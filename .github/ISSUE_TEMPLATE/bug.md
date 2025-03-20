@@ -28,7 +28,7 @@ auto or auto-cpu or invoke or comfy?
 - WSL version (if applicable): <!-- get using `wsl -l -v` -->
 - Docker Version: <!--  get using `docker version` -->
 - Docker compose version: <!--  get using `docker compose version` -->
-- Repo version: <!-- tag, commit sha, or "from master" -->
+- Repo version: <!-- tag, commit sha, or "from main" -->
 - RAM:
 - GPU/VRAM:
 

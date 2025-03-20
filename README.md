@@ -24,7 +24,7 @@ This repository provides multiple UIs for you to play around with stable diffusi
 
 | Workflow                                                                         |
 | -------------------------------------------------------------------------------- |
-| ![](https://github.com/comfyanonymous/ComfyUI/raw/master/comfyui_screenshot.png) |
+| ![](https://github.com/comfyanonymous/ComfyUI/raw/main/comfyui_screenshot.png) |
 
 ## Contributing
 
