@@ -1,0 +1,7 @@
+- [] Update docker-compose to be a more readable
+- [] Add support for swarm
+- [] Pin / configurable versions
+- [] rocm / zluda support
+- [] persistant vol for custom extensions
+- [] generally better workflow vol mappings
+- [] auto custom node loader for comfyui 

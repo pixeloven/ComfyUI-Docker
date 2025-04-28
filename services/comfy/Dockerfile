@@ -4,11 +4,18 @@ ENV DEBIAN_FRONTEND=noninteractive PIP_PREFER_BINARY=1
 
 RUN apt-get update && apt-get install -y git && apt-get clean
 
+# Set USER here? https://stackoverflow.com/questions/24549746/switching-users-inside-docker-image-to-a-non-root-user
+# USER ${uid}:${gid}
+
+# RUN --mount=type=cache,target=/root/.cache/pip \
+# put Cache somehwere else or don't define target?
+# PIP_CACHE_DIR pip cache dir
+
 ENV ROOT=/stable-diffusion
 RUN --mount=type=cache,target=/root/.cache/pip \
   git clone https://github.com/comfyanonymous/ComfyUI.git ${ROOT} && \
   cd ${ROOT} && \
-  git checkout v0.3.30 && \
+  git checkout v0.3.19 && \
   pip install -r requirements.txt
 
 WORKDIR ${ROOT}
