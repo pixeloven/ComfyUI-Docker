@@ -6,10 +6,16 @@ BASE_DIRECTORY="/data/config/comfy"
 OUTPUT_DIRECTORY="/data/output"
 
 mkdir -vp ${BASE_DIRECTORY}
+mkdir -vp ${BASE_DIRECTORY}
 mkdir -vp ${BASE_DIRECTORY}/temp
 mkdir -vp ${BASE_DIRECTORY}/user
 mkdir -vp ${BASE_DIRECTORY}/custom_nodes
 mkdir -vp ${OUTPUT_DIRECTORY}
+
+# XDG_CACHE_HOME - Set cache outside container
+mkdir -vp /data/.cache
+XDG_CACHE_HOME=/data/.cache
+export XDG_CACHE_HOME
 
 # --base-directory BASE_DIRECTORY
 # Set the ComfyUI base directory for models,
