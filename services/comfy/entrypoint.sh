@@ -2,28 +2,24 @@
 
 set -Eeuo pipefail
 
-mkdir -vp /data/config/comfy/custom_nodes
+BASE_DIRECTORY="/data/config/comfy"
+OUTPUT_DIRECTORY="/data/output"
 
-declare -A MOUNTS
+mkdir -vp ${BASE_DIRECTORY}
+mkdir -vp ${BASE_DIRECTORY}/temp
+mkdir -vp ${BASE_DIRECTORY}/user
+mkdir -vp ${BASE_DIRECTORY}/custom_nodes
+mkdir -vp ${OUTPUT_DIRECTORY}
 
-MOUNTS["/root/.cache"]="/data/.cache"
-MOUNTS["${ROOT}/input"]="/data/config/comfy/input"
-MOUNTS["${ROOT}/output"]="/output/comfy"
+# --base-directory BASE_DIRECTORY
+# Set the ComfyUI base directory for models,
+# custom_nodes, input, output, temp, and user directories.
+CLI_ARGS+="${CLI_ARGS} --base-directory ${BASE_DIRECTORY} --output-directory ${OUTPUT_DIRECTORY}"
 
-for to_path in "${!MOUNTS[@]}"; do
-  set -Eeuo pipefail
-  from_path="${MOUNTS[${to_path}]}"
-  rm -rf "${to_path}"
-  if [ ! -f "$from_path" ]; then
-    mkdir -vp "$from_path"
-  fi
-  mkdir -vp "$(dirname "${to_path}")"
-  ln -sT "${from_path}" "${to_path}"
-  echo Mounted $(basename "${from_path}")
-done
+echo ${CLI_ARGS} 
 
 if [ -f "/data/config/comfy/startup.sh" ]; then
-  pushd ${ROOT}
+  pushd ${APPLICATION_ROOT}
   . /data/config/comfy/startup.sh
   popd
 fi

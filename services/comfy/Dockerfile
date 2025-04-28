@@ -1,21 +1,29 @@
 FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
 
-ENV DEBIAN_FRONTEND=noninteractive PIP_PREFER_BINARY=1
+ENV DEBIAN_FRONTEND=noninteractive 
+ENV PIP_PREFER_BINARY=1
+ENV APPLICATION_ROOT=/stable-diffusion
+ENV NVIDIA_VISIBLE_DEVICES=all 
+ENV PYTHONPATH="${PYTHONPATH}:${PWD}" 
+ENV CLI_ARGS=""
 
-RUN apt-get update && apt-get install -y git && apt-get clean
+WORKDIR ${APPLICATION_ROOT}
 
-ENV ROOT=/stable-diffusion
+# Explore how we can use the CLI to do this instead
+# https://docs.comfy.org/installation/system_requirements
+# https://docs.comfy.org/comfy-cli/getting-started
+RUN apt-get update && \ 
+  apt-get install -y git && \
+  apt-get clean && \
+  git clone --branch v0.3.19 --depth 1 https://github.com/comfyanonymous/ComfyUI.git ${APPLICATION_ROOT}
+
+COPY . .
+
 RUN --mount=type=cache,target=/root/.cache/pip \
-  git clone https://github.com/comfyanonymous/ComfyUI.git ${ROOT} && \
-  cd ${ROOT} && \
-  git checkout v0.3.30 && \
-  pip install -r requirements.txt
+  pip install -r requirements.txt && \
+  chmod u+x ./entrypoint.sh 
 
-WORKDIR ${ROOT}
-COPY . /docker/
-RUN chmod u+x /docker/entrypoint.sh && cp /docker/extra_model_paths.yaml ${ROOT}
-
-ENV NVIDIA_VISIBLE_DEVICES=all PYTHONPATH="${PYTHONPATH}:${PWD}" CLI_ARGS=""
 EXPOSE 7860
-ENTRYPOINT ["/docker/entrypoint.sh"]
+
+ENTRYPOINT ["./entrypoint.sh"]
 CMD python -u main.py --listen --port 7860 ${CLI_ARGS}

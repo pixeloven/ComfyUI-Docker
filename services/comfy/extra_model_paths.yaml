@@ -1,3 +1,4 @@
+# https://github.com/comfyanonymous/ComfyUI/blob/master/extra_model_paths.yaml.example
 a111:
   base_path: /data
 
@@ -16,10 +17,14 @@ a111:
   clip: models/CLIPEncoder
   embeddings: embeddings
 
-  custom_nodes: config/comfy/custom_nodes
+comfyui:
+  base_path: /data
+
+  # custom_nodes: config/comfy/custom_nodes
 
   # TODO: I am unsure about these, need more testing
-  # style_models: config/comfy/style_models
-  # t2i_adapter: config/comfy/t2i_adapter
-  # clip_vision: config/comfy/clip_vision
-  # diffusers: config/comfy/diffusers
+  # style_models: data/config/comfy/style_models
+  # t2i_adapter: data/config/comfy/t2i_adapter
+  # clip_vision: data/config/comfy/clip_vision
+  # diffusers: data/config/comfy/diffusers
+  # download_model_base: data/models 

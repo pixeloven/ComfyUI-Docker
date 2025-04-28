@@ -4,3 +4,7 @@
 # VSCode specific
 *.code-workspace
 /.vscode
+
+# Service data
+/data/*
+!/data/.gitkeep
