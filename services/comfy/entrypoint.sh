@@ -6,9 +6,9 @@ mkdir -vp /data/config/comfy/custom_nodes
 
 declare -A MOUNTS
 
-MOUNTS["/root/.cache"]="/data/.cache"
-MOUNTS["${ROOT}/input"]="/data/config/comfy/input"
-MOUNTS["${ROOT}/output"]="/output/comfy"
+# MOUNTS["/root/.cache"]="/data/.cache" # Determine why the original author decided to do this.
+MOUNTS["${APPLICATION_ROOT}/input"]="/data/config/comfy/input"
+MOUNTS["${APPLICATION_ROOT}/output"]="/output/comfy"
 
 for to_path in "${!MOUNTS[@]}"; do
   set -Eeuo pipefail
@@ -23,7 +23,7 @@ for to_path in "${!MOUNTS[@]}"; do
 done
 
 if [ -f "/data/config/comfy/startup.sh" ]; then
-  pushd ${ROOT}
+  pushd ${APPLICATION_ROOT}
   . /data/config/comfy/startup.sh
   popd
 fi

@@ -16,6 +16,7 @@ a111:
   clip: models/CLIPEncoder
   embeddings: embeddings
 
+  # This isn't a real value as far as I can tell?
   custom_nodes: config/comfy/custom_nodes
 
   # TODO: I am unsure about these, need more testing
