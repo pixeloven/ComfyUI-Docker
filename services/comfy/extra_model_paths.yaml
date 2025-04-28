@@ -1,3 +1,4 @@
+# https://github.com/comfyanonymous/ComfyUI/blob/master/extra_model_paths.yaml.example
 a111:
   base_path: /data
 
@@ -16,8 +17,10 @@ a111:
   clip: models/CLIPEncoder
   embeddings: embeddings
 
-  # This isn't a real value as far as I can tell?
-  custom_nodes: config/comfy/custom_nodes
+comfyui:
+  base_path: /data
+
+  # custom_nodes: config/comfy/custom_nodes
 
   # TODO: I am unsure about these, need more testing
   # style_models: data/config/comfy/style_models

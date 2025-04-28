@@ -7,12 +7,15 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 ENV PYTHONPATH="${PYTHONPATH}:${PWD}" 
 ENV CLI_ARGS=""
 
+WORKDIR ${APPLICATION_ROOT}
+
+# Explore how we can use the CLI to do this instead
+# https://docs.comfy.org/installation/system_requirements
+# https://docs.comfy.org/comfy-cli/getting-started
 RUN apt-get update && \ 
   apt-get install -y git && \
   apt-get clean && \
   git clone --branch v0.3.19 --depth 1 https://github.com/comfyanonymous/ComfyUI.git ${APPLICATION_ROOT}
-
-WORKDIR ${APPLICATION_ROOT}
 
 COPY . .
 
