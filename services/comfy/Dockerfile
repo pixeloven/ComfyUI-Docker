@@ -3,8 +3,9 @@ FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime AS base
 ENV DEBIAN_FRONTEND=noninteractive 
 ENV PIP_PREFER_BINARY=1
 
-RUN apt-get update && \ 
-  apt-get install -y git wget curl libgl1-mesa-glx libglib2.0-0 && \
+RUN --mount=type=cache,target=/var/cache/apt \ 
+  apt-get update && \ 
+  apt-get install -y git wget curl jq ffmpeg libgl1-mesa-glx libglib2.0-0 && \
   apt-get clean
 
 # Explore how we can use the CLI to do this instead
@@ -25,10 +26,12 @@ WORKDIR /home/comfy/app
 # conda create -n comfy-env python=3.11 && \
 # conda activate comfy-env && \
 # comfy install 
-RUN git clone --branch v0.3.30 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
+RUN --mount=type=cache,target=/comfy/.cache/pip \ 
+  git clone --branch v0.3.30 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
   mkdir -p .local/bin && \
   pip install -r requirements.txt && \
-  # pip install onnxruntime-gpu # Should make it so this can be included maybe through a mountable requirements.txt or yaml?
+  pip install onnxruntime-gpu
+# Should make ONNX optional by moving this into a configuration file that can be alterated at run time
 
 COPY --chown=comfy:comfy . .
 
