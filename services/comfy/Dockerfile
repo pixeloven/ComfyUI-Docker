@@ -1,13 +1,12 @@
-FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive 
 ENV PIP_PREFER_BINARY=1
-ENV APPLICATION_ROOT=/stable-diffusion
 ENV NVIDIA_VISIBLE_DEVICES=all 
 ENV PYTHONPATH="${PYTHONPATH}:${PWD}" 
 ENV CLI_ARGS=""
 
-WORKDIR ${APPLICATION_ROOT}
+WORKDIR /app
 
 # Explore how we can use the CLI to do this instead
 # https://docs.comfy.org/installation/system_requirements
@@ -15,7 +14,7 @@ WORKDIR ${APPLICATION_ROOT}
 RUN apt-get update && \ 
   apt-get install -y git && \
   apt-get clean && \
-  git clone --branch v0.3.19 --depth 1 https://github.com/comfyanonymous/ComfyUI.git ${APPLICATION_ROOT}
+  git clone --branch v0.3.30 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
 
 COPY . .
 
