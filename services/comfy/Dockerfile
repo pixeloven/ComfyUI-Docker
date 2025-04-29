@@ -1,26 +1,44 @@
-FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime
+FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime AS base
 
 ENV DEBIAN_FRONTEND=noninteractive 
 ENV PIP_PREFER_BINARY=1
-ENV NVIDIA_VISIBLE_DEVICES=all 
-ENV PYTHONPATH="${PYTHONPATH}:${PWD}" 
-ENV CLI_ARGS=""
 
-WORKDIR /app
+RUN apt-get update && \ 
+  apt-get install -y git wget curl libgl1-mesa-glx libglib2.0-0 && \
+  apt-get clean
 
 # Explore how we can use the CLI to do this instead
 # https://docs.comfy.org/installation/system_requirements
 # https://docs.comfy.org/comfy-cli/getting-started
-RUN apt-get update && \ 
-  apt-get install -y git && \
-  apt-get clean && \
-  git clone --branch v0.3.30 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
+FROM base AS application
 
-COPY . .
+RUN useradd -m -s /bin/bash comfy
 
-RUN --mount=type=cache,target=/root/.cache/pip \
+USER comfy
+
+WORKDIR /home/comfy/app
+
+# Using CLI (with conda venv -can do venv without all this too)
+# python -m pip install -U pip && \
+# pip install comfy-cli && \
+# conda init bash && \
+# conda create -n comfy-env python=3.11 && \
+# conda activate comfy-env && \
+# comfy install 
+RUN git clone --branch v0.3.30 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
+  mkdir -p .local/bin && \
   pip install -r requirements.txt && \
-  chmod u+x ./entrypoint.sh 
+  pip install onnxruntime onnxruntime_gpu 
+
+COPY --chown=comfy:comfy . .
+
+RUN chmod u+x ./entrypoint.sh 
+
+ENV PATH="/home/comfy/.local/bin:${PATH}"
+ENV PYTHONPATH="${PYTHONPATH}:${PWD}"
+
+ENV NVIDIA_VISIBLE_DEVICES=all 
+ENV CLI_ARGS=""
 
 EXPOSE 7860
 
