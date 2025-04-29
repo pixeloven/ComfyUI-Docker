@@ -28,7 +28,7 @@ WORKDIR /home/comfy/app
 RUN git clone --branch v0.3.30 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
   mkdir -p .local/bin && \
   pip install -r requirements.txt && \
-  pip install onnxruntime onnxruntime_gpu 
+  # pip install onnxruntime-gpu # Should make it so this can be included maybe through a mountable requirements.txt or yaml?
 
 COPY --chown=comfy:comfy . .
 

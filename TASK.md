@@ -1,3 +1,6 @@
+- [] Fix Mappings for models `/data/models` and `data/config/comfy/models` the later is created by ComfyManager
+- [] Add out of the box support for onnx but make it configurable (optional) not backed into the image
+- [] Run everything in an venv
 - [] Update docker-compose to be a more readable
 - [] Add support for swarm
 - [] Pin / configurable versions
