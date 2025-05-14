@@ -50,13 +50,8 @@ services:
     <<: *base_service
     profiles: ["comfy"]
     build: ./services/comfy/
-    image: sd-comfy:7
+    image: comfy:v0.3.34
     environment:
-      - CLI_ARGS=
+      - CLI_ARGS=${COMFY_CLI_ARGS}
 
-  comfy-cpu:
-    <<: *comfy
-    profiles: ["comfy-cpu"]
-    deploy: {}
-    environment:
-      - CLI_ARGS=--cpu
+# Named volume for plugins? With some manifest that you can edit in case you bork something?

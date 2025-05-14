@@ -27,7 +27,7 @@ WORKDIR /home/comfy/app
 # conda activate comfy-env && \
 # comfy install 
 RUN --mount=type=cache,target=/comfy/.cache/pip \ 
-  git clone --branch v0.3.30 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
+  git clone --branch v0.3.34 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
   mkdir -p .local/bin && \
   pip install -r requirements.txt && \
   pip install onnxruntime-gpu
