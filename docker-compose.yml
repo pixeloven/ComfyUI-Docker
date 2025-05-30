@@ -62,3 +62,5 @@ services:
 # TODO
 # Named volume for plugins? With some manifest that you can edit in case you bork something?
 # Version auto1111, use same or similar base images
+# Fix Mappings for models `/data/models` and `data/config/comfy/models` the later is created by ComfyManager
+# Run everything in an venv
