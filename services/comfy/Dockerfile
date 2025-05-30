@@ -27,7 +27,7 @@ WORKDIR /home/comfy/app
 # conda activate comfy-env && \
 # comfy install 
 RUN --mount=type=cache,target=/comfy/.cache/pip \ 
-  git clone --branch v0.3.34 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
+  git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
   mkdir -p .local/bin && \
   pip install -r requirements.txt && \
   pip install onnxruntime-gpu
@@ -43,7 +43,7 @@ ENV PYTHONPATH="${PYTHONPATH}:${PWD}"
 ENV NVIDIA_VISIBLE_DEVICES=all 
 ENV CLI_ARGS=""
 
-EXPOSE 7860
+EXPOSE 8188
 
 ENTRYPOINT ["./entrypoint.sh"]
-CMD python -u main.py --listen --port 7860 ${CLI_ARGS}
+CMD python -u main.py --listen --port 8188 ${CLI_ARGS}
