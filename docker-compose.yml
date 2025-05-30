@@ -52,7 +52,7 @@ services:
       # - comfy_data:/data:cached # Or :delegated 
       # Or we can have multiple name vols??? or maybe paths within the name vol???
       # - comfy_config:/data/comfy/config:cached # Or :delegated
-      - ./output:/output
+      - ./output:/output # no longer needed since we are now using /data/output
     stop_signal: SIGKILL
     tty: true
     deploy:
