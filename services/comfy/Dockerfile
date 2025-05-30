@@ -22,13 +22,17 @@ WORKDIR /home/comfy/app
 # Using CLI (with conda venv -can do venv without all this too)
 # python -m pip install -U pip && \
 # pip install comfy-cli && \
+
+# not sure if this is needed but we could try this?
+# https://stackoverflow.com/questions/48561981/activate-python-virtualenv-in-dockerfile
+# SHELL ["/bin/bash", "-ec"]
 # conda init bash && \
 # conda create -n comfy-env python=3.11 && \
 # conda activate comfy-env && \
 # comfy install 
 RUN --mount=type=cache,target=/comfy/.cache/pip \ 
   git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
-  mkdir -p .local/bin && \
+  mkdir -p ~/.local/bin && \
   pip install -r requirements.txt && \
   pip install onnxruntime-gpu
 # Should make ONNX optional by moving this into a configuration file that can be alterated at run time
