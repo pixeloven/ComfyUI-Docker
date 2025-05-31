@@ -3,10 +3,10 @@ FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime AS base
 ENV DEBIAN_FRONTEND=noninteractive 
 ENV PIP_PREFER_BINARY=1
 
-# Should reuse this across both installs and see if the the libs below are needed
+# Should reuse this across both installs and see if the the libs below are needed libgl1-mesa-glx
 RUN --mount=type=cache,target=/var/cache/apt \ 
   apt-get update && \ 
-  apt-get install -y --no-install-recommends git wget curl jq ffmpeg libgl1-mesa-glx libglib2.0-0 && \
+  apt-get install -y git wget curl jq build-essential ffmpeg libgl1 libglib2.0-0 && \
   apt-get clean && \
   pip install --no-input --upgrade pip
 
@@ -21,7 +21,7 @@ WORKDIR /home/swarm/app
 SHELL ["/bin/bash", "--login", "-c"]
 
 # Setup SwarmUI project
-RUN git clone --branch v0.3.39 --depth 1 https://github.com/mcmonkeyprojects/SwarmUI.git .
+RUN git clone --branch 0.9.6-Beta --depth 1 https://github.com/mcmonkeyprojects/SwarmUI.git .
 
 COPY --chown=swarm:swarm . .
 
@@ -42,6 +42,13 @@ RUN --mount=type=cache,target=~/.cache/pip \
   pip install -r requirements.txt && \
   # pip install onnxruntime-gpu && \
   chmod u+x ./entrypoint.sh 
+
+# https://github.com/mcmonkeyprojects/SwarmUI/blob/master/launchtools/StandardDockerfile.docker
+# https://github.com/mcmonkeyprojects/SwarmUI/blob/master/launch-linux.sh
+# vs
+# https://github.com/mcmonkeyprojects/SwarmUI/blob/master/launchtools/launch-standard-docker.sh
+# https://github.com/mcmonkeyprojects/SwarmUI/blob/master/launchtools/StandardDockerfile.docker
+
 
 ENV NVIDIA_VISIBLE_DEVICES=all 
 ENV CLI_ARGS=""
