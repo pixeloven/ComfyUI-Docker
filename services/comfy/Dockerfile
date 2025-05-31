@@ -5,12 +5,10 @@ ENV PIP_PREFER_BINARY=1
 
 RUN --mount=type=cache,target=/var/cache/apt \ 
   apt-get update && \ 
-  apt-get install -y git wget curl jq ffmpeg libgl1-mesa-glx libglib2.0-0 && \
-  apt-get clean
+  apt-get install -y --no-install-recommends git wget curl jq ffmpeg libgl1-mesa-glx libglib2.0-0 && \
+  apt-get clean && \
+  pip install --upgrade pip
 
-# Explore how we can use the CLI to do this instead
-# https://docs.comfy.org/installation/system_requirements
-# https://docs.comfy.org/comfy-cli/getting-started
 FROM base AS application
 
 RUN useradd -m -s /bin/bash comfy
@@ -19,30 +17,30 @@ USER comfy
 
 WORKDIR /home/comfy/app
 
-# Using CLI (with conda venv -can do venv without all this too)
-# python -m pip install -U pip && \
-# pip install comfy-cli && \
+SHELL ["/bin/bash", "--login", "-c"]
 
-# not sure if this is needed but we could try this?
-# https://stackoverflow.com/questions/48561981/activate-python-virtualenv-in-dockerfile
-# SHELL ["/bin/bash", "-ec"]
-# conda init bash && \
-# conda create -n comfy-env python=3.11 && \
-# conda activate comfy-env && \
-# comfy install 
-RUN --mount=type=cache,target=/comfy/.cache/pip \ 
-  git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
-  mkdir -p ~/.local/bin && \
-  pip install -r requirements.txt && \
-  pip install onnxruntime-gpu
-# Should make ONNX optional by moving this into a configuration file that can be alterated at run time
+# Setup ComfyUI project
+RUN git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
 
 COPY --chown=comfy:comfy . .
 
-RUN chmod u+x ./entrypoint.sh 
+# Setup venv
+# # https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
+ENV VIRTUAL_ENV=/home/comfy/app/.venv
+RUN --mount=type=cache,target=~/.cache/pip \ 
+  mkdir -p ~/.local/bin && \
+  python -m venv $VIRTUAL_ENV
 
-ENV PATH="/home/comfy/.local/bin:${PATH}"
-ENV PYTHONPATH="${PYTHONPATH}:${PWD}"
+ENV PATH="/home/comfy/.local/bin:$PATH"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+# ENV PYTHONPATH="${PYTHONPATH}:${PWD}"
+
+# Activate environment and install dependencies
+# Should make ONNX optional by moving this into a configuration file that can be alterated at run time
+RUN --mount=type=cache,target=~/.cache/pip \ 
+  pip install -r requirements.txt && \
+  pip install onnxruntime-gpu && \
+  chmod u+x ./entrypoint.sh 
 
 ENV NVIDIA_VISIBLE_DEVICES=all 
 ENV CLI_ARGS=""
@@ -51,3 +49,11 @@ EXPOSE 8188
 
 ENTRYPOINT ["./entrypoint.sh"]
 CMD python -u main.py --listen --port 8188 ${CLI_ARGS}
+
+# Explore how we can use the CLI to do this instead
+# https://docs.comfy.org/installation/system_requirements
+# https://docs.comfy.org/comfy-cli/getting-started
+# https://pythonspeed.com/articles/activate-conda-dockerfile/
+# https://pythonspeed.com/articles/multi-stage-docker-python/
+# pip install comfy-cli && \
+# comfy install 

@@ -47,12 +47,9 @@ services:
     ports:
       - "8188:8188" # hardcoded in Dockerfile for now
     volumes:
-      # I think we need clearer seperation than just ./data. for example .cache is for python and should not be shared
-      - ./data:/data
-      # - comfy_data:/data:cached # Or :delegated 
-      # Or we can have multiple name vols??? or maybe paths within the name vol???
-      # - comfy_config:/data/comfy/config:cached # Or :delegated
-      - ./output:/output # no longer needed since we are now using /data/output
+      # - ./comfy/extra_model_paths.yaml:/extra_model_paths.yaml:ro,cached
+      - ./data:/data:delegated
+      - ./output:/output
     stop_signal: SIGKILL
     tty: true
     deploy:
@@ -63,11 +60,15 @@ services:
               device_ids: ['0']
               capabilities: [compute, utility]
 
-volumes:
-  comfy_data:
-
-# TODO
-# Named volume for plugins? With some manifest that you can edit in case you bork something?
 # Version auto1111, use same or similar base images
 # Fix Mappings for models `/data/models` and `data/config/comfy/models` the later is created by ComfyManager
 # Run everything in an venv
+# IPAdapterPlus
+# ONNX
+# comfyui-manager by default
+
+# Model/Embeddings
+# /data/config/comfy
+# /data/config/auto
+# /data/config/shared
+# Also move /output to /data/output

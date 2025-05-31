@@ -1,11 +1,14 @@
 # https://github.com/comfyanonymous/ComfyUI/blob/master/extra_model_paths.yaml.example
+# https://comfyui-wiki.com/en/tutorial/basic/link-models-between-comfyui-and-a1111
 a111:
   base_path: /data
 
-  checkpoints: models/Stable-diffusion # Should edit this to be more generic and support flux?
-  configs: models/Stable-diffusion # What is this one for?
+  checkpoints: models/Stable-diffusion
+  configs: models/Stable-diffusion
   vae: models/VAE
-  loras: models/Lora
+  loras: |
+    models/Lora
+    models/LyCORIS
   upscale_models: |
     models/RealESRGAN
     models/ESRGAN
@@ -20,14 +23,15 @@ a111:
 comfyui:
   base_path: /data
 
-  # custom_nodes: config/comfy/custom_nodes
+  custom_nodes: config/comfy/custom_nodes
+  download_model_base: data/models
 
   # TODO: I am unsure about these, need more testing
   # style_models: data/config/comfy/style_models
   # t2i_adapter: data/config/comfy/t2i_adapter
   # clip_vision: data/config/comfy/clip_vision
   # diffusers: data/config/comfy/diffusers
-  # download_model_base: data/models 
+
 
 # Need this file to be loaded dynamically maybe as a vol? Currently these are being downloaded to /data/config/comfy/models
 # - `ultralytics_bbox` - Specifies the paths for bbox YOLO models.
