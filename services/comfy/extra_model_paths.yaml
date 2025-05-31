@@ -32,6 +32,8 @@ comfyui:
   # clip_vision: data/config/comfy/clip_vision
   # diffusers: data/config/comfy/diffusers
 
+# Need to install ipadapter and set mappings
+# https://github.com/cubiq/ComfyUI_IPAdapter_plus
 
 # Need this file to be loaded dynamically maybe as a vol? Currently these are being downloaded to /data/config/comfy/models
 # - `ultralytics_bbox` - Specifies the paths for bbox YOLO models.
