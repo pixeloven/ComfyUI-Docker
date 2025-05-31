@@ -1,0 +1,52 @@
+FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime AS base
+
+ENV DEBIAN_FRONTEND=noninteractive 
+ENV PIP_PREFER_BINARY=1
+
+# Should reuse this across both installs and see if the the libs below are needed
+RUN --mount=type=cache,target=/var/cache/apt \ 
+  apt-get update && \ 
+  apt-get install -y --no-install-recommends git wget curl jq ffmpeg libgl1-mesa-glx libglib2.0-0 && \
+  apt-get clean && \
+  pip install --no-input --upgrade pip
+
+FROM base AS application
+
+RUN useradd -m -s /bin/bash swarm
+
+USER swarm
+
+WORKDIR /home/swarm/app
+
+SHELL ["/bin/bash", "--login", "-c"]
+
+# Setup SwarmUI project
+RUN git clone --branch v0.3.39 --depth 1 https://github.com/mcmonkeyprojects/SwarmUI.git .
+
+COPY --chown=swarm:swarm . .
+
+# Setup venv
+# https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
+ENV VIRTUAL_ENV=/home/swarm/app/.venv
+RUN --mount=type=cache,target=~/.cache/pip \ 
+  mkdir -p ~/.local/bin && \
+  python -m venv $VIRTUAL_ENV
+
+ENV PATH="/home/swarm/.local/bin:$PATH"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+# ENV PYTHONPATH="${PYTHONPATH}:${PWD}"
+
+# Activate environment and install dependencies
+# Should make ONNX optional by moving this into a configuration file that can be alterated at run time
+RUN --mount=type=cache,target=~/.cache/pip \ 
+  pip install -r requirements.txt && \
+  # pip install onnxruntime-gpu && \
+  chmod u+x ./entrypoint.sh 
+
+ENV NVIDIA_VISIBLE_DEVICES=all 
+ENV CLI_ARGS=""
+
+EXPOSE 8188
+
+ENTRYPOINT ["./entrypoint.sh"]
+CMD python -u main.py --listen --port 8188 ${CLI_ARGS}
