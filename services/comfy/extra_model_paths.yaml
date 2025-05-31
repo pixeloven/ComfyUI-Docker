@@ -34,6 +34,7 @@ comfyui:
 
 # Need to install ipadapter and set mappings
 # https://github.com/cubiq/ComfyUI_IPAdapter_plus
+# Create an auto installer? Is there a newer plugin/extension?
 
 # Need this file to be loaded dynamically maybe as a vol? Currently these are being downloaded to /data/config/comfy/models
 # - `ultralytics_bbox` - Specifies the paths for bbox YOLO models.
