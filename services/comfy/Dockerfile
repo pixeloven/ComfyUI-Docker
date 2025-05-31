@@ -7,7 +7,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
   apt-get update && \ 
   apt-get install -y --no-install-recommends git wget curl jq ffmpeg libgl1-mesa-glx libglib2.0-0 && \
   apt-get clean && \
-  pip install --upgrade pip
+  pip install --no-input --upgrade pip
 
 FROM base AS application
 
