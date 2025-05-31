@@ -25,7 +25,7 @@ RUN git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/Comfy
 COPY --chown=comfy:comfy . .
 
 # Setup venv
-# # https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
+# https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
 ENV VIRTUAL_ENV=/home/comfy/app/.venv
 RUN --mount=type=cache,target=~/.cache/pip \ 
   mkdir -p ~/.local/bin && \
