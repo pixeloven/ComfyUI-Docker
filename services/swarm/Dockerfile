@@ -3,7 +3,7 @@ FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime AS base
 ENV DEBIAN_FRONTEND=noninteractive 
 ENV PIP_PREFER_BINARY=1
 
-# Should reuse this across both installs and see if the the libs below are needed libgl1-mesa-glx
+#  Was using libgl1-mesa-glx but I think it is deprecated. Also need to upgrade pip.
 RUN --mount=type=cache,target=/var/cache/apt \ 
   apt-get update && \ 
   apt-get install -y git wget curl jq build-essential ffmpeg libgl1 libglib2.0-0 && \
