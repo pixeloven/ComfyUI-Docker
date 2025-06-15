@@ -72,3 +72,7 @@ services:
 # /data/config/auto
 # /data/config/shared
 # Also move /output to /data/output
+
+# Rather than swarm maybe forge? https://github.com/lllyasviel/stable-diffusion-webui-forge
+# Also maybe invoke? 
+# Should also decide whether this repo is just for image gen in stable or more general AI workflow since some of thje tools also blur and support audio, text etc
