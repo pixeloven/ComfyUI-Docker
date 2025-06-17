@@ -1,0 +1,149 @@
+# ComfyUI Docker Test Suite Configuration
+# =====================================
+#
+# This docker-compose configuration provides a comprehensive containerized testing
+# environment for the ComfyUI Docker project. It eliminates the need for local
+# Python dependencies and provides consistent testing across all environments.
+#
+# USAGE EXAMPLES:
+# ===============
+#
+# Run all tests:
+#   docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
+#
+# Run specific test categories:
+#   docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner build
+#   docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner cpu
+#   docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner gpu
+#   docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner env
+#   docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner integration
+#
+# Run tests with verbose output:
+#   docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all --verbose
+#
+# Build test container and run tests:
+#   docker compose -f tests/docker-compose.test.yml build test-runner
+#   docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
+#
+# Run tests with database for result storage:
+#   docker compose -f tests/docker-compose.test.yml --profile test-with-db up -d test-db
+#   docker compose -f tests/docker-compose.test.yml --profile test-with-db run --rm test-runner all
+#   docker compose -f tests/docker-compose.test.yml --profile test-with-db down
+#
+# Clean up test environment:
+#   docker compose -f tests/docker-compose.test.yml down --remove-orphans --volumes
+#
+# PROFILES:
+# =========
+# - test: Basic testing environment (test-runner only)
+# - test-with-db: Testing with database for result storage
+#
+# REQUIREMENTS:
+# =============
+# - Docker and Docker Compose installed
+# - No local Python dependencies required
+# - Docker socket access for container management tests
+#
+
+services:
+  # Primary test runner service
+  # Runs all ComfyUI Docker tests in an isolated container environment
+  test-runner:
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile
+      args:
+        # Build arguments for customization
+        PYTHON_VERSION: "3.9"
+    container_name: comfy-test-runner
+    volumes:
+      # Mount Docker socket to allow test container to manage other containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount project root for access to docker-compose.yml and source files
+      - ..:/workspace
+      # Mount test results directory for output persistence
+      - test-results:/app/test-results
+      # Mount cache directory for improved performance
+      - test-cache:/app/.cache
+    working_dir: /workspace
+    environment:
+      # Core environment variables
+      - PROJECT_ROOT=/workspace
+      - TESTS_DIR=/workspace/tests
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      # Test configuration
+      - PYTEST_CACHE_DIR=/app/.cache/pytest
+      - PYTHONPATH=/workspace:/app
+      # Docker configuration
+      - COMPOSE_PROJECT_NAME=comfy-test
+      - COMPOSE_FILE=/workspace/docker-compose.yml
+    networks:
+      - comfy-test-network
+    profiles:
+      - test
+      - test-with-db
+    # Resource limits for consistent testing
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # Optional test database for storing test results and metrics
+  # Useful for CI/CD pipelines and test result tracking
+  test-db:
+    image: postgres:13-alpine
+    container_name: comfy-test-db
+    environment:
+      POSTGRES_DB: test_results
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - test-db-data:/var/lib/postgresql/data
+      # Optional: Mount init scripts
+      # - ./test-db-init:/docker-entrypoint-initdb.d
+    networks:
+      - comfy-test-network
+    profiles:
+      - test-with-db
+    # Health check for database readiness
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_results"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+volumes:
+  # Persistent test results storage
+  test-results:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./test-results
+
+  # Test database data persistence
+  test-db-data:
+    driver: local
+
+  # Test cache for improved performance
+  test-cache:
+    driver: local
+
+networks:
+  # Isolated network for test environment
+  comfy-test-network:
+    driver: bridge
+    external: false
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

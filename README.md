@@ -28,6 +28,21 @@ This repository provides multiple UIs for you to play around with stable diffusi
 
 **CPU Support**: ComfyUI now supports both GPU and CPU-only modes. See [CPU Support Documentation](docs/CPU_SUPPORT.md) for details.
 
+## Testing
+
+This project uses containerized testing for consistent, dependency-free validation:
+
+```bash
+# Run all tests (requires only Docker)
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
+
+# Run specific test categories
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner cpu
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner gpu
+```
+
+For detailed testing documentation, see [Testing Guide](docs/TESTING_GUIDE.md). If migrating from previous versions, see [Migration Guide](docs/MIGRATION_GUIDE.md).
+
 ## Contributing
 
 Contributions are welcome! **Create a discussion first of what the problem is and what you want to contribute (before you implement anything)**

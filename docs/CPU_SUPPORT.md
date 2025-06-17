@@ -138,25 +138,26 @@ docker build -t comfy:v0.3.39 ./services/comfy
 - **Reduced complexity**: No need for separate build targets or conditional logic
 - **Better caching**: Single build path improves Docker layer caching
 
-## Using the Makefile
+## Docker Compose Commands
 
-A Makefile is provided for convenience:
+Use Docker Compose directly for all operations:
 
 ```bash
 # Build both images
-make build
+docker compose --profile comfy build
+docker compose --profile comfy-cpu build
 
 # Start GPU mode
-make up-gpu
+docker compose --profile comfy up -d
 
 # Start CPU mode
-make up-cpu
+docker compose --profile comfy-cpu up -d
 
-# Run tests
-make test
+# Stop all services
+docker compose down --remove-orphans
 
-# Clean up
-make clean
+# View logs
+docker compose logs -f
 ```
 
 ## Testing
@@ -164,14 +165,18 @@ make clean
 ### Running Tests
 
 ```bash
-# Run all tests
-./scripts/test.sh all
+# Run all tests using containerized testing
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
 
 # Test CPU mode only
-./scripts/test.sh cpu
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner cpu
 
 # Test GPU mode only (requires NVIDIA GPU)
-./scripts/test.sh gpu
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner gpu
+
+# Alternative: Direct Python runner (for development)
+python3 tests/test_runner.py all
+python3 tests/test_runner.py cpu
 
 # Test Docker builds
 ./scripts/test.sh build

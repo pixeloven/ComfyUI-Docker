@@ -57,9 +57,17 @@ The implementation adds comprehensive CPU-only mode support alongside the existi
 - `tests/test_env_configuration.py` - Environment configuration tests
 - `tests/test_integration.py` - Integration and workflow tests
 
-#### Build and Development Tools
-- `Makefile` - Convenient targets for building, testing, and managing services
-- `scripts/test.sh` - Comprehensive test runner script
+#### Testing Infrastructure (Modernized)
+- `tests/docker-compose.test.yml` - **Primary testing interface** (replaces scripts/Makefile)
+- `tests/test_runner.py` - Python test runner (runs in container)
+- `docs/TESTING_GUIDE.md` - Comprehensive testing documentation
+- `docs/MIGRATION_GUIDE.md` - Migration guide from old script-based approach
+
+#### Removed Files (Simplified Architecture)
+- ❌ `scripts/test.sh` - Replaced by docker-compose.test.yml
+- ❌ `Makefile` - Replaced by direct docker-compose commands
+- ❌ `tests/test_containerized.sh` - Functionality moved to docker-compose.test.yml
+- ❌ `tests/install_test_runner.sh` - No longer needed (zero dependencies)
 
 ### Updated Files
 
@@ -149,21 +157,22 @@ COMFY_CLI_ARGS="--cpu --force-fp16"
 
 ### Test Execution
 
+The project now uses a containerized testing approach via `docker-compose.test.yml`:
+
 ```bash
-# All tests
-./scripts/test.sh all
+# Run all tests (primary method)
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
 
-# Specific test categories
-./scripts/test.sh build
-./scripts/test.sh cpu
-./scripts/test.sh gpu
-./scripts/test.sh env
-./scripts/test.sh integration
+# Run specific test categories
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner build
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner cpu
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner gpu
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner env
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner integration
 
-# Using Makefile
-make test
-make test-cpu
-make test-gpu
+# Alternative: Direct Python runner (for development)
+python3 tests/test_runner.py all
+python3 tests/test_runner.py build --verbose
 ```
 
 ## Benefits

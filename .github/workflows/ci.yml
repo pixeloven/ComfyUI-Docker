@@ -1,0 +1,225 @@
+name: ComfyUI Docker CI/CD
+
+on:
+
+  push:
+    branches:
+      - main
+
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+  workflow_dispatch:
+    inputs:
+      run_integration_tests:
+        description: 'Run integration tests'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/comfy
+
+jobs:
+  # Validate configuration files
+  validate-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose syntax
+        run: |
+          docker compose config --quiet
+          echo "✅ Docker Compose configuration is valid"
+
+      - name: Validate .env.example
+        run: |
+          # Check that .env.example has required variables
+          grep -q "COMFY_CLI_ARGS" .env.example || exit 1
+          grep -q "COMFY_WEBUI_PORT" .env.example || exit 1
+          echo "✅ .env.example contains required variables"
+
+      - name: Validate profiles
+        run: |
+          # Check that both profiles are defined
+          docker compose --profile comfy config --services | grep -q comfy
+          docker compose --profile comfy-cpu config --services | grep -q comfy-cpu
+          echo "✅ Both comfy and comfy-cpu profiles are valid"
+
+  # Build and test Docker image
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: validate-config
+    strategy:
+      matrix:
+        profile: [comfy, comfy-cpu]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/comfy
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: comfy:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test image packages
+        run: |
+          # Verify onnxruntime-gpu is installed
+          docker run --rm comfy:test pip list | grep onnxruntime-gpu
+          echo "✅ onnxruntime-gpu package verified"
+
+      - name: Test image structure
+        run: |
+          # Verify user and permissions
+          docker run --rm comfy:test whoami | grep comfy
+          docker run --rm comfy:test ls -la /home/comfy/app/entrypoint.sh | grep rwx
+          echo "✅ Image structure verified"
+
+      - name: Test service startup (CPU mode)
+        if: matrix.profile == 'comfy-cpu'
+        run: |
+          # Start CPU service
+          COMFY_CLI_ARGS="--cpu" docker compose --profile comfy-cpu up -d
+          
+          # Wait for service to be ready
+          timeout 120 bash -c 'until curl -f http://localhost:8189 >/dev/null 2>&1; do sleep 5; done'
+          
+          # Verify service is responding
+          curl -f http://localhost:8189
+          
+          # Check logs for CPU mode indicator
+          docker compose logs comfy-cpu | grep -i "cpu"
+          
+          # Cleanup
+          docker compose down
+          echo "✅ CPU service startup verified"
+
+      - name: Test service startup (GPU mode)
+        if: matrix.profile == 'comfy'
+        run: |
+          # Start GPU service (will run in CPU mode on CI)
+          docker compose --profile comfy up -d
+          
+          # Wait for service to be ready
+          timeout 120 bash -c 'until curl -f http://localhost:8188 >/dev/null 2>&1; do sleep 5; done'
+          
+          # Verify service is responding
+          curl -f http://localhost:8188
+          
+          # Cleanup
+          docker compose down
+          echo "✅ GPU service startup verified"
+
+      - name: Push image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/comfy
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Run comprehensive test suite
+  test-suite:
+    runs-on: ubuntu-latest
+    needs: validate-config
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Build test container
+        run: |
+          echo "🐳 Building test container..."
+          docker compose -f tests/docker-compose.test.yml build test-runner
+
+      - name: Run essential test suite
+        run: |
+          echo "🧪 Running essential tests in containerized environment..."
+          # Use containerized tests in CI for consistency and zero dependencies
+          docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all --verbose
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results
+          path: |
+            test-results/
+            tests/.pytest_cache/
+          retention-days: 7
+
+      - name: Cleanup test environment
+        if: always()
+        run: |
+          echo "🧹 Cleaning up test environment..."
+          docker compose -f tests/docker-compose.test.yml down --remove-orphans --volumes || true
+
+  # Security scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name != 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build image for scanning
+        run: |
+          docker build -t comfy:scan ./services/comfy
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'comfy:scan'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'

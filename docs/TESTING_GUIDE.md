@@ -1,281 +1,274 @@
-# Testing Guide for ComfyUI CPU Support
+# Testing Guide
 
-This guide provides step-by-step instructions for testing the new CPU support functionality.
+This document provides comprehensive guidance for testing the ComfyUI Docker project using the containerized testing approach.
 
-## Prerequisites
+## 🎯 Overview
 
-- Docker and Docker Compose installed
-- Python 3.7+ (for running tests)
-- Git (for cloning and managing the repository)
+The ComfyUI Docker project uses a **containerized testing approach** that provides:
 
-## Quick Validation
+- ✅ **Zero Local Dependencies**: Only requires Docker and Docker Compose
+- ✅ **Consistent Environment**: Same testing environment everywhere
+- ✅ **Complete Isolation**: Tests don't affect the host system
+- ✅ **CI/CD Ready**: Perfect for automated pipelines
+- ✅ **Cross-Platform**: Works on Linux, macOS, and Windows
 
-### 1. Verify Configuration Files
+## 🚀 Quick Start
 
-```bash
-# Check docker-compose syntax
-docker compose config
+### Prerequisites
 
-# Check specific profiles
-docker compose --profile comfy config
-docker compose --profile comfy-cpu config
-```
+- Docker installed and running
+- Docker Compose v2.0+ (included with Docker Desktop)
+- No Python dependencies required locally
 
-### 2. Test Docker Builds
-
-```bash
-# Build unified image (works for both CPU and GPU)
-docker compose --profile comfy build
-
-# Verify image exists
-docker images | grep comfy
-```
-
-### 3. Test Service Startup
+### Run All Tests
 
 ```bash
-# Test CPU mode
-docker compose --profile comfy-cpu up -d
-curl http://localhost:8189  # Should return ComfyUI interface
-docker compose --profile comfy-cpu down
-
-# Test GPU mode (if GPU available)
-docker compose --profile comfy up -d  
-curl http://localhost:8188  # Should return ComfyUI interface
-docker compose --profile comfy down
+# Run the complete test suite
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
 ```
 
-## Comprehensive Testing
-
-### 1. Run Automated Tests
+### Run Specific Test Categories
 
 ```bash
-# Make test script executable
-chmod +x scripts/test.sh
+# Docker build validation tests
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner build
 
-# Run all tests
-./scripts/test.sh all
+# CPU functionality tests
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner cpu
 
-# Run specific test categories
-./scripts/test.sh build
-./scripts/test.sh env
-./scripts/test.sh cpu
+# GPU functionality tests (requires NVIDIA GPU)
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner gpu
+
+# Environment configuration tests
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner env
+
+# Integration and workflow tests
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner integration
 ```
 
-### 2. Manual Testing Scenarios
+## 📋 Test Categories
 
-#### Scenario 1: CPU Mode Configuration
+### 1. Build Tests (`build`)
+- **Purpose**: Validate Docker image builds
+- **Coverage**: Dockerfile syntax, dependency installation, image layers
+- **Files**: `tests/test_docker_build.py`
+
+### 2. CPU Tests (`cpu`)
+- **Purpose**: Test CPU-only functionality
+- **Coverage**: Service startup, API availability, CPU inference
+- **Files**: `tests/test_comfy_cpu.py`
+
+### 3. GPU Tests (`gpu`)
+- **Purpose**: Test GPU functionality (requires NVIDIA GPU)
+- **Coverage**: CUDA availability, GPU inference, memory management
+- **Files**: `tests/test_comfy_gpu.py`
+
+### 4. Environment Tests (`env`)
+- **Purpose**: Validate configuration handling
+- **Coverage**: Environment variables, CLI arguments, profiles
+- **Files**: `tests/test_env_configuration.py`
+
+### 5. Integration Tests (`integration`)
+- **Purpose**: Test service interactions and workflows
+- **Coverage**: Service switching, data persistence, API workflows
+- **Files**: `tests/test_integration.py`
+
+## 🔧 Advanced Usage
+
+### Verbose Output
 
 ```bash
-# Create .env file
-cp .env.example .env
-
-# Edit .env to set CPU mode
-echo "COMFY_CLI_ARGS=--cpu" >> .env
-
-# Start service
-docker compose --profile comfy-cpu up -d
-
-# Verify service
-curl -s http://localhost:8189 | grep -i comfy
-
-# Check logs for CPU mode indicator
-docker compose logs comfy-cpu | grep "CPU-only mode"
-
-# Cleanup
-docker compose down
+# Run tests with detailed output
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all --verbose
 ```
 
-#### Scenario 2: GPU Mode with Low VRAM
+### Building Test Container
 
 ```bash
-# Configure for low VRAM
-echo "COMFY_CLI_ARGS=--lowvram" > .env
+# Build the test container (useful for development)
+docker compose -f tests/docker-compose.test.yml build test-runner
 
-# Start GPU service
-docker compose --profile comfy up -d
-
-# Verify service
-curl -s http://localhost:8188 | grep -i comfy
-
-# Check logs
-docker compose logs comfy | grep "GPU mode"
-
-# Cleanup
-docker compose down
+# Force rebuild without cache
+docker compose -f tests/docker-compose.test.yml build --no-cache test-runner
 ```
 
-#### Scenario 3: Concurrent Operation
+### Test Result Storage
 
 ```bash
-# Set different CLI args for testing
-echo "COMFY_CLI_ARGS=" > .env
-
-# Start both services
-docker compose --profile comfy up -d
-docker compose --profile comfy-cpu up -d
-
-# Verify both are running
-curl -s http://localhost:8188 | head -1
-curl -s http://localhost:8189 | head -1
-
-# Check both containers
-docker ps | grep comfy
-
-# Cleanup
-docker compose down
+# Run tests with database for result storage
+docker compose -f tests/docker-compose.test.yml --profile test-with-db up -d test-db
+docker compose -f tests/docker-compose.test.yml --profile test-with-db run --rm test-runner all
+docker compose -f tests/docker-compose.test.yml --profile test-with-db down
 ```
 
-### 3. Using Makefile
+### Cleanup
 
 ```bash
-# Test Makefile targets
-make help
-make config
-make build
+# Clean up test environment
+docker compose -f tests/docker-compose.test.yml down --remove-orphans --volumes
 
-# Test service management
-make up-cpu
-sleep 30  # Wait for startup
-curl http://localhost:8189
-make down
-
-make up-gpu  # Only if GPU available
-sleep 30
-curl http://localhost:8188
-make down
+# Remove test images
+docker image rm comfy-test-runner || true
 ```
 
-## Troubleshooting Tests
+## 🐍 Alternative: Python Runner
 
-### Common Issues and Solutions
+For development environments with Python dependencies installed:
 
-#### 1. Port Conflicts
+### Setup
 
 ```bash
-# Check if ports are in use
-netstat -tlnp | grep :8188
-netstat -tlnp | grep :8189
-
-# If ports are busy, modify docker-compose.yml or stop conflicting services
+# Install test dependencies
+pip install -r tests/requirements.txt
+pip install -r tests/runner-requirements.txt
 ```
 
-#### 2. Docker Build Failures
+### Usage
 
 ```bash
-# Clean Docker cache
-docker system prune -f
-
-# Rebuild with no cache
-docker compose --profile comfy-cpu build --no-cache
-docker compose --profile comfy build --no-cache
+# Run tests directly with Python runner
+python3 tests/test_runner.py all
+python3 tests/test_runner.py build --verbose
+python3 tests/test_runner.py cpu
 ```
 
-#### 3. Test Environment Issues
+## 🔍 Debugging Test Failures
+
+### View Test Logs
 
 ```bash
-# Create fresh test environment
-cd tests
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Run tests with verbose output
-pytest -v --tb=short
+# Run with verbose output to see detailed logs
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all --verbose
 ```
 
-#### 4. Permission Issues
+### Interactive Debugging
 
 ```bash
-# Fix script permissions
-chmod +x scripts/test.sh
+# Start test container with shell access
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner bash
 
-# Fix data directory permissions
-sudo chown -R $USER:$USER data/
+# Inside container, run tests manually
+python3 tests/test_runner.py build --verbose
 ```
 
-## Validation Checklist
-
-Use this checklist to verify the implementation:
-
-### Build Validation
-- [ ] Unified image builds successfully
-- [ ] Image has correct tag (comfy:v0.3.39)
-- [ ] Image contains onnxruntime-gpu (handles both GPU and CPU)
-- [ ] No separate CPU/GPU images (simplified approach)
-
-### Configuration Validation
-- [ ] .env.example contains CPU configuration examples
-- [ ] docker-compose.yml has both comfy and comfy-cpu profiles
-- [ ] Services use different ports (8188 vs 8189)
-- [ ] CPU service has default --cpu CLI args
-- [ ] GPU service has GPU device allocation
-
-### Functionality Validation
-- [ ] CPU service starts and responds on port 8189
-- [ ] GPU service starts and responds on port 8188
-- [ ] Both services can run simultaneously
-- [ ] CLI args are properly passed to ComfyUI
-- [ ] Logs show correct mode indicators
-
-### Test Validation
-- [ ] All automated tests pass
-- [ ] Build tests validate image creation
-- [ ] Environment tests validate configuration
-- [ ] Integration tests validate service interaction
-
-## Performance Testing
-
-### Basic Performance Comparison
+### Check Service Logs
 
 ```bash
-# Start CPU service
-docker compose --profile comfy-cpu up -d
-
-# Time a simple API call
-time curl -s http://localhost:8189/system_stats
-
-# Start GPU service (if available)
-docker compose --profile comfy up -d
-
-# Compare response time
-time curl -s http://localhost:8188/system_stats
+# View ComfyUI service logs during tests
+docker compose logs -f comfy
+docker compose logs -f comfy-cpu
 ```
 
-### Memory Usage Monitoring
+## 📊 Test Configuration
+
+### Environment Variables
+
+The test environment supports these configuration options:
 
 ```bash
-# Monitor CPU service memory
-docker stats comfy-cpu
+# Set custom test timeout
+PYTEST_TIMEOUT=300 docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
 
-# Monitor GPU service memory (if available)
-docker stats comfy
+# Enable debug mode
+DEBUG=1 docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
+
+# Skip GPU tests
+SKIP_GPU_TESTS=1 docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
 ```
 
-## Reporting Issues
+### Test Profiles
 
-If you encounter issues during testing:
+- **`test`**: Basic testing environment (test-runner only)
+- **`test-with-db`**: Testing with PostgreSQL database for result storage
 
-1. **Collect logs**:
+## 🚨 Troubleshooting
+
+### Common Issues
+
+1. **Docker Socket Permission Denied**
    ```bash
-   docker compose logs > comfy-logs.txt
+   # On Linux, ensure user is in docker group
+   sudo usermod -aG docker $USER
+   # Log out and back in
    ```
 
-2. **System information**:
+2. **Port Conflicts**
    ```bash
-   docker version > system-info.txt
-   docker compose version >> system-info.txt
-   uname -a >> system-info.txt
+   # Stop conflicting services
+   docker compose down --remove-orphans
    ```
 
-3. **Test output**:
+3. **Out of Disk Space**
    ```bash
-   ./scripts/test.sh all > test-output.txt 2>&1
+   # Clean up Docker resources
+   docker system prune -f
+   docker volume prune -f
    ```
 
-4. **Configuration**:
+4. **GPU Tests Failing**
    ```bash
-   docker compose config > compose-config.yml
+   # Check NVIDIA Docker runtime
+   docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu20.04 nvidia-smi
    ```
 
-Include these files when reporting issues for faster troubleshooting.
+### Getting Help
+
+- Check test logs with `--verbose` flag
+- Review Docker Compose configuration in `tests/docker-compose.test.yml`
+- Examine individual test files in `tests/` directory
+- Verify Docker and Docker Compose versions
+
+## 📈 Performance Tips
+
+1. **Use Docker Layer Caching**: Build test container once, reuse for multiple test runs
+2. **Parallel Testing**: Tests run in parallel by default via pytest
+3. **Resource Limits**: Test containers have memory limits to prevent resource exhaustion
+4. **Volume Caching**: Test cache volume improves subsequent test runs
+
+## 🔄 CI/CD Integration
+
+The containerized testing approach is designed for CI/CD pipelines and is used in all project workflows:
+
+### GitHub Actions Integration
+
+```yaml
+# Example GitHub Actions workflow step
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build test container
+        run: |
+          docker compose -f tests/docker-compose.test.yml build test-runner
+
+      - name: Run tests
+        run: |
+          docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all --verbose
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -f tests/docker-compose.test.yml down --remove-orphans --volumes
+```
+
+### Current CI/CD Usage
+
+The project's CI/CD pipelines use this testing approach in:
+
+- **Main CI/CD** (`ci.yml`): Full test suite for main branch pushes
+- **PR Validation** (`pr-validation.yml`): Quick validation for pull requests
+- **Release Pipeline** (`release.yml`): Comprehensive testing before releases
+- **Maintenance** (`maintenance.yml`): Automated dependency and security checks
+
+### Benefits for CI/CD
+
+- ✅ **Zero Dependencies**: No need to install Python or test dependencies in CI
+- ✅ **Consistent Environment**: Same testing environment across all CI runs
+- ✅ **Fast Startup**: Docker layer caching speeds up subsequent runs
+- ✅ **Parallel Execution**: Easy to run different test categories in parallel
+- ✅ **Artifact Collection**: Test results automatically collected in volumes
+
+For complete CI/CD pipeline documentation, see [CI/CD Guide](CI_CD_GUIDE.md).
