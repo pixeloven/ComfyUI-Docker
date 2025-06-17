@@ -26,6 +26,8 @@ This repository provides multiple UIs for you to play around with stable diffusi
 | -------------------------------------------------------------------------------- |
 | ![](https://github.com/comfyanonymous/ComfyUI/raw/main/comfyui_screenshot.png) |
 
+**CPU Support**: ComfyUI now supports both GPU and CPU-only modes. See [CPU Support Documentation](docs/CPU_SUPPORT.md) for details.
+
 ## Contributing
 
 Contributions are welcome! **Create a discussion first of what the problem is and what you want to contribute (before you implement anything)**

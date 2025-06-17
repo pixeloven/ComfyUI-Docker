@@ -9,3 +9,7 @@
 # Service data
 /data/*
 !/data/.gitkeep
+
+# Python
+/.venv
+/tests/.venv

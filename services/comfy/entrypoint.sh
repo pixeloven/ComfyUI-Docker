@@ -22,6 +22,13 @@ mkdir -vp ${OUTPUT_DIRECTORY}
 # custom_nodes, input, output, temp, and user directories.
 CLI_ARGS+="${CLI_ARGS} --base-directory ${BASE_DIRECTORY} --output-directory ${OUTPUT_DIRECTORY}"
 
+# Log the mode based on CLI_ARGS
+if [[ "${CLI_ARGS}" == *"--cpu"* ]]; then
+  echo "Running ComfyUI in CPU-only mode"
+else
+  echo "Running ComfyUI in GPU mode"
+fi
+
 if [ -f "/data/config/comfy/startup.sh" ]; then
   pushd ${APPLICATION_ROOT}
   . /data/config/comfy/startup.sh

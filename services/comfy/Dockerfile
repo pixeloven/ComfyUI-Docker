@@ -1,53 +1,48 @@
-FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime AS base
+# Build arguments
+ARG PYTORCH_VERSION=2.5.1
+ARG CUDA_VERSION=12.4
+ARG CUDNN_VERSION=9
 
-ENV DEBIAN_FRONTEND=noninteractive 
+# Single unified image - onnxruntime-gpu handles both GPU and CPU automatically
+FROM pytorch/pytorch:${PYTORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
 ENV PIP_PREFER_BINARY=1
 
-# Was using libgl1-mesa-glx but I think it is deprecated. Also need to upgrade pip.
-RUN --mount=type=cache,target=/var/cache/apt \ 
-  apt-get update && \ 
+RUN --mount=type=cache,target=/var/cache/apt \
+  apt-get update && \
   apt-get install -y git wget curl jq build-essential ffmpeg libgl1 libglib2.0-0 && \
   apt-get clean && \
   pip install --no-input --upgrade pip
 
-FROM base AS application
-
 RUN useradd -m -s /bin/bash comfy
-
 USER comfy
-
 WORKDIR /home/comfy/app
-
 SHELL ["/bin/bash", "--login", "-c"]
 
 # Setup ComfyUI project
 RUN git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
-
 COPY --chown=comfy:comfy . .
 
 # Setup venv
-# https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
 ENV VIRTUAL_ENV=/home/comfy/app/.venv
-RUN --mount=type=cache,target=~/.cache/pip \ 
+RUN --mount=type=cache,target=~/.cache/pip \
   mkdir -p ~/.local/bin && \
   python -m venv $VIRTUAL_ENV
 
 ENV PATH="/home/comfy/.local/bin:$PATH"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-# ENV PYTHONPATH="${PYTHONPATH}:${PWD}"
 
-# Activate environment and install dependencies
-# Should make ONNX optional by moving this into a configuration file that can be alterated at run time
-RUN --mount=type=cache,target=~/.cache/pip \ 
+# Install dependencies - onnxruntime-gpu automatically falls back to CPU when CUDA unavailable
+RUN --mount=type=cache,target=~/.cache/pip \
   pip install -r requirements.txt && \
   pip install onnxruntime-gpu && \
-  chmod u+x ./entrypoint.sh 
+  chmod u+x ./entrypoint.sh
 
-ENV NVIDIA_VISIBLE_DEVICES=all 
+ENV NVIDIA_VISIBLE_DEVICES=all
 ENV CLI_ARGS=""
 
 EXPOSE 8188
-
 ENTRYPOINT ["./entrypoint.sh"]
 CMD python -u main.py --listen --port 8188 ${CLI_ARGS}
 
@@ -57,4 +52,4 @@ CMD python -u main.py --listen --port 8188 ${CLI_ARGS}
 # https://pythonspeed.com/articles/activate-conda-dockerfile/
 # https://pythonspeed.com/articles/multi-stage-docker-python/
 # pip install comfy-cli && \
-# comfy install 
+# comfy install

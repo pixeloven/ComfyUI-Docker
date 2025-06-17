@@ -60,6 +60,24 @@ services:
               device_ids: ['0']
               capabilities: [compute, utility]
 
+  comfy-cpu:
+    profiles: ["comfy-cpu"]
+    build: ./services/comfy/
+    image: comfy:v0.3.39
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - CLI_ARGS=${COMFY_CLI_ARGS:---cpu}
+    ports:
+      - "8189:8188" # Different port to avoid conflicts
+    volumes:
+      # - ./comfy/extra_model_paths.yaml:/extra_model_paths.yaml:ro,cached
+      - ./data:/data:delegated
+      - ./output:/output
+    stop_signal: SIGKILL
+    tty: true
+
 # Version auto1111, use same or similar base images
 # Fix Mappings for models `/data/models` and `data/config/comfy/models` the later is created by ComfyManager
 # Run everything in an venv
