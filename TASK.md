@@ -15,4 +15,5 @@
 # Managing Worfklows / Models
 - [] Create private repo in github save all workflow data there.
 - [] versioning of workflows
-- [] Descriptions and readmes fro models
+- [] Descriptions and readmes for models - similar to stability matrix but standalone or as part of comfy plugin
+- [] Move this into harmony and restructure that project - this is no longer just docker for stable
