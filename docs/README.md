@@ -23,13 +23,12 @@ How to configure ComfyUI for GPU and CPU modes.
 - Mode switching
 
 ### [Local CI Testing Guide](LOCAL_CI_TESTING.md)
-Test GitHub Actions workflows locally before pushing changes.
+Test GitHub Actions workflows locally using act.
 
 **What's included:**
-- act installation and setup
-- Running workflows locally
-- Troubleshooting common issues
-- Development workflow tips
+- Local act installation
+- Common commands for this project
+- Basic troubleshooting
 
 ## 🚀 Quick Start
 
@@ -59,18 +58,14 @@ docker compose -f tests/docker-compose.test.yml --profile test run --rm test-run
 
 ### Testing CI Changes Locally
 ```bash
-# Install act (GitHub Actions runner)
-brew install act  # macOS
-# or: curl https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash
+# Install act locally
+curl https://raw.githubusercontent.com/nektos/act/master/install.sh | bash
 
-# Test PR validation workflow
-act pull_request -W .github/workflows/pr-validation.yml
+# Test PR validation
+./bin/act pull_request -W .github/workflows/pr-validation.yml
 
-# Test main CI workflow
-act push -W .github/workflows/ci.yml
-
-# Test specific job
-act push -W .github/workflows/ci.yml -j build-and-test
+# Test main CI
+./bin/act push -W .github/workflows/ci.yml
 ```
 
 ### Getting Help
