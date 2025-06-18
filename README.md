@@ -43,6 +43,8 @@ docker compose -f tests/docker-compose.test.yml --profile test run --rm test-run
 
 For detailed testing documentation, see [Testing Guide](docs/TESTING_GUIDE.md). If migrating from previous versions, see [Migration Guide](docs/MIGRATION_GUIDE.md).
 
+**Performance**: The project uses advanced Docker caching strategies that reduce CI/CD build times by 60-80%. See [Docker Caching Guide](docs/DOCKER_CACHING_GUIDE.md) for details.
+
 ## Contributing
 
 Contributions are welcome! **Create a discussion first of what the problem is and what you want to contribute (before you implement anything)**

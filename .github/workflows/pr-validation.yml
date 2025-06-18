@@ -102,21 +102,47 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Build test container
-        run: |
-          echo "🐳 Building test container..."
-          docker compose -f tests/docker-compose.test.yml build test-runner
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test container with caching
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: tests/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: comfy-test-runner:pr
+          cache-from: |
+            type=gha,scope=test-runner-pr
+          cache-to: |
+            type=gha,mode=max,scope=test-runner-pr
 
       - name: Run unit tests
         run: |
           echo "🧪 Running unit tests..."
 
-          # Run build tests (fastest)
-          docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner build
+          # Run build tests (fastest) using cached container
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e PROJECT_ROOT=/workspace \
+            -e TESTS_DIR=/workspace/tests \
+            -e DOCKER_HOST=unix:///var/run/docker.sock \
+            comfy-test-runner:pr build
           echo "✅ Build tests passed"
 
           # Run environment tests
-          docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner env
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            -e PROJECT_ROOT=/workspace \
+            -e TESTS_DIR=/workspace/tests \
+            -e DOCKER_HOST=unix:///var/run/docker.sock \
+            comfy-test-runner:pr env
           echo "✅ Environment tests passed"
 
       - name: Validate test coverage
@@ -166,8 +192,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build image for security scan
-        run: docker build -t comfy:security-scan ./services/comfy
+      - name: Set up Docker Buildx for security scan
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for security scan with cache
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/comfy
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: comfy:security-scan
+          cache-from: |
+            type=gha,scope=security-scan-pr
+          cache-to: |
+            type=gha,mode=max,scope=security-scan-pr
 
       - name: Run basic security checks
         run: |

@@ -8,6 +8,10 @@ on:
         - docker-compose.yml
         - services
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   build:
     strategy:
@@ -19,5 +23,75 @@ jobs:
     runs-on: ubuntu-latest
     name: ${{ matrix.profile }}
     steps:
-      - uses: actions/checkout@v3
-      - run: docker compose --profile ${{ matrix.profile }} build --progress plain
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for caching
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.profile }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=cache
+
+      - name: Build with comprehensive caching
+        if: matrix.profile == 'comfy'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/comfy
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ${{ matrix.profile }}:latest
+          cache-from: |
+            type=gha,scope=${{ matrix.profile }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.profile }}:cache
+          cache-to: |
+            type=gha,mode=max,scope=${{ matrix.profile }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.profile }}:cache,mode=max
+
+      - name: Build other profiles with caching
+        if: matrix.profile != 'comfy'
+        run: |
+          # Enable BuildKit for better caching
+          export DOCKER_BUILDKIT=1
+          export COMPOSE_DOCKER_CLI_BUILD=1
+
+          # Build with cache mount
+          docker compose --profile ${{ matrix.profile }} build --progress plain
+
+      - name: Test built image
+        if: matrix.profile == 'comfy'
+        run: |
+          echo "🧪 Testing built image..."
+          docker run --rm ${{ matrix.profile }}:latest python --version
+          docker run --rm ${{ matrix.profile }}:latest pip list | grep torch
+          echo "✅ Image test completed"
+
+      - name: Push cache to registry
+        if: github.event_name != 'pull_request' && matrix.profile == 'comfy'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/comfy
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: |
+            type=gha,scope=${{ matrix.profile }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.profile }}:cache
+          cache-to: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.profile }}:cache,mode=max
