@@ -13,3 +13,6 @@
 # Python
 /.venv
 /tests/.venv
+
+# act local ci testing
+/bin

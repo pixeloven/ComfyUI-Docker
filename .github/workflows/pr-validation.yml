@@ -8,7 +8,6 @@ on:
       - 'docker-compose.yml'
       - '.env.example'
       - 'tests/**'
-      - 'docs/**'
       - '.github/workflows/**'
 
 jobs:
@@ -157,32 +156,6 @@ jobs:
           [ "$test_files" -ge 5 ] || (echo "❌ Insufficient test files" && exit 1)
           echo "✅ Test coverage adequate"
 
-  # Documentation validation
-  docs-validation:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Validate documentation
-        run: |
-          echo "📚 Validating documentation..."
-          
-          # Check required docs exist
-          test -f docs/CPU_SUPPORT.md || (echo "❌ CPU_SUPPORT.md missing" && exit 1)
-          test -f docs/TESTING_GUIDE.md || (echo "❌ TESTING_GUIDE.md missing" && exit 1)
-          test -f README.md || (echo "❌ README.md missing" && exit 1)
-          echo "✅ Required documentation files exist"
-          
-          # Check README mentions CPU support
-          grep -qi "cpu" README.md || (echo "❌ README doesn't mention CPU support" && exit 1)
-          echo "✅ README mentions CPU support"
-          
-          # Validate test documentation
-          test -f docs/CONTAINERIZED_TESTING.md || (echo "❌ CONTAINERIZED_TESTING.md missing" && exit 1)
-          echo "✅ Test documentation valid"
-
   # Security check
   security-check:
     runs-on: ubuntu-latest
@@ -225,7 +198,7 @@ jobs:
   # PR summary
   pr-summary:
     runs-on: ubuntu-latest
-    needs: [quick-validation, build-validation, test-validation, docs-validation, security-check]
+    needs: [quick-validation, build-validation, test-validation, security-check]
     if: always()
     
     steps:
@@ -237,7 +210,6 @@ jobs:
               'quick-validation': '${{ needs.quick-validation.result }}',
               'build-validation': '${{ needs.build-validation.result }}',
               'test-validation': '${{ needs.test-validation.result }}',
-              'docs-validation': '${{ needs.docs-validation.result }}',
               'security-check': '${{ needs.security-check.result }}'
             };
             

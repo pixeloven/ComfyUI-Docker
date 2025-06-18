@@ -63,6 +63,7 @@ docker compose -f tests/docker-compose.test.yml --profile test run --rm test-run
 
 - **[Quick Reference](docs/QUICK_REFERENCE.md)** - Essential commands and troubleshooting
 - **[CPU Support Guide](docs/CPU_SUPPORT.md)** - GPU and CPU configuration
+- **[Local CI Testing](docs/LOCAL_CI_TESTING.md)** - Test GitHub Actions locally
 - **[Documentation Index](docs/README.md)** - All available guides
 
 ## Contributing
