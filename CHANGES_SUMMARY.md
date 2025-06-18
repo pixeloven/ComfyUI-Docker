@@ -60,14 +60,18 @@ The implementation adds comprehensive CPU-only mode support alongside the existi
 #### Testing Infrastructure (Modernized)
 - `tests/docker-compose.test.yml` - **Primary testing interface** (replaces scripts/Makefile)
 - `tests/test_runner.py` - Python test runner (runs in container)
-- `docs/TESTING_GUIDE.md` - Comprehensive testing documentation
-- `docs/MIGRATION_GUIDE.md` - Migration guide from old script-based approach
+
+#### Documentation (Simplified)
+- `docs/QUICK_REFERENCE.md` - Essential commands and troubleshooting
+- `docs/CPU_SUPPORT.md` - GPU and CPU configuration guide
+- `docs/README.md` - Documentation index
 
 #### Removed Files (Simplified Architecture)
 - ❌ `scripts/test.sh` - Replaced by docker-compose.test.yml
 - ❌ `Makefile` - Replaced by direct docker-compose commands
 - ❌ `tests/test_containerized.sh` - Functionality moved to docker-compose.test.yml
 - ❌ `tests/install_test_runner.sh` - No longer needed (zero dependencies)
+- ❌ Verbose documentation files - Consolidated into essential guides
 
 ### Updated Files
 
@@ -157,23 +161,18 @@ COMFY_CLI_ARGS="--cpu --force-fp16"
 
 ### Test Execution
 
-The project now uses a containerized testing approach via `docker-compose.test.yml`:
+Simple containerized testing approach:
 
 ```bash
-# Run all tests (primary method)
+# Run all tests
 docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
 
-# Run specific test categories
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner build
+# Run specific tests
 docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner cpu
 docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner gpu
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner env
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner integration
-
-# Alternative: Direct Python runner (for development)
-python3 tests/test_runner.py all
-python3 tests/test_runner.py build --verbose
 ```
+
+For detailed commands, see [Quick Reference](docs/QUICK_REFERENCE.md).
 
 ## Benefits
 

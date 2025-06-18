@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
 
@@ -147,7 +147,7 @@ jobs:
 
       - name: Upload SBOM
         if: github.event.inputs.push_to_registry != 'false'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: sbom
           path: sbom.spdx.json
@@ -160,14 +160,14 @@ jobs:
     
     steps:
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           format: 'sarif'
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
 
@@ -184,7 +184,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest >> security-report.md
 
       - name: Upload security report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: security-report
           path: security-report.md
@@ -270,7 +270,7 @@ jobs:
           echo "- Integration tests: ${{ needs.integration-tests.result }}" >> release-notes.md
 
       - name: Update release
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
@@ -291,7 +291,7 @@ jobs:
     
     steps:
       - name: Notify completion
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const results = {

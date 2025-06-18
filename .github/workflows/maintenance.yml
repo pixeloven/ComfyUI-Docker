@@ -58,7 +58,7 @@ jobs:
 
       - name: Create dependency update issue
         if: github.event_name == 'schedule'
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const title = `🔄 Weekly Dependency Update Check - ${new Date().toISOString().split('T')[0]}`;
@@ -115,7 +115,7 @@ jobs:
           docker build -t comfy:security-test ./services/comfy
 
       - name: Run comprehensive security scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: 'comfy:security-test'
           format: 'json'
@@ -140,7 +140,7 @@ jobs:
 
       - name: Create security alert
         if: env.create_security_alert == 'true'
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             await github.rest.issues.create({
@@ -169,7 +169,7 @@ jobs:
             });
 
       - name: Upload security scan results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: security-scan-results
           path: security-scan.json
@@ -184,7 +184,7 @@ jobs:
     
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
@@ -203,14 +203,14 @@ jobs:
           echo "This report was generated automatically by the maintenance workflow." >> maintenance-report.md
 
       - name: Upload maintenance report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: maintenance-report
           path: maintenance-report.md
 
       - name: Comment on latest commit
         if: github.event_name == 'schedule'
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');

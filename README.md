@@ -28,22 +28,42 @@ This repository provides multiple UIs for you to play around with stable diffusi
 
 **CPU Support**: ComfyUI now supports both GPU and CPU-only modes. See [CPU Support Documentation](docs/CPU_SUPPORT.md) for details.
 
-## Testing
+## 🚀 Quick Start
 
-This project uses containerized testing for consistent, dependency-free validation:
+### ComfyUI (Recommended)
 
 ```bash
-# Run all tests (requires only Docker)
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
+# 1. Clone and setup
+git clone <repo-url>
+cd stable-diffusion-webui-docker
+cp .env.example .env
 
-# Run specific test categories
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner cpu
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner gpu
+# 2. Start ComfyUI (GPU mode)
+docker compose --profile comfy up -d
+
+# 3. Open ComfyUI at http://localhost:8188
 ```
 
-For detailed testing documentation, see [Testing Guide](docs/TESTING_GUIDE.md). If migrating from previous versions, see [Migration Guide](docs/MIGRATION_GUIDE.md).
+### CPU Mode
+```bash
+# Configure for CPU-only mode
+echo 'COMFY_CLI_ARGS="--cpu"' >> .env
+docker compose --profile comfy-cpu up -d
+# Open at http://localhost:8189
+```
 
-**Performance**: The project uses advanced Docker caching strategies that reduce CI/CD build times by 60-80%. See [Docker Caching Guide](docs/DOCKER_CACHING_GUIDE.md) for details.
+## 🧪 Testing
+
+```bash
+# Run all tests
+docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
+```
+
+## 📚 Documentation
+
+- **[Quick Reference](docs/QUICK_REFERENCE.md)** - Essential commands and troubleshooting
+- **[CPU Support Guide](docs/CPU_SUPPORT.md)** - GPU and CPU configuration
+- **[Documentation Index](docs/README.md)** - All available guides
 
 ## Contributing
 
