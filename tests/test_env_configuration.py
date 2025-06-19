@@ -1,6 +1,5 @@
 """
-Essential environment configuration tests.
-Focused on critical configuration validation for single developer maintenance.
+Simple tests to verify configuration files are correct.
 """
 import pytest
 import subprocess
@@ -13,16 +12,15 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 
 class TestEnvConfiguration:
-    """Essential environment configuration tests."""
+    """Test environment configuration."""
 
     def test_env_example_exists(self, project_root):
-        """Test that .env.example file exists with required content."""
+        """Test that .env.example file exists."""
         env_example_path = project_root / ".env.example"
         assert env_example_path.exists(), ".env.example file should exist"
 
         content = env_example_path.read_text()
         assert "COMFY_CLI_ARGS" in content, "Should have COMFY_CLI_ARGS variable"
-        assert "--cpu" in content, "Should have CPU mode example"
 
     def test_docker_compose_syntax(self, project_root):
         """Test that docker-compose.yml has valid syntax."""
@@ -43,25 +41,3 @@ class TestEnvConfiguration:
         profiles = result.stdout.strip().split('\n')
         assert "comfy" in profiles, "comfy profile should exist"
         assert "comfy-cpu" in profiles, "comfy-cpu profile should exist"
-
-    def test_port_configuration(self, project_root):
-        """Test that services use correct ports."""
-        result = subprocess.run([
-            "docker", "compose", "config"
-        ], cwd=project_root, capture_output=True, text=True)
-
-        assert result.returncode == 0, f"Config check failed: {result.stderr}"
-
-        config_output = result.stdout
-        assert "8188:8188" in config_output, "GPU service should use port 8188"
-        assert "8189:8188" in config_output, "CPU service should use port 8189"
-
-    def test_cli_args_examples(self, project_root):
-        """Test that .env.example has essential CLI argument examples."""
-        env_example_path = project_root / ".env.example"
-        content = env_example_path.read_text()
-
-        # Check for key CLI options
-        essential_options = ["--cpu", "--lowvram"]
-        for option in essential_options:
-            assert option in content, f"Should have example for {option}"

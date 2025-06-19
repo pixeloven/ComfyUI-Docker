@@ -123,14 +123,14 @@ class TestRunner:
     
     def run_all_tests(self) -> bool:
         """Run all essential tests."""
-        self.console.print(Panel("Running Essential Test Suite", style="blue"))
-        
+        self.console.print(Panel("Running Simple Test Suite", style="blue"))
+
         tests = [
             ("Build validation", self.run_build_tests),
             ("Environment configuration", self.run_env_tests),
-            ("CPU functionality", self.run_cpu_tests),
-            ("GPU functionality", self.run_gpu_tests),
-            ("Integration", self.run_integration_tests),
+            ("CPU service startup", self.run_cpu_tests),
+            ("GPU service startup", self.run_gpu_tests),
+            ("Service integration", self.run_integration_tests),
         ]
         
         results = []
@@ -170,7 +170,7 @@ class TestRunner:
 def main(test_type: str, verbose: bool):
     """
     ComfyUI Docker Test Runner
-    
+
     TEST_TYPE: Type of tests to run (all, build, env, cpu, gpu, integration)
     """
     runner = TestRunner(verbose=verbose)

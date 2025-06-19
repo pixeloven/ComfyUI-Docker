@@ -128,7 +128,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./services/comfy
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: ${{ github.event.inputs.push_to_registry != 'false' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
