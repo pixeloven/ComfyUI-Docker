@@ -27,14 +27,16 @@ jobs:
         run: |
           echo "🔍 Validating configuration files..."
           
-          # Docker Compose validation
-          docker compose config --quiet
-          echo "✅ Docker Compose syntax valid"
-          
           # Profile validation
           docker compose --profile comfy-setup config --services | grep -q comfy-setup
           docker compose --profile comfy config --services | grep -q comfy
           echo "✅ Service profiles valid"
+
+          # Docker compose and build readiness check
+          docker compose config --quiet
+          docker compose --profile comfy-setup build --check --progress plain
+          docker compose --profile comfy build --check --progress plain
+          echo "✅ Docker Compose syntax valid"
           
           # Environment file validation
           grep -q "SETUP_CLI_ARGS" .env.example
@@ -45,16 +47,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate-config
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@main
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
         with:
-          swap-storage: false
-          large-packages: false
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          docker-images: true
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -62,28 +60,30 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Image
-        run: |
-          # Enable BuildKit for better caching
-          export DOCKER_BUILDKIT=1
-          export COMPOSE_DOCKER_CLI_BUILD=1
-          docker compose --profile comfy-setup build --progress plain
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/comfy-setup
+          file: ./Dockerfile
+          push: false
+          tags: comfy-setup
+          cache-from: type=registry,ref=comfy-setup:cache
+          cache-to: type=registry,ref=comfy-setup:cache,mode=max
+
+      - name: Clean up Docker
+        run: docker system prune -a -f
 
   # https://github.com/link89/github-action-demo/blob/cp2k-with-deepmd/.github/workflows/on-pull-request.yml
   build-docker-comfy:
     runs-on: ubuntu-latest
     needs: validate-config
     steps:
-      - name: Free Disk Space (Ubuntu)
-        uses: jlumbroso/free-disk-space@main
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
         with:
-          swap-storage: false
-          large-packages: false
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          docker-images: true
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -91,13 +91,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # For PRs we should just run --check?
-      - name: Build Image
-        run: |
-          # Enable BuildKit for better caching
-          export DOCKER_BUILDKIT=1
-          export COMPOSE_DOCKER_CLI_BUILD=1
-          docker compose --profile comfy build --progress plain
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/comfy
+          file: ./Dockerfile
+          push: false
+          tags: comfy
+          cache-from: type=registry,ref=comfy:cache
+          cache-to: type=registry,ref=comfy:cache,mode=max
 
       - name: Test built image
         run: |
@@ -146,6 +148,9 @@ jobs:
           # Cleanup
           docker compose down
           echo "✅ CPU service startup verified"
+
+      - name: Clean up Docker
+        run: docker system prune -a -f
 
   # PR summary
   pr-summary:
