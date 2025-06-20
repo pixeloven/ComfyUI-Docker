@@ -5,7 +5,7 @@ ENV PIP_PREFER_BINARY=1
 
 RUN --mount=type=cache,target=/var/cache/apt \ 
   apt-get update && \ 
-  apt-get install -y --no-install-recommends git wget curl jq ffmpeg libgl1-mesa-glx libglib2.0-0 && \
+  apt-get install -y git wget curl jq ffmpeg libgl1 libglib2.0-0 && \
   apt-get clean && \
   pip install --no-input --upgrade pip
 
