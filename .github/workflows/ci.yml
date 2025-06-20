@@ -34,13 +34,11 @@ jobs:
           
           # Profile validation
           docker compose --profile setup config --services | grep -q setup
-          docker compose --profile auto config --services | grep -q auto
           docker compose --profile comfy config --services | grep -q comfy
           echo "✅ Service profiles valid"
           
           # Environment file validation
           grep -q "SETUP_CLI_ARGS" .env.example
-          grep -q "AUTO_CLI_ARGS" .env.example
           grep -q "COMFY_CLI_ARGS" .env.example
           echo "✅ Environment file valid"
 

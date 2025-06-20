@@ -8,11 +8,6 @@ assignees: ""
 
 <!--  PLEASE FILL THIS OUT, IT WILL MAKE BOTH OF OUR LIVES EASIER -->
 
-**Has this issue been opened before?**
-
-- [ ] It is not in the [FAQ](https://github.com/AbdBarho/stable-diffusion-webui-docker/wiki/FAQ), I checked.
-- [ ] It is not in the [issues](https://github.com/AbdBarho/stable-diffusion-webui-docker/issues?q=), I searched.
-
 **Describe the bug**
 
 <!--  tried to run the app, my cat exploded -->
