@@ -12,10 +12,10 @@ on:
       - reopened
       - synchronize
     paths:
-      ./services/comfy
-      ./services/setup
-      ./.env.example
-      ./docker-compose.yml
+      - '.github/workflows/**'
+      - 'services/**''
+      - .env.example
+      - docker-compose.yml
 
 env:
   SETUP_CLI_ARGS: --dry-run
