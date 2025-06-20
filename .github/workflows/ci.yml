@@ -18,7 +18,7 @@ on:
 jobs:
   # Validate configuration files
   validate-config:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
         run: docker system prune -a -f
 
   build-docker-comfy-setup:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: validate-config
     steps:
       - name: Maximize build space
@@ -88,7 +88,7 @@ jobs:
   # https://github.com/link89/github-action-demo/blob/cp2k-with-deepmd/.github/workflows/on-pull-request.yml
   # Follow this build to see if we can eek out a way to do this
   build-docker-comfy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: validate-config
     steps:
       - name: Maximize build space
