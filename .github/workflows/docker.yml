@@ -48,24 +48,7 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=cache
 
-      - name: Build with comprehensive caching
-        if: matrix.profile == 'comfy'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./services/comfy
-          platforms: linux/amd64
-          push: false
-          load: true
-          tags: ${{ matrix.profile }}:latest
-          cache-from: |
-            type=gha,scope=${{ matrix.profile }}
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.profile }}:cache
-          cache-to: |
-            type=gha,mode=max,scope=${{ matrix.profile }}
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.profile }}:cache,mode=max
-
       - name: Build other profiles with caching
-        if: matrix.profile != 'comfy'
         run: |
           # Enable BuildKit for better caching
           export DOCKER_BUILDKIT=1
@@ -81,17 +64,3 @@ jobs:
           docker run --rm ${{ matrix.profile }}:latest python --version
           docker run --rm ${{ matrix.profile }}:latest pip list | grep torch
           echo "✅ Image test completed"
-
-      - name: Push cache to registry
-        if: github.event_name != 'pull_request' && matrix.profile == 'comfy'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./services/comfy
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: |
-            type=gha,scope=${{ matrix.profile }}
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.profile }}:cache
-          cache-to: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.profile }}:cache,mode=max
