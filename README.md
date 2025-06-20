@@ -26,7 +26,7 @@ This repository provides multiple UIs for you to play around with stable diffusi
 
 ```bash
 # 1. Clone and setup
-git clone <repo-url>
+git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
 cd stable-diffusion-webui-docker
 cp .env.example .env
 
@@ -42,6 +42,14 @@ docker compose --profile comfy up -d
 echo 'COMFY_CLI_ARGS="--cpu"' >> .env
 docker compose --profile comfy-cpu up -d
 # Open at http://localhost:8189
+```
+
+### Model Setup (Optional)
+```bash
+# Download models (dry run first to preview)
+docker compose --profile comfy-setup up
+
+# For actual download, edit .env: SETUP_CLI_ARGS=""
 ```
 
 ## 📚 Documentation

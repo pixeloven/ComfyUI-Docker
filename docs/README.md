@@ -38,14 +38,32 @@ New to this project? Start here:
 2. **[CPU Support Guide](CPU_SUPPORT.md)** - Configure for your hardware
 3. **[Local CI Testing Guide](LOCAL_CI_TESTING.md)** - Test changes locally
 
+## 🏗️ Available Services
+
+This project provides three main Docker services:
+
+### ComfyUI
+- **Profile**: `comfy`
+- **Port**: 8188
+- **Purpose**: Main ComfyUI interface with GPU acceleration
+- **Requirements**: NVIDIA GPU with CUDA support
+
+### Model Setup Service
+- **Profile**: `comfy-setup`
+- **Port**: None (utility service)
+- **Purpose**: Download and organize models
+- **Usage**: Run once to set up models
+
 ## 🎯 Common Tasks
 
 ### First Time Setup
 ```bash
 # Clone and start
-git clone <repo-url>
+git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
 cd stable-diffusion-webui-docker
 cp .env.example .env
+docker compose build
+docker compose --profile comfy-setup up -d
 docker compose --profile comfy up -d
 # Visit http://localhost:8188
 ```
@@ -55,11 +73,11 @@ docker compose --profile comfy up -d
 # Install act locally
 curl https://raw.githubusercontent.com/nektos/act/master/install.sh | bash
 
-# Test PR validation
-./bin/act pull_request -W .github/workflows/pr-validation.yml
-
-# Test main CI
+# Test CI workflow
 ./bin/act push -W .github/workflows/ci.yml
+
+# Test release workflow
+./bin/act push -W .github/workflows/release.yml
 ```
 
 ### Getting Help

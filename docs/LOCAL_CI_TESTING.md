@@ -15,22 +15,19 @@ curl https://raw.githubusercontent.com/nektos/act/master/install.sh | bash
 # List all workflows and jobs
 ./bin/act --list
 
-# Test PR validation (most common)
-./bin/act pull_request -W .github/workflows/pr-validation.yml
-
 # Test main CI workflow
 ./bin/act push -W .github/workflows/ci.yml
 
-# Test Docker builds
-./bin/act push -W .github/workflows/docker.yml
+# Test release workflow
+./bin/act push -W .github/workflows/release.yml
 
 # Test specific job only
-./bin/act pull_request -W .github/workflows/pr-validation.yml -j quick-validation
+./bin/act pull_request -W .github/workflows/ci.yml -j validate-config
 ```
 
 ## Configuration
 
-The repository includes a `.actrc` file with optimized settings for this project.
+Act uses default settings that work well for this project. You can create a `.actrc` file in the repository root if you need custom configuration.
 
 ## Troubleshooting
 
