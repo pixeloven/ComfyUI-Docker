@@ -71,8 +71,8 @@ jobs:
           file: ./services/comfy-setup/Dockerfile
           push: false
           tags: ghcr.io/${{ github.actor }}/comfy-setup:latest
-          cache-from: type=gha,ref=ghcr.io/${{ github.actor }}/comfy-setup:cache
-          cache-to: type=gha,ref=ghcr.io/${{ github.actor }}/comfy-setup:cache,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Clean up Docker
         run: docker system prune -a -f
@@ -109,8 +109,8 @@ jobs:
           file: ./services/comfy/Dockerfile
           push: false
           tags: ghcr.io/${{ github.actor }}/comfy:latest
-          cache-from: type=gha,ref=ghcr.io/${{ github.actor }}/comfy:cache
-          cache-to: type=gha,ref=ghcr.io/${{ github.actor }}/comfy:cache,mode=max
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Test built image
         run: |
