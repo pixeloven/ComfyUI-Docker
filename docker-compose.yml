@@ -21,7 +21,7 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - CLI_ARGS=${AUTO_CLI_ARGS}
+      - CLI_ARGS=${AUTO_CLI_ARGS:-""}
     ports:
       - "7860:7860" # hardcoded in Dockerfile for now
     volumes:
@@ -45,7 +45,7 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - CLI_ARGS=${COMFY_CLI_ARGS}
+      - CLI_ARGS=${COMFY_CLI_ARGS:-""}
     ports:
       - "8188:8188" # hardcoded in Dockerfile for now
     volumes:
