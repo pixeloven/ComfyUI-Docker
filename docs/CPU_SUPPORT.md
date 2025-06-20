@@ -43,8 +43,8 @@ COMFY_CLI_ARGS="--verbose"
 ```
 
 ### Profiles & Ports
-- **`comfy`** - GPU mode → http://localhost:8188
-- **`comfy-cpu`** - CPU mode → http://localhost:8189
+- **`comfy`** - ComfyUI → http://localhost:8188
+- **`comfy-setup`** - Model download service (no web interface)
 
 ## 📊 Performance Notes
 
@@ -63,9 +63,6 @@ docker compose --profile comfy-cpu up -d
 # Switch to GPU mode
 echo 'COMFY_CLI_ARGS=""' > .env
 docker compose --profile comfy up -d
-
-# Check GPU availability
-docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu20.04 nvidia-smi
 ```
 
 ## 🐛 Troubleshooting
