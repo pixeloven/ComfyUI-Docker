@@ -45,10 +45,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate-config
     steps:
-      - name: Remove unnecessary files
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          swap-storage: false
+          large-packages: false
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          docker-images: true
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -63,14 +69,21 @@ jobs:
           export COMPOSE_DOCKER_CLI_BUILD=1
           docker compose --profile comfy-setup build --progress plain
 
+  # https://github.com/link89/github-action-demo/blob/cp2k-with-deepmd/.github/workflows/on-pull-request.yml
   build-docker-comfy:
     runs-on: ubuntu-latest
     needs: validate-config
     steps:
-      - name: Remove unnecessary files
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          swap-storage: false
+          large-packages: false
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          docker-images: true
 
       - name: Checkout code
         uses: actions/checkout@v4
