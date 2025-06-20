@@ -11,7 +11,11 @@ on:
       - opened
       - reopened
       - synchronize
-
+    paths:
+      ./services/comfy
+      ./services/setup
+      ./.env.example
+      ./docker-compose.yml
 env:
   SETUP_CLI_ARGS: --dry-run
   COMFY_CLI_ARGS: --cpu
@@ -50,9 +54,6 @@ jobs:
         profile:
           - comfy
           - setup
-    paths:
-      ./services/comfy
-      ./services/setup
 
     steps:
       - name: Checkout code
