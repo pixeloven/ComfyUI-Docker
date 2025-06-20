@@ -108,7 +108,7 @@ jobs:
           context: ./services/comfy
           file: ./services/comfy/Dockerfile
           push: false
-          tags: ghcr.io/${{ github.actor }}/comfy:latest
+          tags: ghcr.io/${{ github.actor }}/comfy:latest # Should this be the branch or pr?
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
