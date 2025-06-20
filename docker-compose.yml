@@ -1,8 +1,10 @@
 name: stable-diffusion-webui-docker
 
 services:
+
   download:
     build: ./services/download/
+    image: download:latest
     profiles: ["download"]
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
@@ -14,7 +16,7 @@ services:
   auto:
     profiles: ["auto"]
     build: ./services/AUTOMATIC1111
-    image: auto:v1.10.1
+    image: auto:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
