@@ -60,7 +60,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./services/comfy-setup
+          context: services/comfy-setup
           file: ./Dockerfile
           push: false
           tags: comfy-setup
@@ -91,7 +91,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./services/comfy
+          context: services/comfy
           file: ./Dockerfile
           push: false
           tags: comfy
