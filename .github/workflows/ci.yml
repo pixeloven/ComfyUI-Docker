@@ -41,15 +41,9 @@ jobs:
           grep -q "COMFY_CLI_ARGS" .env.example
           echo "✅ Environment file valid"
 
-  build-and-test:
+  build-docker-setup:
     runs-on: ubuntu-latest
     needs: validate-config
-    strategy:
-      matrix:
-        profile:
-          - comfy
-          - setup
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -57,54 +51,64 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build other profiles with caching
+      - name: Build Image
         run: |
           # Enable BuildKit for better caching
           export DOCKER_BUILDKIT=1
           export COMPOSE_DOCKER_CLI_BUILD=1
+          docker compose --profile setup build --progress plain
 
-          # Build with cache mount
-          docker compose --profile ${{ matrix.profile }} build --progress plain
+  build-docker-comfy:
+    runs-on: ubuntu-latest
+    needs: validate-config
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Image
+        run: |
+          # Enable BuildKit for better caching
+          export DOCKER_BUILDKIT=1
+          export COMPOSE_DOCKER_CLI_BUILD=1
+          docker compose --profile comfy build --progress plain
 
       - name: Test built image
-        if: matrix.profile == 'comfy'
         run: |
           echo "🧪 Testing built image..."
-          docker run --rm ${{ matrix.profile }}:latest python --version
-          docker run --rm ${{ matrix.profile }}:latest pip list | grep torch
+          docker run --rm comfy:latest python --version
+          docker run --rm comfy:latest pip list | grep torch
           echo "✅ Image test completed"
 
       - name: Test image packages
-        if: matrix.profile == 'comfy'
         run: |
           # Verify onnxruntime-gpu is installed
-          docker run --rm ${{ matrix.profile }}:latest pip list | grep onnxruntime-gpu
+          docker run --rm comfy:latest pip list | grep onnxruntime-gpu
           echo "✅ onnxruntime-gpu package verified"
 
       - name: Test image structure
-        if: matrix.profile == 'comfy'
         run: |
           # Verify for entrypoint location
-          docker run --rm ${{ matrix.profile }}:latest ls -la /home/app/entrypoint.sh | grep rwx
+          docker run --rm comfy:latest ls -la /home/app/entrypoint.sh | grep rwx
           echo "✅ Image structure verified"
 
       - name: Run basic security checks
-        if: matrix.profile == 'comfy'
         run: |
           echo "🔒 Running security checks..."
           
           # Check for non-root user
-          docker run --rm ${{ matrix.profile }}:latest whoami | grep -v root
+          docker run --rm comfy:latest whoami | grep -v root
           echo "✅ Running as non-root user"
           
           # Check for secrets in image
-          ! docker run --rm ${{ matrix.profile }}:latest env | grep -i password
-          ! docker run --rm ${{ matrix.profile }}:latest env | grep -i secret
-          ! docker run --rm ${{ matrix.profile }}:latest env | grep -i token
+          ! docker run --rm comfy:latest env | grep -i password
+          ! docker run --rm comfy:latest env | grep -i secret
+          ! docker run --rm comfy:latest env | grep -i token
           echo "✅ No obvious secrets in environment"
 
       - name: Test service startup
-        if: matrix.profile == 'comfy'
         run: |
           # Start CPU service
           COMFY_CLI_ARGS="--cpu" docker compose --profile comfy up -d
@@ -122,7 +126,7 @@ jobs:
   # PR summary
   pr-summary:
     runs-on: ubuntu-latest
-    needs: [validate-config, build-and-test]
+    needs: [validate-config, build-docker-setup, build-docker-comfy]
     if: always()
     
     steps:
@@ -132,7 +136,8 @@ jobs:
           script: |
             const results = {
               'validate-config': '${{ needs.validate-config.result }}',
-              'build-and-test': '${{ needs.build-and-test.result }}'
+              'build-docker-setup': '${{ needs.build-docker-setup.result }}',
+              'build-docker-comfy': '${{ needs.build-docker-comfy.result }}'
             };
             
             const passed = Object.values(results).filter(r => r === 'success').length;
