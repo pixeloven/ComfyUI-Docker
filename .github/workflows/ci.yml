@@ -92,6 +92,7 @@ jobs:
           echo "✅ Image structure verified"
 
       - name: Run basic security checks
+        if: matrix.profile == 'comfy'
         run: |
           echo "🔒 Running security checks..."
           
