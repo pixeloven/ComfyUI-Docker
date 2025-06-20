@@ -1,6 +1,6 @@
 # Build arguments
-ARG PYTORCH_VERSION=2.5.1
-ARG CUDA_VERSION=12.4
+ARG PYTORCH_VERSION=2.7.0
+ARG CUDA_VERSION=12.8
 ARG CUDNN_VERSION=9
 
 # Single unified image - onnxruntime-gpu handles both GPU and CPU automatically
