@@ -16,6 +16,7 @@ on:
       ./services/setup
       ./.env.example
       ./docker-compose.yml
+
 env:
   SETUP_CLI_ARGS: --dry-run
   COMFY_CLI_ARGS: --cpu
