@@ -32,7 +32,7 @@ jobs:
           echo "✅ Docker Compose syntax valid"
           
           # Profile validation
-          docker compose --profile setup config --services | grep -q setup
+          docker compose --profile comfy-setup config --services | grep -q comfy-setup
           docker compose --profile comfy config --services | grep -q comfy
           echo "✅ Service profiles valid"
           
@@ -41,10 +41,15 @@ jobs:
           grep -q "COMFY_CLI_ARGS" .env.example
           echo "✅ Environment file valid"
 
-  build-docker-setup:
+  build-docker-comfy-setup:
     runs-on: ubuntu-latest
     needs: validate-config
     steps:
+      - name: Remove unnecessary files
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -56,18 +61,24 @@ jobs:
           # Enable BuildKit for better caching
           export DOCKER_BUILDKIT=1
           export COMPOSE_DOCKER_CLI_BUILD=1
-          docker compose --profile setup build --progress plain
+          docker compose --profile comfy-setup build --progress plain
 
   build-docker-comfy:
     runs-on: ubuntu-latest
     needs: validate-config
     steps:
+      - name: Remove unnecessary files
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # For PRs we should just run --check?
       - name: Build Image
         run: |
           # Enable BuildKit for better caching
@@ -126,7 +137,7 @@ jobs:
   # PR summary
   pr-summary:
     runs-on: ubuntu-latest
-    needs: [validate-config, build-docker-setup, build-docker-comfy]
+    needs: [validate-config, build-docker-comfy-setup, build-docker-comfy]
     if: always()
     
     steps:
@@ -136,7 +147,7 @@ jobs:
           script: |
             const results = {
               'validate-config': '${{ needs.validate-config.result }}',
-              'build-docker-setup': '${{ needs.build-docker-setup.result }}',
+              'build-docker-comfy-setup': '${{ needs.build-docker-comfy-setup.result }}',
               'build-docker-comfy': '${{ needs.build-docker-comfy.result }}'
             };
             

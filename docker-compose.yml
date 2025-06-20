@@ -2,10 +2,10 @@ name: stable-diffusion-webui-docker
 
 services:
 
-  setup:
-    build: ./services/setup/
-    image: setup:latest
-    profiles: ["setup"]
+  comfy-setup:
+    build: ./services/comfy-setup/
+    image: comfy-setup:latest
+    profiles: ["comfy-setup"]
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
