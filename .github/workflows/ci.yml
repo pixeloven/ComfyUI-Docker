@@ -31,17 +31,14 @@ jobs:
           docker compose --profile comfy-setup config --services | grep -q comfy-setup
           docker compose --profile comfy config --services | grep -q comfy
           echo "✅ Service profiles valid"
-
-          # Docker compose and build readiness check
-          docker compose config --quiet
-          docker compose --profile comfy-setup build --check --progress plain
-          docker compose --profile comfy build --check --progress plain
-          echo "✅ Docker Compose syntax valid"
           
           # Environment file validation
           grep -q "SETUP_CLI_ARGS" .env.example
           grep -q "COMFY_CLI_ARGS" .env.example
           echo "✅ Environment file valid"
+
+      - name: Clean up Docker
+        run: docker system prune -a -f
 
   build-docker-comfy-setup:
     runs-on: ubuntu-latest
