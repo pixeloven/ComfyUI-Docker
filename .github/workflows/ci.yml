@@ -33,8 +33,9 @@ jobs:
           echo "✅ Docker Compose syntax valid"
           
           # Profile validation
+          docker compose --profile comfy config --services | grep -q download
+          docker compose --profile comfy config --services | grep -q auto
           docker compose --profile comfy config --services | grep -q comfy
-          docker compose --profile comfy-cpu config --services | grep -q comfy-cpu
           echo "✅ Service profiles valid"
           
           # Environment file validation
