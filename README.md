@@ -52,13 +52,6 @@ docker compose --profile comfy-cpu up -d
 # Open at http://localhost:8189
 ```
 
-## 🧪 Testing
-
-```bash
-# Run all tests
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
-```
-
 ## 📚 Documentation
 
 - **[Quick Reference](docs/QUICK_REFERENCE.md)** - Essential commands and troubleshooting

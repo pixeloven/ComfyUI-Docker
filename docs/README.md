@@ -50,12 +50,6 @@ docker compose --profile comfy up -d
 # Visit http://localhost:8188
 ```
 
-### Testing Your Setup
-```bash
-# Run all tests
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
-```
-
 ### Testing CI Changes Locally
 ```bash
 # Install act locally

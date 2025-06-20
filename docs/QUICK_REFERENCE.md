@@ -102,28 +102,6 @@ tar -czf comfy-backup.tar.gz ./data
 tar -xzf comfy-backup.tar.gz
 ```
 
-## 🧪 Testing
-
-### Run Tests
-```bash
-# All tests
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all
-
-# Specific test categories
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner build
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner cpu
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner gpu
-
-# Verbose output
-docker compose -f tests/docker-compose.test.yml --profile test run --rm test-runner all --verbose
-```
-
-### Test Cleanup
-```bash
-# Clean test environment
-docker compose -f tests/docker-compose.test.yml down --remove-orphans --volumes
-```
-
 ## 🐛 Troubleshooting
 
 ### Common Issues
@@ -199,8 +177,7 @@ stable-diffusion-webui-docker/
 ├── .env                       # Your configuration (create from .env.example)
 ├── services/comfy/            # ComfyUI Docker configuration
 ├── data/                      # Models, configurations (auto-created)
-├── output/                    # Generated images (auto-created)
-└── tests/                     # Testing infrastructure
+└── output/                    # Generated images (auto-created)
 ```
 
 ## 🔗 Useful Links

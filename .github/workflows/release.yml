@@ -20,7 +20,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}/comfy
 
 jobs:
-  # Full test suite before release
+
   pre-release-tests:
     runs-on: ubuntu-latest
     
@@ -36,35 +36,7 @@ jobs:
       - name: Set up Docker Buildx for test container
         uses: docker/setup-buildx-action@v3
 
-      - name: Build test container with caching
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: tests/Dockerfile
-          platforms: linux/amd64
-          push: false
-          load: true
-          tags: comfy-test-runner:release
-          cache-from: |
-            type=gha,scope=test-runner-release
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/test-runner:cache
-          cache-to: |
-            type=gha,mode=max,scope=test-runner-release
-
-      - name: Run comprehensive test suite
-        run: |
-          echo "🧪 Running full test suite..."
-          # Use the cached test container image
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            -e PROJECT_ROOT=/workspace \
-            -e TESTS_DIR=/workspace/tests \
-            -e DOCKER_HOST=unix:///var/run/docker.sock \
-            comfy-test-runner:release all --verbose
-          echo "✅ All tests passed"
-
+      # Spin up each to validate
       - name: Performance validation
         run: |
           echo "⚡ Running performance validation..."

@@ -1,4 +1,0 @@
-# Test runner dependencies
-click>=8.0.0          # Modern CLI framework
-rich>=13.0.0          # Beautiful terminal output
-docker>=6.0.0         # Docker API integration

@@ -12,8 +12,6 @@
 
 # Python
 /.venv
-/tests/.venv
-/.pytest_cache
 
 # act local ci testing
 /bin
