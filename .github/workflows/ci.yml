@@ -1,11 +1,9 @@
 name: ComfyUI Docker CI/CD
 
 on:
-
   push:
     branches:
       - main
-
   pull_request:
     types:
       - opened
@@ -16,10 +14,6 @@ on:
       - 'services/**''
       - .env.example
       - docker-compose.yml
-
-env:
-  SETUP_CLI_ARGS: --dry-run
-  COMFY_CLI_ARGS: --cpu
 
 jobs:
   # Validate configuration files
