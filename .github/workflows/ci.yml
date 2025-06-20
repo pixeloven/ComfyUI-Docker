@@ -70,8 +70,7 @@ jobs:
           context: ./services/comfy-setup
           file: ./services/comfy-setup/Dockerfile
           push: false
-          # tags: ghcr.io/${{ github.repository }}:latest
-          tags: comfy-setup
+          tags: ghcr.io/${{ github.actor }}/comfy-setup:latest
           cache-from: type=registry,ref=comfy-setup:cache
           cache-to: type=registry,ref=comfy-setup:cache,mode=max
 
@@ -109,7 +108,7 @@ jobs:
           context: ./services/comfy
           file: ./services/comfy/Dockerfile
           push: false
-          tags: comfy
+          tags: ghcr.io/${{ github.actor }}/comfy:latest
           cache-from: type=registry,ref=comfy:cache
           cache-to: type=registry,ref=comfy:cache,mode=max
 
