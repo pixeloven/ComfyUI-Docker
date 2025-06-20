@@ -8,7 +8,7 @@
 - [] rocm / zluda support
 - [] persistant vol for custom extensions
 - [] generally better workflow vol mappings
-- [] Update download to use a manifest / mapping.
+- [] Update setup to use a manifest / mapping.
 - [] Create a APP for managing manifests, output, etc
 - [] Drop docker support for A111 build alternative using ComfyUI wtih preset workflows in rep
 

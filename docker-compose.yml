@@ -2,40 +2,17 @@ name: stable-diffusion-webui-docker
 
 services:
 
-  download:
-    build: ./services/download/
-    image: download:latest
-    profiles: ["download"]
+  setup:
+    build: ./services/setup/
+    image: setup:latest
+    profiles: ["setup"]
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
+      - CLI_ARGS=${SETUP_CLI_ARGS:-""}
     volumes:
       - ./data:/data
-
-  auto:
-    profiles: ["auto"]
-    build: ./services/AUTOMATIC1111
-    image: auto:latest
-    user: ${PUID:-1000}:${PGID:-1000}
-    environment:
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - CLI_ARGS=${AUTO_CLI_ARGS:-""}
-    ports:
-      - "7860:7860" # hardcoded in Dockerfile for now
-    volumes:
-      - ./data:/data
-      - ./output:/output
-    stop_signal: SIGKILL
-    tty: true
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ['0']
-              capabilities: [compute, utility]
 
   comfy:
     profiles: ["comfy"]

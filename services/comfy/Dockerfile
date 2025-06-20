@@ -4,7 +4,7 @@ ARG CUDA_VERSION=12.4
 ARG CUDNN_VERSION=9
 
 # Single unified image - onnxruntime-gpu handles both GPU and CPU automatically
-FROM pytorch/pytorch:${PYTORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-runtime
+FROM pytorch/pytorch:${PYTORCH_VERSION}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}-runtime AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PIP_PREFER_BINARY=1
@@ -15,22 +15,24 @@ RUN --mount=type=cache,target=/var/cache/apt \
   apt-get clean && \
   pip install --no-input --upgrade pip
 
-RUN useradd -m -s /bin/bash comfy
-USER comfy
-WORKDIR /home/comfy/app
+FROM base AS application
+
+RUN useradd -m -s /bin/bash app
+USER app
+WORKDIR /home/app
 SHELL ["/bin/bash", "--login", "-c"]
 
 # Setup ComfyUI project
 RUN git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
-COPY --chown=comfy:comfy . .
+COPY --chown=app:app . .
 
 # Setup venv
-ENV VIRTUAL_ENV=/home/comfy/app/.venv
+ENV VIRTUAL_ENV=/home/app/.venv
 RUN --mount=type=cache,target=~/.cache/pip \
   mkdir -p ~/.local/bin && \
   python -m venv $VIRTUAL_ENV
 
-ENV PATH="/home/comfy/.local/bin:$PATH"
+ENV PATH="/home/app/.local/bin:$PATH"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install dependencies - onnxruntime-gpu automatically falls back to CPU when CUDA unavailable

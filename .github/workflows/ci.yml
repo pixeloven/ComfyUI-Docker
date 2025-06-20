@@ -13,8 +13,8 @@ on:
       - synchronize
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/comfy
+  SETUP_CLI_ARGS: --dry-run
+  COMFY_CLI_ARGS: --cpu
 
 jobs:
   # Validate configuration files
@@ -33,26 +33,29 @@ jobs:
           echo "✅ Docker Compose syntax valid"
           
           # Profile validation
-          docker compose --profile download config --services | grep -q download
+          docker compose --profile setup config --services | grep -q setup
           docker compose --profile auto config --services | grep -q auto
           docker compose --profile comfy config --services | grep -q comfy
           echo "✅ Service profiles valid"
           
           # Environment file validation
+          grep -q "SETUP_CLI_ARGS" .env.example
+          grep -q "AUTO_CLI_ARGS" .env.example
           grep -q "COMFY_CLI_ARGS" .env.example
           echo "✅ Environment file valid"
 
-  # Build and test Docker image
   build-and-test:
     runs-on: ubuntu-latest
     needs: validate-config
     strategy:
       matrix:
         profile:
-          # - auto
           - comfy
-          - download
-    
+          - setup
+    paths:
+      ./services/comfy
+      ./services/setup
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -88,7 +91,7 @@ jobs:
         if: matrix.profile == 'comfy'
         run: |
           # Verify for entrypoint location
-          docker run --rm ${{ matrix.profile }}:latest ls -la /home/comfy/app/entrypoint.sh | grep rwx
+          docker run --rm ${{ matrix.profile }}:latest ls -la /home/app/entrypoint.sh | grep rwx
           echo "✅ Image structure verified"
 
       - name: Run basic security checks
