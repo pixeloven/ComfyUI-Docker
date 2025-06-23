@@ -9,3 +9,9 @@
 # Service data
 /data/*
 !/data/.gitkeep
+
+# Python
+/.venv
+
+# act local ci testing
+/bin

@@ -1,0 +1,17 @@
+# act configuration for stable-diffusion-webui-docker
+# https://github.com/nektos/act
+
+# Use medium-sized runner for better compatibility
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+
+# Bind Docker socket for Docker-in-Docker operations
+--bind
+
+# Verbose output for debugging
+--verbose
+
+# Use host network for better container communication
+--use-gitignore=false
+
+# Set default platform
+--platform ubuntu-latest=linux/amd64

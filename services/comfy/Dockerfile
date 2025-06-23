@@ -5,7 +5,7 @@ ENV PIP_PREFER_BINARY=1
 
 RUN --mount=type=cache,target=/var/cache/apt \ 
   apt-get update && \ 
-  apt-get install -y --no-install-recommends git wget curl jq ffmpeg libgl1-mesa-glx libglib2.0-0 && \
+  apt-get install -y --no-install-recommends git wget curl jq ffmpeg libgl1 libglib2.0-0 && \
   apt-get clean && \
   pip install --no-input --upgrade pip
 
@@ -20,6 +20,7 @@ WORKDIR /home/comfy/app
 SHELL ["/bin/bash", "--login", "-c"]
 
 # Setup ComfyUI project
+# https://mveg.es/posts/optimizing-pytorch-docker-images-cut-size-by-60percent/
 RUN git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
 
 COPY --chown=comfy:comfy . .

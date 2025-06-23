@@ -1,0 +1,147 @@
+name: ComfyUI Docker CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+      - 'services/**'
+      - '.env.example'
+      - 'docker-compose.yml'
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+jobs:
+  # Validate configuration files
+  validate-config:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate configuration files
+        run: |
+          echo "🔍 Validating configuration files..."
+          
+          # Profile validation
+          docker compose --profile comfy-setup config --services | grep -q comfy-setup
+          docker compose --profile comfy config --services | grep -q comfy
+          echo "✅ Service profiles valid"
+          
+          # Environment file validation
+          grep -q "SETUP_CLI_ARGS" .env.example
+          grep -q "COMFY_CLI_ARGS" .env.example
+          echo "✅ Environment file valid"
+
+      - name: Clean up Docker
+        run: docker system prune -a -f
+
+  build-docker-comfy-setup:
+    runs-on: ubuntu-22.04
+    needs: validate-config
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Additional space saving build space
+        run: |
+          sudo apt clean
+          df -h
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/comfy-setup
+          file: ./services/comfy-setup/Dockerfile
+          push: false
+          tags: ghcr.io/${{ github.actor }}/comfy-setup:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Clean up Docker
+        run: docker system prune -a -f
+
+
+  # PR summary
+  pr-summary:
+    runs-on: ubuntu-latest
+    needs: [validate-config, build-docker-comfy-setup]
+    if: always()
+    
+    steps:
+      - name: PR Validation Summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const results = {
+              'validate-config': '${{ needs.validate-config.result }}',
+              'build-docker-comfy-setup': '${{ needs.build-docker-comfy-setup.result }}'
+            };
+            
+            const passed = Object.values(results).filter(r => r === 'success').length;
+            const total = Object.keys(results).length;
+            
+            let summary = `## 🔍 PR Validation Results\n\n`;
+            summary += `**${passed}/${total} checks passed**\n\n`;
+            
+            for (const [check, result] of Object.entries(results)) {
+              const emoji = result === 'success' ? '✅' : result === 'failure' ? '❌' : '⏭️';
+              summary += `${emoji} ${check.replace('-', ' ')}: ${result}\n`;
+            }
+            
+            if (passed === total) {
+              summary += `\n🎉 All validation checks passed! This PR is ready for review.`;
+            } else {
+              summary += `\n⚠️ Some validation checks failed. Please review and fix the issues.`;
+            }
+            
+            // Add comment to PR
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && comment.body.includes('PR Validation Results')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: summary
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: summary
+              });
+            }
