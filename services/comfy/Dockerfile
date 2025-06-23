@@ -29,6 +29,7 @@ COPY --chown=comfy:comfy . .
 # # https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
 ENV VIRTUAL_ENV=/home/comfy/app/.venv
 RUN --mount=type=cache,target=~/.cache/pip \ 
+  ls -al  && \
   mkdir -p ~/.local/bin && \
   python -m venv $VIRTUAL_ENV
 
@@ -37,10 +38,9 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # ENV PYTHONPATH="${PYTHONPATH}:${PWD}"
 
 # Activate environment and install dependencies
-# Should make ONNX optional by moving this into a configuration file that can be alterated at run time
 RUN --mount=type=cache,target=~/.cache/pip \ 
   pip install -r requirements.txt && \
-  pip install onnxruntime-gpu && \
+  # pip install -r plugin-requirements.txt && \
   chmod u+x ./entrypoint.sh 
 
 ENV NVIDIA_VISIBLE_DEVICES=all 
