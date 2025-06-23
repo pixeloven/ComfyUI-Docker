@@ -85,107 +85,11 @@ jobs:
       - name: Clean up Docker
         run: docker system prune -a -f
 
-  # https://github.com/link89/github-action-demo/blob/cp2k-with-deepmd/.github/workflows/on-pull-request.yml
-  # Follow this build to see if we can eek out a way to do this
-  # build-docker-comfy:
-  #   runs-on: ubuntu-22.04
-  #   needs: validate-config
-  #   steps:
-  #     - name: Maximize build space
-  #       uses: easimon/maximize-build-space@master
-  #       with:
-  #         swap-size-mb: 1024
-  #         remove-dotnet: 'true'
-  #         remove-android: 'true'
-  #         remove-haskell: 'true'
-  #         remove-codeql: 'true'
-  #         remove-docker-images: 'true'
-
-  #     # https://github.com/actions/runner-images/issues/10386
-  #     # Also wonder is there a way to pull the base image without bring down so many shas / layers?
-  #     - name: Additional space saving build space
-  #       run: |
-  #         sudo apt clean
-  #         df -h
-
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-
-  #     - name: Log in to GitHub Container Registry
-  #       uses: docker/login-action@v3
-  #       with:
-  #         registry: ghcr.io
-  #         username: ${{ github.actor }}
-  #         password: ${{ secrets.GITHUB_TOKEN }}
-
-  #     - name: Set up Docker Buildx
-  #       uses: docker/setup-buildx-action@v3
-
-  #     - name: Build and push Docker image
-  #       uses: docker/build-push-action@v5
-  #       with:
-  #         context: ./services/comfy
-  #         file: ./services/comfy/Dockerfile
-  #         push: false
-  #         tags: ghcr.io/${{ github.actor }}/comfy:latest # Should this be the branch or pr?
-  #         cache-from: type=gha
-  #         cache-to: type=gha,mode=max
-
-  #     - name: Test built image
-  #       run: |
-  #         echo "🧪 Testing built image..."
-  #         docker run --rm comfy:latest python --version
-  #         docker run --rm comfy:latest pip list | grep torch
-  #         echo "✅ Image test completed"
-
-  #     - name: Test image packages
-  #       run: |
-  #         # Verify onnxruntime-gpu is installed
-  #         docker run --rm comfy:latest pip list | grep onnxruntime-gpu
-  #         echo "✅ onnxruntime-gpu package verified"
-
-  #     - name: Test image structure
-  #       run: |
-  #         # Verify for entrypoint location
-  #         docker run --rm comfy:latest ls -la /home/app/entrypoint.sh | grep rwx
-  #         echo "✅ Image structure verified"
-
-  #     - name: Run basic security checks
-  #       run: |
-  #         echo "🔒 Running security checks..."
-          
-  #         # Check for non-root user
-  #         docker run --rm comfy:latest whoami | grep -v root
-  #         echo "✅ Running as non-root user"
-          
-  #         # Check for secrets in image
-  #         ! docker run --rm comfy:latest env | grep -i password
-  #         ! docker run --rm comfy:latest env | grep -i secret
-  #         ! docker run --rm comfy:latest env | grep -i token
-  #         echo "✅ No obvious secrets in environment"
-
-  #     - name: Test service startup
-  #       run: |
-  #         # Start CPU service
-  #         COMFY_CLI_ARGS="--cpu" docker compose --profile comfy up -d
-          
-  #         # Wait for service to be ready
-  #         timeout 120 bash -c 'until curl -f http://localhost:8189 >/dev/null 2>&1; do sleep 5; done'
-          
-  #         # Verify service is responding
-  #         curl -f http://localhost:8189
-          
-  #         # Cleanup
-  #         docker compose down
-  #         echo "✅ CPU service startup verified"
-
-  #     - name: Clean up Docker
-  #       run: docker system prune -a -f
 
   # PR summary
   pr-summary:
     runs-on: ubuntu-latest
-    needs: [validate-config, build-docker-comfy-setup, build-docker-comfy]
+    needs: [validate-config, build-docker-comfy-setup]
     if: always()
     
     steps:
@@ -195,8 +99,7 @@ jobs:
           script: |
             const results = {
               'validate-config': '${{ needs.validate-config.result }}',
-              'build-docker-comfy-setup': '${{ needs.build-docker-comfy-setup.result }}',
-              'build-docker-comfy': '${{ needs.build-docker-comfy.result }}'
+              'build-docker-comfy-setup': '${{ needs.build-docker-comfy-setup.result }}'
             };
             
             const passed = Object.values(results).filter(r => r === 'success').length;
