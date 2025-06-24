@@ -38,20 +38,3 @@ services:
             - driver: nvidia
               device_ids: ['0']
               capabilities: [compute, utility]
-
-# Version auto1111, use same or similar base images
-# Fix Mappings for models `/data/models` and `data/config/comfy/models` the later is created by ComfyManager
-# Run everything in an venv
-# IPAdapterPlus
-# ONNX
-# comfyui-manager by default
-
-# Model/Embeddings
-# /data/config/comfy
-# /data/config/auto
-# /data/config/shared
-# Also move /output to /data/output
-
-# Rather than swarm maybe forge? https://github.com/lllyasviel/stable-diffusion-webui-forge
-# Also maybe invoke? 
-# Should also decide whether this repo is just for image gen in stable or more general AI workflow since some of thje tools also blur and support audio, text etc

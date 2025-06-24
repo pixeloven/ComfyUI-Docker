@@ -1,2 +1,2 @@
-onnxruntime-gpu
-insightface
+onnxruntime-gpu>=1.22.0
+insightface>=0.7.3

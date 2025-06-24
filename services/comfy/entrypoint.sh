@@ -22,6 +22,7 @@ mkdir -vp ${OUTPUT_DIRECTORY}
 # custom_nodes, input, output, temp, and user directories.
 CLI_ARGS+="${CLI_ARGS} --base-directory ${BASE_DIRECTORY} --output-directory ${OUTPUT_DIRECTORY}"
 
+# This is broken
 if [ -f "/data/config/comfy/startup.sh" ]; then
   pushd ${APPLICATION_ROOT}
   . /data/config/comfy/startup.sh
