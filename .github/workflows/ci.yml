@@ -82,7 +82,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Clean up Docker
+      - name: Clean up docker
         run: docker system prune -a -f
 
   # https://github.com/link89/github-action-demo/blob/cp2k-with-deepmd/.github/workflows/on-pull-request.yml
@@ -112,6 +112,12 @@ jobs:
       - name: Check disk space
         run: df . -h
 
+      # Do these need to run as root?
+      # docker system prune -a -f vs what we do below?
+      # Can we use apt or another method to remove libraries?
+      # Uninstall node, python, etc
+      # Don't use aptitude
+      # Turn into a custom shared action
       - name: Free disk space
         run: |
           sudo docker rmi $(docker image ls -aq) >/dev/null 2>&1 || true
@@ -166,7 +172,8 @@ jobs:
           context: ./services/comfy
           file: ./services/comfy/Dockerfile
           push: false
-          tags: ghcr.io/${{ github.actor }}/comfy:latest # Should this be the branch or pr?
+          tags: comfy:latest # Should this be the branch or pr?
+          # tags: ghcr.io/${{ github.actor }}/comfy:latest # Should this be the branch or pr?
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -177,11 +184,12 @@ jobs:
           docker run --rm comfy:latest pip list | grep torch
           echo "✅ Image test completed"
 
-      - name: Test image packages
+      - name: Test image for plugin packages
         run: |
           # Verify onnxruntime-gpu is installed
           docker run --rm comfy:latest pip list | grep onnxruntime-gpu
-          echo "✅ onnxruntime-gpu package verified"
+          docker run --rm comfy:latest pip list | grep insightface
+          echo "✅ plugin packages verified"
 
       - name: Test image structure
         run: |
