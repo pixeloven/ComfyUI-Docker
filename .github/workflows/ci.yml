@@ -79,8 +79,7 @@ jobs:
           file: ./services/comfy-setup/Dockerfile
           # push: true
           load: true
-          tags: 
-            - comfy-setup:latest
+          tags: comfy-setup:latest
           # tags: ghcr.io/${{ github.actor }}/comfy-setup:latest
           cache-from: type=gha,scope=comfy-setup:latest
           cache-to: type=gha,mode=max,scope=comfy-setup:latest
@@ -176,8 +175,7 @@ jobs:
           file: ./services/comfy/Dockerfile
           # push: true
           load: true
-          tags: 
-            - comfy:latest # Should this be the branch or pr?
+          tags: comfy:latest # Should this be the branch or pr?
           # tags: ghcr.io/${{ github.actor }}/comfy:latest # Should this be the branch or pr?
           cache-from: type=gha,scope=comfy:latest
           cache-to: type=gha,mode=max,scope=comfy:latest
