@@ -77,7 +77,8 @@ jobs:
         with:
           context: ./services/comfy-setup
           file: ./services/comfy-setup/Dockerfile
-          push: true
+          # push: true
+          load: true
           tags: 
             - comfy-setup:latest
           # tags: ghcr.io/${{ github.actor }}/comfy-setup:latest
@@ -173,7 +174,8 @@ jobs:
         with:
           context: ./services/comfy
           file: ./services/comfy/Dockerfile
-          push: false
+          # push: true
+          load: true
           tags: 
             - comfy:latest # Should this be the branch or pr?
           # tags: ghcr.io/${{ github.actor }}/comfy:latest # Should this be the branch or pr?
