@@ -26,7 +26,7 @@ services:
     ports:
       - "8188:8188" # hardcoded in Dockerfile for now
     volumes:
-      # - ./comfy/extra_model_paths.yaml:/extra_model_paths.yaml:ro,cached
+      # - ./services/comfy/extra_model_paths.yaml:/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
       - ./output:/output
     stop_signal: SIGKILL
