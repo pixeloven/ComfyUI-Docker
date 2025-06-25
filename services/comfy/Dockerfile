@@ -31,9 +31,7 @@ RUN apt-get update && \
   libgl1 \
   libglib2.0-0 && \
   apt-get clean && \
-  rm -rf /var/lib/apt/lists/* && \
-  which python3 && \
-  python3 --version
+  rm -rf /var/lib/apt/lists/*
 
 FROM runtime AS application
 
