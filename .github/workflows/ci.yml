@@ -33,8 +33,8 @@ jobs:
           echo "✅ Service profiles valid"
           
           # Environment file validation
-          grep -q "SETUP_CLI_ARGS" .env.example
-          grep -q "COMFY_CLI_ARGS" .env.example
+          grep -q "PUID" .env.example
+          grep -q "PGID" .env.example
           echo "✅ Environment file valid"
 
       - name: Clean up Docker
