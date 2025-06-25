@@ -71,6 +71,7 @@ RUN --mount=type=cache,target=~/.cache/pip \
 
 ENV CLI_ARGS=""
 
+# Should pass this in as an ARG/ENV
 EXPOSE 8188
 
 ENTRYPOINT ["./entrypoint.sh"]
