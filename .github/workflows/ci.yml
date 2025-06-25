@@ -73,14 +73,16 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./services/comfy-setup
           file: ./services/comfy-setup/Dockerfile
-          push: false
-          tags: ghcr.io/${{ github.actor }}/comfy-setup:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          push: true
+          tags: 
+            - comfy-setup:latest
+          # tags: ghcr.io/${{ github.actor }}/comfy-setup:latest
+          cache-from: type=gha,scope=comfy-setup:latest
+          cache-to: type=gha,mode=max,scope=comfy-setup:latest
 
       - name: Clean up docker
         run: docker system prune -a -f
@@ -167,15 +169,16 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./services/comfy
           file: ./services/comfy/Dockerfile
           push: false
-          tags: comfy:latest # Should this be the branch or pr?
+          tags: 
+            - comfy:latest # Should this be the branch or pr?
           # tags: ghcr.io/${{ github.actor }}/comfy:latest # Should this be the branch or pr?
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=comfy:latest
+          cache-to: type=gha,mode=max,scope=comfy:latest
 
       - name: Test built image
         run: |
