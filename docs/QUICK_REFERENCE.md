@@ -8,7 +8,7 @@ Essential commands and configuration for daily ComfyUI Docker usage.
 ```bash
 # Clone and setup
 git clone https://github.com/pixeloven/ComfyUI-Docker.git
-cd stable-diffusion-webui-docker
+cd ComfyUI-Docker
 cp .env.example .env
 
 # Download models (optional)
