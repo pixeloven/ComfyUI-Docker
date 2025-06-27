@@ -21,23 +21,24 @@ ComfyUI is a powerful and modular stable diffusion GUI and backend with a graph/
 
 ```bash
 # 1. Clone and setup
-git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
-cd stable-diffusion-webui-docker
+git clone https://github.com/pixeloven/ComfyUI-Docker.git
+cd ComfyUI-Docker
 cp .env.example .env
 
-# 2. Start ComfyUI (GPU mode)
-docker compose --profile comfy up -d
+# 2. Start ComfyUI
+docker compose --profile comfy up -d        # GPU mode (recommended)
+# OR
+docker compose --profile comfy-cpu up -d    # CPU mode (universal)
 
 # 3. Open ComfyUI at http://localhost:8188
 ```
 
-**That's it!** ComfyUI is now running. For CPU-only mode, model setup, and advanced configuration, see the documentation below.
+**That's it!** ComfyUI is now running. For model setup and advanced configuration, see the documentation below.
 
 ## 📚 Documentation
 
 ### Getting Started
 - **[Quick Reference](docs/QUICK_REFERENCE.md)** - Essential commands, configuration, and troubleshooting
-- **[CPU Support Guide](docs/CPU_SUPPORT.md)** - GPU vs CPU setup and performance optimization
 
 ### Development & Advanced Usage
 - **[Build Guide](docs/BUILD.md)** - Building images, development setup, and contributing
@@ -45,7 +46,7 @@ docker compose --profile comfy up -d
 
 ### Need Help?
 - Check the [Quick Reference](docs/QUICK_REFERENCE.md) for common solutions
-- Review existing [GitHub Issues](https://github.com/AbdBarho/stable-diffusion-webui-docker/issues)
+- Review existing [GitHub Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)
 - Create a new issue with logs and configuration details
 
 ## 🤝 Contributing
@@ -71,4 +72,4 @@ Special thanks to the amazing open source community behind these projects:
 
 ---
 
-**[⬆ Back to Top](#comfyui-docker)** | **[📚 Documentation](docs/)** | **[🐛 Issues](https://github.com/AbdBarho/stable-diffusion-webui-docker/issues)** | **[💬 Discussions](https://github.com/AbdBarho/stable-diffusion-webui-docker/discussions)**
+**[⬆ Back to Top](#comfyui-docker)** | **[📚 Documentation](docs/)** | **[🐛 Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)** | **[💬 Discussions](https://github.com/pixeloven/ComfyUI-Docker/discussions)**

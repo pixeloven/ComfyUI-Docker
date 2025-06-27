@@ -1,4 +1,4 @@
-name: stable-diffusion-webui-docker
+name: ComfyUI-Docker
 
 services:
 
