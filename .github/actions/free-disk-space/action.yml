@@ -107,7 +107,7 @@ runs:
       shell: bash
       run: |
         echo "📈 Largest installed packages:"
-        sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -nr | head
+        sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -nr | head || true
         echo ""
         echo "📁 Largest directories in /usr (>1GB):"
-        sudo du /usr/ -hx -d 4 --threshold=1G | sort -hr | head
+        sudo du /usr/ -hx -d 4 --threshold=1G | sort -hr | head || true
