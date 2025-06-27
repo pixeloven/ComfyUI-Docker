@@ -7,9 +7,12 @@ Essential commands and configuration for daily ComfyUI Docker usage.
 ### First Time Setup
 ```bash
 # Clone and setup
-git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
+git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd stable-diffusion-webui-docker
 cp .env.example .env
+
+# Download models (optional)
+docker compose --profile comfy-setup up
 
 # Start ComfyUI (GPU mode)
 docker compose --profile comfy up -d
@@ -17,6 +20,7 @@ docker compose --profile comfy up -d
 ```
 
 ### Daily Usage
+
 ```bash
 # Start services
 docker compose --profile comfy up -d
@@ -33,13 +37,15 @@ docker compose logs -f
 # Complete shutdown (removes containers)
 docker compose down
 ```
+> [!IMPORTANT]  
+> Stopping a running container is generally safe while downing, which destroys the running container, will often break the installation. To fix start ComfyUI and use the Comfy Manager to fix each of the installed plugins. 
 
 ### Model Management
 ```bash
-# Download models (dry run first to preview)
+# Preview model downloads (default behavior)
 docker compose --profile comfy-setup up
 
-# Actual download (edit .env: SETUP_CLI_ARGS="")
+# Actual download (edit .env: SETUP_DRY_RUN=0)
 docker compose --profile comfy-setup up
 ```
 
@@ -47,34 +53,36 @@ docker compose --profile comfy-setup up
 
 ### Key Environment Variables (.env file)
 ```bash
-# Hardware Configuration
-COMFY_CLI_ARGS=""              # GPU mode (default)
-COMFY_CLI_ARGS="--cpu"         # CPU-only mode
-COMFY_CLI_ARGS="--lowvram"     # Low VRAM GPU
-COMFY_CLI_ARGS="--novram"      # Very low VRAM GPU
-
 # Model Setup
-SETUP_CLI_ARGS="--dry-run"     # Preview downloads
-SETUP_CLI_ARGS=""              # Actual download
+SETUP_DRY_RUN=1               # Preview downloads (default)
+SETUP_DRY_RUN=0               # Actual download
 
 # System
-PUID=1000                      # User ID
-PGID=1000                      # Group ID
+PUID=1000                     # User ID
+PGID=1000                     # Group ID
+COMFY_WEBUI_PORT=8188         # Web interface port
 ```
 
-### Docker Profiles
-- **`comfy`** - Main ComfyUI service (port 8188)
+### Hardware Configuration
+The project now uses dedicated service profiles instead of CLI arguments:
+- **`comfy`** - GPU mode (default)
+- **`comfy-cpu`** - CPU-only mode
+
+### Service Profiles
+- **`comfy`** - GPU-accelerated ComfyUI (port 8188)
+- **`comfy-cpu`** - CPU-only ComfyUI (port 8188)
 - **`comfy-setup`** - Model download utility
 
-### Hardware Modes
+### Hardware Mode Switching
 ```bash
 # Switch to CPU mode
-echo 'COMFY_CLI_ARGS="--cpu"' > .env
-docker compose restart
+docker compose --profile comfy-cpu up -d
 
 # Switch to GPU mode
-echo 'COMFY_CLI_ARGS=""' > .env
-docker compose restart
+docker compose --profile comfy up -d
+
+# Stop current service first if switching
+docker compose down
 ```
 
 ### Data Management
@@ -93,9 +101,12 @@ docker system prune
 
 ### Quick Fixes
 ```bash
-# Service won't start
-docker compose logs                    # Check error messages
-docker compose down && docker compose --profile comfy up -d
+# Service won't start check for log errors
+docker compose logs
+
+# Kill the container and restart
+docker compose down 
+docker compose --profile comfy up -d
 
 # Port already in use
 netstat -tulpn | grep :8188           # Check what's using port 8188
@@ -106,11 +117,6 @@ docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu20.04 nvidia-smi
 
 # Permission errors
 sudo chown -R $USER:$USER ./data ./output
-
-# Out of memory
-echo 'COMFY_CLI_ARGS="--lowvram"' > .env    # Low VRAM mode
-echo 'COMFY_CLI_ARGS="--cpu"' > .env        # CPU mode
-docker stats                                # Check resource usage
 ```
 
 ### Performance Issues
@@ -132,11 +138,10 @@ docker stats                                # Check resource usage
 1. **Check logs**: `docker compose logs -f`
 2. **Verify setup**: Ensure `.env` file exists and is configured
 3. **Test access**: Visit http://localhost:8188
-4. **Search issues**: [GitHub Issues](https://github.com/AbdBarho/stable-diffusion-webui-docker/issues)
+4. **Search issues**: [GitHub Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)
 5. **Create issue**: Include logs, `.env` config, and system info
 
 ### Related Guides
-- **[CPU Support Guide](CPU_SUPPORT.md)** - Hardware configuration details
 - **[Build Guide](BUILD.md)** - Development and customization
 - **[Documentation Index](README.md)** - All available guides
 

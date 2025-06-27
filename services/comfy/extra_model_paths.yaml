@@ -26,11 +26,9 @@ comfyui:
   custom_nodes: config/comfy/custom_nodes
   download_model_base: data/models
 
-  # TODO: I am unsure about these, need more testing
-  # style_models: data/config/comfy/style_models
-  # t2i_adapter: data/config/comfy/t2i_adapter
-  # clip_vision: data/config/comfy/clip_vision
-  # diffusers: data/config/comfy/diffusers
+  clip_vision: models/ClipVision
+  ipadapter: models/IpAdapter
+
 
 # Need to install ipadapter and set mappings
 # https://github.com/cubiq/ComfyUI_IPAdapter_plus

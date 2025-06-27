@@ -1,4 +1,4 @@
-name: stable-diffusion-webui-docker
+name: ComfyUI-Docker
 
 services:
 
@@ -10,7 +10,7 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - CLI_ARGS=${SETUP_CLI_ARGS:-""}
+      - SETUP_DRY_RUN=${SETUP_DRY_RUN:-1} # Default is to run dry run
     volumes:
       - ./data:/data
 
@@ -22,11 +22,11 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - CLI_ARGS=${COMFY_CLI_ARGS:-""}
+      - CLI_ARGS=
     ports:
       - "8188:8188" # hardcoded in Dockerfile for now
     volumes:
-      # - ./comfy/extra_model_paths.yaml:/extra_model_paths.yaml:ro,cached
+      # - ./services/comfy/extra_model_paths.yaml:/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
       - ./output:/output
     stop_signal: SIGKILL
@@ -39,19 +39,20 @@ services:
               device_ids: ['0']
               capabilities: [compute, utility]
 
-# Version auto1111, use same or similar base images
-# Fix Mappings for models `/data/models` and `data/config/comfy/models` the later is created by ComfyManager
-# Run everything in an venv
-# IPAdapterPlus
-# ONNX
-# comfyui-manager by default
-
-# Model/Embeddings
-# /data/config/comfy
-# /data/config/auto
-# /data/config/shared
-# Also move /output to /data/output
-
-# Rather than swarm maybe forge? https://github.com/lllyasviel/stable-diffusion-webui-forge
-# Also maybe invoke? 
-# Should also decide whether this repo is just for image gen in stable or more general AI workflow since some of thje tools also blur and support audio, text etc
+  comfy-cpu:
+    profiles: ["comfy-cpu"]
+    build: ./services/comfy/
+    image: comfy:latest
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - CLI_ARGS=--cpu
+    ports:
+      - "8188:8188" # hardcoded in Dockerfile for now
+    volumes:
+      # - ./services/comfy/extra_model_paths.yaml:/extra_model_paths.yaml:ro,cached
+      - ./data:/data:delegated
+      - ./output:/output
+    stop_signal: SIGKILL
+    tty: true

@@ -1,55 +1,5 @@
-FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime AS base
-
-ENV DEBIAN_FRONTEND=noninteractive 
-ENV PIP_PREFER_BINARY=1
-
-RUN --mount=type=cache,target=/var/cache/apt \ 
-  apt-get update && \ 
-  apt-get install -y --no-install-recommends git wget curl jq ffmpeg libgl1 libglib2.0-0 && \
-  apt-get clean && \
-  pip install --no-input --upgrade pip
-
-FROM base AS application
-
-RUN useradd -m -s /bin/bash comfy
-
-USER comfy
-
-WORKDIR /home/comfy/app
-
-SHELL ["/bin/bash", "--login", "-c"]
-
-# Setup ComfyUI project
+# FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime AS base
 # https://mveg.es/posts/optimizing-pytorch-docker-images-cut-size-by-60percent/
-RUN git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
-
-COPY --chown=comfy:comfy . .
-
-# Setup venv
-# # https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
-ENV VIRTUAL_ENV=/home/comfy/app/.venv
-RUN --mount=type=cache,target=~/.cache/pip \ 
-  mkdir -p ~/.local/bin && \
-  python -m venv $VIRTUAL_ENV
-
-ENV PATH="/home/comfy/.local/bin:$PATH"
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-# ENV PYTHONPATH="${PYTHONPATH}:${PWD}"
-
-# Activate environment and install dependencies
-# Should make ONNX optional by moving this into a configuration file that can be alterated at run time
-RUN --mount=type=cache,target=~/.cache/pip \ 
-  pip install -r requirements.txt && \
-  pip install onnxruntime-gpu && \
-  chmod u+x ./entrypoint.sh 
-
-ENV NVIDIA_VISIBLE_DEVICES=all 
-ENV CLI_ARGS=""
-
-EXPOSE 8188
-
-ENTRYPOINT ["./entrypoint.sh"]
-CMD python -u main.py --listen --port 8188 ${CLI_ARGS}
 
 # Explore how we can use the CLI to do this instead
 # https://docs.comfy.org/installation/system_requirements
@@ -58,3 +8,72 @@ CMD python -u main.py --listen --port 8188 ${CLI_ARGS}
 # https://pythonspeed.com/articles/multi-stage-docker-python/
 # pip install comfy-cli && \
 # comfy install 
+
+FROM nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04 AS runtime
+
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV DEBIAN_FRONTEND=noninteractive 
+ENV PIP_PREFER_BINARY=1
+
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \ 
+  build-essential \
+  python3 \
+  python3-dev \
+  python3-pip \
+  python3-venv \
+  python-is-python3 \
+  git \
+  wget \
+  curl \
+  jq \
+  ffmpeg \
+  libgl1 \
+  libglib2.0-0 && \
+  apt-get clean && \
+  rm -rf /var/lib/apt/lists/*
+
+FROM runtime AS application
+
+# Create a user and group with specified IDs
+# ARG PUID=1000
+# ARG PGID=1000
+# RUN getent passwd && groupadd -g $PGID comfy && \
+#   useradd -m -u $PUID -g $PGID comfy
+
+USER ubuntu
+
+WORKDIR /home/ubuntu/app
+
+SHELL ["/bin/bash", "--login", "-c"]
+
+# Setup ComfyUI project
+RUN git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
+
+COPY --chown=ubuntu:ubuntu . .
+
+# Setup venv
+# https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
+ENV VIRTUAL_ENV=/home/ubuntu/app/.venv
+RUN --mount=type=cache,target=~/.cache/pip \ 
+  ls -al  && \
+  mkdir -p ~/.local/bin && \
+  python -m venv $VIRTUAL_ENV
+
+ENV PATH="/home/ubuntu/.local/bin:$PATH"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Activate environment and install dependencies
+RUN --mount=type=cache,target=~/.cache/pip \ 
+  pip install --no-cache-dir -r requirements.txt && \
+  pip install --no-cache-dir -r plugin-requirements.txt && \
+  chmod u+x ./entrypoint.sh 
+
+ENV CLI_ARGS=""
+
+# Should pass this in as an ARG/ENV
+EXPOSE 8188
+
+ENTRYPOINT ["./entrypoint.sh"]
+
+CMD ["bash", "./runner.sh"]

@@ -1,10 +1,11 @@
 #!/bin/bash
 
-set -Eeuo pipefail
+set -e
 
-BASE_DIRECTORY="/data/config/comfy"
-OUTPUT_DIRECTORY="/output"
+export BASE_DIRECTORY="/data/config/comfy"
+export OUTPUT_DIRECTORY="/output"
 
+# This breaks if not run in the context of docker-compose (may need to document how to run without or otherwise improve how we do vol mounting)
 mkdir -vp ${BASE_DIRECTORY}
 mkdir -vp ${BASE_DIRECTORY}/temp
 mkdir -vp ${BASE_DIRECTORY}/user
@@ -17,18 +18,7 @@ mkdir -vp ${OUTPUT_DIRECTORY}
 # XDG_CACHE_HOME=/data/.cache
 # export XDG_CACHE_HOME
 
-# --base-directory BASE_DIRECTORY
-# Set the ComfyUI base directory for models,
-# custom_nodes, input, output, temp, and user directories.
-CLI_ARGS+="${CLI_ARGS} --base-directory ${BASE_DIRECTORY} --output-directory ${OUTPUT_DIRECTORY}"
-
-# Log the mode based on CLI_ARGS
-if [[ "${CLI_ARGS}" == *"--cpu"* ]]; then
-  echo "Running ComfyUI in CPU-only mode"
-else
-  echo "Running ComfyUI in GPU mode"
-fi
-
+# This is broken
 if [ -f "/data/config/comfy/startup.sh" ]; then
   pushd ${APPLICATION_ROOT}
   . /data/config/comfy/startup.sh

@@ -11,7 +11,7 @@ mkdir -vp /data/embeddings \
   /data/models/LDSR \
   /data/models/VAE
 
-if echo "$CLI_ARGS" | grep -e '--dry-run'; then
+ if [[ "$SETUP_DRY_RUN" -eq 1 ]]; then
   echo "Running Dry Run..."
 
   aria2c --dry-run -x 10 --disable-ipv6 --input-file ./links.txt --dir /data/models --continue
