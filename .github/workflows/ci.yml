@@ -72,15 +72,25 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Extract metadata for comfy-setup
+        id: meta-setup
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/comfy-setup
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix={{branch}}-
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: ./services/comfy-setup
           file: ./services/comfy-setup/Dockerfile
-          # push: true
-          load: true
-          tags: comfy-setup:latest
-          # tags: ghcr.io/${{ github.actor }}/comfy-setup:latest
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta-setup.outputs.tags }}
+          labels: ${{ steps.meta-setup.outputs.labels }}
           cache-from: type=gha,scope=comfy-setup:latest
           cache-to: type=gha,mode=max,scope=comfy-setup:latest
 
@@ -168,15 +178,25 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Extract metadata for comfy
+        id: meta-comfy
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/comfy
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix={{branch}}-
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: ./services/comfy
           file: ./services/comfy/Dockerfile
-          # push: true
-          load: true
-          tags: comfy:latest # Should this be the branch or pr?
-          # tags: ghcr.io/${{ github.actor }}/comfy:latest # Should this be the branch or pr?
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta-comfy.outputs.tags }}
+          labels: ${{ steps.meta-comfy.outputs.labels }}
           cache-from: type=gha,scope=comfy:latest
           cache-to: type=gha,mode=max,scope=comfy:latest
 
