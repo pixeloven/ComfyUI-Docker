@@ -67,7 +67,8 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN --mount=type=cache,target=~/.cache/pip \ 
   pip install --no-cache-dir -r requirements.txt && \
   pip install --no-cache-dir -r plugin-requirements.txt && \
-  chmod u+x ./entrypoint.sh 
+  chmod u+x ./entrypoint.sh  && \
+  chmod u+x ./runner.sh
 
 ENV CLI_ARGS=""
 ENV COMFY_PORT=8188
