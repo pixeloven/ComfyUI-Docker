@@ -44,11 +44,12 @@ jobs:
     runs-on: ubuntu-22.04
     needs: validate-config
     steps:
-      - name: Free disk space
-        uses: ./.github/actions/free-disk-space
 
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -90,11 +91,12 @@ jobs:
     runs-on: ubuntu-22.04
     needs: validate-config
     steps:
-      - name: Free disk space
-        uses: ./.github/actions/free-disk-space
-
+    
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
