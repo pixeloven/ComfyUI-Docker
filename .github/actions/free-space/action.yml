@@ -8,6 +8,7 @@ runs:
 
     # https://stackoverflow.com/questions/75536771/github-runner-out-of-disk-space-after-building-docker-image
     - name: Check disk space
+      shell: bash
       run: df . -h
 
     # Do these need to run as root?
@@ -17,6 +18,7 @@ runs:
     # Don't use aptitude
     # Turn into a custom shared action
     - name: Free disk space
+      shell: bash
       run: |
         sudo docker rmi $(docker image ls -aq) >/dev/null 2>&1 || true
         sudo rm -rf \
@@ -46,6 +48,7 @@ runs:
         echo "some packages purged"
 
     - name: Check disk space
+      shell: bash
       run: |
         sudo dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -nr | head
         df . -h
