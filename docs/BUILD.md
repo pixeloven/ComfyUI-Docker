@@ -26,17 +26,19 @@ docker compose build --no-cache
 docker compose up --build
 ```
 
-### Build Arguments
+### Docker Architecture
 
-The Dockerfiles support various build arguments for customization:
+The project uses a multi-stage build approach:
 
-```bash
-# Build with specific base image
-docker compose build --build-arg BASE_IMAGE=nvidia/cuda:11.8-devel-ubuntu22.04
+**ComfyUI Service (`services/comfy/`)**:
+- **Base**: `nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04`
+- **Features**: GPU acceleration, virtual environment, ComfyUI v0.3.39
+- **Profiles**: `comfy` (GPU), `comfy-cpu` (CPU-only)
 
-# Build with specific Python version
-docker compose build --build-arg PYTHON_VERSION=3.10
-```
+**Setup Service (`services/comfy-setup/`)**:
+- **Base**: `bash:alpine3.22`
+- **Purpose**: Model downloading with aria2 and parallel processing
+- **Profile**: `comfy-setup`
 
 ## 🛠️ Development Setup
 
@@ -44,8 +46,8 @@ docker compose build --build-arg PYTHON_VERSION=3.10
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
-cd stable-diffusion-webui-docker
+git clone https://github.com/pixeloven/ComfyUI-Docker.git
+cd ComfyUI-Docker
 
 # 2. Copy environment template
 cp .env.example .env
@@ -54,7 +56,9 @@ cp .env.example .env
 docker compose build
 
 # 4. Start services in development mode
-docker compose --profile comfy up -d
+docker compose --profile comfy up -d        # GPU mode
+# OR
+docker compose --profile comfy-cpu up -d    # CPU mode
 
 # 5. View logs
 docker compose logs -f
@@ -67,10 +71,13 @@ docker compose logs -f
 # Rebuild affected services
 docker compose build comfy
 
-# Restart services to apply changes
-docker compose restart comfy
+# Test GPU mode
+docker compose --profile comfy up -d
+docker compose logs comfy
 
-# Test changes
+# Test CPU mode
+docker compose down
+docker compose --profile comfy-cpu up -d
 docker compose logs comfy
 ```
 
@@ -92,17 +99,18 @@ curl https://raw.githubusercontent.com/nektos/act/master/install.sh | bash
 ## 📁 Project Structure
 
 ```
-stable-diffusion-webui-docker/
-├── docker-compose.yml          # Service orchestration
+ComfyUI-Docker/
+├── docker-compose.yml          # Service orchestration (3 profiles)
 ├── .env.example               # Configuration template
 ├── services/
 │   ├── comfy/                 # ComfyUI service
-│   │   ├── Dockerfile         # ComfyUI image definition
+│   │   ├── Dockerfile         # Multi-stage build (CUDA 12.9.1)
 │   │   ├── entrypoint.sh      # Container startup script
+│   │   ├── runner.sh          # ComfyUI execution script
 │   │   └── extra_model_paths.yaml
 │   └── comfy-setup/           # Model setup service
-│       ├── Dockerfile         # Setup image definition
-│       ├── entrypoint.sh      # Setup script
+│       ├── Dockerfile         # Alpine-based downloader
+│       ├── entrypoint.sh      # Download orchestration
 │       ├── links.txt          # Model download links
 │       └── checksums.sha256   # Model verification
 ├── docs/                      # Documentation
@@ -121,9 +129,10 @@ stable-diffusion-webui-docker/
 
 ### Modifying ComfyUI Configuration
 
-1. Edit `services/comfy/Dockerfile` for system-level changes
-2. Edit `services/comfy/entrypoint.sh` for startup configuration
-3. Use `.env` file for runtime arguments
+1. **System-level changes**: Edit `services/comfy/Dockerfile`
+2. **Startup configuration**: Edit `services/comfy/entrypoint.sh`
+3. **Runtime settings**: Use `.env` file for environment variables
+4. **Service selection**: Use Docker Compose profiles (`comfy` vs `comfy-cpu`)
 
 ### Custom Extensions
 
@@ -135,18 +144,21 @@ For persistent custom extensions, modify the Dockerfile to install them during b
 ### Manual Testing
 
 ```bash
-# Start services
+# Test GPU service
 docker compose --profile comfy up -d
-
-# Test web interface
-curl -f http://localhost:8188 || echo "Service not ready"
-
-# Test API endpoint
-curl -X POST http://localhost:8188/api/v1/queue
-
-# Check service health
-docker compose ps
+curl -f http://localhost:8188 || echo "GPU service not ready"
 docker compose logs comfy
+docker compose down
+
+# Test CPU service
+docker compose --profile comfy-cpu up -d
+curl -f http://localhost:8188 || echo "CPU service not ready"
+docker compose logs comfy
+docker compose down
+
+# Test model setup
+docker compose --profile comfy-setup up
+docker compose logs comfy-setup
 ```
 
 ### Automated Testing
@@ -204,7 +216,8 @@ docker compose version
 # Fix file permissions
 sudo chown -R $USER:$USER .
 
-# Check user/group IDs in .env
+# Update .env with correct user/group IDs
+cp .env.example .env
 echo "PUID=$(id -u)" >> .env
 echo "PGID=$(id -g)" >> .env
 ```
@@ -221,7 +234,7 @@ docker system df
 
 ### Getting Help
 
-1. Check existing [GitHub issues](https://github.com/AbdBarho/stable-diffusion-webui-docker/issues)
+1. Check existing [GitHub issues](https://github.com/pixeloven/ComfyUI-Docker/issues)
 2. Review build logs: `docker compose logs`
 3. Test with clean environment: `docker system prune -a`
 4. Create new issue with:

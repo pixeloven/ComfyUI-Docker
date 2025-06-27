@@ -1,4 +1,4 @@
-# act configuration for stable-diffusion-webui-docker
+# act configuration for ComfyUI-Docker
 # https://github.com/nektos/act
 
 # Use medium-sized runner for better compatibility
