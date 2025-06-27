@@ -1,196 +1,145 @@
 # Quick Reference
 
-Essential commands and configuration for ComfyUI Docker setup.
+Essential commands and configuration for daily ComfyUI Docker usage.
 
-## 📁 Directory Structure
+## 🚀 Essential Commands
 
-```
-stable-diffusion-webui-docker/
-├── docker-compose.yml          # Main service configuration
-├── .env.example               # Environment template
-├── .env                       # Your configuration (create from .env.example)
-├── services/
-│   ├── comfy/                 # ComfyUI Docker configuration
-│   └── comfy-setup/           # Model download and setup service
-├── docs/                      # Documentation files
-├── data/                      # Models, configurations (auto-created)
-└── output/                    # Generated images (auto-created)
-```
-
-## 🚀 Getting Started
-
-### Initial Setup
+### First Time Setup
 ```bash
-# Clone repository
+# Clone and setup
 git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
 cd stable-diffusion-webui-docker
-
-# Copy environment file
 cp .env.example .env
-```
 
-### Start ComfyUI
-```bash
-# ComfyUI
+# Start ComfyUI (GPU mode)
 docker compose --profile comfy up -d
 # Access: http://localhost:8188
 ```
 
-### Stop Services
+### Daily Usage
 ```bash
-docker compose stop
-```
-Stopping the container should maintain the state of the container and thefore any plugins installed. If you need to reset the container you can use `docker compose down` to remove the container and then start it again. Keep in mind that your plugins may be broken. In which case you can use ComfyUI-Manager to reinstall them.
+# Start services
+docker compose --profile comfy up -d
 
-### Model Setup (Optional)
+# Stop services (preserves container state)
+docker compose stop
+
+# Restart services
+docker compose restart
+
+# View logs
+docker compose logs -f
+
+# Complete shutdown (removes containers)
+docker compose down
+```
+
+### Model Management
 ```bash
-# Download models using setup service (dry run first)
+# Download models (dry run first to preview)
 docker compose --profile comfy-setup up
 
-# Actual download (remove --dry-run from .env)
-# Edit .env: SETUP_CLI_ARGS=""
+# Actual download (edit .env: SETUP_CLI_ARGS="")
 docker compose --profile comfy-setup up
 ```
 
 ## ⚙️ Configuration
 
-### Environment Variables (.env file)
+### Key Environment Variables (.env file)
 ```bash
-# ComfyUI Configuration
-# CPU mode
-COMFY_CLI_ARGS="--cpu"
+# Hardware Configuration
+COMFY_CLI_ARGS=""              # GPU mode (default)
+COMFY_CLI_ARGS="--cpu"         # CPU-only mode
+COMFY_CLI_ARGS="--lowvram"     # Low VRAM GPU
+COMFY_CLI_ARGS="--novram"      # Very low VRAM GPU
 
-# GPU with low VRAM
-COMFY_CLI_ARGS="--lowvram"
+# Model Setup
+SETUP_CLI_ARGS="--dry-run"     # Preview downloads
+SETUP_CLI_ARGS=""              # Actual download
 
-# GPU with very low VRAM
-COMFY_CLI_ARGS="--novram"
-
-# CPU with optimizations
-COMFY_CLI_ARGS="--cpu --force-fp16"
-
-# Verbose logging
-COMFY_CLI_ARGS="--verbose"
-
-# Setup Service Configuration
-# Dry run (preview downloads)
-SETUP_CLI_ARGS="--dry-run"
-
-# Actual download
-SETUP_CLI_ARGS=""
-
-# User/Group IDs
-PUID=1000
-PGID=1000
+# System
+PUID=1000                      # User ID
+PGID=1000                      # Group ID
 ```
 
-### Docker Compose Profiles
-- `comfy` - GPU mode (port 8188)
-- `comfy-setup` - Model download and setup service
+### Docker Profiles
+- **`comfy`** - Main ComfyUI service (port 8188)
+- **`comfy-setup`** - Model download utility
 
-## 🔧 Common Commands
-
-### Service Management
+### Hardware Modes
 ```bash
-# Start GPU service
-docker compose --profile comfy up -d
-
-# Stop all services
-docker compose stop
-
-# View logs
-docker compose logs -f
-
-# Restart service
+# Switch to CPU mode
+echo 'COMFY_CLI_ARGS="--cpu"' > .env
 docker compose restart
-```
 
-### Building Images
-```bash
-# Build comfy image
-docker compose --profile comfy build
-
-# Build comfy-setup service
-docker compose --profile comfy-setup build
+# Switch to GPU mode
+echo 'COMFY_CLI_ARGS=""' > .env
+docker compose restart
 ```
 
 ### Data Management
 ```bash
-# View mounted volumes
-docker compose config --volumes
+# Backup your data
+tar -czf comfy-backup-$(date +%Y%m%d).tar.gz ./data
 
-# Backup data directory
-tar -czf comfy-backup.tar.gz ./data
+# Check disk usage
+docker system df
 
-# Restore data directory
-tar -xzf comfy-backup.tar.gz
+# Clean up unused images
+docker system prune
 ```
 
 ## 🐛 Troubleshooting
 
-### Common Issues
-
-#### Service Won't Start
+### Quick Fixes
 ```bash
-# Check logs
-docker compose logs
+# Service won't start
+docker compose logs                    # Check error messages
+docker compose down && docker compose --profile comfy up -d
 
-# Check if port is in use
-netstat -tulpn | grep :8188
+# Port already in use
+netstat -tulpn | grep :8188           # Check what's using port 8188
+# Change port in docker-compose.yml if needed
 
-# Restart Docker
-sudo systemctl restart docker  # Linux
-# or restart Docker Desktop
-```
-
-#### GPU Not Detected
-```bash
-# Check NVIDIA runtime
+# GPU not detected
 docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu20.04 nvidia-smi
-```
 
-#### Permission Issues
-```bash
-# Fix file permissions
+# Permission errors
 sudo chown -R $USER:$USER ./data ./output
+
+# Out of memory
+echo 'COMFY_CLI_ARGS="--lowvram"' > .env    # Low VRAM mode
+echo 'COMFY_CLI_ARGS="--cpu"' > .env        # CPU mode
+docker stats                                # Check resource usage
 ```
 
-#### Out of Memory
-```bash
-# Use low VRAM mode
-echo 'COMFY_CLI_ARGS="--lowvram"' >> .env
+### Performance Issues
+- **Slow generation**: Switch to GPU mode if available
+- **Out of VRAM**: Use `--lowvram` or `--novram` flags
+- **High CPU usage**: Normal for CPU mode, consider GPU upgrade
 
-# Use CPU mode
-echo 'COMFY_CLI_ARGS="--cpu"' >> .env
+## 💡 Pro Tips
 
-# Check system resources
-docker stats
-```
-
-## 🔗 Useful Links
-
-- **ComfyUI GitHub**: https://github.com/comfyanonymous/ComfyUI
-- **ComfyUI Documentation**: https://github.com/comfyanonymous/ComfyUI#features
-- **Docker Documentation**: https://docs.docker.com/
-- **Docker Compose Reference**: https://docs.docker.com/compose/
-
-## 💡 Tips
-
-1. **First Run**: Initial startup may take longer as Docker downloads images
-2. **Models**: Place models in `./data/models/` directory
-3. **Outputs**: Generated images appear in `./output/` directory
-4. **Updates**: Pull latest images with `docker compose pull` or build them yourself with `docker compose build`
-5. **Backup**: Regularly backup your `./data/` directory
-6. **Performance**: Use GPU mode for best performance, CPU mode for compatibility
+- **First run**: Initial startup downloads images (~5-10 minutes)
+- **Models**: Auto-downloaded to `./data/models/`
+- **Outputs**: Generated images saved to `./output/`
+- **Updates**: `docker compose pull` for latest images
+- **Backup**: Regularly backup `./data/` directory
+- **Extensions**: Use ComfyUI Manager within the interface
 
 ## 🆘 Getting Help
 
-1. **Check logs**: `docker compose logs`
-2. **Review configuration**: Verify `.env` file settings
-3. **Test connectivity**: Verify service is accessible at http://localhost:8188
-4. **Search issues**: Check existing GitHub issues
-5. **Create issue**: Provide logs and configuration details
+1. **Check logs**: `docker compose logs -f`
+2. **Verify setup**: Ensure `.env` file exists and is configured
+3. **Test access**: Visit http://localhost:8188
+4. **Search issues**: [GitHub Issues](https://github.com/AbdBarho/stable-diffusion-webui-docker/issues)
+5. **Create issue**: Include logs, `.env` config, and system info
 
-For detailed documentation, see:
-- [CPU Support Guide](CPU_SUPPORT.md) - Comprehensive GPU/CPU configuration
-- [Local CI Testing](LOCAL_CI_TESTING.md) - Test GitHub Actions locally
+### Related Guides
+- **[CPU Support Guide](CPU_SUPPORT.md)** - Hardware configuration details
+- **[Build Guide](BUILD.md)** - Development and customization
+- **[Documentation Index](README.md)** - All available guides
+
+---
+
+**[⬆ Back to Documentation](README.md)** | **[🏠 Main README](../README.md)**

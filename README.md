@@ -1,28 +1,23 @@
-# Stable Diffusion WebUI Docker
+# ComfyUI Docker
 
-Run Stable Diffusion on your machine with a nice UI without any hassle!
+A Docker-based setup for running [ComfyUI](https://github.com/comfyanonymous/ComfyUI), a powerful and modular stable diffusion GUI and backend.
 
-## Setup & Usage
+## About ComfyUI
 
-Visit the wiki for [Setup](https://github.com/AbdBarho/stable-diffusion-webui-docker/wiki/Setup) and [Usage](https://github.com/AbdBarho/stable-diffusion-webui-docker/wiki/Usage) instructions, checkout the [FAQ](https://github.com/AbdBarho/stable-diffusion-webui-docker/wiki/FAQ) page if you face any problems, or create a new issue!
+ComfyUI is a powerful and modular stable diffusion GUI and backend with a graph/nodes interface. This Docker setup provides an easy way to run ComfyUI with GPU acceleration or CPU-only mode, complete with model management and persistent storage.
 
-## Features
+### Key Features
+- **Node-based workflow editor** - Visual programming interface for AI image generation
+- **GPU & CPU support** - Optimized for NVIDIA GPUs with CPU fallback
+- **Model management** - Automated model downloading and organization
+- **Persistent storage** - Your models, configs, and outputs are preserved
+- **Easy deployment** - Single command setup with Docker Compose
 
-This repository provides multiple UIs for you to play around with stable diffusion:
-
-### [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
-
-[Full feature list here](https://github.com/comfyanonymous/ComfyUI#features), Screenshot:
-
-| Workflow                                                                         |
-| -------------------------------------------------------------------------------- |
-| ![](https://github.com/comfyanonymous/ComfyUI/raw/main/comfyui_screenshot.png) |
-
-**CPU Support**: ComfyUI now supports both GPU and CPU-only modes. See [CPU Support Documentation](docs/CPU_SUPPORT.md) for details.
+| ComfyUI Workflow Interface |
+| --------------------------- |
+| ![ComfyUI Screenshot](https://github.com/comfyanonymous/ComfyUI/raw/main/comfyui_screenshot.png) |
 
 ## 🚀 Quick Start
-
-### ComfyUI (Recommended)
 
 ```bash
 # 1. Clone and setup
@@ -36,47 +31,44 @@ docker compose --profile comfy up -d
 # 3. Open ComfyUI at http://localhost:8188
 ```
 
-### CPU Mode
-```bash
-# Configure for CPU-only mode
-echo 'COMFY_CLI_ARGS="--cpu"' >> .env
-docker compose --profile comfy-cpu up -d
-# Open at http://localhost:8189
-```
-
-### Model Setup (Optional)
-```bash
-# Download models (dry run first to preview)
-docker compose --profile comfy-setup up
-
-# For actual download, edit .env: SETUP_CLI_ARGS=""
-```
+**That's it!** ComfyUI is now running. For CPU-only mode, model setup, and advanced configuration, see the documentation below.
 
 ## 📚 Documentation
 
-- **[Quick Reference](docs/QUICK_REFERENCE.md)** - Essential commands and troubleshooting
-- **[CPU Support Guide](docs/CPU_SUPPORT.md)** - GPU and CPU configuration
-- **[Local CI Testing](docs/LOCAL_CI_TESTING.md)** - Test GitHub Actions locally
-- **[Documentation Index](docs/README.md)** - All available guides
+### Getting Started
+- **[Quick Reference](docs/QUICK_REFERENCE.md)** - Essential commands, configuration, and troubleshooting
+- **[CPU Support Guide](docs/CPU_SUPPORT.md)** - GPU vs CPU setup and performance optimization
 
-## Contributing
+### Development & Advanced Usage
+- **[Build Guide](docs/BUILD.md)** - Building images, development setup, and contributing
+- **[Local CI Testing](docs/LOCAL_CI_TESTING.md)** - Test GitHub Actions workflows locally
 
-Contributions are welcome! **Create a discussion first of what the problem is and what you want to contribute (before you implement anything)**
+### Need Help?
+- Check the [Quick Reference](docs/QUICK_REFERENCE.md) for common solutions
+- Review existing [GitHub Issues](https://github.com/AbdBarho/stable-diffusion-webui-docker/issues)
+- Create a new issue with logs and configuration details
 
-## Disclaimer
+## 🤝 Contributing
 
-The authors of this project are not responsible for any content generated using this interface.
+Contributions are welcome! Please see the [Build Guide](docs/BUILD.md) for development setup and contribution guidelines.
 
-This license of this software forbids you from sharing any content that violates any laws, produce any harm to a person, disseminate any personal information that would be meant for harm, spread misinformation and target vulnerable groups. For the full list of restrictions please read [the license](./LICENSE).
+**Important**: Create a discussion first describing the problem and your proposed solution before implementing anything.
 
-## Shoutout
+## ⚖️ License & Disclaimer
 
-Special thanks to everyone behind these awesome projects, without them, none of this would have been possible:
+This project is provided under the terms specified in the [LICENSE](./LICENSE) file. Users are responsible for ensuring their use complies with all applicable laws and regulations.
 
-- [AbdBarho/stable-diffusion-webui-docker](https://github.com/AbdBarho/stable-diffusion-webui-docker)
-- [AUTOMATIC1111/stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
-- [InvokeAI](https://github.com/invoke-ai/InvokeAI)
-- [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
-- [CompVis/stable-diffusion](https://github.com/CompVis/stable-diffusion)
-- [Sygil-webui](https://github.com/Sygil-Dev/sygil-webui)
-- and many many more.
+The authors are not responsible for any content generated using this interface. Please use responsibly and ethically.
+
+## 🙏 Acknowledgments
+
+Special thanks to the amazing open source community behind these projects:
+
+- **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** - The powerful node-based stable diffusion interface
+- **[AbdBarho/stable-diffusion-webui-docker](https://github.com/AbdBarho/stable-diffusion-webui-docker)** - Original Docker implementation inspiration
+- **[CompVis/stable-diffusion](https://github.com/CompVis/stable-diffusion)** - The foundational stable diffusion research
+- And the entire AI/ML open source community that makes this possible
+
+---
+
+**[⬆ Back to Top](#comfyui-docker)** | **[📚 Documentation](docs/)** | **[🐛 Issues](https://github.com/AbdBarho/stable-diffusion-webui-docker/issues)** | **[💬 Discussions](https://github.com/AbdBarho/stable-diffusion-webui-docker/discussions)**
