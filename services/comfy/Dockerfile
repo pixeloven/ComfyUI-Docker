@@ -70,9 +70,9 @@ RUN --mount=type=cache,target=~/.cache/pip \
   chmod u+x ./entrypoint.sh 
 
 ENV CLI_ARGS=""
+ENV COMFY_PORT=8188
 
-# Should pass this in as an ARG/ENV
-EXPOSE 8188
+EXPOSE $COMFY_PORT
 
 ENTRYPOINT ["./entrypoint.sh"]
 
