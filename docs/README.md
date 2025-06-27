@@ -36,8 +36,8 @@ Test GitHub Actions workflows locally using act.
 ## 📋 Quick Reference
 
 ### Docker Services
-- **`comfy`** - GPU-accelerated ComfyUI (port 8188)
-- **`comfy-cpu`** - CPU-only ComfyUI (port 8188)
+- **`comfy`** - GPU-accelerated ComfyUI (configurable port, default 8188)
+- **`comfy-cpu`** - CPU-only ComfyUI (configurable port, default 8188)
 - **`comfy-setup`** - Model download utility
 
 ### Essential Commands

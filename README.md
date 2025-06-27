@@ -30,7 +30,7 @@ docker compose --profile comfy up -d        # GPU mode (recommended)
 # OR
 docker compose --profile comfy-cpu up -d    # CPU mode (universal)
 
-# 3. Open ComfyUI at http://localhost:8188
+# 3. Open ComfyUI at http://localhost:8188 (or your configured port)
 ```
 
 **That's it!** ComfyUI is now running. For model setup and advanced configuration, see the documentation below.

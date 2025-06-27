@@ -131,8 +131,19 @@ ComfyUI-Docker/
 
 1. **System-level changes**: Edit `services/comfy/Dockerfile`
 2. **Startup configuration**: Edit `services/comfy/entrypoint.sh`
-3. **Runtime settings**: Use `.env` file for environment variables
+3. **Runtime settings**: Use `.env` file for environment variables (port, user IDs, etc.)
 4. **Service selection**: Use Docker Compose profiles (`comfy` vs `comfy-cpu`)
+
+### Port Configuration
+
+Change the default port by setting `COMFY_PORT` in your `.env` file:
+
+```bash
+# Custom port configuration
+echo 'COMFY_PORT=8080' >> .env
+docker compose --profile comfy up -d
+# Access: http://localhost:8080
+```
 
 ### Custom Extensions
 
@@ -146,13 +157,13 @@ For persistent custom extensions, modify the Dockerfile to install them during b
 ```bash
 # Test GPU service
 docker compose --profile comfy up -d
-curl -f http://localhost:8188 || echo "GPU service not ready"
+curl -f http://localhost:${COMFY_PORT:-8188} || echo "GPU service not ready"
 docker compose logs comfy
 docker compose down
 
 # Test CPU service
 docker compose --profile comfy-cpu up -d
-curl -f http://localhost:8188 || echo "CPU service not ready"
+curl -f http://localhost:${COMFY_PORT:-8188} || echo "CPU service not ready"
 docker compose logs comfy
 docker compose down
 

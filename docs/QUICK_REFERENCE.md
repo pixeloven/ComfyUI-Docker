@@ -60,7 +60,7 @@ SETUP_DRY_RUN=0               # Actual download
 # System
 PUID=1000                     # User ID
 PGID=1000                     # Group ID
-COMFY_WEBUI_PORT=8188         # Web interface port
+COMFY_PORT=8188               # Web interface port
 ```
 
 ### Hardware Configuration
@@ -69,8 +69,8 @@ The project now uses dedicated service profiles instead of CLI arguments:
 - **`comfy-cpu`** - CPU-only mode
 
 ### Service Profiles
-- **`comfy`** - GPU-accelerated ComfyUI (port 8188)
-- **`comfy-cpu`** - CPU-only ComfyUI (port 8188)
+- **`comfy`** - GPU-accelerated ComfyUI (configurable port, default 8188)
+- **`comfy-cpu`** - CPU-only ComfyUI (configurable port, default 8188)
 - **`comfy-setup`** - Model download utility
 
 ### Hardware Mode Switching
@@ -83,6 +83,17 @@ docker compose --profile comfy up -d
 
 # Stop current service first if switching
 docker compose down
+```
+
+### Port Configuration
+```bash
+# Use custom port (edit .env file)
+echo 'COMFY_PORT=8080' >> .env
+docker compose --profile comfy up -d
+# Access: http://localhost:8080
+
+# Or set temporarily
+COMFY_PORT=8080 docker compose --profile comfy up -d
 ```
 
 ### Data Management
