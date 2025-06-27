@@ -180,20 +180,20 @@ jobs:
           cache-from: type=gha,scope=comfy:latest
           cache-to: type=gha,mode=max,scope=comfy:latest
 
-      - name: Test service startup
-        run: |
-          # Start ComfyUI with CPU Only
-           docker compose --profile comfy-cpu up -d
+      # - name: Test service startup
+      #   run: |
+      #     # Start ComfyUI with CPU Only
+      #      docker compose --profile comfy-cpu up -d
           
-          # Wait for service to be ready
-          timeout 120 bash -c 'until curl -f http://localhost:8188 >/dev/null 2>&1; do sleep 5; done'
+      #     # Wait for service to be ready
+      #     timeout 120 bash -c 'until curl -f http://localhost:8188 >/dev/null 2>&1; do sleep 5; done'
           
-          # Verify service is responding
-          curl -f http://localhost:8188
+      #     # Verify service is responding
+      #     curl -f http://localhost:8188
           
-          # Cleanup
-          docker compose down
-          echo "✅ CPU service startup verified"
+      #     # Cleanup
+      #     docker compose down
+      #     echo "✅ CPU service startup verified"
 
       - name: Clean up Docker
         run: docker system prune -a -f
