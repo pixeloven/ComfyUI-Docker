@@ -62,6 +62,7 @@
 1. Add CPU/ROCM support
 2. Implement manifest-based model management
 3. Create workflow management system
+4. Versioned builds and multi [architecture](https://medium.com/womenintechnology/multi-architecture-builds-are-possible-with-docker-compose-kind-of-2a4e8d166c56)
 
 ### Phase 3: Advanced Features (Medium-term)
 1. Easy setup for advanced ComfyUI workflows/extensions

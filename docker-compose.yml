@@ -22,7 +22,7 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - CLI_ARGS="" # This doesn't work
+      - CLI_ARGS=
     ports:
       - "8188:8188" # hardcoded in Dockerfile for now
     volumes:
@@ -47,7 +47,7 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - CLI_ARGS="--cpu"
+      - CLI_ARGS=--cpu
     ports:
       - "8188:8188" # hardcoded in Dockerfile for now
     volumes:

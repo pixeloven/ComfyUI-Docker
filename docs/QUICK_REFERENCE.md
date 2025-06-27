@@ -22,11 +22,13 @@ stable-diffusion-webui-docker/
 ### Initial Setup
 ```bash
 # Clone repository
-git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
-cd stable-diffusion-webui-docker
+git clone https://github.com/pixeloven/ComfyUI-Docker.git
+cd ComfyUI-Docker
 
 # Copy environment file
 cp .env.example .env
+
+docker compose --profile comfy-setup up -d
 ```
 
 ### Start ComfyUI
@@ -40,7 +42,10 @@ docker compose --profile comfy up -d
 ```bash
 docker compose stop
 ```
-Stopping the container should maintain the state of the container and thefore any plugins installed. If you need to reset the container you can use `docker compose down` to remove the container and then start it again. Keep in mind that your plugins may be broken. In which case you can use ComfyUI-Manager to reinstall them.
+Stopping the container should maintain the state of the container and thefore any plugins installed while it was running. If you need to reset the container you can use `docker compose down` to remove the container and then start it again. 
+
+> [!IMPORTANT]  
+> Stopping a running container is generally safe while downing, which destroys the running container, will often break the installation. To fix start ComfyUI and use the Comfy Manager to fix each of the installed plugins. 
 
 ### Model Setup (Optional)
 ```bash

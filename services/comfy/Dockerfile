@@ -75,4 +75,5 @@ ENV CLI_ARGS=""
 EXPOSE 8188
 
 ENTRYPOINT ["./entrypoint.sh"]
-CMD ls -al && python -u main.py --listen --port 8188 ${CLI_ARGS}
+
+CMD ["bash", "./runner.sh"]
