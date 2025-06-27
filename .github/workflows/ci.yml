@@ -45,6 +45,16 @@ jobs:
     needs: validate-config
     steps:
 
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -91,7 +101,17 @@ jobs:
     runs-on: ubuntu-22.04
     needs: validate-config
     steps:
-    
+
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
       - name: Checkout code
         uses: actions/checkout@v4
 

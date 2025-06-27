@@ -2,48 +2,9 @@ name: 'Free Disk Space'
 description: 'Maximize available disk space for GitHub Actions runners by removing unnecessary packages and files'
 author: 'ComfyUI-Docker'
 
-inputs:
-  swap-size-mb:
-    description: 'Swap size in MB for maximize-build-space action'
-    required: false
-    default: '1024'
-  remove-dotnet:
-    description: 'Remove .NET from maximize-build-space action'
-    required: false
-    default: 'true'
-  remove-android:
-    description: 'Remove Android from maximize-build-space action'
-    required: false
-    default: 'true'
-  remove-haskell:
-    description: 'Remove Haskell from maximize-build-space action'
-    required: false
-    default: 'true'
-  remove-codeql:
-    description: 'Remove CodeQL from maximize-build-space action'
-    required: false
-    default: 'true'
-  remove-docker-images:
-    description: 'Remove Docker images from maximize-build-space action'
-    required: false
-    default: 'true'
-  show-disk-usage:
-    description: 'Show detailed disk usage information after cleanup'
-    required: false
-    default: 'true'
-
 runs:
   using: 'composite'
   steps:
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
-      with:
-        swap-size-mb: ${{ inputs.swap-size-mb }}
-        remove-dotnet: ${{ inputs.remove-dotnet }}
-        remove-android: ${{ inputs.remove-android }}
-        remove-haskell: ${{ inputs.remove-haskell }}
-        remove-codeql: ${{ inputs.remove-codeql }}
-        remove-docker-images: ${{ inputs.remove-docker-images }}
 
     - name: Check initial disk space
       shell: bash
