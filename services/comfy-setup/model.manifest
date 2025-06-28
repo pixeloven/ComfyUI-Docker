@@ -1,0 +1,67 @@
+# IPAdapter Plus Models - CLIP Vision Encoders
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors
+  out=clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors
+  out=clip_vision/CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors
+https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/image_encoder/pytorch_model.bin
+  out=clip_vision/clip-vit-large-patch14-336.bin
+
+# IPAdapter Plus Models - SD1.5 Models
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15.safetensors
+  out=ipadapter/ip-adapter_sd15.safetensors
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_light_v11.bin
+  out=ipadapter/ip-adapter_sd15_light_v11.bin
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15.safetensors
+  out=ipadapter/ip-adapter-plus_sd15.safetensors
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus-face_sd15.safetensors
+  out=ipadapter/ip-adapter-plus-face_sd15.safetensors
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-full-face_sd15.safetensors
+  out=ipadapter/ip-adapter-full-face_sd15.safetensors
+https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_vit-G.safetensors
+  out=ipadapter/ip-adapter_sd15_vit-G.safetensors
+
+# IPAdapter Plus Models - SDXL Models
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl_vit-h.safetensors
+  out=ipadapter/ip-adapter_sdxl_vit-h.safetensors
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors
+  out=ipadapter/ip-adapter-plus_sdxl_vit-h.safetensors
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus-face_sdxl_vit-h.safetensors
+  out=ipadapter/ip-adapter-plus-face_sdxl_vit-h.safetensors
+https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl.safetensors
+  out=ipadapter/ip-adapter_sdxl.safetensors
+
+# IPAdapter Plus Models - FaceID Models
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sd15.bin
+  out=ipadapter/ip-adapter-faceid_sd15.bin
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15.bin
+  out=ipadapter/ip-adapter-faceid-plusv2_sd15.bin
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-portrait-v11_sd15.bin
+  out=ipadapter/ip-adapter-faceid-portrait-v11_sd15.bin
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sdxl.bin
+  out=ipadapter/ip-adapter-faceid_sdxl.bin
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl.bin
+  out=ipadapter/ip-adapter-faceid-plusv2_sdxl.bin
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-portrait_sdxl.bin
+  out=ipadapter/ip-adapter-faceid-portrait_sdxl.bin
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-portrait_sdxl_unnorm.bin
+  out=ipadapter/ip-adapter-faceid-portrait_sdxl_unnorm.bin
+
+# IPAdapter Plus Models - FaceID LoRAs
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sd15_lora.safetensors
+  out=loras/ip-adapter-faceid_sd15_lora.safetensors
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15_lora.safetensors
+  out=loras/ip-adapter-faceid-plusv2_sd15_lora.safetensors
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sdxl_lora.safetensors
+  out=loras/ip-adapter-faceid_sdxl_lora.safetensors
+https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl_lora.safetensors
+  out=loras/ip-adapter-faceid-plusv2_sdxl_lora.safetensors
+
+# IPAdapter Plus Models - Community Models
+https://huggingface.co/ostris/ip-composition-adapter/resolve/main/ip_plus_composition_sd15.safetensors
+  out=ipadapter/ip_plus_composition_sd15.safetensors
+https://huggingface.co/ostris/ip-composition-adapter/resolve/main/ip_plus_composition_sdxl.safetensors
+  out=ipadapter/ip_plus_composition_sdxl.safetensors
+https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/ip_adapter_plus_general.bin
+  out=ipadapter/Kolors-IP-Adapter-Plus.bin
+https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-FaceID-Plus/resolve/main/ipa-faceid-plus.bin
+  out=ipadapter/Kolors-IP-Adapter-FaceID-Plus.bin
