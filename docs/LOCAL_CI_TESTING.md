@@ -2,6 +2,13 @@
 
 Test GitHub Actions workflows locally using [act](https://github.com/nektos/act) before pushing changes.
 
+## 📋 Overview
+
+- **Quick Setup** - Install and run act for immediate testing
+- **Common Commands** - Essential act commands for workflow testing
+- **Configuration** - Customizing act behavior for your environment
+- **Troubleshooting** - Resolving common act and workflow issues
+
 ## 🚀 Quick Setup
 
 ```bash
@@ -78,12 +85,8 @@ docker info
 - **Use dry run**: Preview what act will do with `--dry-run`
 - **Check logs**: Use `--verbose` for detailed debugging information
 
-## 🔗 Related Documentation
 
-- **[Build Guide](BUILD.md)** - Development setup and contribution guidelines
-- **[Quick Reference](QUICK_REFERENCE.md)** - Essential Docker commands and hardware configuration
-- **[act documentation](https://github.com/nektos/act)** - Official act documentation
 
 ---
 
-**[⬆ Back to Documentation](README.md)** | **[🛠️ Build Guide](BUILD.md)** | **[🏠 Main README](../README.md)**
+**[⬆ Back to Documentation](README.md)** | **[🏠 Main README](../README.md)** | **[🐛 Report Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)**

@@ -2,15 +2,14 @@
 
 A composite GitHub Action that maximizes available disk space on GitHub Actions runners by removing unnecessary packages, files, and Docker images.
 
-## Features
+## 📋 Overview
 
-- Uses `easimon/maximize-build-space` action for initial cleanup
-- Removes large directories (dotnet, android, ghc, etc.)
-- Purges unnecessary packages using aptitude
-- Provides detailed disk usage reporting
-- Configurable options for different cleanup levels
+- **Usage** - Basic and advanced usage examples
+- **Configuration** - Input parameters and customization options
+- **Cleanup Details** - What directories and packages get removed
+- **Performance** - Expected disk space savings and notes
 
-## Usage
+## 🚀 Usage
 
 ### Basic Usage
 
@@ -36,7 +35,7 @@ steps:
       show-disk-usage: 'true'
 ```
 
-## Inputs
+## ⚙️ Inputs
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
@@ -48,7 +47,7 @@ steps:
 | `remove-docker-images` | Remove Docker images from maximize-build-space action | No | `true` |
 | `show-disk-usage` | Show detailed disk usage information after cleanup | No | `true` |
 
-## What Gets Removed
+## 🗑️ What Gets Removed
 
 ### Directories
 - `/usr/share/dotnet` - .NET runtime and SDK
@@ -67,13 +66,23 @@ steps:
 - Image processing: `imagemagick`, `libmagick*`
 - And many more...
 
-## Disk Space Savings
+## 📊 Disk Space Savings
 
 Typically frees up 10-15GB of disk space on standard GitHub Actions runners, bringing available space from ~14GB to ~25-30GB.
 
-## Notes
+## 📝 Notes
 
 - This action should be run early in your workflow, before checking out code
 - Some package removals may produce warnings - these are generally safe to ignore
 - The action uses `aptitude` for better dependency resolution during package removal
 - All operations are designed to be safe and not affect the core Ubuntu system functionality needed for CI/CD
+
+## 🔗 Related Documentation
+
+- **[CI/CD Workflow](../../workflows/ci.yml)** - Main workflow using this action
+- **[Local CI Testing](../../docs/LOCAL_CI_TESTING.md)** - Test workflows locally with act
+- **[Build Guide](../../docs/BUILD.md)** - Development setup and contribution guidelines
+
+---
+
+**[⬆ Back to Actions](../)** | **[🏠 Main README](../../README.md)** | **[🐛 Report Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)**

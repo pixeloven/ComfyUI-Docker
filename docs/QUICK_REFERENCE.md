@@ -2,7 +2,14 @@
 
 Essential commands and configuration for daily ComfyUI Docker usage.
 
-## 🚀 Essential Commands
+## � Overview
+
+- **Essential Commands** - Daily usage commands for setup and operation
+- **Configuration** - Environment variables and hardware modes
+- **Troubleshooting** - Quick fixes for common issues
+- **Pro Tips** - Best practices and helpful hints
+
+## �🚀 Essential Commands
 
 ### First Time Setup
 ```bash
@@ -152,10 +159,8 @@ sudo chown -R $USER:$USER ./data ./output
 4. **Search issues**: [GitHub Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)
 5. **Create issue**: Include logs, `.env` config, and system info
 
-### Related Guides
-- **[Build Guide](BUILD.md)** - Development and customization
-- **[Documentation Index](README.md)** - All available guides
+
 
 ---
 
-**[⬆ Back to Documentation](README.md)** | **[🏠 Main README](../README.md)**
+**[⬆ Back to Documentation](README.md)** | **[🏠 Main README](../README.md)** | **[🐛 Report Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)**
