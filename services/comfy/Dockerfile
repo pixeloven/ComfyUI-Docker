@@ -56,6 +56,9 @@ RUN --mount=type=cache,target=~/.cache/pip \
 ENV PATH="/home/comfy/.local/bin:$PATH"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
+# @todo this approach is creating a much larger image compared to manual install of the repo 12.7GB -> 15.3GB
+# @todo image fails to run python: can't open file '/home/comfy/app/main.py': [Errno 13] Permission denied
+
 RUN --mount=type=cache,target=~/.cache/pip \
   pip install comfy-cli && \
   comfy --skip-prompt --workspace /home/comfy/app install --nvidia --skip-manager && \
