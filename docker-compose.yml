@@ -27,7 +27,7 @@ services:
     ports:
       - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
     volumes:
-      - ./services/comfy/extra_model_paths.yaml:/home/ubuntu/app/extra_model_paths.yaml:ro,cached
+      - ./services/comfy/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
       - ./output:/output
     stop_signal: SIGKILL
@@ -53,7 +53,7 @@ services:
     ports:
       - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
     volumes:
-      - ./services/comfy/extra_model_paths.yaml:/home/ubuntu/app/extra_model_paths.yaml:ro,cached
+      - ./services/comfy/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
       - ./output:/output
     stop_signal: SIGKILL

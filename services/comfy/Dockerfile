@@ -35,46 +35,55 @@ RUN apt-get update && \
 
 FROM runtime AS application
 
-# Create a user and group with specified IDs
-# ARG PUID=1000
-# ARG PGID=1000
-# RUN getent passwd && groupadd -g $PGID comfy && \
-#   useradd -m -u $PUID -g $PGID comfy
+ARG PUID=1024
+ARG PGID=1024
+RUN groupadd -g $PGID comfy && \
+    useradd -m -u $PUID -g $PGID comfy
 
-USER ubuntu
+USER comfy
 
-WORKDIR /home/ubuntu/app
+WORKDIR /home/comfy
 
 SHELL ["/bin/bash", "--login", "-c"]
+#SHELL ["/bin/bash", "-eux", "-o", "pipefail", "-c"]
 
-# Setup ComfyUI project
-RUN git clone --branch v0.3.39 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
+ENV VIRTUAL_ENV=/home/comfy/.venv
 
-COPY --chown=ubuntu:ubuntu . .
-
-# Setup venv
-# https://pythonspeed.com/articles/activate-virtualenv-dockerfile/
-ENV VIRTUAL_ENV=/home/ubuntu/app/.venv
 RUN --mount=type=cache,target=~/.cache/pip \ 
-  ls -al  && \
-  mkdir -p ~/.local/bin && \
-  python -m venv $VIRTUAL_ENV
+  python -m venv $VIRTUAL_ENV && \
+  source $VIRTUAL_ENV/bin/activate
 
-ENV PATH="/home/ubuntu/.local/bin:$PATH"
+ENV PATH="/home/comfy/.local/bin:$PATH"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# Activate environment and install dependencies
-RUN --mount=type=cache,target=~/.cache/pip \ 
-  pip install --no-cache-dir -r requirements.txt && \
-  pip install --no-cache-dir -r plugin-requirements.txt && \
-  chmod u+x ./entrypoint.sh  && \
-  chmod u+x ./runner.sh
+RUN --mount=type=cache,target=~/.cache/pip \
+  pip install comfy-cli && \
+  comfy --skip-prompt --workspace /home/comfy/app install --nvidia --skip-manager && \
+  comfy --skip-prompt set-default /home/comfy/app && \
+  comfy --skip-prompt --no-enable-telemetry env
 
+WORKDIR /home/comfy/app
+
+COPY --chown=comfy:comfy . .
+
+RUN chmod +x ./entrypoint.sh ./runner.sh
+
+# # Install popular extensions using Comfy-CLI
+# RUN comfy node install ComfyUI-Manager && \
+#     comfy node install ComfyUI-to-Python-Extension && \
+#     comfy node install ComfyUI-ReActor && \
+#     comfy node install ComfyUI-WD14-Tagger
+
+# Set environment variables
 ENV CLI_ARGS=""
 ENV COMFY_PORT=8188
+ENV BASE_DIRECTORY="/data/config/comfy"
+ENV OUTPUT_DIRECTORY="/output"
 
 EXPOSE $COMFY_PORT
 
 ENTRYPOINT ["./entrypoint.sh"]
 
 CMD ["bash", "./runner.sh"]
+
+# maybe comfy cli supports install of extensions?
