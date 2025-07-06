@@ -2,16 +2,23 @@
 
 A Docker-based setup for running [ComfyUI](https://github.com/comfyanonymous/ComfyUI), a powerful and modular stable diffusion GUI and backend.
 
-## About ComfyUI
+## About This Project
 
-ComfyUI is a powerful and modular stable diffusion GUI and backend with a graph/nodes interface. This Docker setup provides an easy way to run ComfyUI with GPU acceleration or CPU-only mode, complete with model management and persistent storage.
+ComfyUI Docker provides a **production-ready, containerized solution** for running ComfyUI - the powerful node-based Stable Diffusion interface. Our goal is to eliminate the complexity of AI image generation setup while maintaining the flexibility and power that advanced users need.
+
+### Why ComfyUI Docker?
+- **🚀 One-Command Setup** - Get running in minutes, not hours
+- **🏗️ Production Ready** - Proper permissions, persistent storage, and error handling
+- **🔄 Flexible Deployment** - GPU acceleration or CPU-only modes
+- **📦 Model Management** - Automated downloading with verification
+- **🔧 Developer Friendly** - Easy development workflow with Docker Compose profiles
 
 ### Key Features
 - **Node-based workflow editor** - Visual programming interface for AI image generation
-- **GPU & CPU support** - Optimized for NVIDIA GPUs with CPU fallback
-- **Model management** - Automated model downloading and organization
-- **Persistent storage** - Your models, configs, and outputs are preserved
-- **Easy deployment** - Single command setup with Docker Compose
+- **Multi-profile architecture** - GPU (`comfy`), CPU (`comfy-cpu`), and setup (`comfy-setup`) modes
+- **Automated model management** - Download and verify models with checksums
+- **Persistent storage** - Your models, configs, and outputs survive container restarts
+- **Virtual environment** - Isolated Python environment for ComfyUI extensions
 
 | ComfyUI Workflow Interface |
 | --------------------------- |
@@ -35,19 +42,14 @@ docker compose --profile comfy-cpu up -d    # CPU mode (universal)
 
 **That's it!** ComfyUI is now running. For model setup and advanced configuration, see the documentation below.
 
-## 📚 Documentation
+## �� Documentation
 
-### Getting Started
-- **[Quick Reference](docs/QUICK_REFERENCE.md)** - Essential commands, configuration, and troubleshooting
+### For Users
+- **[Quick Start](docs/QUICK_START.md)** – Get running in 5 minutes
+- **[Usage](docs/USAGE.md)** – Daily commands & troubleshooting
 
-### Development & Advanced Usage
-- **[Build Guide](docs/BUILD.md)** - Building images, development setup, and contributing
-- **[Local CI Testing](docs/LOCAL_CI_TESTING.md)** - Test GitHub Actions workflows locally
-
-### Need Help?
-- Check the [Quick Reference](docs/QUICK_REFERENCE.md) for common solutions
-- Review existing [GitHub Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)
-- Create a new issue with logs and configuration details
+### For Developers
+- **[Development](docs/DEVELOPMENT.md)** – Building, contributing, and CI
 
 ## 🤝 Contributing
 

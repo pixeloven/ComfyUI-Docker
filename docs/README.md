@@ -1,63 +1,73 @@
-# Documentation Index
+# Documentation
 
-Comprehensive guides for ComfyUI Docker setup, usage, and development.
+Guides for ComfyUI Docker setup, usage, and development.
 
 ## 📖 User Guides
 
-### [Quick Reference](QUICK_REFERENCE.md)
-Essential commands, configuration, and troubleshooting for daily use.
-- Getting started commands
-- Configuration options (GPU/CPU modes)
-- Common troubleshooting
-- Hardware mode switching
-- Useful tips and tricks
+### [Getting Started](GETTING_STARTED.md)
+Quick setup and first run guide.
+- One-command setup
+- Hardware mode selection
+- Basic configuration
+- Next steps
+
+### [Usage Guide](USAGE.md)
+Daily operations and workflows.
+- Essential commands
+- Model management
+- Configuration options
+- Common workflows
+
+### [Configuration](CONFIGURATION.md)
+Environment variables and advanced settings.
+- Environment variables reference
+- Hardware configuration
+- Performance tuning
+- Security settings
+
+### [Troubleshooting](TROUBLESHOOTING.md)
+Common issues and solutions.
+- Critical issues
+- Performance problems
+- Diagnostic commands
+- Getting help
 
 ## 🛠️ Developer Guides
 
 ### [Build Guide](BUILD.md)
-Building Docker images, development setup, and contributing.
-- Building and customizing images
+Development setup and contributing.
+- Building images
 - Development workflow
 - Testing procedures
 - Contribution guidelines
 
-### [Local CI Testing](LOCAL_CI_TESTING.md)
-Test GitHub Actions workflows locally using act.
-- Local testing setup
+### [Local Testing](LOCAL_TESTING.md)
+Test CI workflows locally.
+- Quick setup
 - Common commands
-- Troubleshooting CI issues
+- Troubleshooting
 
-## 🚀 Getting Started
+## 🚀 Quick Start
 
-**New users**: Start with [Quick Reference](QUICK_REFERENCE.md) for immediate setup and hardware configuration.
-
-**Developers**: See [Build Guide](BUILD.md) for development environment setup.
-
-## 📋 Quick Reference
-
-### Docker Services
-- **`comfy`** - GPU-accelerated ComfyUI (configurable port, default 8188)
-- **`comfy-cpu`** - CPU-only ComfyUI (configurable port, default 8188)
-- **`comfy-setup`** - Model download utility
-
-### Essential Commands
 ```bash
-# Start ComfyUI (choose one)
+# 1. Clone and setup
+git clone https://github.com/pixeloven/ComfyUI-Docker.git
+cd ComfyUI-Docker
+cp .env.example .env
+
+# 2. Start ComfyUI
 docker compose --profile comfy up -d        # GPU mode
+# OR
 docker compose --profile comfy-cpu up -d    # CPU mode
 
-# Download models
-docker compose --profile comfy-setup up
-
-# View logs
-docker compose logs -f
+# 3. Open http://localhost:8188
 ```
 
-### Getting Help
-1. Check [Quick Reference](QUICK_REFERENCE.md) for detailed commands
-2. Review service logs: `docker compose logs -f`
-3. Search [GitHub issues](https://github.com/pixeloven/ComfyUI-Docker/issues)
-4. Create new issue with logs and configuration
+## 📋 Service Profiles
+
+- **`comfy`** - GPU-accelerated ComfyUI
+- **`comfy-cpu`** - CPU-only ComfyUI  
+- **`comfy-setup`** - Model download utility
 
 ---
 

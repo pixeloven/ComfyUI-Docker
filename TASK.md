@@ -90,6 +90,10 @@
 - XDG_CACHE_HOME usage unclear and commented out
 - Base directory and output directory configuration working well
 
+### References
+- [radiatingreverberations/comfyui-docker](https://github.com/radiatingreverberations/comfyui-docker)
+- [mmartial/ComfyUI-Nvidia-Docker](https://github.com/mmartial/ComfyUI-Nvidia-Docker)
+- [YanWenKun/ComfyUI-Docker](https://github.com/YanWenKun/ComfyUI-Docker)
 ---
 
 *Last Updated: 2025-06-27*
