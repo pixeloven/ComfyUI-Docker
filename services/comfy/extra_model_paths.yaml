@@ -49,14 +49,14 @@ comfyui:
   deep_danbooru: models/DeepDanbooru
   approx_vae: models/ApproxVAE
 
-# Extension-specific model mappings
+# Extension-specific model mappings can be added here if needed
 # These models are downloaded by ComfyUI extensions and stored in config/comfy/models
-insightface: config/comfy/models/insightface
-sams: config/comfy/models/sams
-annotator: config/comfy/models/annotator
-ultralytics: config/comfy/models/ultralytics
-ultralytics_bbox: config/comfy/models/ultralytics/bbox
-ultralytics_segm: config/comfy/models/ultralytics/segm
+# insightface: config/comfy/models/insightface
+# sams: config/comfy/models/sams
+# annotator: config/comfy/models/annotator
+# ultralytics: config/comfy/models/ultralytics
+# ultralytics_bbox: config/comfy/models/ultralytics/bbox
+# ultralytics_segm: config/comfy/models/ultralytics/segm
 
 # Need to install ipadapter and set mappings
 # https://github.com/cubiq/ComfyUI_IPAdapter_plus

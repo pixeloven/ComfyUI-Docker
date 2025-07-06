@@ -1,14 +1,6 @@
 # FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime AS base
 # https://mveg.es/posts/optimizing-pytorch-docker-images-cut-size-by-60percent/
 
-# Explore how we can use the CLI to do this instead
-# https://docs.comfy.org/installation/system_requirements
-# https://docs.comfy.org/comfy-cli/getting-started
-# https://pythonspeed.com/articles/activate-conda-dockerfile/
-# https://pythonspeed.com/articles/multi-stage-docker-python/
-# pip install comfy-cli && \
-# comfy install 
-
 FROM nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04 AS runtime
 
 ENV NVIDIA_VISIBLE_DEVICES=all
@@ -35,47 +27,55 @@ RUN apt-get update && \
 
 FROM runtime AS application
 
-ARG PUID=1024
-ARG PGID=1024
-RUN groupadd -g $PGID comfy && \
-    useradd -m -u $PUID -g $PGID comfy
+# ARG PUID=1001
+# ARG PGID=1001
+# RUN groupadd -g $PGID comfy && \
+#     useradd -m -u $PUID -g $PGID comfy
 
-USER comfy
+USER ubuntu
 
-WORKDIR /home/comfy
+WORKDIR /home/ubuntu
 
 SHELL ["/bin/bash", "--login", "-c"]
 #SHELL ["/bin/bash", "-eux", "-o", "pipefail", "-c"]
 
-ENV VIRTUAL_ENV=/home/comfy/.venv
+ENV VIRTUAL_ENV=/home/ubuntu/.venv
 
 RUN --mount=type=cache,target=~/.cache/pip \ 
   python -m venv $VIRTUAL_ENV && \
   source $VIRTUAL_ENV/bin/activate
 
-ENV PATH="/home/comfy/.local/bin:$PATH"
+ENV PATH="/home/ubuntu/.local/bin:$PATH"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # @todo this approach is creating a much larger image compared to manual install of the repo 12.7GB -> 15.3GB
 # @todo image fails to run python: can't open file '/home/comfy/app/main.py': [Errno 13] Permission denied
+# Either the comfy cli or cm-cli can be used for managing the ComfyUI installation and extensions
+# @todo https://github.com/Comfy-Org/ComfyUI-Manager/blob/main/docs/en/cm-cli.md
 
-RUN --mount=type=cache,target=~/.cache/pip \
-  pip install comfy-cli && \
-  comfy --skip-prompt --workspace /home/comfy/app install --nvidia --skip-manager && \
-  comfy --skip-prompt set-default /home/comfy/app && \
-  comfy --skip-prompt --no-enable-telemetry env
-
-WORKDIR /home/comfy/app
-
-COPY --chown=comfy:comfy . .
-
-RUN chmod +x ./entrypoint.sh ./runner.sh
+# RUN --mount=type=cache,target=~/.cache/pip \
+#   pip install comfy-cli && \
+#   comfy --skip-prompt --workspace /home/comfy/app install --nvidia --skip-manager && \
+#   comfy --skip-prompt set-default /home/comfy/app && \
+#   comfy --skip-prompt --no-enable-telemetry env
 
 # # Install popular extensions using Comfy-CLI
 # RUN comfy node install ComfyUI-Manager && \
 #     comfy node install ComfyUI-to-Python-Extension && \
 #     comfy node install ComfyUI-ReActor && \
 #     comfy node install ComfyUI-WD14-Tagger
+
+WORKDIR /home/ubuntu/app
+
+RUN git clone --branch v0.3.43 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
+
+COPY --chown=ubuntu:ubuntu . .
+
+RUN --mount=type=cache,target=~/.cache/pip \ 
+  pip install -r requirements.txt && \
+  pip install -r plugin-requirements.txt && \
+  chmod u+x ./entrypoint.sh  && \
+  chmod u+x ./runner.sh
 
 # Set environment variables
 ENV CLI_ARGS=""
@@ -88,5 +88,3 @@ EXPOSE $COMFY_PORT
 ENTRYPOINT ["./entrypoint.sh"]
 
 CMD ["bash", "./runner.sh"]
-
-# maybe comfy cli supports install of extensions?
