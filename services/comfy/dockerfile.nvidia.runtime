@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04 AS runtime
+FROM nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04 AS runtime-nvidia
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV DEBIAN_FRONTEND=noninteractive 

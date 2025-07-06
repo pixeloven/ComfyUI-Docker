@@ -20,42 +20,38 @@ variable "PLATFORMS" {
 
 target "runtime-nvidia" {
     context = "services/comfy"
-    dockerfile = "services/comfy/dockerfile.nvidia.runtime"
-    platforms = var.PLATFORMS
+    dockerfile = "dockerfile.nvidia.runtime"
+    platforms = PLATFORMS
     tags = [
-        "${var.REGISTRY_URL}/comfyui-docker/runtime-nvidia:${var.IMAGE_LABEL}",
-        "${var.REGISTRY_URL}/comfyui-docker/runtime-nvidia:latest"
+        "${REGISTRY_URL}/comfyui-docker/runtime-nvidia:${IMAGE_LABEL}"
     ]
-    cache-from = ["type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/runtime-nvidia:cache"]
-    cache-to = ["type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/runtime-nvidia:cache,mode=max"]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}/comfyui-docker/runtime-nvidia:cache"]
+    cache-to   = ["type=inline"]
 }
 
 target "runtime-cpu" {
     context = "services/comfy"
-    dockerfile = "services/comfy/dockerfile.cpu.runtime"
-    platforms = var.PLATFORMS
+    dockerfile = "dockerfile.cpu.runtime"
+    platforms = PLATFORMS
     tags = [
-        "${var.REGISTRY_URL}/comfyui-docker/runtime-cpu:${var.IMAGE_LABEL}",
-        "${var.REGISTRY_URL}/comfyui-docker/runtime-cpu:latest"
+        "${REGISTRY_URL}/comfyui-docker/runtime-cpu:${IMAGE_LABEL}"
     ]
-    cache-from = ["type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/runtime-cpu:cache"]
-    cache-to = ["type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/runtime-cpu:cache,mode=max"]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}/comfyui-docker/runtime-cpu:cache"]
+    cache-to   = ["type=inline"]
 }
 
 target "comfy-nvidia" {
     context = "services/comfy"
-    dockerfile = "services/comfy/dockerfile.comfy.base"
-    platforms = var.PLATFORMS
+    dockerfile = "dockerfile.comfy.base"
+    platforms = PLATFORMS
     tags = [
-        "${var.REGISTRY_URL}/comfyui-docker/comfy:${var.IMAGE_LABEL}",
-        "${var.REGISTRY_URL}/comfyui-docker/comfy:latest",
-        "${var.REGISTRY_URL}/comfyui-docker/comfy:nvidia-${var.IMAGE_LABEL}"
+        "${REGISTRY_URL}/comfyui-docker/comfy-nvidia:${IMAGE_LABEL}"
     ]
     cache-from = [
-        "type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/runtime-nvidia:cache",
-        "type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/comfy:cache"
+        "type=registry,ref=${REGISTRY_URL}/comfyui-docker/runtime-nvidia:cache",
+        "type=registry,ref=${REGISTRY_URL}/comfyui-docker/comfy-nvidia:cache"
     ]
-    cache-to = ["type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/comfy:cache,mode=max"]
+    cache-to   = ["type=inline"]
     args = {
         RUNTIME = "nvidia"
     }
@@ -63,17 +59,16 @@ target "comfy-nvidia" {
 
 target "comfy-cpu" {
     context = "services/comfy"
-    dockerfile = "services/comfy/dockerfile.comfy.base"
-    platforms = var.PLATFORMS
+    dockerfile = "dockerfile.comfy.base"
+    platforms = PLATFORMS
     tags = [
-        "${var.REGISTRY_URL}/comfyui-docker/comfy-cpu:${var.IMAGE_LABEL}",
-        "${var.REGISTRY_URL}/comfyui-docker/comfy-cpu:latest"
+        "${REGISTRY_URL}/comfyui-docker/comfy-cpu:${IMAGE_LABEL}"
     ]
     cache-from = [
-        "type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/runtime-cpu:cache",
-        "type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/comfy-cpu:cache"
+        "type=registry,ref=${REGISTRY_URL}/comfyui-docker/runtime-cpu:cache",
+        "type=registry,ref=${REGISTRY_URL}/comfyui-docker/comfy-cpu:cache"
     ]
-    cache-to = ["type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/comfy-cpu:cache,mode=max"]
+    cache-to   = ["type=inline"]
     args = {
         RUNTIME = "cpu"
     }
@@ -82,14 +77,13 @@ target "comfy-cpu" {
 // ComfyUI setup image
 target "comfy-setup" {
     context = "services/comfy-setup"
-    dockerfile = "services/comfy-setup/Dockerfile"
-    platforms = var.PLATFORMS
+    dockerfile = "Dockerfile"
+    platforms = PLATFORMS
     tags = [
-        "${var.REGISTRY_URL}/comfyui-docker/comfy-setup:${var.IMAGE_LABEL}",
-        "${var.REGISTRY_URL}/comfyui-docker/comfy-setup:latest"
+        "${REGISTRY_URL}/comfyui-docker/comfy-setup:${IMAGE_LABEL}"
     ]
-    cache-from = ["type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/comfy-setup:cache"]
-    cache-to = ["type=registry,ref=${var.REGISTRY_URL}/comfyui-docker/comfy-setup:cache,mode=max"]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}/comfyui-docker/comfy-setup:cache"]
+    cache-to   = ["type=inline"]
 }
 
 // Convenience groups
