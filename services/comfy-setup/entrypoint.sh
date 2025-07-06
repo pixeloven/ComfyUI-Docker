@@ -2,8 +2,7 @@
 
 set -Eeuo pipefail
 
-mkdir -vp /data/embeddings \
-  /data/config/ \
+mkdir -vp /data/config/ \
   /data/models/ \
   /data/models/Stable-diffusion \
   /data/models/GFPGAN \
