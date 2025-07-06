@@ -53,11 +53,11 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # Either the comfy cli or cm-cli can be used for managing the ComfyUI installation and extensions
 # @todo https://github.com/Comfy-Org/ComfyUI-Manager/blob/main/docs/en/cm-cli.md
 
-# RUN --mount=type=cache,target=~/.cache/pip \
-#   pip install comfy-cli && \
-#   comfy --skip-prompt --workspace /home/comfy/app install --nvidia --skip-manager && \
-#   comfy --skip-prompt set-default /home/comfy/app && \
-#   comfy --skip-prompt --no-enable-telemetry env
+RUN --mount=type=cache,target=~/.cache/pip \
+  pip install comfy-cli && \
+  comfy --skip-prompt --workspace /home/ubuntu/app install --nvidia --skip-manager && \
+  comfy --skip-prompt set-default /home/ubuntu/app && \
+  comfy --skip-prompt --no-enable-telemetry env
 
 # # Install popular extensions using Comfy-CLI
 # RUN comfy node install ComfyUI-Manager && \
@@ -67,12 +67,12 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /home/ubuntu/app
 
-RUN git clone --branch v0.3.43 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
+# RUN git clone --branch v0.3.43 --depth 1 https://github.com/comfyanonymous/ComfyUI.git .
 
 COPY --chown=ubuntu:ubuntu . .
 
 RUN --mount=type=cache,target=~/.cache/pip \ 
-  pip install -r requirements.txt && \
+  # pip install -r requirements.txt && \
   pip install -r plugin-requirements.txt && \
   chmod u+x ./entrypoint.sh  && \
   chmod u+x ./runner.sh
