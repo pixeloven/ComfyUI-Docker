@@ -100,7 +100,7 @@ docker buildx ls
 
 ```bash
 # Start development environment
-docker compose --profile comfy up -d
+docker compose --profile comfy-nvidia up -d
 
 # Monitor logs
 docker compose logs -f
@@ -114,7 +114,7 @@ docker compose restart
 ### Local Testing
 ```bash
 # Test GPU service
-docker compose --profile comfy up -d
+docker compose --profile comfy-nvidia up -d
 curl -f http://localhost:8188
 
 # Test CPU service

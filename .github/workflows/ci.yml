@@ -30,7 +30,7 @@ jobs:
           
           # Profile validation
           docker compose --profile comfy-setup config --services | grep -q comfy-setup
-          docker compose --profile comfy config --services | grep -q comfy
+          docker compose --profile comfy-nvidia config --services | grep -q comfy
           echo "✅ Service profiles valid"
           
           # Environment file validation

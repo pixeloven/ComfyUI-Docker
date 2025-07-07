@@ -26,7 +26,7 @@ Closes #(issue_number)
 
 ## 🧪 Testing
 - [ ] Built locally: `docker buildx bake all`
-- [ ] GPU profile: `docker compose --profile comfy up -d`
+- [ ] GPU profile: `docker compose --profile comfy-nvidia up -d`
 - [ ] CPU profile: `docker compose --profile comfy-cpu up -d`
 - [ ] ComfyUI accessible at http://localhost:8188
 - [ ] Model loading and basic functionality works

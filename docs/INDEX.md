@@ -44,7 +44,7 @@ cd ComfyUI-Docker
 cp .env.example .env
 
 # 2. Start ComfyUI
-docker compose --profile comfy up -d        # GPU mode
+docker compose --profile comfy-nvidia up -d        # GPU mode
 # OR
 docker compose --profile comfy-cpu up -d    # CPU mode
 
