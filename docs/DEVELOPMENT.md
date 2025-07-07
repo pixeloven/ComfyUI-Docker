@@ -123,46 +123,6 @@ docker compose --profile comfy-cpu up -d
 curl -f http://localhost:8188
 ```
 
-### CI Testing with Act
-
-Act lets you run GitHub Actions workflows locally.
-
-#### Install Act
-```bash
-# Install act in project directory
-curl https://raw.githubusercontent.com/nektos/act/master/install.sh | bash
-
-# Verify installation
-./bin/act --version
-```
-
-#### Run CI Tests
-```bash
-# List available workflows
-./bin/act --list
-
-# Test main CI workflow
-./bin/act push -W .github/workflows/ci.yml
-
-# Test specific job
-./bin/act push -W .github/workflows/ci.yml -j validate-config
-
-# Dry run (preview what would execute)
-./bin/act --dry-run
-```
-
-#### Troubleshooting Act
-```bash
-# Verbose output for debugging
-./bin/act --verbose
-
-# Check Docker access
-docker info
-
-# Fix permissions if needed
-chmod +x ./bin/act
-```
-
 ## Contributing
 
 ### Before Contributing

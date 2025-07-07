@@ -2,14 +2,14 @@
 
 Guides for ComfyUI Docker setup, usage, and development.
 
-## 📖 User Guides
+## �� User Guides
 
-### [Getting Started](GETTING_STARTED.md)
-Quick setup and first run guide.
+### [Quick Start](QUICK_START.md)
+Get running in 5 minutes.
 - One-command setup
 - Hardware mode selection
 - Basic configuration
-- Next steps
+- First steps
 
 ### [Usage Guide](USAGE.md)
 Daily operations and workflows.
@@ -17,35 +17,23 @@ Daily operations and workflows.
 - Model management
 - Configuration options
 - Common workflows
-
-### [Configuration](CONFIGURATION.md)
-Environment variables and advanced settings.
-- Environment variables reference
-- Hardware configuration
-- Performance tuning
-- Security settings
-
-### [Troubleshooting](TROUBLESHOOTING.md)
-Common issues and solutions.
-- Critical issues
-- Performance problems
-- Diagnostic commands
-- Getting help
+- Troubleshooting
 
 ## 🛠️ Developer Guides
 
-### [Build Guide](BUILD.md)
+### [Development](DEVELOPMENT.md)
 Development setup and contributing.
-- Building images
+- Building images with Docker Bake
 - Development workflow
 - Testing procedures
 - Contribution guidelines
 
-### [Local Testing](LOCAL_TESTING.md)
-Test CI workflows locally.
-- Quick setup
-- Common commands
-- Troubleshooting
+### [CI/CD](CI_CD.md)
+Docker Bake workflows and local testing.
+- Workflow overview
+- Local testing with Act
+- Docker Bake groups and targets
+- Best practices
 
 ## 🚀 Quick Start
 
@@ -68,6 +56,14 @@ docker compose --profile comfy-cpu up -d    # CPU mode
 - **`comfy`** - GPU-accelerated ComfyUI
 - **`comfy-cpu`** - CPU-only ComfyUI  
 - **`comfy-setup`** - Model download utility
+
+## 🔧 Docker Bake Groups
+
+- **`all`** - All images (runtime-nvidia, runtime-cpu, comfy-nvidia, comfy-cpu, comfy-setup)
+- **`runtime`** - Runtime images only
+- **`nvidia`** - NVIDIA images (runtime-nvidia, comfy-nvidia)
+- **`cpu`** - CPU images (runtime-cpu, comfy-cpu)
+- **`comfy`** - ComfyUI images (comfy-nvidia, comfy-cpu)
 
 ---
 
