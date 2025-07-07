@@ -22,10 +22,6 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 - **Virtual environment** - Isolated Python environment for ComfyUI extensions
 - **Optimized CI/CD** - Docker Bake-based workflows with efficient caching
 
-| ComfyUI Workflow Interface |
-| --------------------------- |
-| ![ComfyUI Screenshot](https://github.com/comfyanonymous/ComfyUI/raw/main/comfyui_screenshot.png) |
-
 ## 🚀 Quick Start
 
 ```bash
