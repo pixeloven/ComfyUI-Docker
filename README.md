@@ -12,6 +12,7 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 - **🔄 Flexible Deployment** - GPU acceleration or CPU-only modes
 - **📦 Model Management** - Automated downloading with verification
 - **🔧 Developer Friendly** - Easy development workflow with Docker Compose profiles
+- **⚡ Efficient Builds** - Docker Bake for optimized image building and caching
 
 ### Key Features
 - **Node-based workflow editor** - Visual programming interface for AI image generation
@@ -19,10 +20,7 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 - **Automated model management** - Download and verify models with checksums
 - **Persistent storage** - Your models, configs, and outputs survive container restarts
 - **Virtual environment** - Isolated Python environment for ComfyUI extensions
-
-| ComfyUI Workflow Interface |
-| --------------------------- |
-| ![ComfyUI Screenshot](https://github.com/comfyanonymous/ComfyUI/raw/main/comfyui_screenshot.png) |
+- **Optimized CI/CD** - Docker Bake-based workflows with efficient caching
 
 ## 🚀 Quick Start
 
@@ -42,18 +40,19 @@ docker compose --profile comfy-cpu up -d    # CPU mode (universal)
 
 **That's it!** ComfyUI is now running. For model setup and advanced configuration, see the documentation below.
 
-## �� Documentation
+## 📚 Documentation
 
 ### For Users
 - **[Quick Start](docs/QUICK_START.md)** – Get running in 5 minutes
 - **[Usage](docs/USAGE.md)** – Daily commands & troubleshooting
 
 ### For Developers
-- **[Development](docs/DEVELOPMENT.md)** – Building, contributing, and CI
+- **[Development](docs/DEVELOPMENT.md)** – Building, contributing, and development workflow
+- **[CI/CD](docs/CI_CD.md)** – Docker Bake workflows and local testing
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please see the [Build Guide](docs/BUILD.md) for development setup and contribution guidelines.
+Contributions are welcome! Please see the [Development Guide](docs/DEVELOPMENT.md) for development setup and contribution guidelines.
 
 **Important**: Create a discussion first describing the problem and your proposed solution before implementing anything.
 

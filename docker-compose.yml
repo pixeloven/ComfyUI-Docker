@@ -3,7 +3,6 @@ name: ComfyUI-Docker
 services:
 
   comfy-setup:
-    build: ./services/comfy-setup/
     image: ghcr.io/pixeloven/comfyui-docker/comfy-setup:latest
     profiles: ["comfy-setup"]
     user: ${PUID:-1000}:${PGID:-1000}
@@ -16,8 +15,7 @@ services:
 
   comfy:
     profiles: ["comfy"]
-    build: ./services/comfy/
-    image: ghcr.io/pixeloven/comfyui-docker/comfy:latest
+    image: ghcr.io/pixeloven/comfyui-docker/comfy-nvidia:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
@@ -42,8 +40,7 @@ services:
 
   comfy-cpu:
     profiles: ["comfy-cpu"]
-    build: ./services/comfy/
-    image: ghcr.io/pixeloven/comfyui-docker/comfy:latest
+    image: ghcr.io/pixeloven/comfyui-docker/comfy-cpu:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}

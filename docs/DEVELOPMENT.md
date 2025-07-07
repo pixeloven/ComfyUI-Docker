@@ -9,12 +9,94 @@ Development setup and contributing to ComfyUI Docker.
 git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd ComfyUI-Docker
 cp .env.example .env
-
-# Build images
-docker compose build
 ```
 
-## Development Workflow
+## Building Images
+
+This project uses Docker Bake for building images with support for multiple runtimes and efficient caching.
+
+### Prerequisites
+
+```bash
+# Ensure Docker Buildx is available
+docker buildx version
+
+# Create a new builder instance if needed
+docker buildx create --name mybuilder --use
+```
+
+### Quick Build Commands
+
+```bash
+# Build all images (NVIDIA and CPU runtimes)
+docker buildx bake all
+
+# Build only NVIDIA runtime and application
+docker buildx bake nvidia
+
+# Build only CPU runtime and application
+docker buildx bake cpu
+
+# Build specific target
+docker buildx bake comfy-nvidia
+docker buildx bake comfy-cpu
+docker buildx bake comfy-setup
+```
+
+### Available Targets
+
+#### Runtime Images
+- `runtime-nvidia` - Base NVIDIA CUDA runtime with cuDNN
+- `runtime-cpu` - Base CPU runtime (Ubuntu 24.04)
+
+#### Application Images
+- `comfy-nvidia` - ComfyUI with NVIDIA GPU support
+- `comfy-cpu` - ComfyUI with CPU-only support
+- `comfy-setup` - Setup utility for model downloads
+
+#### Convenience Groups
+- `all` - Build all images (runtimes + applications + setup)
+- `runtime` - Build both runtime base images
+- `comfy` - Build both ComfyUI application images
+- `nvidia` - Build NVIDIA runtime and application
+- `cpu` - Build CPU runtime and application
+
+### Custom Build Options
+
+```bash
+# Build with custom registry
+docker buildx bake all --set "*.args.REGISTRY_URL=myregistry.com/myuser"
+
+# Build with custom image label
+docker buildx bake all --set "*.args.IMAGE_LABEL=v1.0.0"
+
+# Build for multiple platforms
+docker buildx bake all --set "*.platforms=linux/amd64,linux/arm64"
+
+# Build without cache (force rebuild)
+docker buildx bake all --no-cache
+
+# Build with verbose output
+docker buildx bake all --progress=plain
+```
+
+### Troubleshooting Builds
+
+```bash
+# Check build context
+docker buildx bake --print
+
+# Debug specific target
+docker buildx bake comfy-nvidia --progress=plain
+
+# Clear build cache
+docker buildx prune -a
+
+# Check available builders
+docker buildx ls
+```
+
+## Test Workflow
 
 ```bash
 # Start development environment
@@ -22,10 +104,6 @@ docker compose --profile comfy up -d
 
 # Monitor logs
 docker compose logs -f
-
-# Make changes to Dockerfiles or config
-# Rebuild affected services
-docker compose build comfy
 
 # Test changes
 docker compose restart
@@ -45,46 +123,6 @@ docker compose --profile comfy-cpu up -d
 curl -f http://localhost:8188
 ```
 
-### CI Testing with Act
-
-Act lets you run GitHub Actions workflows locally.
-
-#### Install Act
-```bash
-# Install act in project directory
-curl https://raw.githubusercontent.com/nektos/act/master/install.sh | bash
-
-# Verify installation
-./bin/act --version
-```
-
-#### Run CI Tests
-```bash
-# List available workflows
-./bin/act --list
-
-# Test main CI workflow
-./bin/act push -W .github/workflows/ci.yml
-
-# Test specific job
-./bin/act push -W .github/workflows/ci.yml -j validate-config
-
-# Dry run (preview what would execute)
-./bin/act --dry-run
-```
-
-#### Troubleshooting Act
-```bash
-# Verbose output for debugging
-./bin/act --verbose
-
-# Check Docker access
-docker info
-
-# Fix permissions if needed
-chmod +x ./bin/act
-```
-
 ## Contributing
 
 ### Before Contributing
@@ -95,19 +133,6 @@ chmod +x ./bin/act
 
 ### Guidelines
 - Follow existing code style and patterns
-- Include tests for new features
 - Update documentation if needed
 - Keep commits focused and descriptive
 
-### Common Tasks
-
-#### Adding Models
-1. Add download links to `services/comfy-setup/links.txt`
-2. Update checksums in `services/comfy-setup/checksums.sha256`
-3. Rebuild: `docker compose build comfy-setup`
-4. Test: `docker compose --profile comfy-setup up`
-
-#### Modifying Configuration
-- **System changes**: Edit `services/comfy/Dockerfile`
-- **Startup config**: Edit `services/comfy/entrypoint.sh`
-- **Runtime settings**: Use `.env` file
