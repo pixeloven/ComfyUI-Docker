@@ -1,5 +1,4 @@
-ARG RUNTIME=nvidia
-FROM runtime-${RUNTIME} AS application
+FROM runtime AS application
 
 # ARG PUID=1001
 # ARG PGID=1001
