@@ -11,19 +11,22 @@ WORKDIR /home/ubuntu
 
 SHELL ["/bin/bash", "--login", "-c"]
 
-# Configure uv cache to work with Docker BuildKit cache
-ENV UV_CACHE_DIR=~/.cache/uv
-ENV UV_LINK_MODE=copy 
+ENV VIRTUAL_ENV=/home/ubuntu/.venv
+ENV XDG_CACHE_HOME=/home/ubuntu/.cache
 
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-  uv venv .venv
+RUN --mount=type=cache,target=~/.cache/pip \ 
+  python -m venv $VIRTUAL_ENV && \
+  source ~/.venv/bin/activate
+
+ENV PATH="/home/ubuntu/.local/bin:$PATH"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # @todo this approach is creating a much larger image compared to manual install of the repo 12.7GB -> 15.3GB
 # Either the comfy cli or cm-cli can be used for managing the ComfyUI installation and extensions
 # @todo https://github.com/Comfy-Org/ComfyUI-Manager/blob/main/docs/en/cm-cli.md
-RUN --mount=type=cache,target=~/.cache/uv,sharing=locked \
+RUN --mount=type=cache,target=~/.cache/pip \
   source ~/.venv/bin/activate && \
-  uv pip install comfy-cli && \
+  pip install comfy-cli && \
   comfy --skip-prompt --workspace /home/ubuntu/app install --nvidia --skip-manager && \
   comfy --skip-prompt set-default /home/ubuntu/app && \
   comfy --skip-prompt --no-enable-telemetry env

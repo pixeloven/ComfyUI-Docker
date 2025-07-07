@@ -1,9 +1,9 @@
 FROM base AS extensions
 
 # Pre-install extensions
-RUN --mount=type=cache,target=~/.cache/uv,sharing=locked \
+RUN --mount=type=cache,target=~/.cache/pip \
   source ~/.venv/bin/activate && \
-  uv pip install -r plugin-requirements.txt
+  pip install -r plugin-requirements.txt
 
 # Install extensions
 RUN comfy node install ComfyUI-Manager
