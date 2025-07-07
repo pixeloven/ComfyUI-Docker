@@ -95,6 +95,10 @@ target "comfy-setup" {
 }
 
 // Convenience groups
+group "default" {
+    targets = ["all"]
+}
+
 group "all" {
     targets = ["runtime", "comfy", "comfy-setup"]
 }
