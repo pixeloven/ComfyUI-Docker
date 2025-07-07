@@ -13,8 +13,8 @@ services:
     volumes:
       - ./data:/data
 
-  comfy:
-    profiles: ["comfy"]
+  comfy-nvidia:
+    profiles: ["comfy-nvidia"]
     image: ghcr.io/pixeloven/comfyui-docker/comfy-nvidia:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
