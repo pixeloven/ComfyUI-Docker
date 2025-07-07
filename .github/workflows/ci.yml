@@ -49,16 +49,6 @@ jobs:
   build-images:
     runs-on: ubuntu-22.04
     needs: validate-config
-    strategy:
-      matrix:
-        # Build different groups based on the event
-        include:
-          - event: pull_request
-            group: all
-            description: "All images (PR)"
-          - event: push
-            group: all
-            description: "All images (Push)"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -99,16 +89,16 @@ jobs:
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          targets: ${{ matrix.group }}
+          targets: all
           cache-from: |
-            type=gha,scope=bake-${{ matrix.group }}
+            type=gha,scope=bake-all
             type=registry,ref=ghcr.io/${{ github.repository }}/runtime-nvidia:cache
             type=registry,ref=ghcr.io/${{ github.repository }}/runtime-cpu:cache
             type=registry,ref=ghcr.io/${{ github.repository }}/comfy-nvidia:cache
             type=registry,ref=ghcr.io/${{ github.repository }}/comfy-cpu:cache
             type=registry,ref=ghcr.io/${{ github.repository }}/comfy-setup:cache
           cache-to: |
-            type=gha,mode=max,scope=bake-${{ matrix.group }}
+            type=gha,mode=max,scope=bake-all
             type=inline
 
       - name: Clean up Docker
