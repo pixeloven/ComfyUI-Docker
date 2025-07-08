@@ -1,5 +1,8 @@
 # https://github.com/comfyanonymous/ComfyUI/blob/master/extra_model_paths.yaml.example
 # https://comfyui-wiki.com/en/tutorial/basic/link-models-between-comfyui-and-a1111
+
+# @todo this was done when we were supportiong A1111. 
+# Without that this should probably return to comfy defaults.
 comfyui:
   is_default: "true"
 

@@ -27,7 +27,7 @@ custom_nodes:
   
   # Git-based custom nodes
   git_custom_nodes:
-    "https://github.com/ltdrdata/ComfyUI-Manager":
+    "https://github.com/Comfy-Org/ComfyUI-Manager.git":
       disabled: false
       hash: "latest"  # You can specify a specific commit hash here
       # Optional: branch specification
