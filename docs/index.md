@@ -25,6 +25,16 @@ Development setup, building images with Docker Bake, and contribution guidelines
 ### [CI/CD](development-guides/ci-cd.md)
 Docker Bake workflows, local testing with Act, and best practices.
 
+## 📊 Project Management
+
+Project planning, analysis, and task tracking.
+
+### [Tasks](project-management/tasks.md)
+Current issues, technical debt, and roadmap items for the ComfyUI Docker project.
+
+### [Repository Analysis](project-management/repository-analysis.md)
+Detailed analysis of existing ComfyUI Docker repositories and comparison with our approach.
+
 ---
 
 **[⬆ Back to Main README](../README.md)** | **[🐛 Report Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)** 

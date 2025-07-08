@@ -42,6 +42,49 @@ docker compose --profile comfy-cpu up -d    # CPU mode (universal)
 
 **That's it!** ComfyUI is now running. For model setup and advanced configuration, see the documentation below.
 
+## 📁 Project Structure
+
+```
+ComfyUI-Docker/
+├── 📚 docs/                          # Documentation
+│   ├── index.md                      # Documentation overview
+│   ├── user-guides/                  # User tutorials and guides
+│   ├── development-guides/           # Development and CI/CD guides
+│   └── project-management/           # Project planning and analysis
+│
+├── 🐳 services/                      # Docker service definitions
+│   ├── comfy/                        # Main ComfyUI service
+│   │   ├── dockerfile.comfy.base     # Base ComfyUI image
+│   │   ├── dockerfile.nvidia.runtime # NVIDIA GPU runtime
+│   │   ├── dockerfile.cpu.runtime    # CPU-only runtime
+│   │   ├── startup.sh                # Container startup script
+│   │   ├── entrypoint.sh             # Container entrypoint
+│   │   ├── comfy-lock.yaml           # Custom node dependencies
+│   │   ├── extra_model_paths.yaml    # Model path configuration
+│   │   └── addon-requirements.txt    # Python dependencies
+│   │
+│   └── comfy-setup/                  # Model setup service
+│       ├── Dockerfile                # Setup service image
+│       ├── entrypoint.sh             # Setup entrypoint
+│       ├── checksums.sha256          # Model integrity checksums
+│       └── links.txt                 # Model download links
+│
+├── 📦 data/                          # Persistent data storage
+├── 🖼️ output/                        # Generated image outputs
+├── 🔧 .github/                       # GitHub Actions workflows
+├── 📋 docker-compose.yml             # Main orchestration file
+├── 🏗️ docker-bake.hcl                # Multi-stage build configuration
+└── 📖 README.md                      # This file
+```
+
+### Key Directories Explained
+
+- **`docs/`** - Complete documentation organized by audience (users, developers, project management)
+- **`services/`** - Docker service definitions with multi-stage builds for different runtimes
+- **`data/`** - Persistent storage for models, configs, and user data
+- **`output/`** - Generated images and workflow outputs
+- **`.github/`** - CI/CD workflows and GitHub configuration
+
 ## 📚 Documentation
 
 - **[Documentation Index](docs/)** – Overview of all documentation
@@ -56,6 +99,11 @@ docker compose --profile comfy-cpu up -d    # CPU mode (universal)
 - **[Development Guides](docs/development-guides/)** – All development documentation
   - **[Development](docs/development-guides/development.md)** – Building, contributing, and development workflow
   - **[CI/CD](docs/development-guides/ci-cd.md)** – Docker Bake workflows and local testing
+
+### For Project Management
+- **[Project Management](docs/project-management/)** – Project planning and analysis
+  - **[Tasks & Roadmap](docs/project-management/tasks.md)** – Current issues, technical debt, and roadmap
+  - **[Repository Analysis](docs/project-management/repository-analysis.md)** – Analysis of existing ComfyUI Docker repositories
 
 
 ## 🤝 Contributing
