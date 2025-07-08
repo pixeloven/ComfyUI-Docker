@@ -27,7 +27,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN --mount=type=cache,target=~/.cache/pip \
   source ~/.venv/bin/activate && \
   pip install comfy-cli && \
-  comfy --skip-prompt --workspace /home/ubuntu/app install --nvidia --skip-manager && \
+  comfy --skip-prompt --workspace /home/ubuntu/app install --nvidia && \
   comfy --skip-prompt set-default /home/ubuntu/app && \
   comfy --skip-prompt --no-enable-telemetry env
 # RUN git clone --branch v0.3.43 --depth 1 https://github.com/comfyanonymous/ComfyUI.git app
