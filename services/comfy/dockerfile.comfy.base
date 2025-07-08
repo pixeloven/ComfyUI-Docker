@@ -36,8 +36,12 @@ WORKDIR /home/ubuntu/app
 
 COPY --chown=ubuntu:ubuntu . .
 
-RUN chmod u+x ./entrypoint.sh && \
-  chmod u+x ./runner.sh
+# Pre-install extensions
+RUN --mount=type=cache,target=~/.cache/pip \
+  source ~/.venv/bin/activate && \
+  pip install -r addon-requirements.txt && \
+  chmod u+x ./entrypoint.sh && \
+  chmod u+x ./startup.sh
 
 # Set environment variables
 ENV CLI_ARGS=""
@@ -49,4 +53,4 @@ EXPOSE $COMFY_PORT
 
 ENTRYPOINT ["./entrypoint.sh"]
 
-CMD ["bash", "./runner.sh"]
+CMD ["bash", "./startup.sh"]

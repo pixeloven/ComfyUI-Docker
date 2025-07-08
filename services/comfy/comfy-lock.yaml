@@ -1,0 +1,47 @@
+basic:
+  # Basic configuration section
+  workspace: /home/ubuntu/app
+  comfyui_version: v0.3.43
+
+models:
+  # Model definitions can be added here
+  # Example format:
+  # - model: "stable-diffusion-v1-5"
+  #   url: "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned.safetensors"
+  #   paths:
+  #     - path: "models/checkpoints"
+  #   hashes:
+  #     - hash: "your-hash-here"
+  #       type: "SHA256"
+  #   type: "checkpoint"
+
+custom_nodes:
+  # ComfyUI core commit hash (optional, for version tracking)
+  comfyui: "v0.3.43"
+  
+  # File-based custom nodes (if any)
+  file_custom_nodes:
+    # Example:
+    # - disabled: false
+    #   filename: "custom_node.py"
+  
+  # Git-based custom nodes
+  git_custom_nodes:
+    "https://github.com/ltdrdata/ComfyUI-Manager":
+      disabled: false
+      hash: "latest"  # You can specify a specific commit hash here
+      # Optional: branch specification
+      # branch: "main"
+    
+    # Example of additional custom nodes you might want to add:
+    # "https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved":
+    #   disabled: false
+    #   hash: "latest"
+    # 
+    # "https://github.com/ltdrdata/ComfyUI-Impact-Pack":
+    #   disabled: false
+    #   hash: "latest"
+    #
+    # "https://github.com/Fannovel16/comfyui_controlnet_aux":
+    #   disabled: false
+    #   hash: "latest"

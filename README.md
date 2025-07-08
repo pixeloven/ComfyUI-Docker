@@ -13,13 +13,15 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 - **📦 Model Management** - Automated downloading with verification
 - **🔧 Developer Friendly** - Easy development workflow with Docker Compose profiles
 - **⚡ Efficient Builds** - Docker Bake for optimized image building and caching
+- **🎛️ Custom Node Management** - Version-controlled custom nodes with `comfy-lock.yaml`
 
 ### Key Features
 - **Node-based workflow editor** - Visual programming interface for AI image generation
-- **Multi-profile architecture** - GPU (`comfy`), CPU (`comfy-cpu`), and setup (`comfy-setup`) modes
+- **Multi-profile architecture** - GPU (`comfy-nvidia`), CPU (`comfy-cpu`), and setup (`comfy-setup`) modes
 - **Automated model management** - Download and verify models with checksums
 - **Persistent storage** - Your models, configs, and outputs survive container restarts
 - **Virtual environment** - Isolated Python environment for ComfyUI extensions
+- **Custom node management** - Version-controlled custom nodes using ComfyUI CLI and `comfy-lock.yaml`
 - **Optimized CI/CD** - Docker Bake-based workflows with efficient caching
 
 ## 🚀 Quick Start
@@ -42,17 +44,23 @@ docker compose --profile comfy-cpu up -d    # CPU mode (universal)
 
 ## 📚 Documentation
 
+- **[Documentation Index](docs/)** – Overview of all documentation
+
 ### For Users
-- **[Quick Start](docs/QUICK_START.md)** – Get running in 5 minutes
-- **[Usage](docs/USAGE.md)** – Daily commands & troubleshooting
+- **[User Guides](docs/user-guides/)** – All user documentation
+  - **[Quick Start](docs/user-guides/quick-start.md)** – Get running in 5 minutes
+  - **[Usage Guide](docs/user-guides/usage.md)** – Daily operations and workflows
+  - **[Comfy Lock Usage](docs/user-guides/comfy-lock-usage.md)** – Managing custom nodes and models
 
 ### For Developers
-- **[Development](docs/DEVELOPMENT.md)** – Building, contributing, and development workflow
-- **[CI/CD](docs/CI_CD.md)** – Docker Bake workflows and local testing
+- **[Development Guides](docs/development-guides/)** – All development documentation
+  - **[Development](docs/development-guides/development.md)** – Building, contributing, and development workflow
+  - **[CI/CD](docs/development-guides/ci-cd.md)** – Docker Bake workflows and local testing
+
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please see the [Development Guide](docs/DEVELOPMENT.md) for development setup and contribution guidelines.
+Contributions are welcome! Please see the [Development Guide](docs/development-guides/development.md) for development setup and contribution guidelines.
 
 **Important**: Create a discussion first describing the problem and your proposed solution before implementing anything.
 
@@ -67,6 +75,7 @@ The authors are not responsible for any content generated using this interface. 
 Special thanks to the amazing open source community behind these projects:
 
 - **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** - The powerful node-based stable diffusion interface
+- **[ComfyUI CLI](https://github.com/Comfy-Org/comfy-cli)** - Command-line interface for ComfyUI management
 - **[AbdBarho/stable-diffusion-webui-docker](https://github.com/AbdBarho/stable-diffusion-webui-docker)** - Original Docker implementation inspiration
 - **[CompVis/stable-diffusion](https://github.com/CompVis/stable-diffusion)** - The foundational stable diffusion research
 - And the entire AI/ML open source community that makes this possible
