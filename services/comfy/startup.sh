@@ -34,10 +34,12 @@ comfy env
 # Disable tracking (optional)
 comfy tracking disable
 
-# Install custom nodes from comfy-lock.yaml if it exists
+# Install custom nodes from comfy-lock.yaml file if it exists
 if [ -f "comfy-lock.yaml" ]; then
     echo "Installing custom nodes from comfy-lock.yaml..."
     comfy node install-deps --deps=comfy-lock.yaml
+else
+    echo "No comfy-lock.yaml or comfy-lock.json found, skipping custom node installation"
 fi
 
 # Start ComfyUI with the specified parameters
