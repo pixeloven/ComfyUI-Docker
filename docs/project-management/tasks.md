@@ -1,4 +1,6 @@
-# ComfyUI Docker Project - Issues & Ideas Consolidation
+# Tasks & Roadmap
+
+Current issues, technical debt, and roadmap items for the ComfyUI Docker project.
 
 ## 🚨 Current Issues & Technical Debt
 
@@ -6,13 +8,19 @@
 - [ ] **Model Path Mapping Conflict**: Fix mappings between `/data/models` and `data/config/comfy/models` (the latter is created by ComfyManager)
 - [ ] **ONNX Integration**: Make ONNX support configurable/optional rather than baked into the image
 - [x] **Virtual Environment**: Ensure everything runs in a proper venv as some extensions expect it
-- [ ] **Docker Compose Readability**: Update docker-compose.yml to be more readable and maintainable
+- [x] **Docker Compose Readability**: Update docker-compose.yml to be more readable and maintainable
 
 ### Configuration Issues
-- [ ] **Port Hardcoding**: Port 8188 is hardcoded in Dockerfile (noted in docker-compose.yml line 27)
+- [x] **Port Hardcoding**: Port 8188 is now configurable via COMFY_PORT environment variable
 - [ ] **Volume Mapping**: Generally better workflow volume mappings needed
 - [ ] **Persistent Extensions**: Need persistent volume for custom extensions
-- [ ] **Cache Directory**: Unclear XDG_CACHE_HOME usage (commented out in entrypoint.sh)
+- [x] **Cache Directory**: XDG_CACHE_HOME is properly configured in dockerfile.comfy.base
+
+### Multi-Instance & Workspace Support
+- [ ] **Multiple Workspaces**: Support running multiple ComfyUI instances with different configurations
+- [ ] **Instance Isolation**: Separate data directories, ports, and configurations per workspace
+- [ ] **Workspace Management**: Tools/scripts for creating, managing, and switching between workspaces
+- [ ] **Resource Allocation**: GPU allocation and resource management for multiple instances
 
 ### Build & Deployment
 - [ ] **Version Pinning**: Pin/configurable versions for dependencies
@@ -29,7 +37,7 @@
 
 ### Development Workflow
 - [x] **Containerized Testing**: Test suite runs in containers
-- [ ] **Documentation**: Comprehensive docs structure and easy to use site
+- [x] **Documentation**: Comprehensive docs structure and easy to use site
 
 ## 💡 Future Enhancements
 
@@ -55,8 +63,8 @@
 ### Phase 1: Fix Current Issues (Immediate)
 1. Fix ComfyUI container model path mappings
 2. Make ONNX support configurable
-3. Improve Docker Compose readability
-4. Resolve port hardcoding
+3. Implement multi-workspace support
+4. Improve volume mappings for better workflow management
 
 ### Phase 2: Platform Expansion (Short-term)
 1. Add CPU/ROCM support
@@ -68,6 +76,7 @@
 1. Easy setup for advanced ComfyUI workflows/extensions
 2. Workflow versioning and private repo integration
 3. Management application development
+4. Advanced multi-instance orchestration
 
 ### Phase 4: Platform Evolution (Long-term)
 1. Explore Trellis/OpenUI/Ollama integration
@@ -80,15 +89,23 @@
 - Model mapping issues between `/data/models` and `data/config/comfy/models`
 - Need to fix volume mappings and move `/output` to `/data/output`
 - Consider whether repo scope should expand beyond stable diffusion
+- Port configuration is now properly handled via environment variables
 
 ### From Dockerfile
 - ONNX should be optional and configurable at runtime
 - Explore using ComfyUI CLI instead of direct Python execution
-- Virtual environment setup needs improvement
+- Virtual environment setup is working well
 
 ### From entrypoint.sh
-- XDG_CACHE_HOME usage unclear and commented out
+- XDG_CACHE_HOME is properly configured in dockerfile.comfy.base
 - Base directory and output directory configuration working well
+
+### Multi-Workspace Requirements
+- Need separate docker-compose files or profiles for different workspaces
+- Each workspace should have isolated data directories
+- Port allocation strategy for multiple instances
+- GPU resource allocation and management
+- Workspace-specific configuration management
 
 ### References
 - [radiatingreverberations/comfyui-docker](https://github.com/radiatingreverberations/comfyui-docker)
@@ -96,5 +113,6 @@
 - [YanWenKun/ComfyUI-Docker](https://github.com/YanWenKun/ComfyUI-Docker)
 ---
 
-*Last Updated: 2025-06-27*
-*This document consolidates all project issues, ideas, and roadmap items for easy reference and planning.*
+**[⬆ Back to Project Management](index.md)** | **[⬆ Back to Documentation Index](../index.md)** | **[🐛 Report Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)**
+
+*Last Updated: 2025-01-27*
