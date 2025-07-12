@@ -18,6 +18,8 @@ services:
       - SETUP_DRY_RUN=${SETUP_DRY_RUN:-1} # Default is to run dry run
     volumes:
       - ./data:/data
+    networks:
+      - comfy_network
 
   comfy-nvidia:
     profiles: ["comfy-nvidia"]
@@ -39,6 +41,8 @@ services:
       - ./output:/output
     stop_signal: SIGKILL
     tty: true
+    networks:
+      - comfy_network
     deploy:
       resources:
         reservations:
@@ -67,3 +71,10 @@ services:
       - ./output:/output
     stop_signal: SIGKILL
     tty: true
+    networks:
+      - comfy_network
+
+networks:
+  comfy_network:
+    name: comfy_network
+    driver: bridge 

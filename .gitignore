@@ -1,5 +1,4 @@
 # Docker
-/.devcontainer
 .env
 
 # VSCode specific
