@@ -39,6 +39,7 @@ services:
       - ./services/comfy/comfy-lock.yaml:/home/ubuntu/app/comfy-lock.yaml:ro,cached
       - ./data:/data:delegated
       - ./output:/output
+      # Should .cache be a volume? 
     stop_signal: SIGKILL
     tty: true
     networks:

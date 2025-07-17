@@ -34,22 +34,7 @@ comfy env
 # Disable tracking (optional)
 comfy tracking disable
 
-# This is a workaround.
-if [ ! -d "$BASE_DIRECTORY/custom_nodes/ComfyUI-Manager" ]; then
-    echo "Installing ComfyUI-Manager..."
-    git clone --branch 3.33.8 --depth 1 https://github.com/Comfy-Org/ComfyUI-Manager.git ${BASE_DIRECTORY}/custom_nodes/ComfyUI-Manager
-else
-    echo "ComfyUI-Manager already installed"
-fi
-
-# Install custom nodes from comfy-lock.yaml file if it exists
-# @todo this is not working as expected feature still in early development
-# if [ -f "comfy-lock.yaml" ]; then
-#     echo "Installing custom nodes from comfy-lock.yaml..."
-#     comfy node install-deps --deps=comfy-lock.yaml
-# else
-#     echo "No comfy-lock.yaml or comfy-lock.json found, skipping custom node installation"
-# fi
+./post_install.sh
 
 # Start ComfyUI with the specified parameters
 comfy launch -- --listen --port $COMFY_PORT --base-directory $BASE_DIRECTORY --output-directory $OUTPUT_DIRECTORY $CLI_ARG
