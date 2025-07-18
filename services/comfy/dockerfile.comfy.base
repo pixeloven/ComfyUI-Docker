@@ -11,6 +11,10 @@ ARG PGID=1000
 RUN groupadd -g $PGID comfy && \
     useradd -m -u $PUID -g $PGID comfy
 
+RUN mkdir -p /data /output && \
+    chown -R comfy:comfy /data && \
+    chown -R comfy:comfy /output
+
 USER comfy
 
 WORKDIR /home/comfy
