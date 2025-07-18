@@ -5,6 +5,9 @@ FROM runtime AS base
 # RUN groupadd -g $PGID comfy && \
 #     useradd -m -u $PUID -g $PGID comfy
 
+RUN mkdir /data /output
+RUN chown ubuntu:ubuntu /data /output
+
 USER ubuntu
 
 WORKDIR /home/ubuntu

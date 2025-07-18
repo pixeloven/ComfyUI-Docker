@@ -16,20 +16,6 @@ else
     echo "ComfyUI-Manager already installed"
 fi
 
-# Install custom nodes from comfy-lock.yaml file if it exists
-# @todo this is not working as expected feature still in early development
-# if [ -f "comfy-lock.yaml" ]; then
-#     echo "Installing custom nodes from comfy-lock.yaml..."
-#     comfy node install-deps --deps=comfy-lock.yaml
-# else
-#     echo "No comfy-lock.yaml or comfy-lock.json found, skipping custom node installation"
-# fi
-
-# Install extensions
-# @todo when building locally we should tag images as dev?
-# @todo we can do it this way or we can auto load them into the data/config/comfy/user/default/ComfyUI-Manager/snapshots
-# cp basic-snapshot.json "$BASE_DIRECTORY/user/default/ComfyUI-Manager/snapshots/basic-snapshot.json"    
-
 # Mark completion
 touch .post_install_done
 
