@@ -23,7 +23,8 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 - **Persistent storage** - Your models, configs, and outputs survive container restarts
 - **Virtual environment** - Isolated Python environment for ComfyUI extensions
 - **Custom node management** - Version-controlled custom nodes using ComfyUI CLI and `comfy-lock.yaml`
-
+- **Automatic setup** - ComfyUI Manager and required directories are automatically configured
+- **Environment-based configuration** - All settings controlled via environment variables
 - **Optimized CI/CD** - Docker Bake-based workflows with efficient caching
 
 ## 🚀 Quick Start
@@ -32,7 +33,20 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 # 1. Clone and setup
 git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd ComfyUI-Docker
-cp .env.example .env
+
+# Create .env file with default settings
+cat > .env << EOF
+# User/Group IDs for container permissions
+PUID=1000
+PGID=1000
+
+# ComfyUI Configuration
+COMFY_PORT=8188
+CLI_ARGS=
+
+# Setup Configuration
+SETUP_DRY_RUN=1
+EOF
 
 # 2. Start ComfyUI
 docker compose --profile comfy-nvidia up -d        # GPU mode (recommended)
@@ -96,6 +110,7 @@ ComfyUI-Docker/
 - **[User Guides](docs/user-guides/)** – All user documentation
   - **[Quick Start](docs/user-guides/quick-start.md)** – Get running in 5 minutes
   - **[Usage Guide](docs/user-guides/usage.md)** – Daily operations and workflows
+  - **[Configuration](docs/user-guides/configuration.md)** – Environment variables and performance tuning
   - **[Comfy Lock Usage](docs/user-guides/comfy-lock-usage.md)** – Managing custom nodes and models
 
 

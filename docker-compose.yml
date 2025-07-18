@@ -35,8 +35,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ./services/comfy/extra_model_paths.yaml:/home/ubuntu/app/extra_model_paths.yaml:ro,cached
-      - ./services/comfy/comfy-lock.yaml:/home/ubuntu/app/comfy-lock.yaml:ro,cached
+      - ./services/comfy/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
       - ./output:/output
       # Should .cache be a volume? 
@@ -66,8 +65,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro  
-      - ./services/comfy/extra_model_paths.yaml:/home/ubuntu/app/extra_model_paths.yaml:ro,cached
-      - ./services/comfy/comfy-lock.yaml:/home/ubuntu/app/comfy-lock.yaml:ro,cached
+      - ./services/comfy/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
       - ./output:/output
     stop_signal: SIGKILL

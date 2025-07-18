@@ -47,15 +47,38 @@ docker compose --profile comfy-setup up
 ./data/config/     # ComfyUI settings
 ```
 
+## Automatic Setup Features
+
+The ComfyUI container automatically:
+
+- **Installs ComfyUI Manager**: Version 3.33.8 is automatically installed for easy extension management
+- **Creates Required Directories**: Sets up all necessary data and output directories
+- **Configures Virtual Environment**: Runs ComfyUI in an isolated Python environment
+- **Handles Permissions**: Uses PUID/PGID for proper file ownership
+
+### Post-Install Process
+
+The container runs a post-install script that:
+1. Creates necessary directories (`/data/config/comfy`, `/output`)
+2. Installs ComfyUI Manager if not present
+3. Sets up proper environment variables
+4. Marks completion to avoid re-running
+
+This ensures a consistent setup across all deployments.
+
 ## Configuration
 
 ```bash
 # Custom port
-echo 'COMFY_PORT=8080' >> .env
+sed -i 's/COMFY_PORT=8188/COMFY_PORT=8080/' .env
 
 # Performance tuning
-echo 'CLI_ARGS=--lowvram' >> .env    # 4-6GB GPUs
-echo 'CLI_ARGS=--novram' >> .env     # CPU fallback
+sed -i 's/CLI_ARGS=/CLI_ARGS=--lowvram/' .env    # 4-6GB GPUs
+sed -i 's/CLI_ARGS=/CLI_ARGS=--cpu/' .env        # CPU-only mode
+sed -i 's/CLI_ARGS=/CLI_ARGS=--novram/' .env     # No VRAM mode
+
+# Setup configuration
+sed -i 's/SETUP_DRY_RUN=1/SETUP_DRY_RUN=0/' .env  # Enable actual downloads
 ```
 
 ## Troubleshooting

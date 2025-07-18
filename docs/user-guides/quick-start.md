@@ -12,7 +12,20 @@ ComfyUI is a powerful node-based interface for AI image generation. This Docker 
 # 1. Clone and setup
 git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd ComfyUI-Docker
-cp .env.example .env
+
+# Create .env file with default settings
+cat > .env << EOF
+# User/Group IDs for container permissions
+PUID=1000
+PGID=1000
+
+# ComfyUI Configuration
+COMFY_PORT=8188
+CLI_ARGS=
+
+# Setup Configuration
+SETUP_DRY_RUN=1
+EOF
 
 # 2. Start (choose one)
 docker compose --profile comfy-nvidia up -d        # GPU mode (recommended)
@@ -30,18 +43,22 @@ docker compose --profile comfy-cpu up -d    # CPU mode (universal)
 
 ```bash
 # Change port (default: 8188)
-echo 'COMFY_PORT=8080' >> .env
+sed -i 's/COMFY_PORT=8188/COMFY_PORT=8080/' .env
 
 # Low VRAM mode (4-6GB GPUs)
-echo 'CLI_ARGS=--lowvram' >> .env
+sed -i 's/CLI_ARGS=/CLI_ARGS=--lowvram/' .env
+
+# CPU-only mode
+sed -i 's/CLI_ARGS=/CLI_ARGS=--cpu/' .env
 ```
 
 ## Download Models (Optional)
 
 ```bash
-# Preview downloads
+# Preview downloads (default)
 docker compose --profile comfy-setup up
 
-# Actually download (edit .env: SETUP_DRY_RUN=0)
+# Actually download models
+sed -i 's/SETUP_DRY_RUN=1/SETUP_DRY_RUN=0/' .env
 docker compose --profile comfy-setup up
 ``` 
