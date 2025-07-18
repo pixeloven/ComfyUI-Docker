@@ -8,8 +8,47 @@ Development setup and contributing to ComfyUI Docker.
 # Clone and setup
 git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd ComfyUI-Docker
-cp .env.example .env
+
+# Create .env file with default settings
+cat > .env << EOF
+# User/Group IDs for container permissions
+PUID=1000
+PGID=1000
+
+# ComfyUI Configuration
+COMFY_PORT=8188
+CLI_ARGS=
+
+# Setup Configuration
+SETUP_DRY_RUN=1
+EOF
 ```
+
+## Environment Variables
+
+The application supports the following environment variables:
+
+### User Configuration
+- `PUID` (default: 1000) - User ID for container permissions
+- `PGID` (default: 1000) - Group ID for container permissions
+
+### ComfyUI Configuration
+- `COMFY_PORT` (default: 8188) - Port for ComfyUI web interface
+- `CLI_ARGS` (default: "") - Additional CLI arguments for ComfyUI
+  - `--cpu` - Force CPU-only mode
+  - `--lowvram` - Low VRAM mode for 4-6GB GPUs
+  - `--novram` - No VRAM mode
+
+### Setup Configuration
+- `SETUP_DRY_RUN` (default: 1) - Enable/disable actual model downloads
+  - `1` - Preview downloads only (default)
+  - `0` - Actually download models
+
+### Build Configuration
+- `REGISTRY_URL` (default: "ghcr.io/pixeloven/comfyui-docker/") - Docker registry URL
+- `IMAGE_LABEL` (default: "latest") - Image tag
+- `RUNTIME` (default: "nvidia") - Runtime type
+- `PLATFORMS` (default: ["linux/amd64"]) - Target platforms
 
 ## Building Images
 

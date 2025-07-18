@@ -9,9 +9,12 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 - [ ] **ONNX Integration**: Make ONNX support configurable/optional rather than baked into the image
 - [x] **Virtual Environment**: Ensure everything runs in a proper venv as some extensions expect it
 - [x] **Docker Compose Readability**: Update docker-compose.yml to be more readable and maintainable
+- [x] **ComfyUI Manager Integration**: Automatically installs ComfyUI Manager v3.33.8
+- [x] **Post-Install Script**: Automated setup of directories and environment
 
 ### Configuration Issues
 - [x] **Port Hardcoding**: Port 8188 is now configurable via COMFY_PORT environment variable
+- [x] **Environment Variables**: All configuration is now properly externalized via environment variables
 - [ ] **Volume Mapping**: Generally better workflow volume mappings needed
 - [ ] **Persistent Extensions**: Need persistent volume for custom extensions
 - [x] **Cache Directory**: XDG_CACHE_HOME is properly configured in dockerfile.comfy.base
@@ -65,6 +68,8 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 2. Make ONNX support configurable
 3. Implement multi-workspace support
 4. Improve volume mappings for better workflow management
+5. ✅ Create comprehensive configuration documentation
+6. ✅ Update all documentation to reflect current application state
 
 ### Phase 2: Platform Expansion (Short-term)
 1. Add CPU/ROCM support
@@ -115,4 +120,4 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 
 **[⬆ Back to Project Management](index.md)** | **[⬆ Back to Documentation Index](../index.md)** | **[🐛 Report Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)**
 
-*Last Updated: 2025-01-27*
+*Last Updated: 2025-01-27 - Documentation updated to match current application state*

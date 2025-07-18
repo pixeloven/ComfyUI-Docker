@@ -1,27 +1,30 @@
 FROM runtime AS base
 
-# ARG PUID=1001
-# ARG PGID=1001
-# RUN groupadd -g $PGID comfy && \
-#     useradd -m -u $PUID -g $PGID comfy
+# Remove ubuntu user
+# https://askubuntu.com/questions/1513927/ubuntu-24-04-docker-images-now-includes-user-ubuntu-with-uid-gid-1000
+RUN touch /var/mail/ubuntu && \
+    chown ubuntu /var/mail/ubuntu && \
+    userdel -r ubuntu
 
-RUN mkdir /data /output
-RUN chown ubuntu:ubuntu /data /output
+ARG PUID=1000
+ARG PGID=1000
+RUN groupadd -g $PGID comfy && \
+    useradd -m -u $PUID -g $PGID comfy
 
-USER ubuntu
+USER comfy
 
-WORKDIR /home/ubuntu
+WORKDIR /home/comfy
 
 SHELL ["/bin/bash", "--login", "-c"]
 
-ENV VIRTUAL_ENV=/home/ubuntu/.venv
-ENV XDG_CACHE_HOME=/home/ubuntu/.cache
+ENV VIRTUAL_ENV=/home/comfy/.venv
+ENV XDG_CACHE_HOME=/home/comfy/.cache
 
 RUN --mount=type=cache,target=~/.cache/pip \ 
   python -m venv $VIRTUAL_ENV && \
   source ~/.venv/bin/activate
 
-ENV PATH="/home/ubuntu/.local/bin:$PATH"
+ENV PATH="/home/comfy/.local/bin:$PATH"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Using the comfy cli is creating a much larger image compared to manual install of the repo 12.7GB -> 15.3GB
@@ -32,7 +35,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 #   git clone --branch v0.3.43 --depth 1 https://github.com/comfyanonymous/ComfyUI.git app && \
 #   pip install -r requirements.txt && \
 #   pip install comfy-cli && \
-#   comfy --skip-prompt set-default /home/ubuntu/app && \
+#   comfy --skip-prompt set-default /home/comfy/app && \
 #   comfy --skip-prompt --no-enable-telemetry env
 
 # For now we need --skip-manager to avoid conflict with volume mounted custom_nodes. 
@@ -40,13 +43,13 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN --mount=type=cache,target=~/.cache/pip \
   source ~/.venv/bin/activate && \
   pip install comfy-cli && \
-  comfy --skip-prompt --workspace /home/ubuntu/app install --nvidia --skip-manager && \
-  comfy --skip-prompt set-default /home/ubuntu/app && \
+  comfy --skip-prompt --workspace /home/comfy/app install --nvidia --skip-manager && \
+  comfy --skip-prompt set-default /home/comfy/app && \
   comfy --skip-prompt --no-enable-telemetry env
 
-WORKDIR /home/ubuntu/app
+WORKDIR /home/comfy/app
 
-COPY --chown=ubuntu:ubuntu . .
+COPY --chown=comfy:comfy . .
 
 # Pre-install extensions
 RUN --mount=type=cache,target=~/.cache/pip \
@@ -57,10 +60,17 @@ RUN --mount=type=cache,target=~/.cache/pip \
   pip cache purge
 
 # Set environment variables
-ENV CLI_ARGS=""
-ENV COMFY_PORT=8188
-ENV BASE_DIRECTORY="/data/config/comfy"
-ENV OUTPUT_DIRECTORY="/output"
+ARG CLI_ARGS=""
+ARG COMFY_PORT=8188
+ARG COMFY_DATA_DIRECTORY="/data"
+ARG COMFY_OUTPUT_DIRECTORY="/output"
+
+ENV CLI_ARGS=$CLI_ARGS
+ENV COMFY_PORT=$COMFY_PORT
+ENV COMFY_APP_DIRECTORY="/home/comfy/app"
+ENV COMFY_DATA_DIRECTORY=$COMFY_DATA_DIRECTORY
+ENV COMFY_OUTPUT_DIRECTORY=$COMFY_OUTPUT_DIRECTORY
+ENV COMFY_BASE_DIRECTORY="$COMFY_DATA_DIRECTORY/config/comfy"
 
 EXPOSE $COMFY_PORT
 
