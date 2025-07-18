@@ -15,6 +15,7 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 - **⚡ Efficient Builds** - Docker Bake for optimized image building and caching
 - **🎛️ Custom Node Management** - Version-controlled custom nodes with `comfy-lock.yaml`
 
+
 ### Key Features
 - **Node-based workflow editor** - Visual programming interface for AI image generation
 - **Multi-profile architecture** - GPU (`comfy-nvidia`), CPU (`comfy-cpu`), and setup (`comfy-setup`) modes
@@ -22,6 +23,7 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 - **Persistent storage** - Your models, configs, and outputs survive container restarts
 - **Virtual environment** - Isolated Python environment for ComfyUI extensions
 - **Custom node management** - Version-controlled custom nodes using ComfyUI CLI and `comfy-lock.yaml`
+
 - **Optimized CI/CD** - Docker Bake-based workflows with efficient caching
 
 ## 🚀 Quick Start
@@ -71,6 +73,7 @@ ComfyUI-Docker/
 │
 ├── 📦 data/                          # Persistent data storage
 ├── 🖼️ output/                        # Generated image outputs
+
 ├── 🔧 .github/                       # GitHub Actions workflows
 ├── 📋 docker-compose.yml             # Main orchestration file
 ├── 🏗️ docker-bake.hcl                # Multi-stage build configuration
@@ -94,6 +97,7 @@ ComfyUI-Docker/
   - **[Quick Start](docs/user-guides/quick-start.md)** – Get running in 5 minutes
   - **[Usage Guide](docs/user-guides/usage.md)** – Daily operations and workflows
   - **[Comfy Lock Usage](docs/user-guides/comfy-lock-usage.md)** – Managing custom nodes and models
+
 
 ### For Developers
 - **[Development Guides](docs/development-guides/)** – All development documentation

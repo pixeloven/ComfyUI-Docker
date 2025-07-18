@@ -1,0 +1,11 @@
+# Docker files
+.dockerignore
+dockerfile.comfy.base
+dockerfile.cpu.runtime
+dockerfile.nvidia.runtime
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db 

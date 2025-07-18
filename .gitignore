@@ -1,5 +1,4 @@
 # Docker
-/.devcontainer
 .env
 
 # VSCode specific
@@ -8,10 +7,9 @@
 
 # Service data
 /data/*
-!/data/.gitkeep
+!/data/.gitignore
+/output/*
+!/output/.gitignore
 
 # Python
 /.venv
-
-# act local ci testing
-/bin
