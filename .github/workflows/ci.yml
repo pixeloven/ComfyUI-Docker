@@ -28,10 +28,10 @@ jobs:
         run: |
           echo "🔍 Validating configuration files..."
           
-          # Service validation (without profiles)
-          docker compose config --services | grep -q comfy-cpu
-          docker compose config --services | grep -q comfy-nvidia
-          docker compose config --services | grep -q comfy-nvidia-addons
+          # Service validation (with profiles)
+          docker compose --profile cpu-only config --services | grep -q comfy-cpu
+          docker compose --profile nvidia config --services | grep -q comfy-nvidia
+          docker compose --profile nvidia config --services | grep -q comfy-nvidia-addons
           echo "✅ All services configured correctly"
           
           # Environment file validation
