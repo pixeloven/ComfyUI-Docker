@@ -54,16 +54,16 @@ CLI_ARGS=--novram
 CLI_ARGS=--listen
 ```
 
-### Setup Configuration
+### Performance Configuration
 
-Control the model download process:
+Control ComfyUI performance and resource usage:
 
 ```bash
-# Model download mode
-SETUP_DRY_RUN=1    # 1 = preview only, 0 = actually download (default: 1)
+# Additional CLI arguments for performance tuning
+CLI_ARGS=          # Additional arguments passed to ComfyUI
 ```
 
-**Note**: The default is `1` (preview mode) to prevent accidental large downloads. Set to `0` to actually download models.
+**Note**: Use CLI_ARGS to optimize performance for your hardware configuration.
 
 ## File Structure
 
@@ -85,22 +85,11 @@ ComfyUI-Docker/
 
 ## Model Management
 
-### Automatic Model Downloads
-
-The setup service can automatically download models:
-
-```bash
-# Preview what would be downloaded
-docker compose --profile comfy-setup up
-
-# Actually download models
-sed -i 's/SETUP_DRY_RUN=1/SETUP_DRY_RUN=0/' .env
-docker compose --profile comfy-setup up
-```
+Model management is now handled through custom nodes within ComfyUI. The comfy-setup service has been deprecated in favor of integrated model management.
 
 ### Manual Model Management
 
-You can also manually manage models:
+You can manually manage models:
 
 1. **Download models** to `./data/models/`
 2. **Organize by type** (Stable-diffusion, VAE, ControlNet, etc.)
@@ -128,7 +117,6 @@ PUID=1000
 PGID=1000
 COMFY_PORT=8189
 CLI_ARGS=
-SETUP_DRY_RUN=1
 EOF
 
 # Start second instance

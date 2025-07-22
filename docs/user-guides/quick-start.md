@@ -23,8 +23,6 @@ PGID=1000
 COMFY_PORT=8188
 CLI_ARGS=
 
-# Setup Configuration
-SETUP_DRY_RUN=1
 EOF
 
 # 2. Start (choose one)
@@ -52,13 +50,6 @@ sed -i 's/CLI_ARGS=/CLI_ARGS=--lowvram/' .env
 sed -i 's/CLI_ARGS=/CLI_ARGS=--cpu/' .env
 ```
 
-## Download Models (Optional)
+## Model Management
 
-```bash
-# Preview downloads (default)
-docker compose --profile comfy-setup up
-
-# Actually download models
-sed -i 's/SETUP_DRY_RUN=1/SETUP_DRY_RUN=0/' .env
-docker compose --profile comfy-setup up
-``` 
+Model management is now handled through custom nodes within ComfyUI. The comfy-setup service has been deprecated in favor of integrated model management. 
