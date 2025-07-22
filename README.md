@@ -18,7 +18,7 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 
 ### Key Features
 - **Node-based workflow editor** - Visual programming interface for AI image generation
-- **Multi-profile architecture** - GPU (`comfy-nvidia`), CPU (`comfy-cpu`), and setup (`comfy-setup`) modes
+- **Multi-profile architecture** - GPU (`comfy-nvidia`) and CPU (`comfy-cpu`) modes
 - **Automated model management** - Download and verify models with checksums
 - **Persistent storage** - Your models, configs, and outputs survive container restarts
 - **Virtual environment** - Isolated Python environment for ComfyUI extensions
@@ -44,8 +44,7 @@ PGID=1000
 COMFY_PORT=8188
 CLI_ARGS=
 
-# Setup Configuration
-SETUP_DRY_RUN=1
+
 EOF
 
 # 2. Start ComfyUI
@@ -79,12 +78,6 @@ ComfyUI-Docker/
 │   │   ├── extra_model_paths.yaml    # Model path configuration
 │   │   └── addon-requirements.txt    # Python dependencies
 │   │
-│   └── comfy-setup/                  # Model setup service
-│       ├── Dockerfile                # Setup service image
-│       ├── entrypoint.sh             # Setup entrypoint
-│       ├── checksums.sha256          # Model integrity checksums
-│       └── links.txt                 # Model download links
-│
 ├── 📦 data/                          # Persistent data storage
 ├── 🖼️ output/                        # Generated image outputs
 

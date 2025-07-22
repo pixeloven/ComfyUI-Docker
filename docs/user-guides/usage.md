@@ -38,14 +38,13 @@ docker compose --profile comfy-nvidia up -d
 ## Model Management
 
 ```bash
-# Download models
-docker compose --profile comfy-setup up
-
 # Model locations
 ./data/models/     # Downloaded models
 ./output/          # Generated images
 ./data/config/     # ComfyUI settings
 ```
+
+**Note**: Model management is now handled through custom nodes. The comfy-setup service has been deprecated in favor of integrated model management within ComfyUI.
 
 ## Automatic Setup Features
 
@@ -77,8 +76,8 @@ sed -i 's/CLI_ARGS=/CLI_ARGS=--lowvram/' .env    # 4-6GB GPUs
 sed -i 's/CLI_ARGS=/CLI_ARGS=--cpu/' .env        # CPU-only mode
 sed -i 's/CLI_ARGS=/CLI_ARGS=--novram/' .env     # No VRAM mode
 
-# Setup configuration
-sed -i 's/SETUP_DRY_RUN=1/SETUP_DRY_RUN=0/' .env  # Enable actual downloads
+# Performance tuning
+sed -i 's/CLI_ARGS=/CLI_ARGS=--lowvram/' .env    # 4-6GB GPUs
 ```
 
 ## Troubleshooting

@@ -8,19 +8,6 @@ name: ComfyUI-Docker
 
 services:
 
-  comfy-setup:
-    image: ghcr.io/pixeloven/comfyui-docker/comfy-setup:latest
-    profiles: ["comfy-setup"]
-    user: ${PUID:-1000}:${PGID:-1000}
-    environment:
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - SETUP_DRY_RUN=${SETUP_DRY_RUN:-1} # Default is to run dry run
-    volumes:
-      - ./data:/data
-    networks:
-      - comfy_network
-
   comfy-nvidia:
     profiles: ["comfy-nvidia"]
     image: ghcr.io/pixeloven/comfyui-docker/comfy-nvidia:latest

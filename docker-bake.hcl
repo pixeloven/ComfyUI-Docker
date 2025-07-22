@@ -82,25 +82,13 @@ target "comfy-cpu" {
     depends_on = ["runtime-cpu"]
 }
 
-// ComfyUI setup image
-target "comfy-setup" {
-    context = "services/comfy-setup"
-    dockerfile = "Dockerfile"
-    platforms = PLATFORMS
-    tags = [
-        "${REGISTRY_URL}comfy-setup:${IMAGE_LABEL}"
-    ]
-    cache-from = ["type=registry,ref=${REGISTRY_URL}comfy-setup:cache"]
-    cache-to   = ["type=inline"]
-}
-
 // Convenience groups
 group "default" {
     targets = ["all"]
 }
 
 group "all" {
-    targets = ["runtime", "comfy", "comfy-setup"]
+    targets = ["runtime", "comfy"]
 }
 
 // Base runtime images

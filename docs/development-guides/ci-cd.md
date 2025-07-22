@@ -16,7 +16,7 @@ Our CI/CD pipeline uses Docker Bake for efficient image building with proper cac
 
 | Group | Builds |
 |-------|--------|
-| `all` | All images (runtime-nvidia, runtime-cpu, comfy-nvidia, comfy-cpu, comfy-setup) |
+| `all` | All images (runtime-nvidia, runtime-cpu, comfy-nvidia, comfy-cpu) |
 | `runtime` | Runtime images only |
 | `nvidia` | NVIDIA images (runtime-nvidia, comfy-nvidia) |
 | `cpu` | CPU images (runtime-cpu, comfy-cpu) |

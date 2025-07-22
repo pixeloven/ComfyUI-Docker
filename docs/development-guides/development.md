@@ -19,8 +19,8 @@ PGID=1000
 COMFY_PORT=8188
 CLI_ARGS=
 
-# Setup Configuration
-SETUP_DRY_RUN=1
+# Performance Configuration
+CLI_ARGS=
 EOF
 ```
 
@@ -39,10 +39,8 @@ The application supports the following environment variables:
   - `--lowvram` - Low VRAM mode for 4-6GB GPUs
   - `--novram` - No VRAM mode
 
-### Setup Configuration
-- `SETUP_DRY_RUN` (default: 1) - Enable/disable actual model downloads
-  - `1` - Preview downloads only (default)
-  - `0` - Actually download models
+### Performance Configuration
+- `CLI_ARGS` (default: "") - Additional CLI arguments for ComfyUI performance tuning
 
 ### Build Configuration
 - `REGISTRY_URL` (default: "ghcr.io/pixeloven/comfyui-docker/") - Docker registry URL
@@ -79,7 +77,6 @@ docker buildx bake cpu
 # Build specific target
 docker buildx bake comfy-nvidia
 docker buildx bake comfy-cpu
-docker buildx bake comfy-setup
 ```
 
 ### Available Targets
@@ -91,10 +88,9 @@ docker buildx bake comfy-setup
 #### Application Images
 - `comfy-nvidia` - ComfyUI with NVIDIA GPU support
 - `comfy-cpu` - ComfyUI with CPU-only support
-- `comfy-setup` - Setup utility for model downloads
 
 #### Convenience Groups
-- `all` - Build all images (runtimes + applications + setup)
+- `all` - Build all images (runtimes + applications)
 - `runtime` - Build both runtime base images
 - `comfy` - Build both ComfyUI application images
 - `nvidia` - Build NVIDIA runtime and application
