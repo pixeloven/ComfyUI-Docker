@@ -56,12 +56,9 @@ WORKDIR /home/comfy/app
 COPY --chown=comfy:comfy . .
 
 # Pre-install extensions
-RUN --mount=type=cache,target=~/.cache/pip \
-  source ~/.venv/bin/activate && \
-  pip install -r addon-requirements.txt && \
-  chmod u+x ./entrypoint.sh && \
-  chmod u+x ./startup.sh && \
-  pip cache purge
+RUN chmod u+x ./entrypoint.sh && \
+    chmod u+x ./startup.sh && \
+    pip cache purge
 
 # Set environment variables
 ARG CLI_ARGS=""

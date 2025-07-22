@@ -82,9 +82,27 @@ target "comfy-cpu" {
     depends_on = ["runtime-cpu"]
 }
 
+target "comfy-nvidia-addons" {
+    context = "services/comfy"
+    contexts = {
+        comfy_nvidia = "target:comfy-nvidia"
+    }
+    dockerfile = "dockerfile.comfy.nvidia.addons"
+    platforms = PLATFORMS
+    tags = [
+        "${REGISTRY_URL}comfy-nvidia-addons:${IMAGE_LABEL}"
+    ]
+    cache-from = [
+        "type=registry,ref=${REGISTRY_URL}comfy-nvidia:cache",
+        "type=registry,ref=${REGISTRY_URL}comfy-nvidia-addons:cache"
+    ]
+    cache-to   = ["type=inline"]
+    depends_on = ["comfy-nvidia"]
+}
+
 // Convenience groups
 group "default" {
-    targets = ["all"]
+    targets = ["all", "comfy-nvidia-addons"]
 }
 
 group "all" {
@@ -97,7 +115,7 @@ group "runtime" {
 }
 
 group "nvidia" {
-    targets = ["runtime-nvidia", "comfy-nvidia"]
+    targets = ["runtime-nvidia", "comfy-nvidia", "comfy-nvidia-addons"]
 }
 
 group "cpu" {

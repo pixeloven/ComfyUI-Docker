@@ -53,3 +53,17 @@ sed -i 's/CLI_ARGS=/CLI_ARGS=--cpu/' .env
 ## Model Management
 
 Model management is now handled through custom nodes within ComfyUI. The comfy-setup service has been deprecated in favor of integrated model management. 
+
+## GPU Addons Image
+
+A new GPU-specific image, `comfy-nvidia-addons`, is available for users who want pre-installed GPU-specific addons (see `addon-requirements.txt`).
+
+**To use the GPU image with addons:**
+
+```bash
+docker run --rm --gpus all -v $(pwd)/data:/data -v $(pwd)/output:/output -p 8188:8188 ghcr.io/pixeloven/comfyui-docker/comfy-nvidia-addons:latest
+```
+
+- This image is based on the standard GPU build but includes additional Python packages for GPU features/extensions.
+- Use this image if you require the GPU-specific addons listed in `addon-requirements.txt`.
+- For most users, the standard `comfy-nvidia` image is sufficient unless you need these extra features. 

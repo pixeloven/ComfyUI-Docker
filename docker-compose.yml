@@ -8,8 +8,30 @@ name: ComfyUI-Docker
 
 services:
 
+  comfy-cpu:
+    profiles: ["cpu-only"]
+    image: ghcr.io/pixeloven/comfyui-docker/comfy-cpu:latest
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - COMFY_PORT=${COMFY_PORT:-8188}
+      - CLI_ARGS=--cpu
+    ports:
+      - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro  
+      - ./services/comfy/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
+      - ./data:/data:delegated
+      - ./output:/output
+    stop_signal: SIGKILL
+    tty: true
+    networks:
+      - comfy_network
+
   comfy-nvidia:
-    profiles: ["comfy-nvidia"]
+    profiles: ["nvidia"]
     image: ghcr.io/pixeloven/comfyui-docker/comfy-nvidia:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
@@ -38,20 +60,23 @@ services:
               device_ids: ['0']
               capabilities: [compute, utility]
 
-  comfy-cpu:
-    profiles: ["comfy-cpu"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfy-cpu:latest
+# @todo rename images and better utilize tags
+# @todo update extra_model_paths.yaml to be compatible with invokeai and have versions for default, invoke, a1111, etc.
+
+  comfy-nvidia-addons:
+    profiles: ["nvidia"]
+    image: ghcr.io/pixeloven/comfyui-docker/comfy-nvidia-addons:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - COMFY_PORT=${COMFY_PORT:-8188}
-      - CLI_ARGS=--cpu
+      - CLI_ARGS=
     ports:
       - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro  
+      - /etc/timezone:/etc/timezone:ro
       - ./services/comfy/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
       - ./output:/output
