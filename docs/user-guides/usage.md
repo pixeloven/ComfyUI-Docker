@@ -106,16 +106,3 @@ docker compose exec comfy nvidia-smi
 ---
 
 **[⬆ Back to Documentation](README.md)** | **[🚀 Getting Started](GETTING_STARTED.md)** | **[⚙️ Configuration](CONFIGURATION.md)** 
-
-## GPU Addons Image Usage
-
-The `comfy-nvidia-addons` image includes GPU-specific Python addons (see `addon-requirements.txt`).
-
-**To run with GPU addons:**
-
-```bash
-docker run --rm --gpus all -v $(pwd)/data:/data -v $(pwd)/output:/output -p 8188:8188 ghcr.io/pixeloven/comfyui-docker/comfy-nvidia-addons:latest
-```
-
-- Use this image if you need the extra GPU-specific features/extensions.
-- The standard `comfy-nvidia` image is recommended for most users unless you require these addons. 

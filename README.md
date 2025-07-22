@@ -17,16 +17,11 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 
 
 ### Key Features
-- **Node-based workflow editor** - Visual programming interface for AI image generation
-- **Multi-profile architecture** - GPU (`comfy-nvidia`) and CPU (`comfy-cpu`) modes
-- **Automated model management** - Download and verify models with checksums
+- **Multi-profile architecture** - GPU and CPU profiles
 - **Persistent storage** - Your models, configs, and outputs survive container restarts
 - **Virtual environment** - Isolated Python environment for ComfyUI extensions
-- **Custom node management** - Version-controlled custom nodes using ComfyUI CLI and `comfy-lock.yaml`
-- **Automatic setup** - ComfyUI Manager and required directories are automatically configured
 - **Environment-based configuration** - All settings controlled via environment variables
 - **Optimized CI/CD** - Docker Bake-based workflows with efficient caching
-- **GPU Addons Image** - Optional image (`comfy-nvidia-addons`) with pre-installed GPU-specific Python addons for advanced users
 
 ## 🚀 Quick Start
 
@@ -54,9 +49,6 @@ docker compose --profile comfy-nvidia up -d
 # OR
 # CPU mode (universal)
 docker compose --profile comfy-cpu up -d
-# OR
-# GPU mode with extra addons (advanced)
-docker run --rm --gpus all -v $(pwd)/data:/data -v $(pwd)/output:/output -p 8188:8188 ghcr.io/pixeloven/comfyui-docker/comfy-nvidia-addons:latest
 
 # 3. Open ComfyUI at http://localhost:8188 (or your configured port)
 ```
