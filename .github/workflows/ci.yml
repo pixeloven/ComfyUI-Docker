@@ -28,9 +28,11 @@ jobs:
         run: |
           echo "🔍 Validating configuration files..."
           
-          # Profile validation
-          docker compose --profile comfy-nvidia config --services | grep -q comfy
-          echo "✅ Service profiles valid"
+          # Service validation (without profiles)
+          docker compose config --services | grep -q comfy-cpu
+          docker compose config --services | grep -q comfy-nvidia
+          docker compose config --services | grep -q comfy-nvidia-addons
+          echo "✅ All services configured correctly"
           
           # Environment file validation
           grep -q "PUID" .env.example
@@ -40,6 +42,12 @@ jobs:
           # Docker Bake validation
           docker buildx bake --file docker-bake.hcl --print
           echo "✅ Docker Bake configuration valid"
+          
+          # Validate new build target exists
+          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cpu"
+          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-nvidia"
+          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-nvidia-addons"
+          echo "✅ New build target configured"
 
       - name: Clean up Docker
         run: docker system prune -a -f

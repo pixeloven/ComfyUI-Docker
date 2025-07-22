@@ -26,8 +26,8 @@ CLI_ARGS=
 EOF
 
 # 2. Start (choose one)
-docker compose --profile comfy-nvidia up -d        # GPU mode (recommended)
-docker compose --profile comfy-cpu up -d    # CPU mode (universal)
+docker compose comfy-nvidia up -d        # GPU mode (recommended)
+docker compose comfy-cpu up -d    # CPU mode (universal)
 
 # 3. Open http://localhost:8188
 ```

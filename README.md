@@ -45,10 +45,10 @@ EOF
 
 # 2. Start ComfyUI
 # Standard GPU mode (recommended for most users)
-docker compose --profile comfy-nvidia up -d
+docker compose comfy-nvidia up -d
 # OR
 # CPU mode (universal)
-docker compose --profile comfy-cpu up -d
+docker compose comfy-cpu up -d
 
 # 3. Open ComfyUI at http://localhost:8188 (or your configured port)
 ```
