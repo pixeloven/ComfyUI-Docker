@@ -20,12 +20,13 @@ variable "PLATFORMS" {
 
 target "runtime-nvidia" {
     context = "services/runtime"
-    dockerfile = "dockerfile.nvidia.runtime"
+    dockerfile = "dockerfile.cuda.runtime"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}runtime-nvidia:${IMAGE_LABEL}"
+        "${REGISTRY_URL}runtime-cuda:${IMAGE_LABEL}",
+        "${REGISTRY_URL}runtime-cuda:cache"
     ]
-    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime-nvidia:cache"]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime-cuda:cache"]
     cache-to   = ["type=inline"]
 }
 
@@ -34,7 +35,8 @@ target "runtime-cpu" {
     dockerfile = "dockerfile.cpu.runtime"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}runtime-cpu:${IMAGE_LABEL}"
+        "${REGISTRY_URL}runtime-cpu:${IMAGE_LABEL}",
+        "${REGISTRY_URL}runtime-cpu:cache"
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}runtime-cpu:cache"]
     cache-to   = ["type=inline"]
@@ -45,14 +47,15 @@ target "comfy-nvidia" {
     contexts = {
         runtime = "target:runtime-nvidia"
     }
-    dockerfile = "dockerfile.comfy.base"
+    dockerfile = "dockerfile.comfy.cuda.base"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}comfy-nvidia:${IMAGE_LABEL}"
+        "${REGISTRY_URL}comfyui-cuda:${IMAGE_LABEL}",
+        "${REGISTRY_URL}comfyui-cuda:cache"
     ]
     cache-from = [
-        "type=registry,ref=${REGISTRY_URL}runtime-nvidia:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-nvidia:cache"
+        "type=registry,ref=${REGISTRY_URL}runtime-cuda:cache",
+        "type=registry,ref=${REGISTRY_URL}comfyui-cuda:cache"
     ]
     cache-to   = ["type=inline"]
     args = {
@@ -66,14 +69,15 @@ target "comfy-cpu" {
     contexts = {
         runtime = "target:runtime-cpu"
     }
-    dockerfile = "dockerfile.comfy.base"
+    dockerfile = "dockerfile.comfy.cpu.base"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}comfy-cpu:${IMAGE_LABEL}"
+        "${REGISTRY_URL}comfyui-cpu:${IMAGE_LABEL}",
+        "${REGISTRY_URL}comfyui-cpu:cache"
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime-cpu:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-cpu:cache"
+        "type=registry,ref=${REGISTRY_URL}comfyui-cpu:cache"
     ]
     cache-to   = ["type=inline"]
     args = {
@@ -83,18 +87,19 @@ target "comfy-cpu" {
 }
 
 target "comfy-nvidia-addons" {
-    context = "services/comfy/addons"
+    context = "services/comfy/extended"
     contexts = {
         base = "target:comfy-nvidia"
     }
-    dockerfile = "dockerfile.comfy.nvidia.addons"
+    dockerfile = "dockerfile.comfy.cuda.extended"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}comfy-nvidia-addons:${IMAGE_LABEL}"
+        "${REGISTRY_URL}comfyui-cuda-extended:${IMAGE_LABEL}",
+        "${REGISTRY_URL}comfyui-cuda-extended:cache"
     ]
     cache-from = [
-        "type=registry,ref=${REGISTRY_URL}comfy-nvidia:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-nvidia-addons:cache"
+        "type=registry,ref=${REGISTRY_URL}comfyui-cuda:cache",
+        "type=registry,ref=${REGISTRY_URL}comfyui-cuda-extended:cache"
     ]
     cache-to   = ["type=inline"]
     depends_on = ["comfy-nvidia"]

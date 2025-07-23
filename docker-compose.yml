@@ -10,7 +10,7 @@ services:
 
   comfy-cpu:
     profiles: ["cpu-only"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfy-cpu:latest
+    image: ghcr.io/pixeloven/comfyui-docker/comfyui-cpu:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
@@ -32,7 +32,7 @@ services:
 
   comfy-nvidia:
     profiles: ["nvidia"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfy-nvidia:latest
+    image: ghcr.io/pixeloven/comfyui-docker/comfyui-cuda:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
@@ -65,7 +65,7 @@ services:
 
   comfy-nvidia-addons:
     profiles: ["nvidia"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfy-nvidia-addons:latest
+    image: ghcr.io/pixeloven/comfyui-docker/comfyui-cuda-extended:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
