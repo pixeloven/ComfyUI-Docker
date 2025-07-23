@@ -47,7 +47,7 @@ target "comfy-nvidia" {
     contexts = {
         runtime = "target:runtime-nvidia"
     }
-    dockerfile = "dockerfile.comfy.cuda.base"
+    dockerfile = "dockerfile.comfy.base"
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}comfyui-cuda:${IMAGE_LABEL}",
@@ -69,7 +69,7 @@ target "comfy-cpu" {
     contexts = {
         runtime = "target:runtime-cpu"
     }
-    dockerfile = "dockerfile.comfy.cpu.base"
+    dockerfile = "dockerfile.comfy.base"
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}comfyui-cpu:${IMAGE_LABEL}",
