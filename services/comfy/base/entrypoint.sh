@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
-# Run post install script
-./scripts/post-install.sh
+# Run post install script if it exists
+if [ -f "./scripts/post-install.sh" ]; then
+    ./scripts/post-install.sh
+fi
 
 # Check if post-install steps have already been run
 echo "Checking if post install steps have already been run"

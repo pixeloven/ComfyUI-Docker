@@ -31,7 +31,7 @@ jobs:
           # Service validation (with profiles)
           docker compose --profile cpu-only config --services | grep -q comfy-cpu
           docker compose --profile nvidia config --services | grep -q comfy-nvidia
-          docker compose --profile nvidia config --services | grep -q comfy-nvidia-addons
+          docker compose --profile nvidia config --services | grep -q comfy-cuda-extended
           echo "✅ All services configured correctly"
           
           # Environment file validation
@@ -46,7 +46,7 @@ jobs:
           # Validate new build target exists
           docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cpu"
           docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-nvidia"
-          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-nvidia-addons"
+          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cuda-extended"
           echo "✅ New build target configured"
 
       - name: Clean up Docker

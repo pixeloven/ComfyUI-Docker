@@ -10,7 +10,7 @@ services:
 
   comfy-cpu:
     profiles: ["cpu-only"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfyui-cpu:latest
+    image: ghcr.io/pixeloven/comfyui-docker/comfy-cpu:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
@@ -32,7 +32,7 @@ services:
 
   comfy-nvidia:
     profiles: ["nvidia"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfyui-cuda:latest
+    image: ghcr.io/pixeloven/comfyui-docker/comfy-cuda:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
@@ -63,9 +63,9 @@ services:
 # @todo rename images and better utilize tags
 # @todo update extra_model_paths.yaml to be compatible with invokeai and have versions for default, invoke, a1111, etc.
 
-  comfy-nvidia-addons:
+  comfy-cuda-extended:
     profiles: ["nvidia"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfyui-cuda-extended:latest
+    image: ghcr.io/pixeloven/comfyui-docker/comfy-cuda-extended:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
