@@ -19,7 +19,7 @@ variable "PLATFORMS" {
 }
 
 target "runtime-nvidia" {
-    context = "services/comfy"
+    context = "services/runtime"
     dockerfile = "dockerfile.nvidia.runtime"
     platforms = PLATFORMS
     tags = [
@@ -30,7 +30,7 @@ target "runtime-nvidia" {
 }
 
 target "runtime-cpu" {
-    context = "services/comfy"
+    context = "services/runtime"
     dockerfile = "dockerfile.cpu.runtime"
     platforms = PLATFORMS
     tags = [
@@ -41,7 +41,7 @@ target "runtime-cpu" {
 }
 
 target "comfy-nvidia" {
-    context = "services/comfy"
+    context = "services/comfy/base"
     contexts = {
         runtime = "target:runtime-nvidia"
     }
@@ -62,7 +62,7 @@ target "comfy-nvidia" {
 }
 
 target "comfy-cpu" {
-    context = "services/comfy"
+    context = "services/comfy/base"
     contexts = {
         runtime = "target:runtime-cpu"
     }
@@ -83,7 +83,7 @@ target "comfy-cpu" {
 }
 
 target "comfy-nvidia-addons" {
-    context = "services/comfy"
+    context = "services/comfy/addons"
     contexts = {
         base = "target:comfy-nvidia"
     }

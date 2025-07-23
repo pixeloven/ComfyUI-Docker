@@ -1,4 +1,4 @@
-FROM base as addons
+FROM base AS addons
 
 USER comfy
 WORKDIR /home/comfy/app

@@ -1,0 +1,9 @@
+# Docker files
+.dockerignore
+dockerfile.*
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db 
