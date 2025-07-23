@@ -85,7 +85,7 @@ target "comfy-cpu" {
 target "comfy-nvidia-addons" {
     context = "services/comfy"
     contexts = {
-        comfy_nvidia = "target:comfy-nvidia"
+        base = "target:comfy-nvidia"
     }
     dockerfile = "dockerfile.comfy.nvidia.addons"
     platforms = PLATFORMS
@@ -102,14 +102,13 @@ target "comfy-nvidia-addons" {
 
 // Convenience groups
 group "default" {
-    targets = ["all", "comfy-nvidia-addons"]
+    targets = ["all"]
 }
 
 group "all" {
-    targets = ["runtime", "comfy"]
+    targets = ["runtime", "nvidia", "cpu"]
 }
 
-// Base runtime images
 group "runtime" {
     targets = ["runtime-nvidia", "runtime-cpu"]
 }
@@ -122,7 +121,4 @@ group "cpu" {
     targets = ["runtime-cpu", "comfy-cpu"]
 }
 
-group "comfy" {
-    targets = ["comfy-nvidia", "comfy-cpu"]
-}
 

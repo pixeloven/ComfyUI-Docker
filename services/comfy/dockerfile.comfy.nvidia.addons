@@ -1,4 +1,4 @@
-FROM ghcr.io/pixeloven/comfyui-docker/comfy-nvidia:latest
+FROM base as addons
 
 USER comfy
 WORKDIR /home/comfy/app
@@ -7,10 +7,8 @@ SHELL ["/bin/bash", "--login", "-c"]
 
 COPY --chown=comfy:comfy addon-requirements.txt ./
 
+# Copy the scripts this image needs
 RUN --mount=type=cache,target=~/.cache/pip \
   source ~/.venv/bin/activate && \
   pip install -r addon-requirements.txt && \
   pip cache purge
-
-ENTRYPOINT ["./entrypoint.sh"]
-CMD ["bash", "./startup.sh"] 
