@@ -1,14 +1,11 @@
-FROM base AS addons
+FROM base AS extended
 
-USER comfy
-WORKDIR /home/comfy/app
+COPY --chown=comfy:comfy . .
 
-SHELL ["/bin/bash", "--login", "-c"]
+RUN chmod u+x ./scripts/*.sh
 
-COPY --chown=comfy:comfy addon-requirements.txt ./
-
-# Copy the scripts this image needs
+# Install requirements
 RUN --mount=type=cache,target=~/.cache/pip \
   source ~/.venv/bin/activate && \
-  pip install -r addon-requirements.txt && \
+  pip install -r requirements.txt && \
   pip cache purge

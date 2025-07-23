@@ -88,6 +88,39 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 2. Make repository structure decision (harmony project)
 3. Evaluate multi-modal AI workflow support
 
+## 🆕 New Priorities Based on Comparative Analysis
+
+### Multi-Architecture Support (High Priority)
+- [ ] **AMD ROCm Support**: Add AMD GPU compatibility (from YanWenKun, ai-dock)
+- [ ] **ARM64 Support**: Apple Silicon and ARM server support
+- [ ] **Multiple CUDA Versions**: Support for different CUDA releases
+- [ ] **Cross-Platform Testing**: Ensure compatibility across architectures
+
+### Cloud Deployment Features (High Priority)
+- [ ] **Vast.ai Templates**: Pre-configured templates for Vast.ai deployment
+- [ ] **RunPod Templates**: Pre-configured templates for RunPod deployment
+- [ ] **Cloud Documentation**: Dedicated cloud deployment guides
+- [ ] **Optimized Images**: Smaller, cloud-ready variants
+- [ ] **Auto-scaling Support**: Cloud-native scaling capabilities
+
+### Security & Configuration (Medium Priority)
+- [ ] **Optional Password Protection**: Default security with authentication options
+- [ ] **Token Support**: CivitAI, HuggingFace integration for model downloads
+- [ ] **Auto-update Features**: Configurable ComfyUI updates
+- [ ] **Enhanced Environment Variables**: More comprehensive configuration options
+
+### Service Orchestration (Medium Priority)
+- [ ] **Supervisor Integration**: Multi-service orchestration (from ai-dock)
+- [ ] **API Wrapper Service**: ComfyUI API service management
+- [ ] **Service Health Monitoring**: Health checks and monitoring
+- [ ] **Memory Management**: Built-in VRAM clearing and optimization
+
+### Enhanced User Experience (Medium Priority)
+- [ ] **Runtime Permission Flexibility**: Enhanced UID/GID configuration (from mmartial)
+- [ ] **WSL2 Optimization**: Better Windows Subsystem for Linux support
+- [ ] **Extension Automation**: Automated custom node installation
+- [ ] **Extension Marketplace**: Integrated extension discovery and management
+
 ## 📝 Notes & Comments from Code
 
 ### From docker-compose.yml
@@ -116,8 +149,9 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 - [radiatingreverberations/comfyui-docker](https://github.com/radiatingreverberations/comfyui-docker)
 - [mmartial/ComfyUI-Nvidia-Docker](https://github.com/mmartial/ComfyUI-Nvidia-Docker)
 - [YanWenKun/ComfyUI-Docker](https://github.com/YanWenKun/ComfyUI-Docker)
+- [ai-dock/comfyui](https://github.com/ai-dock/comfyui)
 ---
 
 **[⬆ Back to Project Management](index.md)** | **[⬆ Back to Documentation Index](../index.md)** | **[🐛 Report Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)**
 
-*Last Updated: 2025-01-27 - Documentation updated to match current application state*
+*Last Updated: 2025-01-27 - Documentation updated to match current application state and include comparative analysis with ai-dock/comfyui*

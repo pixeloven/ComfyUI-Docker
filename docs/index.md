@@ -39,4 +39,8 @@ Detailed analysis of existing ComfyUI Docker repositories and comparison with ou
 
 ---
 
+**Updated**: Repository analysis now includes [ai-dock/comfyui](https://github.com/ai-dock/comfyui) with focus on multi-architecture support, cloud deployment, and security features.
+
+---
+
 **[⬆ Back to Main README](../README.md)** | **[🐛 Report Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)** 
