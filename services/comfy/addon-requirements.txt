@@ -1,2 +1,4 @@
 onnxruntime-gpu>=1.22.0
 insightface>=0.7.3
+# triton>=3.0.0
+# sageattention>=1.0.6

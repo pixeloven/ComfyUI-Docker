@@ -71,7 +71,7 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - COMFY_PORT=${COMFY_PORT:-8188}
-      - CLI_ARGS=
+      - CLI_ARGS="--use-sage-attention"
     ports:
       - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
     volumes:
@@ -84,6 +84,13 @@ services:
     tty: true
     networks:
       - comfy_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [compute, utility]
 
 networks:
   comfy_network:
