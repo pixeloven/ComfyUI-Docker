@@ -1,4 +1,4 @@
 #!/bin/bash
 set -e
 
-# @todo
+# @todo https://github.com/megvii-research/HiDiffusion

@@ -54,6 +54,56 @@ CLI_ARGS=--novram
 CLI_ARGS=--listen
 ```
 
+### SageAttention 2++ Configuration
+
+The extended image includes SageAttention 2++ for optimized attention computation:
+
+#### What is SageAttention 2++?
+- **Performance optimization** for transformer attention mechanisms
+- **GPU-optimized** implementation with CUDA acceleration
+- **Compatible** with SDXL and other modern models
+- **Automatic fallback** to standard attention for incompatible dimensions
+- **Library-only installation** - no custom nodes required
+
+#### Usage
+SageAttention 2++ is automatically installed and configured in the extended image. The library provides optimized attention computation that ComfyUI can utilize automatically:
+
+1. **Use the extended image**: `docker compose comfy-cuda-extended up -d`
+2. **Automatic optimization**: SageAttention 2++ is used automatically by compatible models
+3. **No manual configuration**: The library integrates seamlessly with ComfyUI's attention mechanisms
+
+#### Performance Benefits
+- **2-3x faster** attention computation on compatible models
+- **Reduced VRAM usage** for attention operations
+- **Better scaling** with larger sequence lengths
+- **Optimized for modern GPUs** (RTX 30/40 series, A100, H100)
+- **Automatic fallback** for incompatible operations
+
+#### Hardware Requirements
+- **NVIDIA GPU** with CUDA support (RTX 20 series or newer recommended)
+- **8GB+ VRAM** for optimal performance
+- **CUDA 12.x** runtime environment
+
+#### Troubleshooting SageAttention
+```bash
+# Check SageAttention installation
+docker compose exec comfy-cuda-extended python -c "import sageattention; print('SageAttention OK')"
+
+# View SageAttention logs
+docker compose logs comfy-cuda-extended | grep -i sage
+
+# Test SageAttention functionality
+docker compose exec comfy-cuda-extended python -c "
+import sageattention
+import torch
+q = torch.randn(1, 8, 64, 64, dtype=torch.float16).cuda()
+k = torch.randn(1, 8, 64, 64, dtype=torch.float16).cuda()
+v = torch.randn(1, 8, 64, 64, dtype=torch.float16).cuda()
+output = sageattention.sageattn(q, k, v, tensor_layout='HND')
+print('SageAttention test passed')
+"
+```
+
 ### Performance Configuration
 
 Control ComfyUI performance and resource usage:

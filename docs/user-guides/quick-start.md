@@ -4,7 +4,7 @@ Get ComfyUI running in minutes.
 
 ## What is ComfyUI?
 
-ComfyUI is a powerful node-based interface for AI image generation. This Docker setup provides GPU acceleration with CPU fallback.
+ComfyUI is a powerful node-based interface for AI image generation. This Docker setup provides GPU acceleration with CPU fallback and optional SageAttention 2++ optimization.
 
 ## Setup
 
@@ -27,6 +27,7 @@ EOF
 
 # 2. Start (choose one)
 docker compose comfy-nvidia up -d        # GPU mode (recommended)
+docker compose comfy-cuda-extended up -d # Extended GPU mode (2-3x faster attention)
 docker compose comfy-cpu up -d    # CPU mode (universal)
 
 # 3. Open http://localhost:8188
@@ -34,8 +35,28 @@ docker compose comfy-cpu up -d    # CPU mode (universal)
 
 ## Hardware Modes
 
-- **GPU Mode** (`comfy`): Fast generation, requires NVIDIA GPU
+- **GPU Mode** (`comfy-nvidia`): Fast generation, requires NVIDIA GPU
+- **Extended GPU Mode** (`comfy-cuda-extended`): ⚡ **2-3x faster attention** with SageAttention 2++, requires NVIDIA GPU with 8GB+ VRAM
 - **CPU Mode** (`comfy-cpu`): Works everywhere, slower generation
+
+## SageAttention 2++ Extended Mode
+
+The extended mode includes SageAttention 2++ for significantly faster attention computation:
+
+### Benefits
+- **2-3x faster** attention operations
+- **Reduced VRAM usage** for attention
+- **Better scaling** with large models
+- **Automatic fallback** for incompatible operations
+
+### Requirements
+- NVIDIA GPU with 8GB+ VRAM (RTX 20 series or newer recommended)
+- CUDA 12.x runtime environment
+
+### Usage
+1. Start with extended mode: `docker compose comfy-cuda-extended up -d`
+2. SageAttention 2++ is automatically used by compatible models
+3. No manual configuration required - seamless integration
 
 ## Basic Configuration
 

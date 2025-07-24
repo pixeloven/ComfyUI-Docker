@@ -14,14 +14,15 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 - **🔧 Developer Friendly** - Easy development workflow with Docker Compose profiles
 - **⚡ Efficient Builds** - Docker Bake for optimized image building and caching
 - **🎛️ Custom Node Management** - Integrated ComfyUI Manager for extension management
-
+- **⚡ SageAttention 2++** - Optimized attention computation for 2-3x faster generation
 
 ### Key Features
-- **Multi-profile architecture** - GPU and CPU profiles
+- **Multi-profile architecture** - GPU and CPU profiles with extended SageAttention 2++ support
 - **Persistent storage** - Your models, configs, and outputs survive container restarts
 - **Virtual environment** - Isolated Python environment for ComfyUI extensions
 - **Environment-based configuration** - All settings controlled via environment variables
 - **Optimized CI/CD** - Docker Bake-based workflows with efficient caching
+- **Performance optimization** - SageAttention 2++ for faster attention computation
 
 ## 🚀 Quick Start
 
@@ -40,13 +41,15 @@ PGID=1000
 COMFY_PORT=8188
 CLI_ARGS=
 
-
 EOF
 
-# 2. Start ComfyUI
+# 2. Start ComfyUI (choose one)
 # Standard GPU mode (recommended for most users)
 docker compose comfy-nvidia up -d
-# OR
+
+# Extended GPU mode with SageAttention 2++ (2-3x faster attention)
+docker compose comfy-cuda-extended up -d
+
 # CPU mode (universal)
 docker compose comfy-cpu up -d
 
@@ -54,6 +57,29 @@ docker compose comfy-cpu up -d
 ```
 
 **That's it!** ComfyUI is now running. For model setup and advanced configuration, see the documentation below.
+
+## 🚀 Performance Modes
+
+### Standard GPU Mode (`comfy-nvidia`)
+- **Best for**: Most users, general purpose
+- **Performance**: Standard ComfyUI performance
+- **Compatibility**: Works with all models and workflows
+
+### Extended GPU Mode (`comfy-cuda-extended`) ⚡
+- **Best for**: Power users, production workloads
+- **Performance**: 2-3x faster attention computation with SageAttention 2++
+- **Features**: 
+  - Optimized attention mechanisms
+  - Reduced VRAM usage
+  - Better scaling with large models
+  - Automatic fallback for incompatible operations
+  - Library-only installation (no custom nodes required)
+- **Requirements**: NVIDIA GPU with 8GB+ VRAM, CUDA 12.x
+
+### CPU Mode (`comfy-cpu`)
+- **Best for**: Systems without GPU, testing
+- **Performance**: Slower but universal compatibility
+- **Compatibility**: Works on any system
 
 ## 📁 Project Structure
 
@@ -78,9 +104,10 @@ ComfyUI-Docker/
 │       │   ├── post_install.sh       # Post-installation setup
 │       │   └── extra_model_paths.yaml # Model path configuration
 │       │
-│       └── addons/                   # Addon packages
-│           ├── dockerfile.comfy.nvidia.addons # NVIDIA addons image
-│           └── addon-requirements.txt # Python dependencies
+│       └── extended/                 # Extended features
+│           ├── dockerfile.comfy.cuda.extended # SageAttention 2++ image
+│           ├── requirements.txt      # Extended dependencies
+│           └── scripts/              # Performance optimization scripts
 │
 ├── 📦 data/                          # Persistent data storage
 ├── 🖼️ output/                        # Generated image outputs

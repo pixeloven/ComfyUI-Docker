@@ -60,11 +60,8 @@ services:
               device_ids: ['0']
               capabilities: [compute, utility]
 
-# @todo rename images and better utilize tags
-# @todo update extra_model_paths.yaml to be compatible with invokeai and have versions for default, invoke, a1111, etc.
-
   comfy-cuda-extended:
-    profiles: ["nvidia"]
+    profiles: ["nvidia-extended"]
     image: ghcr.io/pixeloven/comfyui-docker/comfy-cuda-extended:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
@@ -94,5 +91,4 @@ services:
 
 networks:
   comfy_network:
-    name: comfy_network
     driver: bridge 

@@ -77,7 +77,7 @@ target "comfy-cpu" {
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime-cpu:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-cpu:cache"
+        "type=registry,ref=${REGISTRY_URL}comfy-cuda:cache"
     ]
     cache-to   = ["type=inline"]
     args = {
@@ -99,7 +99,8 @@ target "comfy-cuda-extended" {
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime-cuda:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-cuda:cache"
+        "type=registry,ref=${REGISTRY_URL}comfy-cuda:cache",
+        "type=registry,ref=${REGISTRY_URL}comfy-cuda-extended:cache"
     ]
     cache-to   = ["type=inline"]
     depends_on = ["comfy-nvidia"]

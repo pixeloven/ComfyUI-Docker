@@ -1,5 +1,10 @@
 onnxruntime-gpu>=1.22.0
 insightface>=0.7.3
-triton>=3.0.0
-# SageAttention V1 (stable, pip-installable)
-sageattention>=1.0.6
+triton>=3.3.0
+# SageAttention 2++ (latest optimized version from woct0rdho fork)
+# Note: This will be built from source during container build for optimal performance
+# Alternative: Use pre-built wheels from woct0rdho/SageAttention releases
+# sageattention>=2.0.0  # Commented out as we build from source
+# Build dependencies for SageAttention 2++
+ninja>=1.11.0
+packaging>=23.0
