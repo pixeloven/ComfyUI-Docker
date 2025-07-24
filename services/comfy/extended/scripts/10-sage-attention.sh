@@ -20,15 +20,15 @@ python -c "
 import sageattention
 import torch
 
-# Create test tensors
-batch_size, seq_len, hidden_dim = 2, 64, 128
-q = torch.randn(batch_size, seq_len, hidden_dim).cuda()
-k = torch.randn(batch_size, seq_len, hidden_dim).cuda()
-v = torch.randn(batch_size, seq_len, hidden_dim).cuda()
+# Create test tensors in the correct format: [batch_size, num_heads, seq_len, head_dim]
+batch_size, num_heads, seq_len, head_dim = 2, 8, 64, 64
+q = torch.randn(batch_size, num_heads, seq_len, head_dim, dtype=torch.float16).cuda()
+k = torch.randn(batch_size, num_heads, seq_len, head_dim, dtype=torch.float16).cuda()
+v = torch.randn(batch_size, num_heads, seq_len, head_dim, dtype=torch.float16).cuda()
 
-# Test forward pass
+# Test sageattn function
 try:
-    output = sageattention.forward(q, k, v)
+    output = sageattention.sageattn(q, k, v, tensor_layout='HND')
     print('✅ SageAttention test passed')
 except Exception as e:
     print(f'❌ SageAttention test failed: {e}')

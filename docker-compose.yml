@@ -71,7 +71,7 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - COMFY_PORT=${COMFY_PORT:-8188}
-      - CLI_ARGS="--use-sage-attention"
+      - CLI_ARGS=
     ports:
       - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
     volumes:
