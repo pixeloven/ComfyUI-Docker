@@ -30,8 +30,8 @@ services:
     networks:
       - comfy_network
 
-  comfy-nvidia:
-    profiles: ["nvidia"]
+  comfy-cuda:
+    profiles: ["cuda"]
     image: ghcr.io/pixeloven/comfyui-docker/comfy-cuda:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
@@ -61,7 +61,7 @@ services:
               capabilities: [compute, utility]
 
   comfy-cuda-extended:
-    profiles: ["nvidia-extended"]
+    profiles: ["cuda-extended"]
     image: ghcr.io/pixeloven/comfyui-docker/comfy-cuda-extended:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:

@@ -18,7 +18,7 @@ variable "PLATFORMS" {
     default = ["linux/amd64"]
 }
 
-target "runtime-nvidia" {
+target "runtime-cuda" {
     context = "services/runtime"
     dockerfile = "dockerfile.cuda.runtime"
     platforms = PLATFORMS
@@ -42,10 +42,10 @@ target "runtime-cpu" {
     cache-to   = ["type=inline"]
 }
 
-target "comfy-nvidia" {
+target "comfy-cuda" {
     context = "services/comfy/base"
     contexts = {
-        runtime = "target:runtime-nvidia"
+        runtime = "target:runtime-cuda"
     }
     dockerfile = "dockerfile.comfy.base"
     platforms = PLATFORMS
@@ -59,9 +59,9 @@ target "comfy-nvidia" {
     ]
     cache-to   = ["type=inline"]
     args = {
-        RUNTIME = "nvidia"
+        RUNTIME = "cuda"
     }
-    depends_on = ["runtime-nvidia"]
+    depends_on = ["runtime-cuda"]
 }
 
 target "comfy-cpu" {
@@ -101,7 +101,7 @@ target "sageattention-builder" {
 target "comfy-cuda-extended" {
     context = "services/comfy/extended"
     contexts = {
-        base = "target:comfy-nvidia"
+        base = "target:comfy-cuda"
         sageattention-builder = "target:sageattention-builder"
     }
     dockerfile = "dockerfile.comfy.cuda.extended"
@@ -117,7 +117,7 @@ target "comfy-cuda-extended" {
         "type=registry,ref=${REGISTRY_URL}comfy-cuda-extended:cache"
     ]
     cache-to   = ["type=inline"]
-    depends_on = ["comfy-nvidia", "sageattention-builder"]
+    depends_on = ["comfy-cuda", "sageattention-builder"]
 }
 
 // Convenience groups
@@ -126,25 +126,26 @@ group "default" {
 }
 
 group "all" {
-    targets = ["runtime", "nvidia", "cpu"]
+    targets = ["runtime", "cuda", "cpu"]
+}
+
+group "base" {
+    targets = ["runtime-cuda", "runtime-cpu", "comfy-cuda", "comfy-cpu"]
 }
 
 group "runtime" {
-    targets = ["runtime-nvidia", "runtime-cpu"]
+    targets = ["runtime-cuda", "runtime-cpu"]
 }
 
 group "builder" {
     targets = ["sageattention-builder"]
 }
 
-group "nvidia" {
-    targets = ["runtime-nvidia", "comfy-nvidia", "comfy-cuda-extended"]
+group "cuda" {
+    targets = ["runtime-cuda", "comfy-cuda", "comfy-cuda-extended"]
 }
 
 group "cpu" {
     targets = ["runtime-cpu", "comfy-cpu"]
 }
 
-group "base" {
-    targets = ["runtime-nvidia", "runtime-cpu", "comfy-nvidia", "comfy-cpu"]
-}

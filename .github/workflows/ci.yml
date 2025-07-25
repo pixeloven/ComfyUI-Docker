@@ -30,8 +30,8 @@ jobs:
           
           # Service validation (with profiles)
           docker compose --profile cpu-only config --services | grep -q comfy-cpu
-          docker compose --profile nvidia config --services | grep -q comfy-nvidia
-          docker compose --profile nvidia config --services | grep -q comfy-cuda-extended
+          docker compose --profile cuda config --services | grep -q comfy-cuda
+          docker compose --profile cuda-extended config --services | grep -q comfy-cuda-extended
           echo "✅ All services configured correctly"
           
           # Environment file validation
@@ -45,9 +45,9 @@ jobs:
           
           # Validate all build targets exist (including extended for quality assurance)
           docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cpu"
-          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-nvidia"
+          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cuda"
           docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cpu"
-          docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-nvidia"
+          docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cuda"
           docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cuda-extended"
           docker buildx bake --file docker-bake.hcl --print | grep -q "sageattention-builder"
           echo "✅ All build targets configured correctly"
@@ -80,7 +80,14 @@ jobs:
         uses: docker/bake-action@v6
         with:
           source: .
-          targets: base
+          targets: runtime
+          push: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push CPU ComfyUI images
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          targets: cpu
           push: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Clean up Docker
