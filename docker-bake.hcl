@@ -145,4 +145,6 @@ group "cpu" {
     targets = ["runtime-cpu", "comfy-cpu"]
 }
 
-
+group "base" {
+    targets = ["runtime-nvidia", "runtime-cpu", "comfy-nvidia", "comfy-cpu"]
+}

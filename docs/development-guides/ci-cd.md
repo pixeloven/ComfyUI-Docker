@@ -8,7 +8,7 @@ Our CI/CD pipeline uses Docker Bake for efficient image building with proper cac
 - **Triggers**: Push to `main`, PRs, changes to services/docker files
 - **Jobs**: 
   - `validate-config`: Validates configs and Docker Bake syntax
-  - `build-images`: Builds all images using bake group `all`
+  - `build-images`: Builds base images using bake group `base` (runtime + base ComfyUI images)
   - `test-cpu-runtime`: Tests CPU runtime startup (PRs only)
   - `pr-summary`: Provides PR validation summary
 
@@ -16,9 +16,10 @@ Our CI/CD pipeline uses Docker Bake for efficient image building with proper cac
 
 | Group | Builds |
 |-------|--------|
-| `all` | All images (runtime-nvidia, runtime-cpu, comfy-nvidia, comfy-cpu) |
+| `all` | All images (runtime-nvidia, runtime-cpu, comfy-nvidia, comfy-cpu, comfy-cuda-extended, sageattention-builder) |
+| `base` | Base images only (runtime-nvidia, runtime-cpu, comfy-nvidia, comfy-cpu) |
 | `runtime` | Runtime images only |
-| `nvidia` | NVIDIA images (runtime-nvidia, comfy-nvidia) |
+| `nvidia` | NVIDIA images (runtime-nvidia, comfy-nvidia, comfy-cuda-extended) |
 | `cpu` | CPU images (runtime-cpu, comfy-cpu) |
 | `comfy` | ComfyUI images (comfy-nvidia, comfy-cpu) |
 
