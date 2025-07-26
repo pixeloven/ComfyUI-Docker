@@ -1,9 +1,0 @@
-# https://github.com/comfyanonymous/ComfyUI/blob/master/extra_model_paths.yaml.example
-
-comfyui:
-  is_default: "true"
-
-  base_path: /data
-
-  custom_nodes: config/comfy/custom_nodes
-  download_model_base: config/comfy/models

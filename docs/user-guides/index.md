@@ -13,8 +13,6 @@ Daily operations, model management, and common workflows.
 ### [Configuration](configuration.md)
 Complete guide to environment variables, performance tuning, and multi-instance setup.
 
-
-
 ---
 
 **[⬆ Back to Documentation](../index.md)** 
