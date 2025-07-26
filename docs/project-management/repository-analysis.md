@@ -4,7 +4,7 @@ Detailed analysis of existing ComfyUI Docker repositories and comparison with ou
 
 ## Executive Summary
 
-This document provides a detailed analysis of three prominent ComfyUI Docker repositories and compares them to the current ComfyUI-Docker project. Each repository takes a different approach to containerizing ComfyUI, with varying levels of complexity, features, and target audiences.
+This document provides a detailed analysis of four prominent ComfyUI Docker repositories and compares them to the current ComfyUI-Docker project. Each repository takes a different approach to containerizing ComfyUI, with varying levels of complexity, features, and target audiences.
 
 ## Repository Overview
 
@@ -13,6 +13,7 @@ This document provides a detailed analysis of three prominent ComfyUI Docker rep
 | [YanWenKun/ComfyUI-Docker](https://github.com/YanWenKun/ComfyUI-Docker) | 892 | 157 | Dockerfile | 2025-07-06 | Multi-architecture, production-ready |
 | [mmartial/ComfyUI-Nvidia-Docker](https://github.com/mmartial/ComfyUI-Nvidia-Docker) | 148 | 35 | Shell | 2025-07-05 | User-friendly, permission management |
 | [radiatingreverberations/comfyui-docker](https://github.com/radiatingreverberations/comfyui-docker) | 24 | 0 | HCL | 2025-07-05 | Modern CI/CD, cloud-optimized |
+| [ai-dock/comfyui](https://github.com/ai-dock/comfyui) | 897 | 293 | Shell | 2025-07-10 | Cloud-first, highly configurable |
 
 ---
 
@@ -177,6 +178,65 @@ services:
 
 ---
 
+## 4. ai-dock/comfyui
+
+### Architecture & Approach
+
+**Base Strategy**: Cloud-first, highly configurable AI-Dock containerization
+- **Base OS**: AI-Dock base with authentication and UX improvements
+- **Build System**: Traditional Dockerfile with AI-Dock base
+- **Image Strategy**: Multi-platform support with cloud optimization
+
+### Key Features
+
+#### Multi-Platform Support
+- **NVIDIA CUDA**: Multiple CUDA version variants
+- **AMD ROCm**: Full ROCm support for AMD GPUs
+- **CPU**: Optimized CPU-only images
+- **Cloud Templates**: Pre-configured for Vast.ai, RunPod
+
+#### Environment Configuration
+- **Comprehensive Variables**: Port, tokens, startup args, auto-update
+- **Token Support**: CivitAI, HuggingFace authentication
+- **Auto-Update**: Configurable ComfyUI updates on startup
+- **Git Reference**: Branch, tag, or commit hash specification
+
+#### Service Management
+- **Supervisor**: Multi-service orchestration
+- **API Wrapper**: ComfyUI API service on port 8188
+- **Password Protection**: Default security with authentication
+- **Memory Management**: Built-in VRAM clearing
+
+### Technical Implementation
+```bash
+# Environment variables
+AUTO_UPDATE=false
+CIVITAI_TOKEN=your_token
+COMFYUI_ARGS=--gpu-only --highvram
+COMFYUI_PORT_HOST=8188
+COMFYUI_REF=latest
+HF_TOKEN=your_token
+
+# Service management
+supervisorctl [start|stop|restart] comfyui
+```
+
+### Strengths
+✅ **Multi-architecture support** (CUDA, ROCm, CPU)  
+✅ **Cloud-first design** with templates  
+✅ **Comprehensive configuration** via environment variables  
+✅ **Supervisor service management**  
+✅ **Security defaults** with authentication  
+✅ **Large community** (897 stars)  
+
+### Weaknesses
+❌ **No bundled models** (requires provisioning)  
+❌ **Cloud-focused** (less local dev friendly)  
+❌ **Split documentation** between base and image wikis  
+❌ **No automated extension management**  
+
+---
+
 ## Comparison with Current ComfyUI-Docker Project
 
 ### Current Project Strengths
@@ -201,20 +261,50 @@ services:
 
 ### Areas for Improvement
 
-#### Build System
-🔄 **Consider Docker Bake**: For more complex build scenarios  
-🔄 **Multi-architecture Support**: AMD GPU, ARM support  
-🔄 **Optimized Base Images**: Smaller, more efficient containers  
+#### Multi-Architecture Support
+🔄 **Add ROCm Support**: AMD GPU compatibility (from YanWenKun, ai-dock)  
+🔄 **ARM64 Support**: Apple Silicon and ARM servers  
+🔄 **Multiple CUDA Versions**: Support for different CUDA releases  
 
-#### Features
-🔄 **Extension Management**: Automated custom node installation  
-🔄 **Cloud Deployment**: RunPod/Vast.ai optimization  
-🔄 **Performance Tuning**: SageAttention, xformers integration  
+#### Cloud Deployment
+🔄 **Cloud Templates**: Pre-configured for Vast.ai, RunPod (from ai-dock, radiatingreverberations)  
+🔄 **Cloud Documentation**: Dedicated cloud deployment guides  
+🔄 **Optimized Images**: Smaller, cloud-ready variants  
+
+#### Build System
+🔄 **Docker Bake Adoption**: Modern build orchestration (from radiatingreverberations)  
+🔄 **Multi-stage Optimization**: Better layer caching  
+🔄 **CI/CD Enhancement**: Automated testing and deployment  
 
 #### User Experience
-🔄 **Model Marketplace**: Integrated model discovery  
-🔄 **Workflow Management**: Version control for workflows  
-🔄 **Health Monitoring**: Container health checks  
+🔄 **Enhanced Permissions**: Runtime UID/GID flexibility (from mmartial)  
+🔄 **WSL2 Optimization**: Better Windows support  
+🔄 **Supervisor Integration**: Multi-service orchestration (from ai-dock)  
+
+#### Security & Configuration
+🔄 **Security Defaults**: Password protection options (from ai-dock)  
+🔄 **Token Support**: CivitAI, HuggingFace integration  
+🔄 **Auto-update Features**: Configurable ComfyUI updates  
+
+#### Extension Management
+🔄 **Automated Extensions**: Custom node installation  
+🔄 **Extension Marketplace**: Integrated extension discovery  
+🔄 **Dependency Resolution**: Automatic extension dependencies  
+
+---
+
+## Summary Table
+
+| Feature | YanWenKun | mmartial | radiatingrev. | ai-dock | **Ours** |
+|---------|-----------|----------|---------------|---------|----------|
+| Multi-Architecture | ✅ | ❌ | Partial | ✅ | Partial |
+| Cloud Templates | ❌ | ❌ | ✅ | ✅ | ❌ |
+| Permission Management | Basic | ✅ | Basic | Good | Good |
+| Supervisor Services | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Security Defaults | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Extension Management | ❌ | ❌ | ❌ | ❌ | Partial |
+| Build System | Dockerfile | Makefile | Docker Bake | Dockerfile | Docker Bake |
+| Documentation | ✅ | ✅ | Good | Split | ✅ |
 
 ---
 
@@ -222,49 +312,49 @@ services:
 
 ### Immediate Improvements (Phase 1)
 
-1. **Adopt Docker Bake** (from radiatingreverberations)
-   - Implement for complex multi-stage builds
-   - Better CI/CD integration
-   - More efficient layer caching
+1. **Add Multi-Architecture Support**
+   - Implement AMD ROCm support
+   - Add ARM64 support for Apple Silicon
+   - Support multiple CUDA versions
 
-2. **Enhanced Permission Management** (from mmartial)
-   - Runtime UID/GID configuration
-   - Better WSL2 support
-   - Improved user experience
+2. **Enhance Cloud Deployment**
+   - Create Vast.ai and RunPod templates
+   - Add cloud deployment documentation
+   - Optimize images for cloud providers
 
-3. **Multi-architecture Support** (from YanWenKun)
-   - AMD GPU (ROCM) support
-   - ARM64 support for Apple Silicon
-   - Multiple CUDA version variants
+3. **Improve Permission Management**
+   - Add runtime UID/GID configuration
+   - Enhance WSL2 support
+   - Implement flexible permission options
 
 ### Medium-term Enhancements (Phase 2)
 
-1. **Cloud Optimization**
-   - RunPod/Vast.ai ready configurations
-   - Optimized for GPU cloud providers
-   - Pre-built specialized images
+1. **Security & Configuration**
+   - Add optional password protection
+   - Implement token support for model downloads
+   - Add auto-update configuration options
 
-2. **Extension Ecosystem**
-   - Automated custom node management
-   - Extension marketplace integration
-   - Dependency resolution
+2. **Service Orchestration**
+   - Consider supervisor for multi-service management
+   - Add API wrapper service
+   - Implement service health monitoring
 
-3. **Performance Features**
-   - SageAttention integration
-   - xformers optimization
-   - Memory management improvements
+3. **Extension Ecosystem**
+   - Automate custom node installation
+   - Create extension marketplace integration
+   - Add dependency resolution
 
 ### Long-term Vision (Phase 3)
 
-1. **Platform Evolution**
-   - Multi-modal AI support
-   - Workflow versioning
-   - Collaborative features
+1. **Advanced Features**
+   - Multi-instance support with resource management
+   - Workflow versioning and collaboration
+   - Advanced monitoring and analytics
 
-2. **Enterprise Features**
-   - Multi-user support
-   - Resource management
-   - Monitoring and analytics
+2. **Platform Evolution**
+   - Multi-modal AI support beyond image generation
+   - Integration with other AI platforms
+   - Enterprise features and multi-user support
 
 ---
 
@@ -275,20 +365,22 @@ The current ComfyUI-Docker project demonstrates **excellent architectural decisi
 ### Key Takeaways
 
 1. **Current project is well-positioned** for most use cases
-2. **Docker Bake adoption** would provide significant benefits
-3. **Permission management** from mmartial's approach is valuable
-4. **Multi-architecture support** should be prioritized
-5. **Cloud optimization** is important for future growth
+2. **Multi-architecture support** should be prioritized
+3. **Cloud deployment features** are important for future growth
+4. **Permission management** from mmartial's approach is valuable
+5. **Security defaults** from ai-dock should be considered
+6. **Supervisor integration** could enhance multi-service capabilities
 
 ### Recommended Next Steps
 
-1. **Implement Docker Bake** for build system modernization
-2. **Add multi-architecture support** (AMD, ARM)
+1. **Implement multi-architecture support** (AMD, ARM)
+2. **Add cloud deployment templates** and documentation
 3. **Enhance permission management** for better user experience
-4. **Optimize for cloud deployment** scenarios
-5. **Maintain current strengths** while adopting best practices
+4. **Consider security defaults** and token support
+5. **Explore supervisor integration** for service orchestration
+6. **Maintain current strengths** while adopting best practices
 
-The current project's **clean architecture** and **comprehensive documentation** provide an excellent foundation for incorporating the best features from all three analyzed repositories.
+The current project's **clean architecture** and **comprehensive documentation** provide an excellent foundation for incorporating the best features from all four analyzed repositories.
 
 ---
 

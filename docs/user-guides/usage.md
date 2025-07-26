@@ -6,9 +6,9 @@ Daily operations for ComfyUI Docker.
 
 ```bash
 # Start (GPU)
-docker compose --profile comfy-nvidia up -d
+docker compose comfy-nvidia up -d
 # Start (CPU)
-docker compose --profile comfy-cpu up -d
+docker compose comfy-cpu up -d
 
 # Stop (preserves state)
 docker compose stop
@@ -28,11 +28,11 @@ docker compose down
 ```bash
 # Switch to CPU
 docker compose down
-docker compose --profile comfy-cpu up -d
+docker compose comfy-cpu up -d
 
 # Switch to GPU
 docker compose down
-docker compose --profile comfy-nvidia up -d
+docker compose comfy-nvidia up -d
 ```
 
 ## Model Management

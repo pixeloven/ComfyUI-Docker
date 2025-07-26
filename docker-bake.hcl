@@ -18,62 +18,66 @@ variable "PLATFORMS" {
     default = ["linux/amd64"]
 }
 
-target "runtime-nvidia" {
-    context = "services/comfy"
-    dockerfile = "dockerfile.nvidia.runtime"
+target "runtime-cuda" {
+    context = "services/runtime"
+    dockerfile = "dockerfile.cuda.runtime"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}runtime-nvidia:${IMAGE_LABEL}"
+        "${REGISTRY_URL}runtime-cuda:${IMAGE_LABEL}",
+        "${REGISTRY_URL}runtime-cuda:cache"
     ]
-    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime-nvidia:cache"]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime-cuda:cache"]
     cache-to   = ["type=inline"]
 }
 
 target "runtime-cpu" {
-    context = "services/comfy"
+    context = "services/runtime"
     dockerfile = "dockerfile.cpu.runtime"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}runtime-cpu:${IMAGE_LABEL}"
+        "${REGISTRY_URL}runtime-cpu:${IMAGE_LABEL}",
+        "${REGISTRY_URL}runtime-cpu:cache"
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}runtime-cpu:cache"]
     cache-to   = ["type=inline"]
 }
 
-target "comfy-nvidia" {
-    context = "services/comfy"
+target "comfy-cuda" {
+    context = "services/comfy/base"
     contexts = {
-        runtime = "target:runtime-nvidia"
+        runtime = "target:runtime-cuda"
     }
     dockerfile = "dockerfile.comfy.base"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}comfy-nvidia:${IMAGE_LABEL}"
+        "${REGISTRY_URL}comfy-cuda:${IMAGE_LABEL}",
+        "${REGISTRY_URL}comfy-cuda:cache"
     ]
     cache-from = [
-        "type=registry,ref=${REGISTRY_URL}runtime-nvidia:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-nvidia:cache"
+        "type=registry,ref=${REGISTRY_URL}runtime-cuda:cache",
+        "type=registry,ref=${REGISTRY_URL}comfy-cuda:cache"
     ]
     cache-to   = ["type=inline"]
     args = {
-        RUNTIME = "nvidia"
+        RUNTIME = "cuda"
     }
-    depends_on = ["runtime-nvidia"]
+    depends_on = ["runtime-cuda"]
 }
 
 target "comfy-cpu" {
-    context = "services/comfy"
+    context = "services/comfy/base"
     contexts = {
         runtime = "target:runtime-cpu"
     }
     dockerfile = "dockerfile.comfy.base"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}comfy-cpu:${IMAGE_LABEL}"
+        "${REGISTRY_URL}comfy-cpu:${IMAGE_LABEL}",
+        "${REGISTRY_URL}comfy-cpu:cache"
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime-cpu:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-cpu:cache"
+        "type=registry,ref=${REGISTRY_URL}comfy-cuda:cache"
     ]
     cache-to   = ["type=inline"]
     args = {
@@ -82,29 +86,66 @@ target "comfy-cpu" {
     depends_on = ["runtime-cpu"]
 }
 
+target "sageattention-builder" {
+    context = "services/comfy/extended"
+    dockerfile = "dockerfile.sage.builder"
+    platforms = PLATFORMS
+    tags = [
+        "${REGISTRY_URL}sageattention-builder:${IMAGE_LABEL}",
+        "${REGISTRY_URL}sageattention-builder:cache"
+    ]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}sageattention-builder:cache"]
+    cache-to   = ["type=inline"]
+}
+
+target "comfy-cuda-extended" {
+    context = "services/comfy/extended"
+    contexts = {
+        base = "target:comfy-cuda"
+        sageattention-builder = "target:sageattention-builder"
+    }
+    dockerfile = "dockerfile.comfy.cuda.extended"
+    platforms = PLATFORMS
+    tags = [
+        "${REGISTRY_URL}comfy-cuda-extended:${IMAGE_LABEL}",
+        "${REGISTRY_URL}comfy-cuda-extended:cache"
+    ]
+    cache-from = [
+        "type=registry,ref=${REGISTRY_URL}runtime-cuda:cache",
+        "type=registry,ref=${REGISTRY_URL}comfy-cuda:cache",
+        "type=registry,ref=${REGISTRY_URL}sageattention-builder:cache",
+        "type=registry,ref=${REGISTRY_URL}comfy-cuda-extended:cache"
+    ]
+    cache-to   = ["type=inline"]
+    depends_on = ["comfy-cuda", "sageattention-builder"]
+}
+
 // Convenience groups
 group "default" {
     targets = ["all"]
 }
 
 group "all" {
-    targets = ["runtime", "comfy"]
+    targets = ["runtime", "cuda", "cpu"]
 }
 
-// Base runtime images
+group "base" {
+    targets = ["runtime-cuda", "runtime-cpu", "comfy-cuda", "comfy-cpu"]
+}
+
 group "runtime" {
-    targets = ["runtime-nvidia", "runtime-cpu"]
+    targets = ["runtime-cuda", "runtime-cpu"]
 }
 
-group "nvidia" {
-    targets = ["runtime-nvidia", "comfy-nvidia"]
+group "builder" {
+    targets = ["sageattention-builder"]
+}
+
+group "cuda" {
+    targets = ["runtime-cuda", "comfy-cuda", "comfy-cuda-extended"]
 }
 
 group "cpu" {
     targets = ["runtime-cpu", "comfy-cpu"]
-}
-
-group "comfy" {
-    targets = ["comfy-nvidia", "comfy-cpu"]
 }
 

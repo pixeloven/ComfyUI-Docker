@@ -13,19 +13,16 @@ ComfyUI Docker provides a **production-ready, containerized solution** for runni
 - **📦 Model Management** - Automated downloading with verification
 - **🔧 Developer Friendly** - Easy development workflow with Docker Compose profiles
 - **⚡ Efficient Builds** - Docker Bake for optimized image building and caching
-- **🎛️ Custom Node Management** - Version-controlled custom nodes with `comfy-lock.yaml`
-
+- **🎛️ Custom Node Management** - Integrated ComfyUI Manager for extension management
+- **⚡ SageAttention 2++** - Optimized attention computation for 2-3x faster generation
 
 ### Key Features
-- **Node-based workflow editor** - Visual programming interface for AI image generation
-- **Multi-profile architecture** - GPU (`comfy-nvidia`) and CPU (`comfy-cpu`) modes
-- **Automated model management** - Download and verify models with checksums
+- **Multi-profile architecture** - GPU and CPU profiles with extended SageAttention 2++ support
 - **Persistent storage** - Your models, configs, and outputs survive container restarts
 - **Virtual environment** - Isolated Python environment for ComfyUI extensions
-- **Custom node management** - Version-controlled custom nodes using ComfyUI CLI and `comfy-lock.yaml`
-- **Automatic setup** - ComfyUI Manager and required directories are automatically configured
 - **Environment-based configuration** - All settings controlled via environment variables
 - **Optimized CI/CD** - Docker Bake-based workflows with efficient caching
+- **Performance optimization** - SageAttention 2++ for faster attention computation
 
 ## 🚀 Quick Start
 
@@ -44,18 +41,45 @@ PGID=1000
 COMFY_PORT=8188
 CLI_ARGS=
 
-
 EOF
 
-# 2. Start ComfyUI
-docker compose --profile comfy-nvidia up -d        # GPU mode (recommended)
-# OR
-docker compose --profile comfy-cpu up -d    # CPU mode (universal)
+# 2. Start ComfyUI (choose one)
+# Standard GPU mode (recommended for most users)
+docker compose comfy-nvidia up -d
+
+# Extended GPU mode with SageAttention 2++ (2-3x faster attention)
+docker compose comfy-cuda-extended up -d
+
+# CPU mode (universal)
+docker compose comfy-cpu up -d
 
 # 3. Open ComfyUI at http://localhost:8188 (or your configured port)
 ```
 
 **That's it!** ComfyUI is now running. For model setup and advanced configuration, see the documentation below.
+
+## 🚀 Performance Modes
+
+### Standard GPU Mode (`comfy-nvidia`)
+- **Best for**: Most users, general purpose
+- **Performance**: Standard ComfyUI performance
+- **Compatibility**: Works with all models and workflows
+
+### Extended GPU Mode (`comfy-cuda-extended`) ⚡
+- **Best for**: Power users, production workloads
+- **Performance**: 2-3x faster attention computation with SageAttention 2++
+- **Features**: 
+  - Optimized attention mechanisms
+  - Reduced VRAM usage
+  - Better scaling with large models
+  - Automatic fallback for incompatible operations
+  - Library-only installation (no custom nodes required)
+- **Requirements**: NVIDIA GPU with 8GB+ VRAM, CUDA 12.x
+
+### CPU Mode (`comfy-cpu`)
+- **Best for**: Systems without GPU, testing
+- **Performance**: Slower but universal compatibility
+- **Compatibility**: Works on any system
 
 ## 📁 Project Structure
 
@@ -68,16 +92,23 @@ ComfyUI-Docker/
 │   └── project-management/           # Project planning and analysis
 │
 ├── 🐳 services/                      # Docker service definitions
-│   ├── comfy/                        # Main ComfyUI service
-│   │   ├── dockerfile.comfy.base     # Base ComfyUI image
+│   ├── runtime/                      # Runtime base images
 │   │   ├── dockerfile.nvidia.runtime # NVIDIA GPU runtime
-│   │   ├── dockerfile.cpu.runtime    # CPU-only runtime
-│   │   ├── startup.sh                # Container startup script
-│   │   ├── entrypoint.sh             # Container entrypoint
-│   │   ├── comfy-lock.yaml           # Custom node dependencies
-│   │   ├── extra_model_paths.yaml    # Model path configuration
-│   │   └── addon-requirements.txt    # Python dependencies
+│   │   └── dockerfile.cpu.runtime    # CPU-only runtime
 │   │
+│   └── comfy/                        # Main ComfyUI service
+│       ├── base/                     # Base ComfyUI image
+│       │   ├── dockerfile.comfy.base # Base ComfyUI image
+│       │   ├── startup.sh            # Container startup script
+│       │   ├── entrypoint.sh         # Container entrypoint
+│       │   ├── post_install.sh       # Post-installation setup
+│       │   └── extra_model_paths.yaml # Model path configuration
+│       │
+│       └── extended/                 # Extended features
+│           ├── dockerfile.comfy.cuda.extended # SageAttention 2++ image
+│           ├── requirements.txt      # Extended dependencies
+│           └── scripts/              # Performance optimization scripts
+│
 ├── 📦 data/                          # Persistent data storage
 ├── 🖼️ output/                        # Generated image outputs
 
@@ -104,7 +135,7 @@ ComfyUI-Docker/
   - **[Quick Start](docs/user-guides/quick-start.md)** – Get running in 5 minutes
   - **[Usage Guide](docs/user-guides/usage.md)** – Daily operations and workflows
   - **[Configuration](docs/user-guides/configuration.md)** – Environment variables and performance tuning
-  - **[Comfy Lock Usage](docs/user-guides/comfy-lock-usage.md)** – Managing custom nodes and models
+
 
 
 ### For Developers

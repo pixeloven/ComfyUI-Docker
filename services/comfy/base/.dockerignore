@@ -1,8 +1,6 @@
 # Docker files
 .dockerignore
-dockerfile.comfy.base
-dockerfile.cpu.runtime
-dockerfile.nvidia.runtime
+dockerfile.*
 
 # Temporary files
 *.tmp

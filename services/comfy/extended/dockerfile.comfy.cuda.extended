@@ -1,0 +1,18 @@
+FROM base AS extended
+
+# Copy SageAttention wheels from builder
+# @todo should we clean up wheels after install?
+COPY --from=sageattention-builder /wheels /tmp/wheels
+
+COPY --chown=comfy:comfy . .
+
+RUN chmod u+x ./scripts/*.sh
+
+# Install requirements with pre-built SageAttention wheel
+RUN --mount=type=cache,target=~/.cache/pip \
+    source ~/.venv/bin/activate && \
+    # Install SageAttention from pre-built wheel first
+    pip install /tmp/wheels/*.whl && \
+    # Install remaining requirements
+    pip install -r requirements.txt && \
+    pip cache purge

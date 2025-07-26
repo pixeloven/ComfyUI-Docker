@@ -1,0 +1,17 @@
+# IpAdapter
+onnxruntime-gpu>=1.22.0
+insightface>=0.7.3
+
+# SageAttention 2++ 
+# 
+# Note: This will be built from source (latest optimized version from woct0rdho fork) 
+# during container build for optimal performance
+# Alternative: Use pre-built wheels from woct0rdho/SageAttention releases
+# sageattention>=2.0.0  # Commented out as we build from source
+# Build dependencies for SageAttention 2++
+triton>=3.3.0
+ninja>=1.11.0
+packaging>=23.0
+
+# HiDiffusion
+hidiffusion>=0.1.10

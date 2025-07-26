@@ -49,19 +49,17 @@ RUN --mount=type=cache,target=~/.cache/pip \
   pip install comfy-cli && \
   comfy --skip-prompt --workspace /home/comfy/app install --nvidia --skip-manager && \
   comfy --skip-prompt set-default /home/comfy/app && \
-  comfy --skip-prompt --no-enable-telemetry env
+  comfy --skip-prompt --no-enable-telemetry env && \
+  pip cache purge
 
 WORKDIR /home/comfy/app
 
 COPY --chown=comfy:comfy . .
 
-# Pre-install extensions
-RUN --mount=type=cache,target=~/.cache/pip \
-  source ~/.venv/bin/activate && \
-  pip install -r addon-requirements.txt && \
+RUN pip cache purge && \
   chmod u+x ./entrypoint.sh && \
   chmod u+x ./startup.sh && \
-  pip cache purge
+  chmod u+x ./scripts/*.sh
 
 # Set environment variables
 ARG CLI_ARGS=""

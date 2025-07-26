@@ -8,9 +8,31 @@ name: ComfyUI-Docker
 
 services:
 
-  comfy-nvidia:
-    profiles: ["comfy-nvidia"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfy-nvidia:latest
+  comfy-cpu:
+    profiles: ["cpu-only"]
+    image: ghcr.io/pixeloven/comfyui-docker/comfy-cpu:latest
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - COMFY_PORT=${COMFY_PORT:-8188}
+      - CLI_ARGS=--cpu
+    ports:
+      - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro  
+      - ./services/comfy/base/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
+      - ./data:/data:delegated
+      - ./output:/output
+    stop_signal: SIGKILL
+    tty: true
+    networks:
+      - comfy_network
+
+  comfy-cuda:
+    profiles: ["cuda"]
+    image: ghcr.io/pixeloven/comfyui-docker/comfy-cuda:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
@@ -22,7 +44,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ./services/comfy/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
+      - ./services/comfy/base/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
       - ./output:/output
       # Should .cache be a volume? 
@@ -38,29 +60,35 @@ services:
               device_ids: ['0']
               capabilities: [compute, utility]
 
-  comfy-cpu:
-    profiles: ["comfy-cpu"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfy-cpu:latest
+  comfy-cuda-extended:
+    profiles: ["cuda-extended"]
+    image: ghcr.io/pixeloven/comfyui-docker/comfy-cuda-extended:latest
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - COMFY_PORT=${COMFY_PORT:-8188}
-      - CLI_ARGS=--cpu
+      - CLI_ARGS=
     ports:
       - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro  
-      - ./services/comfy/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
+      - /etc/timezone:/etc/timezone:ro
+      - ./services/comfy/base/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
       - ./output:/output
     stop_signal: SIGKILL
     tty: true
     networks:
       - comfy_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [compute, utility]
 
 networks:
   comfy_network:
-    name: comfy_network
     driver: bridge 

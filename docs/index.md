@@ -15,8 +15,7 @@ Daily operations, model management, and common workflows.
 ### [Configuration](user-guides/configuration.md)
 Complete guide to environment variables, performance tuning, and multi-instance setup.
 
-### [Comfy Lock Usage](user-guides/comfy-lock-usage.md)
-Managing custom nodes and models with comfy-lock.yaml.
+
 
 ## 🛠️ Development Guides
 
@@ -37,6 +36,10 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 
 ### [Repository Analysis](project-management/repository-analysis.md)
 Detailed analysis of existing ComfyUI Docker repositories and comparison with our approach.
+
+---
+
+**Updated**: Repository analysis now includes [ai-dock/comfyui](https://github.com/ai-dock/comfyui) with focus on multi-architecture support, cloud deployment, and security features.
 
 ---
 

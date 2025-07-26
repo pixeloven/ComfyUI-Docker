@@ -60,7 +60,6 @@ comfyui:
 # ultralytics: config/comfy/models/ultralytics
 # ultralytics_bbox: config/comfy/models/ultralytics/bbox
 # ultralytics_segm: config/comfy/models/ultralytics/segm
-
 # Need to install ipadapter and set mappings
 # https://github.com/cubiq/ComfyUI_IPAdapter_plus
 # Create an auto installer? Is there a newer plugin/extension?

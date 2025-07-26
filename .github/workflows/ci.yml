@@ -28,9 +28,11 @@ jobs:
         run: |
           echo "🔍 Validating configuration files..."
           
-          # Profile validation
-          docker compose --profile comfy-nvidia config --services | grep -q comfy
-          echo "✅ Service profiles valid"
+          # Service validation (with profiles)
+          docker compose --profile cpu-only config --services | grep -q comfy-cpu
+          docker compose --profile cuda config --services | grep -q comfy-cuda
+          docker compose --profile cuda-extended config --services | grep -q comfy-cuda-extended
+          echo "✅ All services configured correctly"
           
           # Environment file validation
           grep -q "PUID" .env.example
@@ -40,6 +42,15 @@ jobs:
           # Docker Bake validation
           docker buildx bake --file docker-bake.hcl --print
           echo "✅ Docker Bake configuration valid"
+          
+          # Validate all build targets exist (including extended for quality assurance)
+          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cpu"
+          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cuda"
+          docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cpu"
+          docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cuda"
+          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cuda-extended"
+          docker buildx bake --file docker-bake.hcl --print | grep -q "sageattention-builder"
+          echo "✅ All build targets configured correctly"
 
       - name: Clean up Docker
         run: docker system prune -a -f
@@ -69,7 +80,14 @@ jobs:
         uses: docker/bake-action@v6
         with:
           source: .
-          targets: all
+          targets: runtime
+          push: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push CPU ComfyUI images
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          targets: cpu
           push: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Clean up Docker
