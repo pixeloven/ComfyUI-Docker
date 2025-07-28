@@ -21,10 +21,11 @@ https://github.com/loscrossos/lib_causal-conv1d/releases/download/v1.5.0.post8_c
 https://github.com/loscrossos/lib_mamba/releases/download/v2.2.4_crossos00/mamba_ssm-2.2.4+cu129torch2.7.1-cp312-cp312-linux_x86_64.whl
 
 # Additional dependencies
-accelerate>=1.1.1 
-
-# IPAdapter
+accelerate>=1.1.1
 onnxruntime-gpu>=1.22.0
+
+# PuLID / IPAdapter
+facexlib>=0.3.0
 insightface>=0.7.3
 
 # HiDiffusion
