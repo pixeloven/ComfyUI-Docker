@@ -4,7 +4,6 @@ COPY --chown=comfy:comfy . .
 
 RUN chmod u+x ./scripts/*.sh
 
-RUN --mount=type=cache,target=~/.cache/pip \
-    conda activate $CONDA_ENV_NAME && \
-    pip install -r requirements.txt && \
-    pip cache purge
+RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
+    source $VENV_PATH/bin/activate && \
+    pip install -r requirements.txt

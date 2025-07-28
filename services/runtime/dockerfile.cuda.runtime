@@ -22,14 +22,3 @@ RUN apt-get update && \
   libglib2.0-0 && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
-
-# Install Miniforge for better dependency management as recommended by ComfyUI (conda-forge focused)
-ENV CONDA_DIR=/opt/conda
-ENV PATH=$CONDA_DIR/bin:$PATH
-RUN wget --quiet https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O ~/miniforge.sh && \
-    /bin/bash ~/miniforge.sh -b -p $CONDA_DIR && \
-    rm ~/miniforge.sh && \
-    $CONDA_DIR/bin/conda clean -a -y && \
-    ln -s $CONDA_DIR/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
-    echo ". $CONDA_DIR/etc/profile.d/conda.sh" >> ~/.bashrc && \
-    echo "conda activate base" >> ~/.bashrc
