@@ -21,21 +21,26 @@ WORKDIR /home/comfy
 
 SHELL ["/bin/bash", "--login", "-c"]
 
-ENV VIRTUAL_ENV=/home/comfy/.venv
+# Setup conda environment for ComfyUI using Miniforge (conda-forge by default)
+ENV CONDA_ENV_NAME=comfyenv
+ENV CONDA_DIR=/opt/conda
+ENV PATH=$CONDA_DIR/bin:$PATH
 ENV XDG_CACHE_HOME=/home/comfy/.cache
 
+# Create conda environment following ComfyUI documentation recommendations
+# Miniforge uses conda-forge by default, so no channel configuration needed
 RUN --mount=type=cache,target=~/.cache/pip \ 
-  python -m venv $VIRTUAL_ENV && \
-  source ~/.venv/bin/activate
+  conda create -n $CONDA_ENV_NAME python=3.12 -y && \
+  echo "conda activate $CONDA_ENV_NAME" >> ~/.bashrc
 
+ENV PATH="$CONDA_DIR/envs/$CONDA_ENV_NAME/bin:$PATH"
 ENV PATH="/home/comfy/.local/bin:$PATH"
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Using the comfy cli is creating a much larger image compared to manual install of the repo 12.7GB -> 15.3GB
 # @todo need to see how we can trim this down. Consider using manual install along side the comfy cli for management.
 # git clone --branch v0.3.43 --depth 1 https://github.com/comfyanonymous/ComfyUI.git app
 # RUN --mount=type=cache,target=~/.cache/pip \
-#   source ~/.venv/bin/activate && \
+#   conda activate $CONDA_ENV_NAME && \
 #   git clone --branch v0.3.43 --depth 1 https://github.com/comfyanonymous/ComfyUI.git app && \
 #   pip install -r requirements.txt && \
 #   pip install comfy-cli && \
@@ -45,12 +50,14 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # For now we need --skip-manager to avoid conflict with volume mounted custom_nodes. 
 # @todo see if we can install just the cli and not the node: https://github.com/Comfy-Org/ComfyUI-Manager/blob/main/docs/en/cm-cli.md
 RUN --mount=type=cache,target=~/.cache/pip \
-  source ~/.venv/bin/activate && \
+  conda activate $CONDA_ENV_NAME && \
   pip install comfy-cli && \
   comfy --skip-prompt --workspace /home/comfy/app install --nvidia --skip-manager && \
   comfy --skip-prompt set-default /home/comfy/app && \
   comfy --skip-prompt --no-enable-telemetry env && \
   pip cache purge
+
+# can we target a specific verison of the application?
 
 WORKDIR /home/comfy/app
 

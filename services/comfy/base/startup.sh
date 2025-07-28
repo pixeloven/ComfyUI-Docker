@@ -1,8 +1,11 @@
 #!/bin/bash
 set -e
 
-# Activate virtual environment
-source ~/.venv/bin/activate
+# Initialize conda by sourcing the conda profile
+source /opt/conda/etc/profile.d/conda.sh
+
+# Activate conda environment as recommended by ComfyUI documentation
+conda activate $CONDA_ENV_NAME
 
 # Show comfy environment
 # Show environment
