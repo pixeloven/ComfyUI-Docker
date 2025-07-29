@@ -12,7 +12,12 @@ log_info "Checking ComfyUI-TeaCache installation..."
 
 if [ ! -d "$COMFY_BASE_DIRECTORY/custom_nodes/ComfyUI-TeaCache" ]; then
     log_info "Installing ComfyUI-TeaCache..."
-    if git clone --branch main --depth 1 https://github.com/welltop-cn/ComfyUI-TeaCache.git ${COMFY_BASE_DIRECTORY}/custom_nodes/ComfyUI-TeaCache; then
+    
+    # Run git clone and capture exit code, but let output show
+    git clone --branch main --depth 1 https://github.com/welltop-cn/ComfyUI-TeaCache.git ${COMFY_BASE_DIRECTORY}/custom_nodes/ComfyUI-TeaCache
+    local exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
         log_success "ComfyUI-TeaCache installed successfully"
     else
         log_error "Failed to install ComfyUI-TeaCache"

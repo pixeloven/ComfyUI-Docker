@@ -13,7 +13,12 @@ log_info "Checking ComfyUI-Manager installation..."
 
 if [ ! -d "$COMFY_BASE_DIRECTORY/custom_nodes/ComfyUI-Manager" ]; then
     log_info "Installing ComfyUI-Manager..."
-    if git clone --branch main --depth 1 https://github.com/Comfy-Org/ComfyUI-Manager.git ${COMFY_BASE_DIRECTORY}/custom_nodes/ComfyUI-Manager; then
+    
+    # Run git clone and capture exit code, but let output show
+    git clone --branch main --depth 1 https://github.com/Comfy-Org/ComfyUI-Manager.git ${COMFY_BASE_DIRECTORY}/custom_nodes/ComfyUI-Manager
+    local exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
         log_success "ComfyUI-Manager installed successfully"
     else
         log_error "Failed to install ComfyUI-Manager"

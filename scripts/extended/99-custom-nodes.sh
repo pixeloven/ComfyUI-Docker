@@ -22,7 +22,12 @@ install_custom_node() {
     
     # Install using ComfyUI CLI
     log_info "Installing $name using ComfyUI CLI..."
-    if comfy --workspace="$COMFY_APP_DIRECTORY" node install "$node_identifier"; then
+    
+    # Run the command and capture exit code, but let output show
+    comfy --workspace="$COMFY_APP_DIRECTORY" node install "$node_identifier"
+    local exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
         # Verify installation actually worked by checking directory exists
         if [ -d "$directory" ]; then
             log_success "$name installed successfully"

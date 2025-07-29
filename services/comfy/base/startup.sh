@@ -47,7 +47,12 @@ run_post_install_scripts() {
             [ ! -f "$script" ] && continue
             
             log_info "Executing script: $(basename "$script")"
-            if "$script"; then
+            
+            # Run the script and capture exit code, but let output show
+            "$script"
+            local exit_code=$?
+            
+            if [ $exit_code -eq 0 ]; then
                 log_success "Script completed: $(basename "$script")"
                 ((dir_scripts++))
                 ((total_scripts++))
