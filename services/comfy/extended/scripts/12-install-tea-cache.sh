@@ -11,4 +11,6 @@ else
     echo "ComfyUI-TeaCache already installed"
 fi
 
+# @todo let's use the manager cli to do this instead. 
+# TeaCache, HiDiffusion, Sage, Flash, etc
 # Note worthy https://github.com/chengzeyi/Comfy-WaveSpeed
