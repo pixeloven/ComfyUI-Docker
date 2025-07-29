@@ -24,6 +24,7 @@ services:
       - /etc/timezone:/etc/timezone:ro  
       - ./data:/data:delegated
       - ./output:/output
+      - ./scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:
@@ -45,6 +46,7 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - ./data:/data:delegated
       - ./output:/output
+      - ./scripts:/home/comfy/app/scripts:ro
       # Should .cache be a volume? 
     stop_signal: SIGKILL
     tty: true
@@ -74,6 +76,7 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - ./data:/data:delegated
       - ./output:/output
+      - ./scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:

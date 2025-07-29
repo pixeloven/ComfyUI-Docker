@@ -10,7 +10,7 @@ Essential guides for using ComfyUI Docker.
 Get running in 5 minutes with one-command setup and basic configuration.
 
 ### [Usage Guide](user-guides/usage.md)
-Daily operations, model management, and common workflows.
+Daily operations, model management, bootstrap scripts, and common workflows.
 
 ### [Configuration](user-guides/configuration.md)
 Complete guide to environment variables, performance tuning, and multi-instance setup.
@@ -22,7 +22,7 @@ Complete guide to environment variables, performance tuning, and multi-instance 
 Guides for developers and contributors.
 
 ### [Development](development-guides/development.md)
-Development setup, building images with Docker Bake, and contribution guidelines.
+Development setup, building images with Docker Bake, script development, and contribution guidelines.
 
 ### [CI/CD](development-guides/ci-cd.md)
 Docker Bake workflows, local testing with Act, and best practices.

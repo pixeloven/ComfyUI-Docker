@@ -2,8 +2,6 @@ FROM base AS extended
 
 COPY --chown=comfy:comfy . .
 
-RUN chmod u+x ./scripts/*.sh
-
 RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
     source $VENV_PATH/bin/activate && \
     pip install -r extra-requirements.txt

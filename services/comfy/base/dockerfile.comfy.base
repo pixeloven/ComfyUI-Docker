@@ -44,8 +44,7 @@ COPY --chown=comfy:comfy . .
 
 RUN pip cache purge && \
   chmod u+x ./entrypoint.sh && \
-  chmod u+x ./startup.sh && \
-  chmod u+x ./scripts/*.sh
+  chmod u+x ./startup.sh
 
 # Set environment variables
 ARG CLI_ARGS=""
