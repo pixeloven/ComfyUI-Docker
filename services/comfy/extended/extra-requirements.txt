@@ -23,6 +23,7 @@ https://github.com/loscrossos/lib_mamba/releases/download/v2.2.4_crossos00/mamba
 # Additional dependencies
 accelerate>=1.1.1
 onnxruntime-gpu>=1.22.0
+diffusers>=0.24.0
 
 # PuLID / IPAdapter
 facexlib>=0.3.0

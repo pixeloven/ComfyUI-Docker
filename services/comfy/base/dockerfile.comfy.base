@@ -31,30 +31,14 @@ RUN python3 -m venv $VENV_PATH && \
 
 ENV PATH="$VENV_PATH/bin:$PATH"
 
-WORKDIR /home/comfy/app
-
-# Using the comfy cli is creating a much larger image compared to manual install of the repo 12.7GB -> 15.3GB
-# @todo need to see how we can trim this down. Consider using manual install along side the comfy cli for management.
-# git clone --branch v0.3.43 --depth 1 https://github.com/comfyanonymous/ComfyUI.git app
 RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
   source $VENV_PATH/bin/activate && \
-  git clone --branch v0.3.46 --depth 1 https://github.com/comfyanonymous/ComfyUI.git . && \
-  pip install -r requirements.txt && \
   pip install comfy-cli && \
+  comfy --skip-prompt --workspace /home/comfy/app install --nvidia && \
   comfy --skip-prompt set-default /home/comfy/app && \
   comfy --skip-prompt --no-enable-telemetry env
 
-# For now we need --skip-manager to avoid conflict with volume mounted custom_nodes. 
-# @todo see if we can install just the cli and not the node: https://github.com/Comfy-Org/ComfyUI-Manager/blob/main/docs/en/cm-cli.md
-# RUN --mount=type=cache,target=~/.cache/pip \
-#   conda activate $CONDA_ENV_NAME && \
-#   pip install comfy-cli && \
-#   comfy --skip-prompt --workspace /home/comfy/app install --nvidia && \
-#   comfy --skip-prompt set-default /home/comfy/app && \
-#   comfy --skip-prompt --no-enable-telemetry env && \
-#   pip cache purge
-
-# can we target a specific verison of the application?
+WORKDIR /home/comfy/app
 
 COPY --chown=comfy:comfy . .
 
