@@ -175,185 +175,40 @@ curl -f http://localhost:8188
 
 ComfyUI Docker uses a modular script system for container bootstrapping and setup. Scripts are mounted as volumes and executed during container startup with sophisticated logging and error handling.
 
-### Script System Architecture
+### Overview
 
-The script system consists of:
+- **Architecture**: Scripts stored in `scripts/category/` and mounted as volumes
+- **Execution**: Automatic execution during startup with colored logging
+- **Logging**: Shared logging library (`scripts/logging.sh`) for consistent output
+- **Integration**: Volume mounting allows script modification without rebuilding images
 
-- **Script Directory Structure**: `scripts/category/*.sh` (one level deep)
-- **Startup Script**: `services/comfy/base/startup.sh` with enhanced logging
-- **Volume Mounting**: Scripts mounted read-only to `/home/comfy/app/scripts`
-- **Execution Engine**: Function-based execution with colored logging
+### Development Resources
 
-### Logging Functions
+For comprehensive script development information, see:
 
-The startup script provides standardized logging functions with colors:
+**[📜 Scripts Guide](../user-guides/scripts.md)** - Complete documentation including:
+- Script system architecture and execution flow
+- Logging functions and colored output
+- Script templates and development guidelines  
+- Testing procedures and debugging techniques
+- Common use cases and practical examples
 
-```bash
-# Available logging functions
-log_info "Informational message"     # Blue [INFO]
-log_success "Success message"        # Green [SUCCESS]  
-log_warning "Warning message"        # Yellow [WARNING]
-log_error "Error message"            # Red [ERROR]
+### Core Development Files
 
-# Color codes (if you need custom logging)
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly NC='\033[0m' # No Color
-```
+Key files for script system development:
 
-### Script Categories
+- **`services/comfy/base/startup.sh`** - Main startup script with execution logic
+- **`scripts/logging.sh`** - Shared logging library for colored output
+- **`scripts/base/`** - Core functionality scripts
+- **`scripts/extended/`** - Extended functionality scripts
 
-#### Base Scripts (`scripts/base/`)
-Core functionality scripts that run first:
-- `00-file-structure.sh` - Creates essential directory structure
-- `01-install-comfy-manager.sh` - Installs ComfyUI Manager
-
-#### Extended Scripts (`scripts/extended/`)
-Additional functionality for the extended image:
-- `10-install-ipadapter.sh` - IP Adapter integration
-- `11-install-pulid-flux.sh` - PuLID Flux setup
-- `12-install-tea-cache.sh` - TEA Cache optimization
-- `13-install-hi-diffusion.sh` - Hi-Diffusion setup
-- `99-custom-nodes.sh` - Additional custom nodes
-
-### Creating New Scripts
-
-#### 1. Script Structure Template
+### Quick Development Test
 
 ```bash
-#!/bin/bash
-set -e
-
-# Script: [Brief description]
-# Category: [base|extended|custom]
-# Purpose: [Detailed purpose]
-
-echo "Starting [script name]..."
-
-# Check if already installed/configured
-if [ -f "/some/marker/file" ]; then
-    echo "Already configured, skipping..."
-    exit 0
-fi
-
-# Main installation logic
-echo "Installing [component]..."
-# ... installation commands ...
-
-# Create completion marker
-touch "/some/marker/file"
-echo "Successfully installed [component]"
-```
-
-#### 2. Script Naming Convention
-
-- Use numerical prefixes: `00-99`
-- Descriptive names: `10-install-component.sh`
-- Lower case with hyphens: `component-name.sh`
-
-#### 3. Best Practices
-
-- **Idempotent**: Safe to run multiple times
-- **Error Handling**: Use `set -e` and check command success
-- **Logging**: Use echo statements for user feedback
-- **Dependencies**: Check for required tools/packages before use
-- **Cleanup**: Clean up temporary files and caches
-
-### Testing Scripts
-
-#### Local Testing
-
-```bash
-# Test script syntax
-bash -n scripts/category/script.sh
-
-# Test script execution in container
-docker compose exec comfy bash /home/comfy/app/scripts/category/script.sh
-
-# Test with debug output
-docker compose exec comfy bash -x /home/comfy/app/scripts/category/script.sh
-```
-
-#### Integration Testing
-
-```bash
-# Force script re-execution
-docker compose exec comfy rm -f .post_install_done
-
-# Restart container and monitor logs
-docker compose restart && docker compose logs -f
-```
-
-#### Testing New Categories
-
-```bash
-# Create test category
-mkdir -p scripts/test
-echo '#!/bin/bash
-set -e
-echo "Test script executed successfully"' > scripts/test/01-test.sh
-chmod +x scripts/test/01-test.sh
-
-# Test execution
-docker compose exec comfy rm -f .post_install_done
-docker compose restart
-```
-
-### Script Execution Flow
-
-The startup script executes scripts in this order:
-
-1. **Check Status**: Verify if post-install is complete
-2. **Process Categories**: Loop through `scripts/*/` in alphabetical order
-3. **Execute Scripts**: Run all `*.sh` files in each category
-4. **Log Results**: Track success/failure with colored output
-5. **Mark Complete**: Create `.post_install_done` marker
-
-### Debugging Script Issues
-
-#### Common Issues
-
-- **Permission Denied**: Ensure scripts are executable (`chmod +x`)
-- **Syntax Errors**: Use `bash -n script.sh` to check syntax
-- **Path Issues**: Use absolute paths or verify working directory
-- **Environment**: Scripts run in the ComfyUI virtual environment
-
-#### Debug Commands
-
-```bash
-# Check script permissions
-docker compose exec comfy ls -la /home/comfy/app/scripts/
-
-# Verify script content
-docker compose exec comfy cat /home/comfy/app/scripts/category/script.sh
-
-# Check execution environment
-docker compose exec comfy env
-
-# Monitor real-time execution
-docker compose logs -f --tail=0
-```
-
-### Modifying the Startup Script
-
-If you need to modify the script execution logic in `services/comfy/base/startup.sh`:
-
-#### Key Functions
-
-- `run_post_install_scripts()` - Main execution function
-- `check_post_install_status()` - Status checking
-- `mark_post_install_complete()` - Completion marking
-- `log_*()` functions - Logging utilities
-
-#### Testing Startup Changes
-
-```bash
-# Test syntax
+# Test startup script syntax
 bash -n services/comfy/base/startup.sh
 
-# Build and test
+# Build and test changes
 docker buildx bake comfy-cuda
 docker compose up -d && docker compose logs -f
 ```

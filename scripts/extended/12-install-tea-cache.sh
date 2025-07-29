@@ -1,14 +1,25 @@
 #!/bin/bash
 set -e
 
+# Source logging functions
+source "$(dirname "$0")/../logging.sh"
+
 # ComfyUI-TeaCache
 # @description: TeaCache is a cache for ComfyUI that is not part of the official ComfyUI repository.
 # @link: https://github.com/welltop-cn/ComfyUI-TeaCache.git
+
+log_info "Checking ComfyUI-TeaCache installation..."
+
 if [ ! -d "$COMFY_BASE_DIRECTORY/custom_nodes/ComfyUI-TeaCache" ]; then
-    echo "Installing ComfyUI-TeaCache..."
-    git clone --branch main --depth 1 https://github.com/welltop-cn/ComfyUI-TeaCache.git ${COMFY_BASE_DIRECTORY}/custom_nodes/ComfyUI-TeaCache
+    log_info "Installing ComfyUI-TeaCache..."
+    if git clone --branch main --depth 1 https://github.com/welltop-cn/ComfyUI-TeaCache.git ${COMFY_BASE_DIRECTORY}/custom_nodes/ComfyUI-TeaCache; then
+        log_success "ComfyUI-TeaCache installed successfully"
+    else
+        log_error "Failed to install ComfyUI-TeaCache"
+        exit 1
+    fi
 else
-    echo "ComfyUI-TeaCache already installed"
+    log_info "ComfyUI-TeaCache already installed, skipping..."
 fi
 
 # @todo let's use the manager cli to do this instead. 
