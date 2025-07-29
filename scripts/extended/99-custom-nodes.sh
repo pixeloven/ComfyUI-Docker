@@ -4,42 +4,13 @@ set -e
 # Source logging functions
 source "$(dirname "$0")/../logging.sh"
 
+# Source custom nodes installation functions
+source "$(dirname "$0")/../custom-nodes.sh"
+
 log_info "Starting custom nodes installation..."
 
-# Function to install a custom node using ComfyUI CLI
-install_custom_node() {
-    local name="$1"
-    local node_identifier="$2"
-    local directory="$COMFY_BASE_DIRECTORY/custom_nodes/$name"
-    
-    log_info "Checking $name installation..."
-    
-    # Early return if already installed
-    if [ -d "$directory" ]; then
-        log_info "$name already installed, skipping..."
-        return 0
-    fi
-    
-    # Install using ComfyUI CLI
-    log_info "Installing $name using ComfyUI CLI..."
-    
-    # Run the command and capture exit code, but let output show
-    comfy --workspace="$COMFY_APP_DIRECTORY" node install "$node_identifier"
-    local exit_code=$?
-    
-    if [ $exit_code -eq 0 ]; then
-        # Verify installation actually worked by checking directory exists
-        if [ -d "$directory" ]; then
-            log_success "$name installed successfully"
-        else
-            log_error "ComfyUI CLI reported success but $name directory not found at $directory"
-            exit 1
-        fi
-    else
-        log_error "Failed to install $name"
-        exit 1
-    fi
-}
+# Custom nodes install to volume via symlink - this ensures persistence
+# ComfyUI CLI installs to $COMFY_APP_DIRECTORY/custom_nodes (symlinked to $COMFY_BASE_DIRECTORY/custom_nodes)
 
 # ComfyUI-KJNodes
 # @description: KJNodes is a collection of nodes for ComfyUI that are not part of the official ComfyUI repository.

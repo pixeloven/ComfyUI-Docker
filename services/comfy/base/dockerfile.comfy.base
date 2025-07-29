@@ -1,5 +1,23 @@
 FROM runtime AS base
 
+# ComfyUI Docker Image - Volume Architecture
+# 
+# REQUIRED VOLUMES:
+#   /data   - Models, custom nodes, user configs (mount required for persistence)
+#   
+# DIRECTORY STRUCTURE:
+#   /data/comfy/custom_nodes/  - Installed custom nodes (persistent)
+#   /data/comfy/input/         - Input images and workflows
+#   /data/comfy/models/        - AI models (checkpoints, LoRAs, etc.)
+#   /data/comfy/output/        - Generated images and workflows
+#   /data/comfy/temp/          - Temporary files
+#   /data/comfy/user/          - User configurations and workflows
+#   /home/comfy/app/           - ComfyUI application (ephemeral)
+#
+# VOLUME MOUNT EXAMPLES:
+#   docker run -v ./data:/data comfyui
+#   docker-compose.yml: ./data:/data:delegated
+
 # Remove ubuntu user
 # https://askubuntu.com/questions/1513927/ubuntu-24-04-docker-images-now-includes-user-ubuntu-with-uid-gid-1000
 RUN touch /var/mail/ubuntu && \
@@ -11,9 +29,11 @@ ARG PGID=1000
 RUN groupadd -g $PGID comfy && \
     useradd -m -u $PUID -g $PGID comfy
 
-RUN mkdir -p /data /output && \
-    chown -R comfy:comfy /data && \
-    chown -R comfy:comfy /output
+# Create persistent data directories structure
+# These directories will be volume-mounted in production for data persistence
+RUN mkdir -p /data/comfy/{custom_nodes,input,models,output,temp,user} && \
+    mkdir -p /data/comfy/models/{checkpoints,vae,loras,embeddings,hypernetworks,controlnet,clip_vision,upscale_models,ipadapter} && \
+    chown -R comfy:comfy /data
 
 USER comfy
 
@@ -36,7 +56,13 @@ RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip
   pip install comfy-cli && \
   comfy --skip-prompt --workspace /home/comfy/app install --nvidia && \
   comfy --skip-prompt set-default /home/comfy/app && \
-  comfy --skip-prompt --no-enable-telemetry env
+  comfy --skip-prompt --no-enable-telemetry env && \
+  ln -sf /data/comfy/custom_nodes /home/comfy/app/custom_nodes && \
+  ln -sf /data/comfy/input /home/comfy/app/input && \
+  ln -sf /data/comfy/models /home/comfy/app/models && \
+  ln -sf /data/comfy/output /home/comfy/app/output && \
+  ln -sf /data/comfy/temp /home/comfy/app/temp && \
+  ln -sf /data/comfy/user /home/comfy/app/user
 
 WORKDIR /home/comfy/app
 
@@ -56,8 +82,8 @@ ENV CLI_ARGS=$CLI_ARGS
 ENV COMFY_PORT=$COMFY_PORT
 ENV COMFY_APP_DIRECTORY="/home/comfy/app"
 ENV COMFY_DATA_DIRECTORY=$COMFY_DATA_DIRECTORY
-ENV COMFY_OUTPUT_DIRECTORY=$COMFY_OUTPUT_DIRECTORY
-ENV COMFY_BASE_DIRECTORY="$COMFY_DATA_DIRECTORY/config/comfy"
+ENV COMFY_OUTPUT_DIRECTORY="$COMFY_DATA_DIRECTORY/output"
+ENV COMFY_BASE_DIRECTORY="$COMFY_DATA_DIRECTORY/comfy"
 
 EXPOSE $COMFY_PORT
 
