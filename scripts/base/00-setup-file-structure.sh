@@ -4,6 +4,28 @@ set -e
 # Source logging functions
 source "$(dirname "$0")/../logging.sh"
 
+# Function to create symlink, preserving any existing content
+ensure_symlink() {
+    local source_path="$1"
+    local target_path="$2"
+    local description="$3"
+    
+    # Ensure target directory exists
+    mkdir -p "$target_path"
+    
+    # If source directory exists and has content, preserve it
+    if [ -d "$source_path" ] && [ "$(ls -A "$source_path" 2>/dev/null)" ]; then
+        log_info "Preserving existing $description content"
+        mv "$source_path"/* "$target_path"/ 2>/dev/null || true
+    fi
+    
+    # Remove source and create symlink
+    rm -rf "$source_path"
+    ln -sf "$target_path" "$source_path"
+    
+    log_success "$description symlink created: $(basename "$source_path") -> $(basename "$target_path")"
+}
+
 log_info "Initializing volume-based directory structure..."
 
 # Set environment variable defaults first
@@ -43,37 +65,6 @@ log_info "Ensuring all required subdirectories exist..."
 mkdir -p "$COMFY_BASE_DIRECTORY"/{custom_nodes,input,models,output,temp,user}
 chown -R comfy:comfy "$COMFY_DATA_DIRECTORY"
 
-# Function to ensure symlink exists and is correct
-ensure_symlink() {
-    local source_path="$1"
-    local target_path="$2"
-    local description="$3"
-    
-    # Remove existing symlink or file if it exists but is incorrect
-    if [ -e "$source_path" ] || [ -L "$source_path" ]; then
-        if [ ! -L "$source_path" ] || [ "$(readlink "$source_path")" != "$target_path" ]; then
-            log_info "Removing incorrect $description symlink/file at $source_path"
-            rm -rf "$source_path"
-        fi
-    fi
-    
-    # Create symlink if it doesn't exist or was removed
-    if [ ! -L "$source_path" ]; then
-        log_info "Creating $description symlink: $source_path -> $target_path"
-        ln -sf "$target_path" "$source_path"
-    fi
-    
-    # Validate the symlink
-    if [ -L "$source_path" ] && [ -d "$target_path" ]; then
-        log_success "$description symlink validated: $(basename "$source_path") -> $(basename "$target_path")"
-        return 0
-    else
-        log_error "$description symlink validation failed"
-        log_error "Source: $source_path (exists: $([ -L "$source_path" ] && echo "yes" || echo "no"))"
-        log_error "Target: $target_path (exists: $([ -d "$target_path" ] && echo "yes" || echo "no"))"
-        return 1
-    fi
-}
 
 # Ensure all required symlinks exist and are correct
 log_info "Validating and ensuring required symlinks..."
