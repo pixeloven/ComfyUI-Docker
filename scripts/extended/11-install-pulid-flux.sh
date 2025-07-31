@@ -29,3 +29,15 @@ log_info "PuLID_ComfyUI_FLUX installation is currently disabled"
 # fi
 
 # https://github.com/lldacing/ComfyUI_PuLID_Flux_ll - Does it support SDXL?
+
+# https://github.com/cubiq/ComfyUI_InstantID
+# https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet
+# https://github.com/Gourieff/ComfyUI-ReActor
+
+# @todo Cateogirize the custom nodes into categories and install them in the correct order
+# @todo see if we can fix dependecy issues so "fix" is not needed
+# @todo install a theme
+# @todo create examples for use cases
+# @todo fix pipe in and out from easy use nodes
+# @todo see if we can cut image size down more
+# @todo consider quantized models for faster inference / setup wan2.2, loras for flux etc

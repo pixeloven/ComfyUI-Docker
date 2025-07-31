@@ -61,14 +61,25 @@ install_custom_node_from_git() {
     
     # Install using git clone
     log_info "Installing $repo_name via git clone..."
-    git clone --branch main --depth 1 "$git_url" "$directory"
-    pip install -r "$directory/requirements.txt"
+    git clone --branch main --depth 1 "$git_url" "$directory" --recursive
     local exit_code=$?
     
     if [ $exit_code -eq 0 ]; then
+        # Check if requirements.txt exists and install dependencies if present
+        if [ -f "$directory/requirements.txt" ]; then
+            log_info "Installing $repo_name requirements..."
+            pip install -r "$directory/requirements.txt"
+            exit_code=$?
+            if [ $exit_code -ne 0 ]; then
+                log_error "Failed to install $repo_name requirements"
+                exit 1
+            fi
+        else
+            log_info "$repo_name has no requirements.txt file"
+        fi
         log_success "$repo_name installed successfully"
     else
-        log_error "Failed to install $repo_name"
+        log_error "Failed to clone $repo_name repository"
         exit 1
     fi
 }
