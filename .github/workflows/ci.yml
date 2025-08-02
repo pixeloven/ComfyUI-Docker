@@ -69,14 +69,3 @@ jobs:
       run: |
         docker buildx bake all --push
 
-  pr-summary:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    needs: [validate-config, test-compose-profiles, test-bake-targets]
-    steps:
-    - name: PR Validation Summary
-      run: |
-        echo "✅ All validation checks passed!"
-        echo "- Docker Compose configuration is valid"
-        echo "- Docker Bake configuration is valid"
-        echo "- All expected targets and profiles exist"
