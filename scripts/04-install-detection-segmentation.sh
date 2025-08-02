@@ -12,11 +12,11 @@ log_info "Starting object detection and segmentation installation..."
 # ComfyUI-Impact-Pack
 # @description: Object detection, segmentation, and selective processing with advanced masking capabilities
 # @link: https://github.com/ltdrdata/ComfyUI-Impact-Pack
-install_custom_node_from_git "ComfyUI-Impact-Pack" "https://github.com/ltdrdata/ComfyUI-Impact-Pack.git"
+install_custom_node "ComfyUI-Impact-Pack" "ComfyUI-Impact-Pack"
 
 # ComfyUI-Impact-Subpack
 # @description: Additional components and utilities for ComfyUI-Impact-Pack
 # @link: https://github.com/ltdrdata/ComfyUI-Impact-Subpack
-install_custom_node_from_git "ComfyUI-Impact-Subpack" "https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git"
+install_custom_node "ComfyUI-Impact-Subpack" "comfyui-impact-subpack"
 
 log_success "Object detection and segmentation installation completed successfully" 

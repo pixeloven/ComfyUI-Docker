@@ -17,6 +17,6 @@ install_custom_node "ComfyUI_IPAdapter_plus" "comfyui_ipadapter_plus"
 # comfyui_controlnet_aux
 # @description: ControlNet preprocessors and auxiliary nodes for advanced image conditioning and control
 # @link: https://github.com/Fannovel16/comfyui_controlnet_aux
-install_custom_node_from_git "comfyui_controlnet_aux" "https://github.com/Fannovel16/comfyui_controlnet_aux.git"
+install_custom_node "comfyui_controlnet_aux" "comfyui_controlnet_aux"
 
 log_success "Control systems installation completed successfully" 

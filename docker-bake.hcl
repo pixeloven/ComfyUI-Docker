@@ -11,7 +11,7 @@ variable "IMAGE_LABEL" {
 }
 
 variable "RUNTIME" {
-    default = "nvidia"
+    default = "cuda"
 }
 
 variable "PLATFORMS" {

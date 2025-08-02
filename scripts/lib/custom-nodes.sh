@@ -4,6 +4,25 @@
 # Source this file in your scripts to access custom node installation functions
 # Usage: source "$(dirname "$0")/../custom-nodes.sh" || source ./scripts/custom-nodes.sh
 
+# Function to check if installation should be skipped (node already installed)
+should_skip_installation() {
+    local display_name="$1"
+    local identifier="$2"
+    # Convert identifier to lowercase for consistent directory naming
+    local directory_name=$(echo "$identifier" | tr '[:upper:]' '[:lower:]')
+    local directory="$COMFY_BASE_DIRECTORY/custom_nodes/$directory_name"
+    
+    log_info "Checking $display_name installation..."
+    
+    # Check if already installed
+    if [ -d "$directory" ]; then
+        log_info "$display_name already installed, skipping..."
+        return 0  # Yes, should skip installation
+    fi
+    
+    return 1  # No, should not skip installation
+}
+
 # Function to install a custom node using ComfyUI CLI
 install_custom_node() {
     local name="$1"
@@ -12,12 +31,9 @@ install_custom_node() {
     local directory_name=$(echo "$node_identifier" | tr '[:upper:]' '[:lower:]')
     local directory="$COMFY_BASE_DIRECTORY/custom_nodes/$directory_name"
     
-    log_info "Checking $name installation..."
-    
-    # Early return if already installed
-    if [ -d "$directory" ]; then
-        log_info "$name already installed, skipping..."
-        return 0
+    # Check if already installed
+    if should_skip_installation "$name" "$node_identifier"; then
+        exit 0
     fi
     
     # Install using ComfyUI CLI
@@ -51,12 +67,9 @@ install_custom_node_from_git() {
     local directory_name=$(echo "$repo_name" | tr '[:upper:]' '[:lower:]')
     local directory="$COMFY_BASE_DIRECTORY/custom_nodes/$directory_name"
     
-    log_info "Checking $repo_name installation..."
-    
-    # Early return if already installed
-    if [ -d "$directory" ]; then
-        log_info "$repo_name already installed, skipping..."
-        return 0
+    # Check if already installed
+    if should_skip_installation "$repo_name" "$repo_name"; then
+        exit 0
     fi
     
     # Install using git clone
@@ -75,7 +88,7 @@ install_custom_node_from_git() {
                 exit 1
             fi
         else
-            log_info "$repo_name has no requirements.txt file"
+            log_warning "$repo_name has no requirements.txt file"
         fi
         log_success "$repo_name installed successfully"
     else
