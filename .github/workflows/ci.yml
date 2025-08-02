@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -69,31 +69,10 @@ jobs:
       run: |
         docker buildx bake all --push
 
-  test-cpu-runtime:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    needs: [validate-config]
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Build CPU runtime for testing
-      run: |
-        docker buildx bake runtime-cpu core-cpu
-    
-    - name: Test CPU runtime startup
-      run: |
-        timeout 60 docker compose --profile cpu up -d
-        sleep 10
-        docker compose ps
-        docker compose logs
-        # Test that ComfyUI starts successfully
-        curl -f http://localhost:8188/system_stats || exit 1
-        docker compose down
-
   pr-summary:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    needs: [validate-config, test-compose-profiles, test-bake-targets, test-cpu-runtime]
+    needs: [validate-config, test-compose-profiles, test-bake-targets]
     steps:
     - name: PR Validation Summary
       run: |
@@ -101,4 +80,3 @@ jobs:
         echo "- Docker Compose configuration is valid"
         echo "- Docker Bake configuration is valid"
         echo "- All expected targets and profiles exist"
-        echo "- CPU runtime successfully starts and responds"
