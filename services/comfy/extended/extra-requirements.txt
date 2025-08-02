@@ -1,0 +1,33 @@
+# CrossOS Acceleritor - Complete acceleration library suite
+# Based on: https://github.com/loscrossos/crossOS_acceleritor
+# Provides pre-built wheels for all acceleration libraries including SageAttention
+
+# @todo Consider splitting requirements into use cases video, image, audio, 3d, etc.
+
+# Core acceleration libraries (pre-built wheels)
+xformers
+triton>=3.3.1
+
+# FlashAttention 2.8.0 (pre-built)
+https://github.com/loscrossos/lib_flashattention/releases/download/v2.8.0/flash_attn-2.8.0+cu129torch2.7.1-cp312-cp312-linux_x86_64.whl
+
+# SageAttention 2.2.0 (pre-built)
+https://github.com/loscrossos/lib_sageattention/releases/download/v2.2.0/sageattention-2.2.0+cu129torch270-cp312-cp312-linux_x86_64.whl
+
+# CausalConv1d 1.5.0 (pre-built)
+https://github.com/loscrossos/lib_causal-conv1d/releases/download/v1.5.0.post8_crossos00/causal_conv1d-1.5.0.post8+cu129torch2.7.1-cp312-cp312-linux_x86_64.whl
+
+# MambaSSM 2.2.4 (pre-built)
+https://github.com/loscrossos/lib_mamba/releases/download/v2.2.4_crossos00/mamba_ssm-2.2.4+cu129torch2.7.1-cp312-cp312-linux_x86_64.whl
+
+# Additional dependencies
+accelerate>=1.1.1
+onnxruntime-gpu>=1.22.0
+diffusers>=0.24.0
+
+# PuLID / IPAdapter
+facexlib>=0.3.0
+insightface>=0.7.3
+
+# HiDiffusion
+# hidiffusion>=0.1.10 # Can't find how to use this or a node that supports it.

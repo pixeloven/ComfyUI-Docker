@@ -10,6 +10,9 @@ Get running in 5 minutes with one-command setup and basic configuration.
 ### [Usage Guide](usage.md)
 Daily operations, model management, and common workflows.
 
+### [Scripts Guide](scripts.md)
+Complete guide to the script system for customizing container setup and bootstrapping.
+
 ### [Configuration](configuration.md)
 Complete guide to environment variables, performance tuning, and multi-instance setup.
 

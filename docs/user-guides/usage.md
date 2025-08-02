@@ -57,13 +57,33 @@ The ComfyUI container automatically:
 
 ### Post-Install Process
 
-The container runs a post-install script that:
+The container runs a modular post-install script system that:
 1. Creates necessary directories (`/data/config/comfy`, `/output`)
 2. Installs ComfyUI Manager if not present
-3. Sets up proper environment variables
-4. Marks completion to avoid re-running
+3. Executes additional setup scripts from mounted volumes
+4. Sets up proper environment variables
+5. Marks completion to avoid re-running
 
 This ensures a consistent setup across all deployments.
+
+## Bootstrap Scripts
+
+The ComfyUI Docker system includes a powerful script management system for customizing container setup. Scripts are automatically executed during startup with colored logging and error handling.
+
+### Quick Overview
+
+- **Organized**: Scripts stored in `scripts/category/` directories  
+- **Ordered**: Execute alphabetically by category, then by filename
+- **Logged**: Colored output with INFO, SUCCESS, WARNING, ERROR levels
+- **Protected**: Run once per container (unless forced to re-run)
+
+### Getting Started
+
+See the **[📜 Scripts Guide](scripts.md)** for complete documentation on:
+- Creating custom scripts with colored logging
+- Script templates and best practices  
+- Common use cases and examples
+- Troubleshooting and debugging
 
 ## Configuration
 

@@ -22,9 +22,8 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro  
-      - ./services/comfy/base/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
-      - ./output:/output
+      - ./scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:
@@ -44,9 +43,8 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ./services/comfy/base/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
-      - ./output:/output
+      - ./scripts:/home/comfy/app/scripts:ro
       # Should .cache be a volume? 
     stop_signal: SIGKILL
     tty: true
@@ -74,9 +72,8 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ./services/comfy/base/extra_model_paths.yaml:/home/comfy/app/extra_model_paths.yaml:ro,cached
       - ./data:/data:delegated
-      - ./output:/output
+      - ./scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:

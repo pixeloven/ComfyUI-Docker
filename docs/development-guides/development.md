@@ -171,3 +171,45 @@ curl -f http://localhost:8188
 - Update documentation if needed
 - Keep commits focused and descriptive
 
+## Script Development
+
+ComfyUI Docker uses a modular script system for container bootstrapping and setup. Scripts are mounted as volumes and executed during container startup with sophisticated logging and error handling.
+
+### Overview
+
+- **Architecture**: Scripts stored in `scripts/category/` and mounted as volumes
+- **Execution**: Automatic execution during startup with colored logging
+- **Logging**: Shared logging library (`scripts/logging.sh`) for consistent output
+- **Integration**: Volume mounting allows script modification without rebuilding images
+
+### Development Resources
+
+For comprehensive script development information, see:
+
+**[📜 Scripts Guide](../user-guides/scripts.md)** - Complete documentation including:
+- Script system architecture and execution flow
+- Logging functions and colored output
+- Script templates and development guidelines  
+- Testing procedures and debugging techniques
+- Common use cases and practical examples
+
+### Core Development Files
+
+Key files for script system development:
+
+- **`services/comfy/base/startup.sh`** - Main startup script with execution logic
+- **`scripts/logging.sh`** - Shared logging library for colored output
+- **`scripts/base/`** - Core functionality scripts
+- **`scripts/extended/`** - Extended functionality scripts
+
+### Quick Development Test
+
+```bash
+# Test startup script syntax
+bash -n services/comfy/base/startup.sh
+
+# Build and test changes
+docker buildx bake comfy-cuda
+docker compose up -d && docker compose logs -f
+```
+
