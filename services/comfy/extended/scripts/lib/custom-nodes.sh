@@ -2,7 +2,7 @@
 
 # Custom Nodes Installation Library for ComfyUI Docker Scripts
 # Source this file in your scripts to access custom node installation functions
-# Usage: source "$(dirname "$0")/../custom-nodes.sh" || source ./scripts/custom-nodes.sh
+# Usage: source "$(dirname "$0")/lib/custom-nodes.sh" || source ./scripts/custom-nodes.sh
 
 # Function to check if installation should be skipped (node already installed)
 should_skip_installation() {
@@ -100,6 +100,6 @@ install_custom_node_from_git() {
 # Check if functions are being sourced correctly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "This file should be sourced, not executed directly."
-    echo "Usage: source \"\$(dirname \"\$0\")/../custom-nodes.sh\""
+    echo "Usage: source \"\$(dirname \"\$0\")/lib/custom-nodes.sh\""
     exit 1
 fi 

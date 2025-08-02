@@ -1,4 +1,4 @@
-name: ComfyUI-Docker
+name: ComfyUI Extended Images
 # Any leasons we can learn from InvokeAI?
 # https://github.com/invoke-ai/InvokeAI/blob/main/docker/docker-compose.yml
 
@@ -6,32 +6,17 @@ name: ComfyUI-Docker
 # @todo manage top extensions https://github.com/if-ai/ComfyUI-IF_Trellis as one of them
 # @todo post install script to install extensions and models https://github.com/microsoft/TRELLIS/pull/30/files
 
+# Usage:
+# docker compose up                              # Default (extended)
+# docker compose up comfy                       # Explicit service name
+# COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/comfy-cuda:latest docker compose up  # Basic CUDA
+# 
+# For base images (CPU), use: docker compose -f docker-compose.base.yml up
+
 services:
 
-  comfy-cpu:
-    profiles: ["cpu-only"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfy-cpu:latest
-    user: ${PUID:-1000}:${PGID:-1000}
-    environment:
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - COMFY_PORT=${COMFY_PORT:-8188}
-      - CLI_ARGS=--cpu
-    ports:
-      - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro  
-      - ./data:/data:delegated
-      - ./scripts:/home/comfy/app/scripts:ro
-    stop_signal: SIGKILL
-    tty: true
-    networks:
-      - comfy_network
-
-  comfy-cuda:
-    profiles: ["cuda"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfy-cuda:latest
+  comfy:
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/comfy-cuda-extended:latest}
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
@@ -44,36 +29,9 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
       - ./data:/data:delegated
-      - ./scripts:/home/comfy/app/scripts:ro
-      # Should .cache be a volume? 
-    stop_signal: SIGKILL
-    tty: true
-    networks:
-      - comfy_network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ['0']
-              capabilities: [compute, utility]
-
-  comfy-cuda-extended:
-    profiles: ["cuda-extended"]
-    image: ghcr.io/pixeloven/comfyui-docker/comfy-cuda-extended:latest
-    user: ${PUID:-1000}:${PGID:-1000}
-    environment:
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - COMFY_PORT=${COMFY_PORT:-8188}
-      - CLI_ARGS=
-    ports:
-      - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-      - ./data:/data:delegated
-      - ./scripts:/home/comfy/app/scripts:ro
+      # Scripts path - switches based on image being used
+      - ./services/comfy/extended/scripts:/home/comfy/app/scripts:ro
+      # should we mount python and local cache?
     stop_signal: SIGKILL
     tty: true
     networks:

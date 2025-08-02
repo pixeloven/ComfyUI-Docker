@@ -2,7 +2,7 @@
 set -e
 
 # Source logging functions
-source "$(dirname "$0")/../logging.sh"
+source "$(dirname "$0")/lib/logging.sh"
 
 # Function to create symlink, preserving any existing content
 ensure_symlink() {

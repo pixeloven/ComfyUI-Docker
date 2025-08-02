@@ -1,0 +1,51 @@
+name: ComfyUI Base Images
+# Base services for ComfyUI Docker - CPU and basic CUDA variants
+# This file requires explicit targeting: docker compose -f docker-compose.base.yml up
+#
+# Usage:
+# docker compose -f docker-compose.base.yml up comfy-cpu
+# docker compose -f docker-compose.base.yml up comfy-cuda
+
+services:
+
+  comfy-cpu:
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/comfy-cpu:latest}
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - COMFY_PORT=${COMFY_PORT:-8188}
+      - CLI_ARGS=--cpu
+    ports:
+      - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro  
+      - ./data:/data:delegated
+    stop_signal: SIGKILL
+    tty: true
+    networks:
+      - comfy_network
+
+  comfy-cuda:
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/comfy-cuda:latest}
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - COMFY_PORT=${COMFY_PORT:-8188}
+      - CLI_ARGS=
+    ports:
+      - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro  
+      - ./data:/data:delegated
+    stop_signal: SIGKILL
+    tty: true
+    networks:
+      - comfy_network
+
+networks:
+  comfy_network:
+    driver: bridge 

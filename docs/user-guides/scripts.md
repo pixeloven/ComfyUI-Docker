@@ -22,7 +22,7 @@ The ComfyUI Docker system includes a powerful script management system that allo
    set -e
    
    # Source logging functions for colored output
-   source "$(dirname "$0")/../logging.sh"
+   source "$(dirname "$0")/lib/logging.sh"
    
    log_info "Installing my custom component..."
    
@@ -88,7 +88,7 @@ All scripts can use standardized colored logging by sourcing the logging library
 set -e
 
 # Source logging functions for colored output
-source "$(dirname "$0")/../logging.sh"
+source "$(dirname "$0")/lib/logging.sh"
 
 # Available logging functions
 log_info "General information and progress updates"
@@ -116,7 +116,7 @@ Use this template for new scripts:
 set -e
 
 # Source logging functions for colored output
-source "$(dirname "$0")/../logging.sh"
+source "$(dirname "$0")/lib/logging.sh"
 
 # Script: Brief description of what this script does
 # Category: [base|extended|custom|etc]
@@ -242,7 +242,7 @@ docker compose logs -f --tail=0
 ```bash
 #!/bin/bash
 set -e
-source "$(dirname "$0")/../logging.sh"
+source "$(dirname "$0")/lib/logging.sh"
 
 NODE_NAME="ComfyUI-CustomNode"
 NODE_REPO="https://github.com/author/ComfyUI-CustomNode.git"
@@ -267,7 +267,7 @@ fi
 ```bash
 #!/bin/bash
 set -e
-source "$(dirname "$0")/../logging.sh"
+source "$(dirname "$0")/lib/logging.sh"
 
 PACKAGES=("package1" "package2" "package3")
 
@@ -291,7 +291,7 @@ log_success "All Python packages installed successfully"
 ```bash
 #!/bin/bash
 set -e
-source "$(dirname "$0")/../logging.sh"
+source "$(dirname "$0")/lib/logging.sh"
 
 CONFIG_FILE="/path/to/config.conf"
 BACKUP_FILE="/path/to/config.conf.backup"
@@ -320,7 +320,7 @@ log_success "System configuration completed"
 ```bash
 #!/bin/bash
 set -e
-source "$(dirname "$0")/../logging.sh"
+source "$(dirname "$0")/lib/logging.sh"
 
 MODEL_URL="https://example.com/model.safetensors"
 MODEL_PATH="$COMFY_BASE_DIRECTORY/models/checkpoints/model.safetensors"
