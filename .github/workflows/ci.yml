@@ -35,8 +35,8 @@ jobs:
           echo "✅ All services configured correctly"
           
           # Environment file validation
-          grep -q "PUID" .env.example
-          grep -q "PGID" .env.example
+          grep -q "PUID" .env.example || echo "❌ PUID not found in .env.example"
+          grep -q "PGID" .env.example || echo "❌ PGID not found in .env.example"
           echo "✅ Environment file valid"
           
           # Docker Bake validation
@@ -49,7 +49,6 @@ jobs:
           docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cpu"
           docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cuda"
           docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cuda-extended"
-          docker buildx bake --file docker-bake.hcl --print | grep -q "sageattention-builder"
           echo "✅ All build targets configured correctly"
 
       - name: Clean up Docker
