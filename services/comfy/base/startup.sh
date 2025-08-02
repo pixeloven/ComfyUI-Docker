@@ -31,41 +31,23 @@ run_post_install_scripts() {
     
     local total_scripts=0
     
-    # Process each subdirectory in scripts/ in alphabetical order
-    for script_dir in ./scripts/*/; do
-        # Skip if no directories match the pattern
-        [ ! -d "$script_dir" ] && continue
+    # Execute numbered scripts in order from scripts root directory
+    for script in ./scripts/[0-9]*.sh; do
+        # Skip if no scripts match the pattern
+        [ ! -f "$script" ] && continue
         
-        local dir_name=$(basename "$script_dir")
-        local dir_scripts=0
+        log_info "Executing script: $(basename "$script")"
         
-        log_info "Processing scripts in: $dir_name"
+        # Run the script and capture exit code, but let output show
+        "$script"
+        local exit_code=$?
         
-        # Execute all .sh files in this directory
-        for script in "$script_dir"*.sh; do
-            # Skip if no scripts match the pattern
-            [ ! -f "$script" ] && continue
-            
-            log_info "Executing script: $(basename "$script")"
-            
-            # Run the script and capture exit code, but let output show
-            "$script"
-            local exit_code=$?
-            
-            if [ $exit_code -eq 0 ]; then
-                log_success "Script completed: $(basename "$script")"
-                ((dir_scripts++))
-                ((total_scripts++))
-            else
-                log_error "Script failed: $(basename "$script")"
-                return 1
-            fi
-        done
-        
-        if [ $dir_scripts -eq 0 ]; then
-            log_warning "No executable scripts found in: $dir_name"
+        if [ $exit_code -eq 0 ]; then
+            log_success "Script completed: $(basename "$script")"
+            ((total_scripts++))
         else
-            log_success "Completed $dir_scripts scripts in: $dir_name"
+            log_error "Script failed: $(basename "$script")"
+            return 1
         fi
     done
     
