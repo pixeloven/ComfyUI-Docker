@@ -1,22 +1,23 @@
-name: ComfyUI Extended Images
-# Any leasons we can learn from InvokeAI?
-# https://github.com/invoke-ai/InvokeAI/blob/main/docker/docker-compose.yml
+# ComfyUI Docker Compose Configuration
+# Multiple service profiles for different use cases
+#
+# Quick Start Commands:
+# docker compose --profile core up -d       # Core ComfyUI with GPU (recommended)
+# docker compose --profile complete up -d   # Complete ComfyUI with all optimizations  
+# docker compose --profile cpu up -d        # CPU mode
+#
+# For convenience, core is also the default:
+# docker compose up -d                      # Same as --profile core
 
-# @todo extra_model_paths.yaml should be compatible with invokeai and have versions for default, invoke, a1111, etc.
-# @todo manage top extensions https://github.com/if-ai/ComfyUI-IF_Trellis as one of them
-# @todo post install script to install extensions and models https://github.com/microsoft/TRELLIS/pull/30/files
-
-# Usage:
-# docker compose up                              # Default (extended)
-# docker compose up comfy                       # Explicit service name
-# COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/comfy-cuda:latest docker compose up  # Basic CUDA
-# 
-# For base images (CPU), use: docker compose -f docker-compose.base.yml up
+# Environment Variables:
+# COMFY_PORT - Port to expose ComfyUI (default: 8188)
+# COMFY_IMAGE - Override default image
+# COMFY_BASE_DIRECTORY - Base directory for ComfyUI (default: ./data)
 
 services:
-
-  comfy:
-    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/comfy-cuda-extended:latest}
+  # Core GPU mode (--profile core, also default)
+  core-cuda:
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/core:cuda-latest}
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
@@ -31,7 +32,6 @@ services:
       - ./data:/data:delegated
       # Scripts path - switches based on image being used
       - ./services/comfy/extended/scripts:/home/comfy/app/scripts:ro
-      # should we mount python and local cache?
     stop_signal: SIGKILL
     tty: true
     networks:
@@ -41,8 +41,62 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['0']
-              capabilities: [compute, utility]
+              count: all
+              capabilities: [gpu]
+    profiles: [core, ""]
+
+  # Complete GPU mode with all optimizations (--profile complete)
+  complete-cuda:
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/complete:cuda-latest}
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - COMFY_PORT=${COMFY_PORT:-8188}
+      - CLI_ARGS=
+    ports:
+      - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./data:/data:delegated
+      # Scripts path - switches based on image being used
+      - ./services/comfy/extended/scripts:/home/comfy/app/scripts:ro
+    stop_signal: SIGKILL
+    tty: true
+    networks:
+      - comfy_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    profiles: [complete]
+
+  # CPU-only mode (--profile cpu)
+  core-cpu:
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/core:cpu-latest}
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - COMFY_PORT=${COMFY_PORT:-8188}
+      - CLI_ARGS=
+    ports:
+      - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./data:/data:delegated
+      # Scripts path - switches based on image being used
+      - ./services/comfy/extended/scripts:/home/comfy/app/scripts:ro
+    stop_signal: SIGKILL
+    tty: true
+    networks:
+      - comfy_network
+    profiles: [cpu]
 
 networks:
   comfy_network:

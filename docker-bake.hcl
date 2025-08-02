@@ -23,10 +23,10 @@ target "runtime-cuda" {
     dockerfile = "dockerfile.cuda.runtime"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}runtime-cuda:${IMAGE_LABEL}",
-        "${REGISTRY_URL}runtime-cuda:cache"
+        "${REGISTRY_URL}runtime:cuda-${IMAGE_LABEL}",
+        "${REGISTRY_URL}runtime:cuda-cache"
     ]
-    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime-cuda:cache"]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cuda-cache"]
     cache-to   = ["type=inline"]
 }
 
@@ -35,14 +35,14 @@ target "runtime-cpu" {
     dockerfile = "dockerfile.cpu.runtime"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}runtime-cpu:${IMAGE_LABEL}",
-        "${REGISTRY_URL}runtime-cpu:cache"
+        "${REGISTRY_URL}runtime:cpu-${IMAGE_LABEL}",
+        "${REGISTRY_URL}runtime:cpu-cache"
     ]
-    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime-cpu:cache"]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cpu-cache"]
     cache-to   = ["type=inline"]
 }
 
-target "comfy-cuda" {
+target "core-cuda" {
     context = "services/comfy/base"
     contexts = {
         runtime = "target:runtime-cuda"
@@ -50,12 +50,12 @@ target "comfy-cuda" {
     dockerfile = "dockerfile.comfy.base"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}comfy-cuda:${IMAGE_LABEL}",
-        "${REGISTRY_URL}comfy-cuda:cache"
+        "${REGISTRY_URL}core:cuda-${IMAGE_LABEL}",
+        "${REGISTRY_URL}core:cuda-cache"
     ]
     cache-from = [
-        "type=registry,ref=${REGISTRY_URL}runtime-cuda:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-cuda:cache"
+        "type=registry,ref=${REGISTRY_URL}runtime:cuda-cache",
+        "type=registry,ref=${REGISTRY_URL}core:cuda-cache"
     ]
     cache-to   = ["type=inline"]
     args = {
@@ -64,7 +64,7 @@ target "comfy-cuda" {
     depends_on = ["runtime-cuda"]
 }
 
-target "comfy-cpu" {
+target "core-cpu" {
     context = "services/comfy/base"
     contexts = {
         runtime = "target:runtime-cpu"
@@ -72,12 +72,12 @@ target "comfy-cpu" {
     dockerfile = "dockerfile.comfy.base"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}comfy-cpu:${IMAGE_LABEL}",
-        "${REGISTRY_URL}comfy-cpu:cache"
+        "${REGISTRY_URL}core:cpu-${IMAGE_LABEL}",
+        "${REGISTRY_URL}core:cpu-cache"
     ]
     cache-from = [
-        "type=registry,ref=${REGISTRY_URL}runtime-cpu:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-cuda:cache"
+        "type=registry,ref=${REGISTRY_URL}runtime:cpu-cache",
+        "type=registry,ref=${REGISTRY_URL}core:cuda-cache"
     ]
     cache-to   = ["type=inline"]
     args = {
@@ -86,24 +86,24 @@ target "comfy-cpu" {
     depends_on = ["runtime-cpu"]
 }
 
-target "comfy-cuda-extended" {
+target "complete-cuda" {
     context = "services/comfy/extended"
     contexts = {
-        base = "target:comfy-cuda"
+        base = "target:core-cuda"
     }
     dockerfile = "dockerfile.comfy.cuda.extended"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}comfy-cuda-extended:${IMAGE_LABEL}",
-        "${REGISTRY_URL}comfy-cuda-extended:cache"
+        "${REGISTRY_URL}complete:cuda-${IMAGE_LABEL}",
+        "${REGISTRY_URL}complete:cuda-cache"
     ]
     cache-from = [
-        "type=registry,ref=${REGISTRY_URL}runtime-cuda:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-cuda:cache",
-        "type=registry,ref=${REGISTRY_URL}comfy-cuda-extended:cache"
+        "type=registry,ref=${REGISTRY_URL}runtime:cuda-cache",
+        "type=registry,ref=${REGISTRY_URL}core:cuda-cache",
+        "type=registry,ref=${REGISTRY_URL}complete:cuda-cache"
     ]
     cache-to   = ["type=inline"]
-    depends_on = ["comfy-cuda"]
+    depends_on = ["core-cuda"]
 }
 
 // Convenience groups
@@ -116,7 +116,7 @@ group "all" {
 }
 
 group "base" {
-    targets = ["runtime-cuda", "runtime-cpu", "comfy-cuda", "comfy-cpu"]
+    targets = ["runtime-cuda", "runtime-cpu", "core-cuda", "core-cpu"]
 }
 
 group "runtime" {
@@ -124,10 +124,10 @@ group "runtime" {
 }
 
 group "cuda" {
-    targets = ["runtime-cuda", "comfy-cuda", "comfy-cuda-extended"]
+    targets = ["runtime-cuda", "core-cuda", "complete-cuda"]
 }
 
 group "cpu" {
-    targets = ["runtime-cpu", "comfy-cpu"]
+    targets = ["runtime-cpu", "core-cpu"]
 }
 

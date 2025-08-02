@@ -1,153 +1,104 @@
-name: ComfyUI Docker CI/CD
+name: CI
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/**'
-      - 'services/**'
-      - '.env.example'
-      - 'docker-compose.yml'
-      - 'docker-bake.hcl'
+    branches: [ main, develop ]
   pull_request:
-    types:
-      - opened
-      - reopened
-      - synchronize
+    branches: [ main, develop ]
+  workflow_dispatch:
 
 jobs:
-  # Validate configuration files
   validate-config:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    
+    - name: Validate Docker Compose
+      run: |
+        docker compose config --quiet
+    
+    - name: Validate Docker Bake
+      run: |
+        docker buildx bake --file docker-bake.hcl --print
 
-      - name: Validate configuration files
-        run: |
-          echo "🔍 Validating configuration files..."
-          
-          # Service validation (with profiles)
-          docker compose --profile cpu-only config --services | grep -q comfy-cpu
-          docker compose --profile cuda config --services | grep -q comfy-cuda
-          docker compose --profile cuda-extended config --services | grep -q comfy-cuda-extended
-          echo "✅ All services configured correctly"
-          
-          # Environment file validation
-          grep -q "PUID" .env.example || echo "❌ PUID not found in .env.example"
-          grep -q "PGID" .env.example || echo "❌ PGID not found in .env.example"
-          echo "✅ Environment file valid"
-          
-          # Docker Bake validation
-          docker buildx bake --file docker-bake.hcl --print
-          echo "✅ Docker Bake configuration valid"
-          
-          # Validate all build targets exist (including extended for quality assurance)
-          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cpu"
-          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cuda"
-          docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cpu"
-          docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cuda"
-          docker buildx bake --file docker-bake.hcl --print | grep -q "comfy-cuda-extended"
-          echo "✅ All build targets configured correctly"
+  test-compose-profiles:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Test Docker Compose profiles
+      run: |
+        # Test that profiles are properly configured
+        docker compose --profile cpu config --services | grep -q core-cpu
+        docker compose --profile core config --services | grep -q core-cuda
+        docker compose --profile complete config --services | grep -q complete-cuda
+        docker compose config --services | grep -q core-cuda
 
-      - name: Clean up Docker
-        run: docker system prune -a -f
+  test-bake-targets:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Test Docker Bake targets
+      run: |
+        # Validate all expected targets exist in docker-bake.hcl
+        docker buildx bake --file docker-bake.hcl --print | grep -q "core-cpu"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "core-cuda"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cpu"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cuda"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "complete-cuda"
 
-  # Build all images using Docker Bake
   build-images:
-    runs-on: ubuntu-22.04
-    needs: validate-config
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [validate-config, test-compose-profiles, test-bake-targets]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Build and push images
+      run: |
+        docker buildx bake all --push
 
-      - name: Free disk space
-        uses: ./.github/actions/free-disk-space
+  test-cpu-runtime:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [validate-config]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build CPU runtime for testing
+      run: |
+        docker buildx bake runtime-cpu core-cpu
+    
+    - name: Test CPU runtime startup
+      run: |
+        timeout 60 docker compose --profile cpu up -d
+        sleep 10
+        docker compose ps
+        docker compose logs
+        # Test that ComfyUI starts successfully
+        curl -f http://localhost:8188/system_stats || exit 1
+        docker compose down
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push with Docker Bake
-        uses: docker/bake-action@v6
-        with:
-          source: .
-          targets: runtime
-          push: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Build and push CPU ComfyUI images
-        uses: docker/bake-action@v6
-        with:
-          source: .
-          targets: cpu
-          push: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Clean up Docker
-        run: docker system prune -a -f
-
-  # PR summary
   pr-summary:
     runs-on: ubuntu-latest
-    needs: [validate-config, build-images]
-    if: always() && github.event_name == 'pull_request'
-    
+    if: github.event_name == 'pull_request'
+    needs: [validate-config, test-compose-profiles, test-bake-targets, test-cpu-runtime]
     steps:
-      - name: PR Validation Summary
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const results = {
-              'validate-config': '${{ needs.validate-config.result }}',
-              'build-images': '${{ needs.build-images.result }}'
-            };
-            
-            const passed = Object.values(results).filter(r => r === 'success').length;
-            const total = Object.keys(results).length;
-            
-            let summary = `## 🔍 PR Validation Results\n\n`;
-            summary += `**${passed}/${total} checks passed**\n\n`;
-            
-            for (const [check, result] of Object.entries(results)) {
-              const emoji = result === 'success' ? '✅' : result === 'failure' ? '❌' : '⏭️';
-              summary += `${emoji} ${check.replace('-', ' ')}: ${result}\n`;
-            }
-            
-            if (passed === total) {
-              summary += `\n🎉 All validation checks passed! This PR is ready for review.`;
-            } else {
-              summary += `\n⚠️ Some validation checks failed. Please review and fix the issues.`;
-            }
-            
-            // Add comment to PR
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && comment.body.includes('PR Validation Results')
-            );
-            
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: summary
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: summary
-              });
-            }
+    - name: PR Validation Summary
+      run: |
+        echo "✅ All validation checks passed!"
+        echo "- Docker Compose configuration is valid"
+        echo "- Docker Bake configuration is valid"
+        echo "- All expected targets and profiles exist"
+        echo "- CPU runtime successfully starts and responds"

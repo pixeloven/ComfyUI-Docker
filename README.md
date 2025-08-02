@@ -1,176 +1,111 @@
-# ComfyUI Docker
+# ComfyUI Docker 🐳
 
-A Docker-based setup for running [ComfyUI](https://github.com/comfyanonymous/ComfyUI), a powerful and modular stable diffusion GUI and backend.
+**Production-ready ComfyUI with Docker Compose**
 
-## About This Project
+A complete Docker setup for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) with GPU acceleration, custom nodes, and workflow management.
 
-ComfyUI Docker provides a **production-ready, containerized solution** for running ComfyUI - the powerful node-based Stable Diffusion interface. Our goal is to eliminate the complexity of AI image generation setup while maintaining the flexibility and power that advanced users need.
+## Features ✨
 
-### Why ComfyUI Docker?
-- **🚀 One-Command Setup** - Get running in minutes, not hours
-- **🏗️ Production Ready** - Proper permissions, persistent storage, and error handling
-- **🔄 Flexible Deployment** - GPU acceleration or CPU-only modes
-- **📦 Model Management** - Automated downloading with verification
-- **🔧 Developer Friendly** - Easy development workflow with Docker Compose profiles
-- **⚡ Efficient Builds** - Docker Bake for optimized image building and caching
-- **🎛️ Custom Node Management** - Integrated ComfyUI Manager for extension management
-- **⚡ SageAttention 2++** - Optimized attention computation for 2-3x faster generation
+- **🚀 GPU-Accelerated**: NVIDIA CUDA support with optimized attention mechanisms  
+- **🔧 Custom Nodes**: Pre-installed workflow enhancers, detection tools, and more
+- **📁 Persistent Storage**: Models, workflows, and outputs saved to `./data/`
+- **🐳 Production Ready**: Multi-stage builds with proper caching
+- **⚡ SageAttention**: 2-3x faster attention computation on supported GPUs
 
-### Key Features
-- **Multi-profile architecture** - GPU and CPU profiles with extended SageAttention 2++ support
-- **Persistent storage** - Your models, configs, and outputs survive container restarts
-- **Virtual environment** - Isolated Python environment for ComfyUI extensions
-- **Environment-based configuration** - All settings controlled via environment variables
-- **Optimized CI/CD** - Docker Bake-based workflows with efficient caching
-- **Performance optimization** - SageAttention 2++ for faster attention computation
+## Quick Start 🏃‍♂️
 
-## 🚀 Quick Start
+### Prerequisites
+- Docker & Docker Compose
+- NVIDIA GPU + drivers (for GPU modes)
+- 8GB+ VRAM recommended for complete mode
 
+### Launch ComfyUI
+
+**Core Mode (Recommended)** ⚡
 ```bash
-# 1. Clone and setup
 git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd ComfyUI-Docker
-
-# Create .env file with default settings
-cat > .env << EOF
-# User/Group IDs for container permissions
-PUID=1000
-PGID=1000
-
-# ComfyUI Configuration
-COMFY_PORT=8188
-CLI_ARGS=
-
-EOF
-
-# 2. Start ComfyUI (choose one)
-# Standard GPU mode (recommended for most users)
-docker compose comfy-nvidia up -d
-
-# Extended GPU mode with SageAttention 2++ (2-3x faster attention)
-docker compose comfy-cuda-extended up -d
-
-# CPU mode (universal)
-docker compose comfy-cpu up -d
-
-# 3. Open ComfyUI at http://localhost:8188 (or your configured port)
+docker compose up -d
 ```
 
-**That's it!** ComfyUI is now running. For model setup and advanced configuration, see the documentation below.
-
-## 🚀 Performance Modes
-
-### Standard GPU Mode (`comfy-nvidia`)
-- **Best for**: Most users, general purpose
-- **Performance**: Standard ComfyUI performance
-- **Compatibility**: Works with all models and workflows
-
-### Extended GPU Mode (`comfy-cuda-extended`) ⚡
-- **Best for**: Power users, production workloads
-- **Performance**: 2-3x faster attention computation with SageAttention 2++
-- **Features**: 
-  - Optimized attention mechanisms
-  - Reduced VRAM usage
-  - Better scaling with large models
-  - Automatic fallback for incompatible operations
-  - Library-only installation (no custom nodes required)
-- **Requirements**: NVIDIA GPU with 8GB+ VRAM, CUDA 12.x
-
-### CPU Mode (`comfy-cpu`)
-- **Best for**: Systems without GPU, testing
-- **Performance**: Slower but universal compatibility
-- **Compatibility**: Works on any system
-
-## 📁 Project Structure
-
-```
-ComfyUI-Docker/
-├── 📚 docs/                          # Documentation
-│   ├── index.md                      # Documentation overview
-│   ├── user-guides/                  # User tutorials and guides
-│   ├── development-guides/           # Development and CI/CD guides
-│   └── project-management/           # Project planning and analysis
-│
-├── 🐳 services/                      # Docker service definitions
-│   ├── runtime/                      # Runtime base images
-│   │   ├── dockerfile.nvidia.runtime # NVIDIA GPU runtime
-│   │   └── dockerfile.cpu.runtime    # CPU-only runtime
-│   │
-│   └── comfy/                        # Main ComfyUI service
-│       ├── base/                     # Base ComfyUI image
-│       │   ├── dockerfile.comfy.base # Base ComfyUI image
-│       │   ├── startup.sh            # Container startup script
-│       │   ├── entrypoint.sh         # Container entrypoint
-│       │   ├── post_install.sh       # Post-installation setup
-│       │   └── extra_model_paths.yaml # Model path configuration
-│       │
-│       └── extended/                 # Extended features
-│           ├── dockerfile.comfy.cuda.extended # SageAttention 2++ image
-│           ├── requirements.txt      # Extended dependencies
-│           └── scripts/              # Performance optimization scripts
-│
-├── 📦 data/                          # Persistent data storage
-├── 🖼️ output/                        # Generated image outputs
-
-├── 🔧 .github/                       # GitHub Actions workflows
-├── 📋 docker-compose.yml             # Main orchestration file
-├── 🏗️ docker-bake.hcl                # Multi-stage build configuration
-└── 📖 README.md                      # This file
+**Complete Mode (All Features)**
+```bash
+docker compose --profile complete up -d
 ```
 
-### Key Directories Explained
+**CPU Mode**
+```bash
+docker compose --profile cpu up -d
+```
 
-- **`docs/`** - Complete documentation organized by audience (users, developers, project management)
-- **`services/`** - Docker service definitions with multi-stage builds for different runtimes
-- **`data/`** - Persistent storage for models, configs, and user data
-- **`output/`** - Generated images and workflow outputs
-- **`.github/`** - CI/CD workflows and GitHub configuration
+Access ComfyUI at: **http://localhost:8188**
 
-## 📚 Documentation
+## Usage Modes 🎯
 
-- **[Documentation Index](docs/)** – Overview of all documentation
+### Core Mode (`core-cuda`) ⚡
 
-### For Users
-- **[User Guides](docs/user-guides/)** – All user documentation
-  - **[Quick Start](docs/user-guides/quick-start.md)** – Get running in 5 minutes
-  - **[Usage Guide](docs/user-guides/usage.md)** – Daily operations and workflows
-  - **[Configuration](docs/user-guides/configuration.md)** – Environment variables and performance tuning
+**Best for**: Most users, standard workflows
+- ✅ Essential ComfyUI functionality
+- ✅ GPU acceleration
+- ✅ Fast startup and lighter resource usage
+- ✅ All core features you need
 
+```bash
+docker compose up -d
+# or explicitly: docker compose --profile core up -d
+```
 
+### Complete Mode (`complete-cuda`) 🚀
 
-### For Developers
-- **[Development Guides](docs/development-guides/)** – All development documentation
-  - **[Development](docs/development-guides/development.md)** – Building, contributing, and development workflow
-  - **[CI/CD](docs/development-guides/ci-cd.md)** – Docker Bake workflows and local testing
+**Best for**: Production workflows, heavy processing, power users
+- ✅ All custom nodes included
+- ✅ SageAttention optimization (2-3x faster)
+- ✅ GPU-accelerated generation  
+- ✅ Pre-installed models and workflows
+- ⚠️  Larger download and resource usage
 
-### For Project Management
-- **[Project Management](docs/project-management/)** – Project planning and analysis
-  - **[Tasks & Roadmap](docs/project-management/tasks.md)** – Current issues, technical debt, and roadmap
-  - **[Repository Analysis](docs/project-management/repository-analysis.md)** – Analysis of existing ComfyUI Docker repositories
+```bash
+docker compose --profile complete up -d
+```
 
+### CPU Mode (`core-cpu`)
 
-## 🤝 Contributing
+**Best for**: Testing, compatibility, no GPU available
+- ✅ Universal compatibility
+- ⚠️  Slower generation times
+- ✅ Lower resource requirements
 
-Contributions are welcome! Please see the [Development Guide](docs/development-guides/development.md) for development setup and contribution guidelines.
+```bash
+docker compose --profile cpu up -d
+```
 
-**Important**: Create a discussion first describing the problem and your proposed solution before implementing anything.
+## Data & Storage 💾
 
-## ⚖️ License & Disclaimer
+Everything persists in `./data/`:
+```
+data/
+├── models/          # Checkpoints, LoRAs, embeddings
+├── input/           # Upload images here  
+├── output/          # Generated images
+├── user/            # Custom nodes, workflows
+└── temp/            # Temporary files
+```
 
-This project is provided under the terms specified in the [LICENSE](./LICENSE) file. Users are responsible for ensuring their use complies with all applicable laws and regulations.
+## Development 🛠️
 
-The authors are not responsible for any content generated using this interface. Please use responsibly and ethically.
+See [Development Guide](docs/development-guides/development.md) for:
+- Building custom images
+- Adding custom nodes
+- Local development setup
+- Contributing guidelines
 
-## 🙏 Acknowledgments
+## Documentation 📚
 
-Special thanks to the amazing open source community behind these projects:
+- **[Quick Start Guide](docs/user-guides/quick-start.md)** - Get up and running fast
+- **[Configuration](docs/user-guides/configuration.md)** - Customize your setup  
+- **[Usage Guide](docs/user-guides/usage.md)** - Advanced usage patterns
+- **[Development](docs/development-guides/development.md)** - Build and customize
 
-- **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** - The powerful node-based stable diffusion interface
-- **[ComfyUI CLI](https://github.com/Comfy-Org/comfy-cli)** - Command-line interface for ComfyUI management
-- **[AbdBarho/stable-diffusion-webui-docker](https://github.com/AbdBarho/stable-diffusion-webui-docker)** - Original Docker implementation inspiration
-- **[CompVis/stable-diffusion](https://github.com/CompVis/stable-diffusion)** - The foundational stable diffusion research
-- And the entire AI/ML open source community that makes this possible
+## License 📄
 
----
-
-**[⬆ Back to Top](#comfyui-docker)** | **[📚 Documentation](docs/)** | **[🐛 Issues](https://github.com/pixeloven/ComfyUI-Docker/issues)** | **[💬 Discussions](https://github.com/pixeloven/ComfyUI-Docker/discussions)**
+Licensed under [MIT License](LICENSE). ComfyUI is licensed under GPL-3.0.

@@ -1,72 +1,89 @@
-# Quick Start
+# Quick Start Guide
 
-Get ComfyUI running in minutes.
+Get ComfyUI running in 5 minutes with Docker Compose.
 
-## What is ComfyUI?
+## Prerequisites
 
-ComfyUI is a powerful node-based interface for AI image generation. This Docker setup provides GPU acceleration with CPU fallback and optional SageAttention 2++ optimization.
+- **Docker** & **Docker Compose** installed
+- **NVIDIA GPU + drivers** (for GPU modes)  
+- **8GB+ VRAM** recommended for complete mode
 
-## Setup
+## Launch ComfyUI
 
+### 1. Clone & Setup
 ```bash
-# 1. Clone and setup
 git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd ComfyUI-Docker
-
-# Create .env file with default settings
-cat > .env << EOF
-# User/Group IDs for container permissions
-PUID=1000
-PGID=1000
-
-# ComfyUI Configuration
-COMFY_PORT=8188
-CLI_ARGS=
-
-EOF
-
-# 2. Start (choose one)
-docker compose comfy-nvidia up -d        # GPU mode (recommended)
-docker compose comfy-cuda-extended up -d # Extended GPU mode (2-3x faster attention)
-docker compose comfy-cpu up -d    # CPU mode (universal)
-
-# 3. Open http://localhost:8188
 ```
 
-## Hardware Modes
-
-- **GPU Mode** (`comfy-nvidia`): Fast generation, requires NVIDIA GPU
-- **Extended GPU Mode** (`comfy-cuda-extended`): ⚡ **2-3x faster attention** with SageAttention 2++, requires NVIDIA GPU with 8GB+ VRAM
-- **CPU Mode** (`comfy-cpu`): Works everywhere, slower generation
-
-## SageAttention 2++ Extended Mode
-
-The extended mode includes SageAttention 2++ for significantly faster attention computation:
-
-### Benefits
-- **2-3x faster** attention operations
-- **Reduced VRAM usage** for attention
-- **Better scaling** with large models
-- **Automatic fallback** for incompatible operations
-
-### Requirements
-- NVIDIA GPU with 8GB+ VRAM (RTX 20 series or newer recommended)
-- CUDA 12.x runtime environment
-
-### Usage
-1. Start with extended mode: `docker compose comfy-cuda-extended up -d`
-2. SageAttention 2++ is automatically used by compatible models
-3. No manual configuration required - seamless integration
-
-## Basic Configuration
-
+### 2. Start ComfyUI (Choose One)
 ```bash
-# Change port (default: 8188)
-sed -i 's/COMFY_PORT=8188/COMFY_PORT=8080/' .env
+# Core mode (recommended - essential features with GPU acceleration)
+docker compose up -d
 
-# Low VRAM mode (4-6GB GPUs)
-sed -i 's/CLI_ARGS=/CLI_ARGS=--lowvram/' .env
+# Complete mode (all features including optimizations and custom nodes)
+docker compose --profile complete up -d
 
-# CPU-only mode
-sed -i 's/CLI_ARGS=/CLI_ARGS=--cpu/' .env
+# CPU mode (universal compatibility)
+docker compose --profile cpu up -d
 ```
+
+### 3. Access ComfyUI
+Open **http://localhost:8188** in your browser
+
+## Usage Modes
+
+- **Core Mode** (`core-cuda`): Essential ComfyUI with GPU acceleration, fast startup
+- **Complete Mode** (`complete-cuda`): ⚡ **2-3x faster attention** with SageAttention 2++, all custom nodes included
+- **CPU Mode** (`core-cpu`): Works everywhere, slower generation
+
+## First Workflow
+
+Once ComfyUI loads:
+
+1. **Load Example**: Use the "Load Default" workflow button
+2. **Add Models**: Place checkpoint files in `./data/models/checkpoints/`
+3. **Generate**: Click "Queue Prompt" to start generation
+
+### Quick Model Setup
+1. Start with core mode: `docker compose up -d`
+2. Download a checkpoint (e.g., Stable Diffusion 1.5) to `./data/models/checkpoints/`
+3. Load the default workflow and select your model
+4. Generate your first image!
+
+## Data Persistence
+
+All your data persists in `./data/`:
+```
+data/
+├── models/          # Place model files here
+├── input/           # Upload images for processing
+├── output/          # Generated images appear here
+├── user/            # Custom nodes and workflows
+└── temp/            # Temporary processing files
+```
+
+## Next Steps
+
+- **[Usage Guide](usage.md)** - Learn advanced workflows
+- **[Configuration](configuration.md)** - Customize your setup
+- **[Development](../development-guides/development.md)** - Build custom images
+
+## Troubleshooting
+
+**GPU not detected?**
+```bash
+# Check NVIDIA drivers
+nvidia-smi
+
+# Verify Docker can access GPU
+docker run --rm --gpus all nvidia/cuda:11.8-runtime-ubuntu20.04 nvidia-smi
+```
+
+**Port already in use?**
+```bash
+# Use different port
+COMFY_PORT=8189 docker compose up -d
+```
+
+**Need more help?** See the [Configuration Guide](configuration.md) for detailed troubleshooting.

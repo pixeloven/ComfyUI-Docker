@@ -1,221 +1,284 @@
-# Configuration
+# Configuration Guide
 
-Complete guide to configuring ComfyUI Docker.
+Customize your ComfyUI Docker setup for optimal performance.
 
 ## Environment Variables
 
-All configuration is handled through environment variables in the `.env` file.
-
-### User Configuration
-
-Control container permissions and user/group IDs:
-
+### Core Configuration
 ```bash
-# User and group IDs for container permissions
-PUID=1000    # User ID (default: 1000)
-PGID=1000    # Group ID (default: 1000)
+# Port configuration
+COMFY_PORT=8188                    # Web interface port
+
+# User/Group IDs for file permissions  
+PUID=1000                          # User ID
+PGID=1000                          # Group ID
+
+# Base directory for all ComfyUI data
+COMFY_BASE_DIRECTORY=./data        # Data directory path
+
+# ComfyUI startup arguments
+CLI_ARGS=                          # Additional CLI arguments
 ```
 
-**Note**: These should match your host user/group IDs to avoid permission issues.
-
-### ComfyUI Configuration
-
-Control ComfyUI behavior and performance:
-
+### Performance Tuning
 ```bash
-# Web interface port
-COMFY_PORT=8188    # Port for ComfyUI web interface (default: 8188)
+# GPU Memory Management
+CLI_ARGS="--lowvram"               # 4-6GB VRAM systems
+CLI_ARGS="--novram"                # <4GB VRAM systems  
+CLI_ARGS="--cpu"                   # Force CPU-only mode
 
-# Additional CLI arguments
-CLI_ARGS=          # Additional arguments passed to ComfyUI
+# Attention Optimization
+CLI_ARGS="--use-split-cross-attention"  # Memory-efficient attention
+CLI_ARGS="--use-quad-cross-attention"   # Alternative attention method
+
+# Preview Settings
+CLI_ARGS="--preview-method auto"   # Auto-select preview method
+CLI_ARGS="--preview-method none"   # Disable previews (saves memory)
 ```
 
-#### Available CLI Arguments
+## Custom Image Selection
 
-- `--cpu` - Force CPU-only mode (useful for systems without GPU)
-- `--lowvram` - Low VRAM mode for GPUs with 4-6GB memory
-- `--novram` - No VRAM mode (uses system RAM instead)
-- `--listen` - Listen on all interfaces (not just localhost)
-- `--port 8080` - Override port (alternative to COMFY_PORT)
-
-#### Performance Tuning Examples
-
+### Override Default Images
 ```bash
-# For 4-6GB GPUs
-CLI_ARGS=--lowvram
+# Use specific image versions
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-latest docker compose up -d
 
-# For CPU-only systems
-CLI_ARGS=--cpu
+# Use CPU-optimized image for testing  
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cpu-latest docker compose --profile cpu up -d
 
-# For systems with very limited VRAM
-CLI_ARGS=--novram
-
-# For remote access
-CLI_ARGS=--listen
+# Use complete package with all features
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/complete:cuda-latest docker compose --profile complete up -d
 ```
 
-### SageAttention 2++ Configuration
+## SageAttention Configuration
 
-The extended image includes SageAttention 2++ for optimized attention computation:
+The complete package includes SageAttention 2++ for 2-3x faster attention computation.
 
-#### What is SageAttention 2++?
-- **Performance optimization** for transformer attention mechanisms
-- **GPU-optimized** implementation with CUDA acceleration
-- **Compatible** with SDXL and other modern models
-- **Automatic fallback** to standard attention for incompatible dimensions
-- **Library-only installation** - no custom nodes required
+### Automatic Configuration
+1. **Use the complete image**: `docker compose --profile complete up -d`
+2. SageAttention is automatically enabled for compatible operations
+3. No manual configuration required
 
-#### Usage
-SageAttention 2++ is automatically installed and configured in the extended image. The library provides optimized attention computation that ComfyUI can utilize automatically:
-
-1. **Use the extended image**: `docker compose comfy-cuda-extended up -d`
-2. **Automatic optimization**: SageAttention 2++ is used automatically by compatible models
-3. **No manual configuration**: The library integrates seamlessly with ComfyUI's attention mechanisms
-
-#### Performance Benefits
-- **2-3x faster** attention computation on compatible models
-- **Reduced VRAM usage** for attention operations
-- **Better scaling** with larger sequence lengths
-- **Optimized for modern GPUs** (RTX 30/40 series, A100, H100)
-- **Automatic fallback** for incompatible operations
-
-#### Hardware Requirements
-- **NVIDIA GPU** with CUDA support (RTX 20 series or newer recommended)
-- **8GB+ VRAM** for optimal performance
-- **CUDA 12.x** runtime environment
-
-#### Troubleshooting SageAttention
+### Verification
 ```bash
-# Check SageAttention installation
-docker compose exec comfy-cuda-extended python -c "import sageattention; print('SageAttention OK')"
+# Check if SageAttention is loaded
+docker compose exec complete-cuda python -c "import sageattention; print('SageAttention OK')"
 
 # View SageAttention logs
-docker compose logs comfy-cuda-extended | grep -i sage
+docker compose logs complete-cuda | grep -i sage
 
-# Test SageAttention functionality
-docker compose exec comfy-cuda-extended python -c "
-import sageattention
+# Test attention performance
+docker compose exec complete-cuda python -c "
 import torch
-q = torch.randn(1, 8, 64, 64, dtype=torch.float16).cuda()
-k = torch.randn(1, 8, 64, 64, dtype=torch.float16).cuda()
-v = torch.randn(1, 8, 64, 64, dtype=torch.float16).cuda()
-output = sageattention.sageattn(q, k, v, tensor_layout='HND')
+from sageattention import sageattn
 print('SageAttention test passed')
 "
 ```
 
-### Performance Configuration
+### Fallback Behavior
+- SageAttention automatically falls back to standard attention for incompatible operations
+- No workflow modifications needed
+- Seamless integration with existing models
 
-Control ComfyUI performance and resource usage:
+## Model Path Configuration
 
+### Default Paths
+```yaml
+# data/extra_model_paths.yaml
+base_path: /data/
+
+checkpoints: models/checkpoints
+vae: models/vae  
+loras: models/loras
+embeddings: models/embeddings
+controlnet: models/controlnet
+clip: models/clip
+clip_vision: models/clip_vision
+diffusers: models/diffusers
+style_models: models/style_models
+upscale_models: models/upscale_models
+```
+
+### Custom Paths
+```yaml
+# Add custom model directories
+custom_nodes: user/custom_nodes
+workflows: user/workflows  
+scripts: user/scripts
+```
+
+## Docker Compose Profiles
+
+### Available Profiles
 ```bash
-# Additional CLI arguments for performance tuning
-CLI_ARGS=          # Additional arguments passed to ComfyUI
+# Default profile (core mode)
+docker compose up -d
+
+# Core profile (explicit)
+docker compose --profile core up -d
+
+# Complete profile with all features
+docker compose --profile complete up -d
+
+# CPU-only profile  
+docker compose --profile cpu up -d
 ```
 
-**Note**: Use CLI_ARGS to optimize performance for your hardware configuration.
+## Network Configuration
 
-## File Structure
-
-The application uses the following directory structure:
-
-```
-ComfyUI-Docker/
-├── data/                    # Persistent data storage
-│   ├── models/             # Downloaded AI models
-│   │   ├── Stable-diffusion/  # Checkpoint models
-│   │   ├── VAE/              # VAE models
-│   │   ├── ControlNet/       # ControlNet models
-│   │   └── ...               # Other model types
-│   └── config/             # ComfyUI configuration
-│       └── comfy/          # ComfyUI settings and custom nodes
-├── output/                 # Generated images and outputs
-└── .env                    # Environment configuration
-```
-
-## Model Management
-
-Model management is now handled through custom nodes within ComfyUI. The comfy-setup service has been deprecated in favor of integrated model management.
-
-### Manual Model Management
-
-You can manually manage models:
-
-1. **Download models** to `./data/models/`
-2. **Organize by type** (Stable-diffusion, VAE, ControlNet, etc.)
-3. **Use ComfyUI Manager** (automatically installed) for easy model management
-
-## Multi-Instance Configuration
-
-To run multiple ComfyUI instances:
-
-1. **Create separate directories** for each instance
-2. **Use different ports** for each instance
-3. **Use different data directories** to avoid conflicts
-
-Example for second instance:
-
+### Port Mapping
 ```bash
-# Create second instance directory
-mkdir comfyui-instance-2
-cd comfyui-instance-2
+# Custom port
+COMFY_PORT=8080 docker compose up -d
 
-# Copy docker-compose.yml and create .env
-cp ../docker-compose.yml .
-cat > .env << EOF
-PUID=1000
-PGID=1000
-COMFY_PORT=8189
-CLI_ARGS=
-EOF
+# Multiple instances  
+COMFY_PORT=8188 docker compose up -d    # Instance 1
+COMFY_PORT=8189 docker compose up -d    # Instance 2 (different directory)
+```
 
-# Start second instance
-docker compose --profile comfy-nvidia up -d
+### Network Access
+```bash
+# Allow external access (security risk!)
+# Modify docker-compose.yml ports section:
+ports:
+  - "0.0.0.0:${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
+```
+
+## Storage Configuration
+
+### Volume Mounts
+```yaml
+# Default mounts in docker-compose.yml
+volumes:
+  - /etc/localtime:/etc/localtime:ro       # System timezone
+  - /etc/timezone:/etc/timezone:ro         # System timezone  
+  - ./data:/data:delegated                 # Main data directory
+  - ./services/comfy/extended/scripts:/home/comfy/app/scripts:ro  # Scripts
+```
+
+### Custom Mounts
+```yaml
+# Add custom volume mounts
+volumes:
+  - ./custom-models:/data/models/custom:ro    # Read-only model library
+  - ./shared-workflows:/data/workflows:rw     # Shared workflow directory
+  - /fast-storage/temp:/data/temp:rw          # High-speed temp storage
+```
+
+## Performance Optimization
+
+### System Resources
+```yaml
+# Resource limits in docker-compose.yml
+deploy:
+  resources:
+    limits:
+      memory: 16G        # Maximum RAM usage
+    reservations:
+      memory: 8G         # Reserved RAM
+      devices:
+        - driver: nvidia
+          count: all     # Use all GPUs
+          capabilities: [gpu]
+```
+
+### GPU Configuration
+```bash
+# Specific GPU selection
+CLI_ARGS="--directml"              # Use DirectML (Windows)
+CLI_ARGS="--force-fp16"            # Force half-precision
+CLI_ARGS="--fp16-vae"              # Half-precision VAE
+```
+
+## Logging Configuration
+
+### Log Levels
+```bash
+# Verbose logging
+CLI_ARGS="--verbose"
+
+# Debug mode
+CLI_ARGS="--debug-mode"
+
+# Quiet mode
+CLI_ARGS="--disable-server-log"
+```
+
+### Log Management
+```bash
+# View logs
+docker compose logs -f --tail=100
+
+# Save logs to file
+docker compose logs > comfyui.log
+
+# Rotate logs automatically
+# Add to docker-compose.yml:
+logging:
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+```
+
+## Security Configuration
+
+### File Permissions
+```bash
+# Set proper ownership
+sudo chown -R $USER:$USER ./data
+
+# Secure permissions
+chmod 755 ./data
+chmod -R 644 ./data/models/*
+```
+
+### Network Security
+```bash
+# Local access only (default)
+ports:
+  - "127.0.0.1:${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
+
+# Firewall configuration (if exposing externally)
+sudo ufw allow ${COMFY_PORT}/tcp
 ```
 
 ## Troubleshooting Configuration
 
 ### Common Issues
 
-1. **Permission Errors**
-   ```bash
-   # Fix ownership
-   sudo chown -R $USER:$USER ./data ./output
-   ```
-
-2. **Port Already in Use**
-   ```bash
-   # Change port in .env
-   sed -i 's/COMFY_PORT=8188/COMFY_PORT=8189/' .env
-   ```
-
-3. **GPU Not Detected**
-   ```bash
-   # Test GPU access
-   docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu20.04 nvidia-smi
-   ```
-
-4. **Low Memory Errors**
-   ```bash
-   # Enable low VRAM mode
-   sed -i 's/CLI_ARGS=/CLI_ARGS=--lowvram/' .env
-   ```
-
-### Validation
-
-Test your configuration:
-
+**Memory errors**
 ```bash
-# Check environment variables
-docker compose config
-
-# Test container startup
-docker compose --profile comfy-nvidia up --abort-on-container-exit
-
-# Check logs
-docker compose logs -f
+# Reduce memory usage
+CLI_ARGS="--lowvram --novram --cpu"
 ```
 
----
+**Model loading issues**
+```bash
+# Check model paths
+docker compose exec core-cuda ls -la /data/models/checkpoints/
 
-**[⬆ Back to User Guides](index.md)** | **[🚀 Quick Start](quick-start.md)** | **[📖 Usage Guide](usage.md)** 
+# Verify permissions
+docker compose exec core-cuda ls -la /data/
+```
+
+**GPU not detected**
+```bash
+# Test GPU access
+docker run --rm --gpus all nvidia/cuda:11.8-runtime-ubuntu20.04 nvidia-smi
+
+# Check Docker GPU support
+docker info | grep -i nvidia
+```
+
+### Diagnostic Commands
+```bash
+# Container information
+docker compose exec core-cuda env | grep COMFY
+docker compose exec core-cuda python --version
+docker compose exec core-cuda pip list | grep torch
+
+# System information
+docker compose exec core-cuda cat /proc/meminfo | head
+docker compose exec core-cuda df -h
+``` 
