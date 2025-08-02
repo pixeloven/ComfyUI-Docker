@@ -42,6 +42,14 @@ Access ComfyUI at: **http://localhost:8188**
 
 ## Usage Modes 🎯
 
+### Overview
+
+| Mode | Service | Profile | Image | Description |
+|------|---------|---------|--------|-------------|
+| **Core** | `core-cuda` | `--profile core` (default) | `ghcr.io/.../core:cuda-latest` | Essential ComfyUI with GPU |
+| **Complete** | `complete-cuda` | `--profile complete` | `ghcr.io/.../complete:cuda-latest` | Full package with optimizations |
+| **CPU** | `core-cpu` | `--profile cpu` | `ghcr.io/.../core:cpu-latest` | CPU-only mode |
+
 ### Core Mode (`core-cuda`) ⚡
 
 **Best for**: Most users, standard workflows
