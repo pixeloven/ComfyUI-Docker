@@ -25,6 +25,11 @@ accelerate>=1.1.1
 onnxruntime-gpu>=1.22.0
 diffusers>=0.24.0
 
+# Custom node optimizations - frequently used dependencies baked in for faster startup
+opencv-python>=4.8.0
+scipy>=1.11.0
+matplotlib>=3.7.0
+
 # PuLID / IPAdapter
 facexlib>=0.3.0
 insightface>=0.7.3
