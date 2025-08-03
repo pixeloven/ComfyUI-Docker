@@ -43,7 +43,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    profiles: [core, ""]
+    profiles: [core]
 
   # Complete GPU mode with all optimizations (--profile complete)
   complete-cuda:
