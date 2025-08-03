@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04 AS runtime-nvidia
+FROM nvidia/cuda:12.9.1-base-ubuntu24.04 AS runtime-nvidia
 
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV DEBIAN_FRONTEND=noninteractive 
@@ -20,5 +20,6 @@ RUN apt-get update && \
   ffmpeg \
   libgl1 \
   libglib2.0-0 && \
+  apt-get autoremove -y && \
   apt-get clean && \
-  rm -rf /var/lib/apt/lists/*
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
