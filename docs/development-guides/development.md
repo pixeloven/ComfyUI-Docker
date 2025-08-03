@@ -136,7 +136,7 @@ RUN cd /home/comfy/ComfyUI/custom_nodes && \
 
 **Method 2: Build Scripts**
 ```bash
-# Add to services/comfy/extended/scripts/
+# Add to services/comfy/complete/scripts/
 # Files in scripts/ are executed during container startup
 ```
 
@@ -330,13 +330,13 @@ services/
 │   └── dockerfile.cuda.runtime # CUDA runtime
 │
 └── comfy/                     # ComfyUI services
-    ├── base/                  # Base ComfyUI image
-    │   ├── dockerfile.comfy.base
+    ├── core/                  # Core ComfyUI image
+    │   ├── dockerfile.comfy.core
     │   ├── startup.sh
     │   └── entrypoint.sh
     │
-    └── extended/              # Extended features
-        ├── dockerfile.comfy.cuda.extended
+    └── complete/              # Complete features
+        ├── dockerfile.comfy.cuda.complete
         ├── extra-requirements.txt
         └── scripts/           # Startup scripts
             ├── 00-setup-file-structure.sh

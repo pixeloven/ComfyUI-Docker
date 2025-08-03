@@ -64,7 +64,6 @@ runs:
         df . -h
 
     - name: Show detailed disk usage
-      if: ${{ inputs.show-disk-usage == 'true' }}
       shell: bash
       run: |
         echo "📈 Largest installed packages:"
