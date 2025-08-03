@@ -50,10 +50,14 @@ jobs:
 
   build-images:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [validate-config, test-compose-profiles, test-bake-targets]
     steps:
     - uses: actions/checkout@v4
+    
+    - name: Free disk space
+      uses: ./.github/actions/free-disk-space
+      with:
+        show-disk-usage: 'true'
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -65,7 +69,84 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     
-    - name: Build and push images
-      run: |
-        docker buildx bake all --push
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/pixeloven/comfyui-docker
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build images
+      uses: docker/bake-action@v4
+      with:
+        files: docker-bake.hcl
+        targets: all
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        set: |
+          *.cache-from=type=gha
+          *.cache-to=type=gha,mode=max
+
+  pr-summary:
+    runs-on: ubuntu-latest
+    needs: [validate-config, test-compose-profiles, test-bake-targets, build-images]
+    if: always() && github.event_name == 'pull_request'
+    
+    steps:
+      - name: PR Validation Summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const results = {
+              'validate-config': '${{ needs.validate-config.result }}',
+              'test-compose-profiles': '${{ needs.test-compose-profiles.result }}',
+              'test-bake-targets': '${{ needs.test-bake-targets.result }}',
+              'build-images': '${{ needs.build-images.result }}'
+            };
+            
+            const passed = Object.values(results).filter(r => r === 'success').length;
+            const total = Object.keys(results).length;
+            
+            let summary = `## 🔍 PR Validation Results\n\n`;
+            summary += `**${passed}/${total} checks passed**\n\n`;
+            
+            for (const [check, result] of Object.entries(results)) {
+              const emoji = result === 'success' ? '✅' : result === 'failure' ? '❌' : '⏭️';
+              summary += `${emoji} ${check.replace('-', ' ')}: ${result}\n`;
+            }
+            
+            if (passed === total) {
+              summary += `\n🎉 All validation checks passed! This PR is ready for review.`;
+            } else {
+              summary += `\n⚠️ Some validation checks failed. Please review and fix the issues.`;
+            }
+            
+            // Add comment to PR
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && comment.body.includes('PR Validation Results')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: summary
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: summary
+              });
+            }
 
