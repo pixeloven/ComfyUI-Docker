@@ -2,7 +2,7 @@
 
 # Logging Library for ComfyUI Docker Scripts
 # Source this file in your scripts to access colored logging functions
-# Usage: source "$(dirname "$0")/../logging.sh" || source ./scripts/logging.sh
+# Usage: source "$(dirname "$0")/lib/logging.sh" || source ./scripts/logging.sh
 
 # Color codes for logging
 readonly RED='\033[0;31m'
@@ -31,6 +31,6 @@ log_error() {
 # Check if functions are being sourced correctly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "This file should be sourced, not executed directly."
-    echo "Usage: source \"\$(dirname \"\$0\")/../logging.sh\""
+    echo "Usage: source \"\$(dirname \"\$0\")/lib/logging.sh\""
     exit 1
 fi 

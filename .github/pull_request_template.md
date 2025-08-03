@@ -9,41 +9,47 @@ Before submitting this PR, please ensure you have:
 For more details, see: https://github.com/pixeloven/ComfyUI-Docker#contributing
 -->
 
-## 📋 Summary
+## Description
+Brief description of changes and motivation.
 
-**Type:** 🐛 Bug fix | ✨ Feature | 🔧 Config | 📚 Docs | 🏗️ Infrastructure
+## Type of Change
+- [ ] Bug fix (non-breaking change which fixes an issue)
+- [ ] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Documentation update
+- [ ] Performance improvement
+- [ ] Code refactoring
 
-**Affects:** Docker images | Docker Compose | CI/CD | Documentation | Other: ________
+## Testing Checklist
+Please verify the following before submitting:
 
-## 🔗 Related
+### Build Testing
+- [ ] All images build successfully: `docker buildx bake all`
+- [ ] No build warnings or errors
+- [ ] Build cache works correctly
 
-Closes #(issue_number)
-**Discussion:** [Link](https://github.com/pixeloven/ComfyUI-Docker/discussions/...)
+### Runtime Testing
+- [ ] Core mode: `docker compose up -d`
+- [ ] Complete mode: `docker compose --profile complete up -d`
+- [ ] CPU profile: `docker compose --profile cpu up -d`
+- [ ] ComfyUI loads successfully (http://localhost:8188)
+- [ ] Basic workflow execution works
 
-## 🎯 Description
+### Configuration Testing
+- [ ] Docker Compose configuration is valid: `docker compose config`
+- [ ] Environment variables work correctly
+- [ ] Volume mounts are preserved
 
-<!-- What does this PR do and why is it needed? -->
+## Documentation
+- [ ] Updated relevant documentation
+- [ ] Added/updated code comments where necessary
+- [ ] Followed existing code style and patterns
 
-## 🧪 Testing
-- [ ] Built locally: `docker buildx bake all`
-- [ ] GPU profile: `docker compose --profile comfy-nvidia up -d`
-- [ ] CPU profile: `docker compose --profile comfy-cpu up -d`
-- [ ] ComfyUI accessible at http://localhost:8188
-- [ ] Model loading and basic functionality works
-- [ ] Persistent storage verified
+## Additional Notes
+Any additional information, context, or screenshots.
 
-## ✅ Checklist
-
-- [ ] Code follows project style
-- [ ] Self-review completed
-- [ ] All tests pass locally
-- [ ] Documentation updated
-- [ ] No sensitive info exposed
-- [ ] Commit messages are clear
-
-## 🎨 Screenshots
-
-<!-- Add if UI changes involved -->
+## Related Issues
+Closes #(issue number)
 
 ---
 

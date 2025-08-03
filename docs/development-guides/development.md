@@ -1,215 +1,352 @@
-# Development
+# Development Guide
 
-Development setup and contributing to ComfyUI Docker.
+Complete guide for building, customizing, and contributing to ComfyUI Docker.
 
-## Setup
+## Quick Development Setup
 
+### Prerequisites
+- **Docker** 24.0+ with Buildx
+- **Docker Compose** 2.0+
+- **Git** for version control
+- **NVIDIA Docker** (for GPU development)
+
+### Clone and Setup
 ```bash
-# Clone and setup
 git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd ComfyUI-Docker
 
-# Create .env file with default settings
-cat > .env << EOF
-# User/Group IDs for container permissions
-PUID=1000
-PGID=1000
+# Build base images
+docker buildx bake runtime
 
-# ComfyUI Configuration
-COMFY_PORT=8188
-CLI_ARGS=
+# Build application images  
+docker buildx bake base
 
-# Performance Configuration
-CLI_ARGS=
-EOF
+# Test locally
+docker compose up -d
 ```
 
-## Environment Variables
+## Architecture Overview
 
-The application supports the following environment variables:
+### Multi-Stage Build System
+```
+┌─────────────────┐    ┌─────────────────┐
+│   runtime-cuda  │    │   runtime-cpu   │
+│   (Ubuntu +     │    │   (Ubuntu       │
+│    CUDA)        │    │    Base)        │
+└─────────┬───────┘    └─────────┬───────┘
+          │                      │
+          ▼                      ▼
+┌─────────────────┐    ┌─────────────────┐
+│    core-cuda    │    │    core-cpu     │
+│  (ComfyUI +     │    │  (ComfyUI       │
+│   CUDA)         │    │   CPU-only)     │
+└─────────┬───────┘    └─────────────────┘
+          │
+          ▼
+┌─────────────────┐
+│  complete-cuda  │
+│ (Full Package + │
+│ SageAttention)  │
+└─────────────────┘
+```
 
-### User Configuration
-- `PUID` (default: 1000) - User ID for container permissions
-- `PGID` (default: 1000) - Group ID for container permissions
+### Build Targets
 
-### ComfyUI Configuration
-- `COMFY_PORT` (default: 8188) - Port for ComfyUI web interface
-- `CLI_ARGS` (default: "") - Additional CLI arguments for ComfyUI
-  - `--cpu` - Force CPU-only mode
-  - `--lowvram` - Low VRAM mode for 4-6GB GPUs
-  - `--novram` - No VRAM mode
+**Runtime Layer:**
+- `runtime-cpu` - Base CPU runtime (Ubuntu 24.04)
+- `runtime-cuda` - Base CUDA runtime (Ubuntu 24.04 + CUDA)
 
-### Performance Configuration
-- `CLI_ARGS` (default: "") - Additional CLI arguments for ComfyUI performance tuning
+**Application Layer:**
+- `core-cpu` - ComfyUI with CPU-only support
+- `core-cuda` - ComfyUI with CUDA support
 
-### Build Configuration
-- `REGISTRY_URL` (default: "ghcr.io/pixeloven/comfyui-docker/") - Docker registry URL
-- `IMAGE_LABEL` (default: "latest") - Image tag
-- `RUNTIME` (default: "nvidia") - Runtime type
-- `PLATFORMS` (default: ["linux/amd64"]) - Target platforms
+**Extended Layer:**
+- `complete-cuda` - Complete package with custom nodes and optimizations
 
 ## Building Images
 
-This project uses Docker Bake for building images with support for multiple runtimes and efficient caching.
-
-### Prerequisites
-
-```bash
-# Ensure Docker Buildx is available
-docker buildx version
-
-# Create a new builder instance if needed
-docker buildx create --name mybuilder --use
-```
-
 ### Quick Build Commands
-
 ```bash
-# Build all images (NVIDIA and CPU runtimes)
+# Build all images
 docker buildx bake all
 
-# Build only NVIDIA runtime and application
-docker buildx bake nvidia
+# Build specific groups
+docker buildx bake cuda       # CUDA stack
+docker buildx bake cpu        # CPU stack
+docker buildx bake runtime    # Runtime layer only
 
-# Build only CPU runtime and application
-docker buildx bake cpu
-
-# Build specific target
-docker buildx bake comfy-nvidia
-docker buildx bake comfy-cpu
+# Build individual targets
+docker buildx bake core-cpu
+docker buildx bake complete-cuda
 ```
 
-### Available Targets
-
-#### Runtime Images
-- `runtime-nvidia` - Base NVIDIA CUDA runtime with cuDNN
-- `runtime-cpu` - Base CPU runtime (Ubuntu 24.04)
-
-#### Application Images
-- `comfy-nvidia` - ComfyUI with NVIDIA GPU support
-- `comfy-cpu` - ComfyUI with CPU-only support
-
-#### Convenience Groups
-- `all` - Build all images (runtimes + applications)
-- `runtime` - Build both runtime base images
-- `comfy` - Build both ComfyUI application images
-- `nvidia` - Build NVIDIA runtime and application
-- `cpu` - Build CPU runtime and application
-
-### Custom Build Options
-
+### Development Builds
 ```bash
-# Build with custom registry
-docker buildx bake all --set "*.args.REGISTRY_URL=myregistry.com/myuser"
+# Build with custom tags
+IMAGE_LABEL=dev docker buildx bake all
 
-# Build with custom image label
-docker buildx bake all --set "*.args.IMAGE_LABEL=v1.0.0"
-
-# Build for multiple platforms
-docker buildx bake all --set "*.platforms=linux/amd64,linux/arm64"
-
-# Build without cache (force rebuild)
+# Build without cache (clean build)
 docker buildx bake all --no-cache
 
-# Build with verbose output
+# Build and push to registry
+docker buildx bake all --push
+```
+
+## Local Development
+
+### Testing Changes
+```bash
+# Test basic functionality
+docker compose up -d
+curl -f http://localhost:8188/system_stats
+
+# Test CPU mode
+docker compose --profile cpu up -d
+
+# View logs
+docker compose logs -f core-cuda
+```
+
+### Development Profiles
+```bash
+# Development with volume mounts
+docker compose -f docker-compose.dev.yml up -d
+
+# Individual service testing
+docker compose --profile core up -d
+docker compose --profile complete up -d
+docker compose --profile cpu up -d
+```
+
+## Customization
+
+### Adding Custom Nodes
+
+**Method 1: Extend Existing Image**
+```dockerfile
+FROM ghcr.io/pixeloven/comfyui-docker/core:cuda-latest
+
+# Install custom nodes
+RUN comfy node install ComfyUI-Custom-Node-Name
+
+# Or install via git
+RUN cd /home/comfy/ComfyUI/custom_nodes && \
+    git clone https://github.com/author/custom-node.git
+```
+
+**Method 2: Build Scripts**
+```bash
+# Add to services/comfy/extended/scripts/
+# Files in scripts/ are executed during container startup
+```
+
+### Custom Models
+```bash
+# Add models to data directory
+mkdir -p ./data/models/checkpoints
+wget -O ./data/models/checkpoints/model.safetensors https://example.com/model.safetensors
+```
+
+### Environment Customization
+```bash
+# Custom environment variables
+export COMFY_PORT=8080
+export CLI_ARGS="--lowvram --preview-method auto"
+
+# Custom startup script
+./scripts/custom-startup.sh
+```
+
+## Performance Optimization
+
+### Build Optimization
+- **Multi-stage builds** minimize final image size
+- **Layer cache** reuses common layers across builds  
+- **Registry cache** shares cache across developers
+
+### Runtime Optimization
+- **SageAttention** for 2-3x faster attention in complete-cuda
+- **Memory-efficient** attention methods
+- **GPU optimization** with proper CUDA configuration
+
+### Development Tips
+```bash
+# Build incrementally
+docker buildx bake runtime     # Build base first
+docker buildx bake core-cuda   # Then application
+
+# Use cache effectively
+docker buildx bake all --cache-from=type=registry,ref=ghcr.io/pixeloven/comfyui-docker/runtime:cuda-cache
+
+# Monitor build progress
 docker buildx bake all --progress=plain
-```
-
-### Troubleshooting Builds
-
-```bash
-# Check build context
-docker buildx bake --print
-
-# Debug specific target
-docker buildx bake comfy-nvidia --progress=plain
-
-# Clear build cache
-docker buildx prune -a
-
-# Check available builders
-docker buildx ls
-```
-
-## Test Workflow
-
-```bash
-# Start development environment
-docker compose --profile comfy-nvidia up -d
-
-# Monitor logs
-docker compose logs -f
-
-# Test changes
-docker compose restart
 ```
 
 ## Testing
 
-### Local Testing
+### Unit Testing
 ```bash
-# Test GPU service
-docker compose --profile comfy-nvidia up -d
-curl -f http://localhost:8188
+# Test image functionality
+docker run --rm ghcr.io/pixeloven/comfyui-docker/core:cuda-latest python --version
 
-# Test CPU service
-docker compose down
-docker compose --profile comfy-cpu up -d
-curl -f http://localhost:8188
+# Test GPU access
+docker run --rm --gpus all ghcr.io/pixeloven/comfyui-docker/core:cuda-latest nvidia-smi
+```
+
+### Integration Testing
+```bash
+# Test full stack
+docker compose up -d
+sleep 30
+curl -f http://localhost:8188/system_stats
+
+# Test workflows
+curl -X POST http://localhost:8188/prompt \
+  -H "Content-Type: application/json" \
+  -d @test-workflow.json
+```
+
+### Automated Testing
+```bash
+# Run CI tests locally
+.github/scripts/test-images.sh
+
+# Test with different configurations
+CLI_ARGS="--cpu" docker compose up -d
+CLI_ARGS="--lowvram" docker compose up -d
 ```
 
 ## Contributing
 
-### Before Contributing
-1. Create a discussion describing the problem and solution
-2. Fork the repository and create a feature branch
-3. Test your changes locally
-4. Open a pull request
+### Development Workflow
+1. **Fork** the repository
+2. **Create feature branch**: `git checkout -b feature/my-feature`
+3. **Make changes** and test locally
+4. **Build and test**: `docker buildx bake all`
+5. **Submit PR** with clear description
 
-### Guidelines
-- Follow existing code style and patterns
-- Update documentation if needed
-- Keep commits focused and descriptive
+### Code Standards
+- **Dockerfile best practices**: Multi-stage, minimal layers, proper caching
+- **Shell scripts**: Use bash, proper error handling, logging
+- **Documentation**: Update docs for any user-facing changes
+- **Testing**: Ensure all build targets work
 
-## Script Development
+### PR Guidelines
+- **Clear description** of changes and motivation
+- **Test locally** before submitting
+- **Update documentation** if needed
+- **Follow existing patterns** in build configuration
 
-ComfyUI Docker uses a modular script system for container bootstrapping and setup. Scripts are mounted as volumes and executed during container startup with sophisticated logging and error handling.
+## Troubleshooting
 
-### Overview
-
-- **Architecture**: Scripts stored in `scripts/category/` and mounted as volumes
-- **Execution**: Automatic execution during startup with colored logging
-- **Logging**: Shared logging library (`scripts/logging.sh`) for consistent output
-- **Integration**: Volume mounting allows script modification without rebuilding images
-
-### Development Resources
-
-For comprehensive script development information, see:
-
-**[📜 Scripts Guide](../user-guides/scripts.md)** - Complete documentation including:
-- Script system architecture and execution flow
-- Logging functions and colored output
-- Script templates and development guidelines  
-- Testing procedures and debugging techniques
-- Common use cases and practical examples
-
-### Core Development Files
-
-Key files for script system development:
-
-- **`services/comfy/base/startup.sh`** - Main startup script with execution logic
-- **`scripts/logging.sh`** - Shared logging library for colored output
-- **`scripts/base/`** - Core functionality scripts
-- **`scripts/extended/`** - Extended functionality scripts
-
-### Quick Development Test
-
+### Build Issues
 ```bash
-# Test startup script syntax
-bash -n services/comfy/base/startup.sh
+# Clear build cache
+docker buildx prune
 
-# Build and test changes
-docker buildx bake comfy-cuda
-docker compose up -d && docker compose logs -f
+# Check build context
+docker buildx bake --print all
+
+# Debug specific target
+docker buildx bake runtime-cuda --progress=plain
 ```
+
+### Runtime Issues
+```bash
+# Check container logs
+docker compose logs -f
+
+# Access container for debugging
+docker compose exec core-cuda bash
+
+# Check system resources
+docker stats
+```
+
+### Common Problems
+
+**GPU not detected**
+```bash
+# Check NVIDIA runtime
+docker run --rm --gpus all nvidia/cuda:12.0-runtime-ubuntu20.04 nvidia-smi
+
+# Verify Docker GPU support
+docker info | grep -i nvidia
+```
+
+**Build cache issues**
+```bash
+# Force rebuild
+docker buildx bake all --no-cache
+
+# Check cache usage
+docker system df
+```
+
+**Permission issues**
+```bash
+# Fix file ownership
+sudo chown -R $USER:$USER ./data
+
+# Check container user
+docker compose exec core-cuda id
+```
+
+## Advanced Topics
+
+### Multi-Platform Builds
+```bash
+# Setup buildx for multi-platform
+docker buildx create --name mybuilder --use
+
+# Build for multiple platforms
+PLATFORMS=linux/amd64,linux/arm64 docker buildx bake all --push
+```
+
+### Custom Registry
+```bash
+# Build for custom registry
+REGISTRY_URL=myregistry.com/comfyui/ docker buildx bake all --push
+```
+
+### Development Images
+```bash
+# Create development variants
+FROM ghcr.io/pixeloven/comfyui-docker/core:cuda-latest
+
+# Add development tools
+RUN pip install ipython jupyter black
+
+# Mount source code
+VOLUME ["/workspace"]
+```
+
+## Project Structure
+
+```
+services/
+├── runtime/                    # Base runtime images
+│   ├── dockerfile.cpu.runtime  # CPU runtime
+│   └── dockerfile.cuda.runtime # CUDA runtime
+│
+└── comfy/                     # ComfyUI services
+    ├── base/                  # Base ComfyUI image
+    │   ├── dockerfile.comfy.base
+    │   ├── startup.sh
+    │   └── entrypoint.sh
+    │
+    └── extended/              # Extended features
+        ├── dockerfile.comfy.cuda.extended
+        ├── extra-requirements.txt
+        └── scripts/           # Startup scripts
+            ├── 00-setup-file-structure.sh
+            ├── 01-setup-example-workflows.sh
+            └── lib/           # Shared libraries
+```
+
+## Resources
+
+- **[Docker Buildx Bake](https://docs.docker.com/build/bake/)** - Build configuration reference
+- **[ComfyUI API](https://github.com/comfyanonymous/ComfyUI)** - ComfyUI documentation
+- **[NVIDIA Container Runtime](https://github.com/NVIDIA/nvidia-container-runtime)** - GPU support
 

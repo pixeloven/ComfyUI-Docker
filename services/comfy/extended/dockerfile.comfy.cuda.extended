@@ -1,7 +1,18 @@
 FROM base AS extended
 
-COPY --chown=comfy:comfy . .
+# Copy the extended startup script and current directory files
+COPY --chown=comfy:comfy ./extra-requirements.txt ./extra-requirements.txt
 
+# Install additional Python requirements
 RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
     source $VENV_PATH/bin/activate && \
     pip install -r extra-requirements.txt
+
+# Set executable permissions on the new startup script
+COPY --chown=comfy:comfy ./startup.sh ./startup.sh
+COPY --chown=comfy:comfy ./scripts ./scripts
+RUN chmod u+x ./startup.sh && \
+    chmod u+x ./scripts/*.sh
+
+# Override the base image CMD to use the extended startup script
+CMD ["bash", "./startup.sh"]
