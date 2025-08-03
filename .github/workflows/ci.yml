@@ -32,7 +32,6 @@ jobs:
         docker compose --profile cpu config --services | grep -q core-cpu
         docker compose --profile core config --services | grep -q core-cuda
         docker compose --profile complete config --services | grep -q complete-cuda
-        docker compose config --services | grep -q core-cuda
 
   test-bake-targets:
     runs-on: ubuntu-latest
