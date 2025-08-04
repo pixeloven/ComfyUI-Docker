@@ -66,17 +66,6 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     
-    - name: Debug registry access
-      run: |
-        echo "Testing registry access..."
-        echo "Repository: ${{ github.repository }}"
-        echo "Repository owner: ${{ github.repository_owner }}"
-        echo "Repository name: ${{ github.event.repository.name }}"
-        echo "Actor: ${{ github.actor }}"
-        # Test if we can access the registry
-        curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-             "https://ghcr.io/v2/pixeloven/comfyui-docker/tags/list" || echo "Registry access failed"
-    
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
@@ -93,7 +82,6 @@ jobs:
         files: docker-bake.hcl
         targets: all
         push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
           *.cache-from=type=gha
           *.cache-to=type=gha,mode=max
