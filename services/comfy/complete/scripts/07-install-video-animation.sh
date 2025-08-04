@@ -12,6 +12,6 @@ log_info "Starting video and animation tools installation..."
 # ComfyUI-AdvancedLivePortrait
 # @description: Advanced live portrait functionality for real-time face animation and expression transfer
 # @link: https://github.com/PowerHouseMan/ComfyUI-AdvancedLivePortrait
-install_custom_node "ComfyUI-AdvancedLivePortrait" "comfyui-advancedliveportrait"
+# install_custom_node "ComfyUI-AdvancedLivePortrait" "comfyui-advancedliveportrait"
 
 log_success "Video and animation tools installation completed successfully" 

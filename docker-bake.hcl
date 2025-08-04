@@ -43,11 +43,11 @@ target "runtime-cpu" {
 }
 
 target "core-cuda" {
-    context = "services/comfy/base"
+    context = "services/comfy/core"
     contexts = {
         runtime = "target:runtime-cuda"
     }
-    dockerfile = "dockerfile.comfy.base"
+    dockerfile = "dockerfile.comfy.core"
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:cuda-${IMAGE_LABEL}",
@@ -65,11 +65,11 @@ target "core-cuda" {
 }
 
 target "core-cpu" {
-    context = "services/comfy/base"
+    context = "services/comfy/core"
     contexts = {
         runtime = "target:runtime-cpu"
     }
-    dockerfile = "dockerfile.comfy.base"
+    dockerfile = "dockerfile.comfy.core"
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:cpu-${IMAGE_LABEL}",
@@ -87,11 +87,11 @@ target "core-cpu" {
 }
 
 target "complete-cuda" {
-    context = "services/comfy/extended"
+    context = "services/comfy/complete"
     contexts = {
-        base = "target:core-cuda"
+        core = "target:core-cuda"
     }
-    dockerfile = "dockerfile.comfy.cuda.extended"
+    dockerfile = "dockerfile.comfy.cuda.complete"
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}complete:cuda-${IMAGE_LABEL}",
@@ -115,7 +115,7 @@ group "all" {
     targets = ["runtime", "cuda", "cpu"]
 }
 
-group "base" {
+group "core" {
     targets = ["runtime-cuda", "runtime-cpu", "core-cuda", "core-cpu"]
 }
 

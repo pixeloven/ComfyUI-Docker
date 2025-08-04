@@ -31,7 +31,7 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - ./data:/data:delegated
       # Scripts path - switches based on image being used
-      - ./services/comfy/extended/scripts:/home/comfy/app/scripts:ro
+      - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:
@@ -61,7 +61,7 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - ./data:/data:delegated
       # Scripts path - switches based on image being used
-      - ./services/comfy/extended/scripts:/home/comfy/app/scripts:ro
+      - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:
@@ -91,7 +91,7 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - ./data:/data:delegated
       # Scripts path - switches based on image being used
-      - ./services/comfy/extended/scripts:/home/comfy/app/scripts:ro
+      - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:

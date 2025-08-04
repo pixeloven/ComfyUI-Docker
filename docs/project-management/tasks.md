@@ -17,7 +17,7 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 - [x] **Environment Variables**: All configuration is now properly externalized via environment variables
 - [ ] **Volume Mapping**: Generally better workflow volume mappings needed
 - [ ] **Persistent Extensions**: Need persistent volume for custom extensions
-- [x] **Cache Directory**: XDG_CACHE_HOME is properly configured in dockerfile.comfy.base
+- [x] **Cache Directory**: XDG_CACHE_HOME is properly configured in dockerfile.comfy.core
 
 ### Multi-Instance & Workspace Support
 - [ ] **Multiple Workspaces**: Support running multiple ComfyUI instances with different configurations
@@ -135,7 +135,7 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 - Virtual environment setup is working well
 
 ### From entrypoint.sh
-- XDG_CACHE_HOME is properly configured in dockerfile.comfy.base
+- XDG_CACHE_HOME is properly configured in dockerfile.comfy.core
 - Base directory and output directory configuration working well
 
 ### Multi-Workspace Requirements

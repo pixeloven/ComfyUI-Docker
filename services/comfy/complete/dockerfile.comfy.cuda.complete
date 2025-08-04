@@ -1,4 +1,4 @@
-FROM base AS extended
+FROM core AS complete
 
 # Copy the extended startup script and current directory files
 COPY --chown=comfy:comfy ./extra-requirements.txt ./extra-requirements.txt
@@ -14,5 +14,5 @@ COPY --chown=comfy:comfy ./scripts ./scripts
 RUN chmod u+x ./startup.sh && \
     chmod u+x ./scripts/*.sh
 
-# Override the base image CMD to use the extended startup script
+# Override the core image CMD to use the complete startup script
 CMD ["bash", "./startup.sh"]

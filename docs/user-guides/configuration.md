@@ -153,7 +153,7 @@ volumes:
   - /etc/localtime:/etc/localtime:ro       # System timezone
   - /etc/timezone:/etc/timezone:ro         # System timezone  
   - ./data:/data:delegated                 # Main data directory
-  - ./services/comfy/extended/scripts:/home/comfy/app/scripts:ro  # Scripts
+  - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro  # Scripts
 ```
 
 ### Custom Mounts
