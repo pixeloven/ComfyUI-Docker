@@ -78,6 +78,12 @@ jobs:
         docker pull ghcr.io/pixeloven/comfyui-docker/runtime:cuda-latest || echo "Image doesn't exist yet (expected for first build)"
         echo "Registry authentication successful"
     
+    - name: Test bake configuration
+      run: |
+        echo "Testing bake configuration..."
+        docker buildx bake --file docker-bake.hcl --print
+        echo "Bake configuration is valid"
+    
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
@@ -93,10 +99,14 @@ jobs:
       with:
         files: docker-bake.hcl
         targets: all
-        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        # push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        push: true
         set: |
           *.cache-from=type=gha
           *.cache-to=type=gha,mode=max
+        # Add debug output
+        provenance: false
+        sbom: false
 
   pr-summary:
     runs-on: ubuntu-latest
