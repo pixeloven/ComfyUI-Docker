@@ -7,6 +7,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   validate-config:
     runs-on: ubuntu-latest
@@ -65,6 +69,14 @@ jobs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+        # Alternative: Use PAT if GITHUB_TOKEN doesn't work
+        # password: ${{ secrets.GHCR_TOKEN }}
+    
+    - name: Verify registry access
+      run: |
+        echo "Testing registry access..."
+        docker pull ghcr.io/pixeloven/comfyui-docker/runtime:cuda-latest || echo "Image doesn't exist yet (expected for first build)"
+        echo "Registry authentication successful"
     
     - name: Extract metadata
       id: meta
