@@ -26,7 +26,7 @@ target "runtime-cuda" {
         "${REGISTRY_URL}runtime:cuda-${IMAGE_LABEL}",
         "${REGISTRY_URL}runtime:cuda-cache"
     ]
-    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cuda-cache"]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cuda-cache,optional=true"]
     cache-to   = ["type=inline"]
 }
 
@@ -38,7 +38,7 @@ target "runtime-cpu" {
         "${REGISTRY_URL}runtime:cpu-${IMAGE_LABEL}",
         "${REGISTRY_URL}runtime:cpu-cache"
     ]
-    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cpu-cache"]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cpu-cache,optional=true"]
     cache-to   = ["type=inline"]
 }
 
@@ -54,8 +54,8 @@ target "core-cuda" {
         "${REGISTRY_URL}core:cuda-cache"
     ]
     cache-from = [
-        "type=registry,ref=${REGISTRY_URL}runtime:cuda-cache",
-        "type=registry,ref=${REGISTRY_URL}core:cuda-cache"
+        "type=registry,ref=${REGISTRY_URL}runtime:cuda-cache,optional=true",
+        "type=registry,ref=${REGISTRY_URL}core:cuda-cache,optional=true"
     ]
     cache-to   = ["type=inline"]
     args = {
@@ -76,8 +76,8 @@ target "core-cpu" {
         "${REGISTRY_URL}core:cpu-cache"
     ]
     cache-from = [
-        "type=registry,ref=${REGISTRY_URL}runtime:cpu-cache",
-        "type=registry,ref=${REGISTRY_URL}core:cuda-cache"
+        "type=registry,ref=${REGISTRY_URL}runtime:cpu-cache,optional=true",
+        "type=registry,ref=${REGISTRY_URL}core:cpu-cache,optional=true"
     ]
     cache-to   = ["type=inline"]
     args = {
@@ -98,9 +98,9 @@ target "complete-cuda" {
         "${REGISTRY_URL}complete:cuda-cache"
     ]
     cache-from = [
-        "type=registry,ref=${REGISTRY_URL}runtime:cuda-cache",
-        "type=registry,ref=${REGISTRY_URL}core:cuda-cache",
-        "type=registry,ref=${REGISTRY_URL}complete:cuda-cache"
+        "type=registry,ref=${REGISTRY_URL}runtime:cuda-cache,optional=true",
+        "type=registry,ref=${REGISTRY_URL}core:cuda-cache,optional=true",
+        "type=registry,ref=${REGISTRY_URL}complete:cuda-cache,optional=true"
     ]
     cache-to   = ["type=inline"]
     depends_on = ["core-cuda"]

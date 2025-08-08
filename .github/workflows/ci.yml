@@ -7,6 +7,8 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+
+
 jobs:
   validate-config:
     runs-on: ubuntu-latest
@@ -65,6 +67,14 @@ jobs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+    
+
+    
+    - name: Test bake configuration
+      run: |
+        echo "Testing bake configuration..."
+        docker buildx bake --file docker-bake.hcl --print
+        echo "Bake configuration is valid"
     
     - name: Extract metadata
       id: meta
