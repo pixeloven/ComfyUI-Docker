@@ -3,7 +3,7 @@
 
 // Variables with defaults
 variable "REGISTRY_URL" {
-    default = "ghcr.io/pixeloven/ComfyUI-Docker/"
+    default = "ghcr.io/pixeloven/comfyui-docker/"
 }
 
 variable "IMAGE_LABEL" {

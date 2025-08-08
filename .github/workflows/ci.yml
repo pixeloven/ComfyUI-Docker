@@ -74,16 +74,6 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print
         echo "Bake configuration is valid"
     
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ env.REGISTRY }}/${{ github.repository }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=raw,value=latest,enable={{is_default_branch}}
-    
     - name: Build images
       uses: docker/bake-action@v4
       with:
@@ -95,6 +85,9 @@ jobs:
         set: |
           *.cache-from=type=gha
           *.cache-to=type=gha,mode=max
+        # Ensure proper authentication for multi-image builds
+        provenance: false
+        sbom: false
 
 
   pr-summary:
