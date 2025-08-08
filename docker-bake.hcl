@@ -77,7 +77,7 @@ target "core-cpu" {
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime:cpu-cache,optional=true",
-        "type=registry,ref=${REGISTRY_URL}core:cuda-cache,optional=true"
+        "type=registry,ref=${REGISTRY_URL}core:cpu-cache,optional=true"
     ]
     cache-to   = ["type=inline"]
     args = {

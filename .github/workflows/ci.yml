@@ -7,9 +7,7 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
+
 
 jobs:
   validate-config:
@@ -69,14 +67,8 @@ jobs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-        # Alternative: Use PAT if GITHUB_TOKEN doesn't work
-        # password: ${{ secrets.GHCR_TOKEN }}
     
-    - name: Verify registry access
-      run: |
-        echo "Testing registry access..."
-        docker pull ghcr.io/pixeloven/comfyui-docker/runtime:cuda-latest || echo "Image doesn't exist yet (expected for first build)"
-        echo "Registry authentication successful"
+
     
     - name: Test bake configuration
       run: |
@@ -99,14 +91,11 @@ jobs:
       with:
         files: docker-bake.hcl
         targets: all
-        # push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        push: true
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
           *.cache-from=type=gha
           *.cache-to=type=gha,mode=max
-        # Add debug output
-        provenance: false
-        sbom: false
 
   pr-summary:
     runs-on: ubuntu-latest

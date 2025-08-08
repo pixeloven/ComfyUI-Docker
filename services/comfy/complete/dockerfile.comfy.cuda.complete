@@ -16,3 +16,6 @@ RUN chmod u+x ./startup.sh && \
 
 # Override the core image CMD to use the complete startup script
 CMD ["bash", "./startup.sh"]
+
+# @todo consider creating https://github.com/rgthree/rgthree-comfy/blob/main/prestartup_script.py to run setup instead of external bash
+# https://github.com/Comfy-Org/ComfyUI-Manager/blob/main/prestartup_script.py
