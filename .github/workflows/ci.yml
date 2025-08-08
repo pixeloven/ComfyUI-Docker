@@ -74,7 +74,8 @@ jobs:
       uses: docker/bake-action@v4
       with:
         files: docker-bake.hcl
-        targets: all
+        # targets: all
+        targets: runtime
         push: true
         # push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
