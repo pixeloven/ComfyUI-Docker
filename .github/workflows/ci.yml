@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Test Docker Bake targets
       run: |
         # Validate all expected targets exist in docker-bake.hcl
@@ -57,23 +57,19 @@ jobs:
     
     - name: Free disk space
       uses: ./.github/actions/free-disk-space
-    
+        
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-    
+      with:
+        buildkitd-flags: --debug
+  
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v3
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Test bake configuration
-      run: |
-        echo "Testing bake configuration..."
-        docker buildx bake --file docker-bake.hcl --print
-        echo "Bake configuration is valid"
-    
+
     - name: Build images
       uses: docker/bake-action@v4
       with:
