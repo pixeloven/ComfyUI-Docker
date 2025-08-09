@@ -89,8 +89,10 @@ jobs:
         push: ${{ github.event_name == 'push' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
-          *.cache-from=type=gha
-          *.cache-to=type=gha,mode=max
+          *.CACHE_TYPE=gha
+          *.CACHE_MODE=max
+          *.BUILDKIT_INLINE_CACHE=1
+          *.DOCKER_BUILDKIT=1
         provenance: false
         sbom: false
 
@@ -157,8 +159,10 @@ jobs:
         push: true
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
-          *.cache-from=type=gha
-          *.cache-to=type=gha,mode=max
+          *.CACHE_TYPE=gha
+          *.CACHE_MODE=max
+          *.BUILDKIT_INLINE_CACHE=1
+          *.DOCKER_BUILDKIT=1
           *.VERSION=${{ needs.semantic-version.outputs.version }}
         provenance: false
         sbom: false

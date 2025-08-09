@@ -54,11 +54,16 @@ RUN python3 -m venv $VENV_PATH && \
 
 ENV PATH="$VENV_PATH/bin:$PATH"
 
-# Install ComfyUI and ComfyUI-Manager - symlinks will be created at runtime to preserve manager
-ARG RUNTIME=cuda
+# Layer 1: Install comfy-cli (rarely changes)
 RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
   source $VENV_PATH/bin/activate && \
-  pip install comfy-cli && \
+  pip install comfy-cli
+
+# Layer 2: Install ComfyUI base (changes with ComfyUI updates)
+ARG RUNTIME=cuda
+ARG COMFYUI_VERSION=latest
+RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
+  source $VENV_PATH/bin/activate && \
   if [ "$RUNTIME" = "cuda" ]; then \
     comfy --skip-prompt --workspace /home/comfy/app install --nvidia; \
   else \
@@ -69,8 +74,10 @@ RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip
 
 WORKDIR /home/comfy/app
 
+# Layer 3: Copy application files (changes with code changes)
 COPY --chown=comfy:comfy . .
 
+# Layer 4: Final setup (rarely changes)
 RUN pip cache purge && \
   chmod u+x ./entrypoint.sh && \
   chmod u+x ./startup.sh
