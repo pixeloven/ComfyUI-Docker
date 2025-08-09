@@ -1,0 +1,392 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*.*.*'  # Trigger on semantic version tags
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # Validation jobs - run on all triggers
+  validate-config:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Validate Docker Compose
+      run: |
+        docker compose config --quiet
+    
+    - name: Validate Docker Bake
+      run: |
+        docker buildx bake --file docker-bake.hcl --print
+
+  test-compose-profiles:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Test Docker Compose profiles
+      run: |
+        # Test that profiles are properly configured
+        docker compose --profile cpu config --services | grep -q core-cpu
+        docker compose --profile core config --services | grep -q core-cuda
+        docker compose --profile complete config --services | grep -q complete-cuda
+
+  test-bake-targets:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Test Docker Bake targets
+      run: |
+        # Validate all expected targets exist in docker-bake.hcl
+        docker buildx bake --file docker-bake.hcl --print | grep -q "core-cpu"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "core-cuda"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cpu"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cuda"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "complete-cuda"
+
+  # Build and push images - conditional behavior based on trigger
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: [validate-config, test-compose-profiles, test-bake-targets]
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')))
+    env:
+      REGISTRY: ghcr.io
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Free disk space
+      uses: ./.github/actions/free-disk-space
+          
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        buildkitd-flags: --debug
+
+    # Login to registry only for push events
+    - name: Login to GitHub Container Registry
+      if: github.event_name == 'push'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Build images (push only for main/tags, not for PRs)
+    - name: Build and push images
+      uses: docker/bake-action@v4
+      with:
+        files: docker-bake.hcl
+        targets: all
+        push: ${{ github.event_name == 'push' }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-from=type=gha
+          *.cache-to=type=gha,mode=max
+        provenance: false
+        sbom: false
+
+  # Semantic versioning - run after build for push events
+  semantic-version:
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    if: github.event_name == 'push'
+    outputs:
+      version: ${{ steps.semantic.outputs.version }}
+      version_tag: ${{ steps.semantic.outputs.version_tag }}
+      version_type: ${{ steps.semantic.outputs.version_type }}
+      major: ${{ steps.semantic.outputs.major }}
+      minor: ${{ steps.semantic.outputs.minor }}
+      patch: ${{ steps.semantic.outputs.patch }}
+      increment: ${{ steps.semantic.outputs.increment }}
+      is_tagged: ${{ steps.semantic.outputs.is_tagged }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Generate semantic version
+      id: semantic
+      uses: paulhatch/semantic-version@v5.4.0
+      with:
+        tag_prefix: "v"
+        major_pattern: "(MAJOR)"
+        minor_pattern: "(MINOR)"
+        version_format: ${{ startsWith(github.ref, 'refs/tags/') && '${major}.${minor}.${patch}' || '${major}.${minor}.${patch}-prerelease${increment}' }}
+        debug: false
+
+  # Push versioned images - run after semantic versioning
+  push-versioned:
+    runs-on: ubuntu-latest
+    needs: [semantic-version]
+    if: github.event_name == 'push'
+    env:
+      REGISTRY: ghcr.io
+      VERSION: ${{ needs.semantic-version.outputs.version }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Free disk space
+      uses: ./.github/actions/free-disk-space
+          
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        buildkitd-flags: --debug
+  
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push versioned images
+      uses: docker/bake-action@v4
+      with:
+        files: docker-bake.hcl
+        targets: all
+        push: true
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-from=type=gha
+          *.cache-to=type=gha,mode=max
+          *.VERSION=${{ needs.semantic-version.outputs.version }}
+        provenance: false
+        sbom: false
+
+  # Release-specific jobs - only run on tag push
+  update-semver:
+    runs-on: ubuntu-latest
+    needs: [push-versioned]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Update major/minor semver tags
+      uses: rickstaa/action-update-semver@v1
+      with:
+        major_version_tag_only: false
+
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [push-versioned, semantic-version]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Generate Release Notes
+      id: release_notes
+      run: |
+        # Get the previous tag for comparison
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+        
+        # Generate release notes using GitHub CLI
+        if [ -n "$PREVIOUS_TAG" ]; then
+          RELEASE_NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
+            --field tag_name=${{ github.ref_name }} \
+            --field previous_tag_name=$PREVIOUS_TAG \
+            --field target_commitish=${{ github.sha }} \
+            --jq '.body')
+        else
+          RELEASE_NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
+            --field tag_name=${{ github.ref_name }} \
+            --field target_commitish=${{ github.sha }} \
+            --jq '.body')
+        fi
+        
+        # Escape newlines for GitHub Actions
+        RELEASE_NOTES="${RELEASE_NOTES//'%'/'%25'}"
+        RELEASE_NOTES="${RELEASE_NOTES//$'\n'/'%0A'}"
+        RELEASE_NOTES="${RELEASE_NOTES//$'\r'/'%0D'}"
+        
+        echo "release_notes<<EOF" >> $GITHUB_OUTPUT
+        echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release v${{ needs.semantic-version.outputs.version }} (${{ needs.semantic-version.outputs.version_type }})
+        body: |
+          # 🎉 Release v${{ needs.semantic-version.outputs.version }} (${{ needs.semantic-version.outputs.version_type }})
+          
+          ## 📦 Docker Images
+          
+          The following Docker images have been built and tagged with **v${{ needs.semantic-version.outputs.version }}**:
+          
+          ### 🚀 Runtime Images
+          - `ghcr.io/pixeloven/comfyui-docker/runtime:cuda-v${{ needs.semantic-version.outputs.version }}` - CUDA-enabled runtime
+          - `ghcr.io/pixeloven/comfyui-docker/runtime:cpu-v${{ needs.semantic-version.outputs.version }}` - CPU-only runtime
+          
+          ### 🎯 Core Images
+          - `ghcr.io/pixeloven/comfyui-docker/core:cuda-v${{ needs.semantic-version.outputs.version }}` - CUDA-enabled core
+          - `ghcr.io/pixeloven/comfyui-docker/core:cpu-v${{ needs.semantic-version.outputs.version }}` - CPU-only core
+          
+          ### 🎨 Complete Image
+          - `ghcr.io/pixeloven/comfyui-docker/complete:cuda-v${{ needs.semantic-version.outputs.version }}` - Complete CUDA setup with all nodes
+          
+          ### 🔧 Builder Image
+          - `ghcr.io/pixeloven/comfyui-docker/sageattention-builder:v${{ needs.semantic-version.outputs.version }}` - SageAttention builder
+          
+          ---
+          
+          ## 🚀 Quick Start
+          
+          ```bash
+          # Use the latest version
+          docker compose up -d
+          
+          # Or specify this specific version
+          COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-v${{ needs.semantic-version.outputs.version }} docker compose up -d
+          ```
+          
+          ## 📋 Version Information
+          
+          - **Version Type**: ${{ needs.semantic-version.outputs.version_type }}
+          - **Major**: ${{ needs.semantic-version.outputs.major }}
+          - **Minor**: ${{ needs.semantic-version.outputs.minor }}
+          - **Patch**: ${{ needs.semantic-version.outputs.patch }}
+          
+          ---
+          
+          ## 📝 Changelog
+          
+          ${{ steps.release_notes.outputs.release_notes }}
+        draft: false
+        prerelease: false
+
+  # Summary jobs
+  version-info:
+    runs-on: ubuntu-latest
+    needs: [semantic-version]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+    - name: Version Information
+      run: |
+        echo "🔍 Semantic Version Analysis"
+        echo "=========================="
+        echo ""
+        echo "📋 Version Details:"
+        echo "  Version: ${{ needs.semantic-version.outputs.version }}"
+        echo "  Version Tag: ${{ needs.semantic-version.outputs.version_tag }}"
+        echo "  Version Type: ${{ needs.semantic-version.outputs.version_type }}"
+        echo "  Major: ${{ needs.semantic-version.outputs.major }}"
+        echo "  Minor: ${{ needs.semantic-version.outputs.minor }}"
+        echo "  Patch: ${{ needs.semantic-version.outputs.patch }}"
+        echo "  Increment: ${{ needs.semantic-version.outputs.increment }}"
+        echo "  Is Tagged: ${{ needs.semantic-version.outputs.is_tagged }}"
+        echo ""
+        echo "🏷️ Next Release Tag: ${{ needs.semantic-version.outputs.version_tag }}"
+        echo ""
+        if [[ "${{ needs.semantic-version.outputs.version_type }}" != "none" ]]; then
+          echo "🚀 This commit would trigger a ${{ needs.semantic-version.outputs.version_type }} release!"
+          echo "   To create a release, tag this commit with: ${{ needs.semantic-version.outputs.version_tag }}"
+        else
+          echo "📝 This commit would be a patch release"
+          echo "   To create a release, tag this commit with: ${{ needs.semantic-version.outputs.version_tag }}"
+        fi
+        echo ""
+        echo "💡 Commit Message Patterns:"
+        echo "  - Add '(MAJOR)' to commit message for major version bump"
+        echo "  - Add '(MINOR)' to commit message for minor version bump"
+        echo "  - Default is patch version bump"
+
+  pr-summary:
+    runs-on: ubuntu-latest
+    needs: [validate-config, test-compose-profiles, test-bake-targets, build-and-push]
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - name: PR Validation Summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const results = {
+              'validate-config': '${{ needs.validate-config.result }}',
+              'test-compose-profiles': '${{ needs.test-compose-profiles.result }}',
+              'test-bake-targets': '${{ needs.test-bake-targets.result }}',
+              'build-and-push': '${{ needs.build-and-push.result }}'
+            };
+            
+            const passed = Object.values(results).filter(r => r === 'success').length;
+            const total = Object.keys(results).length;
+            
+            let summary = `## 🔍 PR Validation Results\n\n`;
+            summary += `**${passed}/${total} checks passed**\n\n`;
+            
+            for (const [check, result] of Object.entries(results)) {
+              const emoji = result === 'success' ? '✅' : result === 'failure' ? '❌' : '⏭️';
+              summary += `${emoji} ${check.replace('-', ' ')}: ${result}\n`;
+            }
+            
+            if (passed === total) {
+              summary += `\n🎉 All validation checks passed! This PR is ready for review.`;
+            } else {
+              summary += `\n⚠️ Some validation checks failed. Please review and fix the issues.`;
+            }
+            
+            // Add comment to PR
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && comment.body.includes('PR Validation Results')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: summary
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: summary
+              });
+            }
+
+  release-summary:
+    runs-on: ubuntu-latest
+    needs: [create-release, semantic-version]
+    if: always() && startsWith(github.ref, 'refs/tags/')
+    steps:
+    - name: Release Summary
+      run: |
+        echo "🎉 Release v${{ needs.semantic-version.outputs.version }} (${{ needs.semantic-version.outputs.version_type }}) completed successfully!"
+        echo ""
+        echo "📦 Docker images pushed to:"
+        echo "  - ghcr.io/pixeloven/comfyui-docker/runtime:cuda-v${{ needs.semantic-version.outputs.version }}"
+        echo "  - ghcr.io/pixeloven/comfyui-docker/runtime:cpu-v${{ needs.semantic-version.outputs.version }}"
+        echo "  - ghcr.io/pixeloven/comfyui-docker/core:cuda-v${{ needs.semantic-version.outputs.version }}"
+        echo "  - ghcr.io/pixeloven/comfyui-docker/core:cpu-v${{ needs.semantic-version.outputs.version }}"
+        echo "  - ghcr.io/pixeloven/comfyui-docker/complete:cuda-v${{ needs.semantic-version.outputs.version }}"
+        echo "  - ghcr.io/pixeloven/comfyui-docker/sageattention-builder:v${{ needs.semantic-version.outputs.version }}"
+        echo ""
+        echo "🏷️ Version tags created:"
+        echo "  - v${{ needs.semantic-version.outputs.major }}.${{ needs.semantic-version.outputs.minor }}.${{ needs.semantic-version.outputs.patch }}"
+        echo "  - v${{ needs.semantic-version.outputs.major }}.${{ needs.semantic-version.outputs.minor }}"
+        echo "  - v${{ needs.semantic-version.outputs.major }}"
+        echo ""
+        echo "📝 GitHub release created: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.semantic-version.outputs.version }}" 

@@ -11,6 +11,7 @@ A complete Docker setup for [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
 - **📁 Persistent Storage**: Models, workflows, and outputs saved to `./data/`
 - **🐳 Production Ready**: Multi-stage builds with proper caching
 - **⚡ SageAttention**: 2-3x faster attention computation on supported GPUs
+- **🏷️ Versioned Releases**: Semantic versioning with automated Docker image builds and major/minor version tags
 
 ## Quick Start 🏃‍♂️
 
@@ -106,6 +107,31 @@ See [Development Guide](docs/development-guides/development.md) for:
 - Adding custom nodes
 - Local development setup
 - Contributing guidelines
+
+## Versioning & Releases 🏷️
+
+This project uses semantic versioning with automated releases:
+
+- **Release Process**: [Release Guide](docs/development-guides/releases.md)
+- **Versioned Images**: All Docker images are tagged with version numbers
+- **Latest**: Always use `latest` tag for the most recent build
+- **Automatic Detection**: Uses commit message patterns `(MAJOR)` and `(MINOR)` for version detection
+
+### Using Specific Versions
+
+```bash
+# Exact version
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-v1.0.0 docker compose up -d
+
+# Latest patch in minor version
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-v1.0 docker compose up -d
+
+# Latest minor in major version
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-v1 docker compose up -d
+
+# Use latest (default)
+docker compose up -d
+```
 
 ## Documentation 📚
 

@@ -1,0 +1,73 @@
+# .github/release.yml
+# Configuration for automatically generated release notes
+
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - documentation
+      - internal
+    authors:
+      - dependabot[bot]
+      - renovate[bot]
+  
+  categories:
+    - title: 🚀 Major Features & Breaking Changes
+      labels:
+        - breaking-change
+        - major
+        - feature
+        - enhancement
+      exclude:
+        labels:
+          - bug
+          - fix
+    
+    - title: ✨ New Features & Improvements
+      labels:
+        - feature
+        - enhancement
+        - improvement
+      exclude:
+        labels:
+          - breaking-change
+          - major
+    
+    - title: 🐛 Bug Fixes & Patches
+      labels:
+        - bug
+        - fix
+        - patch
+        - bugfix
+    
+    - title: 🔧 Infrastructure & CI/CD
+      labels:
+        - ci
+        - cd
+        - infrastructure
+        - docker
+        - workflow
+    
+    - title: 📚 Documentation & Examples
+      labels:
+        - documentation
+        - docs
+        - example
+        - guide
+    
+    - title: 🔄 Dependencies & Updates
+      labels:
+        - dependencies
+        - update
+        - upgrade
+    
+    - title: 🧹 Maintenance & Cleanup
+      labels:
+        - maintenance
+        - cleanup
+        - refactor
+        - chore
+    
+    - title: 📦 Other Changes
+      labels:
+        - "*" 

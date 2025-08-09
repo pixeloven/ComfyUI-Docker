@@ -10,6 +10,10 @@ variable "IMAGE_LABEL" {
     default = "latest"
 }
 
+variable "VERSION" {
+    default = "latest"
+}
+
 variable "RUNTIME" {
     default = "cuda"
 }
@@ -24,6 +28,7 @@ target "runtime-cuda" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}runtime:cuda-${IMAGE_LABEL}",
+        "${REGISTRY_URL}runtime:cuda-v${VERSION}",
         "${REGISTRY_URL}runtime:cuda-cache"
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cuda-cache,optional=true"]
@@ -36,6 +41,7 @@ target "runtime-cpu" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}runtime:cpu-${IMAGE_LABEL}",
+        "${REGISTRY_URL}runtime:cpu-v${VERSION}",
         "${REGISTRY_URL}runtime:cpu-cache"
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cpu-cache,optional=true"]
@@ -48,6 +54,7 @@ target "sageattention-builder" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}sageattention-builder:${IMAGE_LABEL}",
+        "${REGISTRY_URL}sageattention-builder:v${VERSION}",
         "${REGISTRY_URL}sageattention-builder:cache"
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}sageattention-builder:cache,optional=true"]
@@ -64,6 +71,7 @@ target "core-cuda" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:cuda-${IMAGE_LABEL}",
+        "${REGISTRY_URL}core:cuda-v${VERSION}",
         "${REGISTRY_URL}core:cuda-cache"
     ]
     cache-from = [
@@ -86,6 +94,7 @@ target "core-cpu" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:cpu-${IMAGE_LABEL}",
+        "${REGISTRY_URL}core:cpu-v${VERSION}",
         "${REGISTRY_URL}core:cpu-cache"
     ]
     cache-from = [
@@ -109,6 +118,7 @@ target "complete-cuda" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}complete:cuda-${IMAGE_LABEL}",
+        "${REGISTRY_URL}complete:cuda-v${VERSION}",
         "${REGISTRY_URL}complete:cuda-cache"
     ]
     cache-from = [
