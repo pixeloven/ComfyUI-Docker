@@ -33,7 +33,7 @@ variable "DOCKER_BUILDKIT" {
 
 // Cache configuration
 variable "CACHE_TYPE" {
-    default = "registry"  // gha, registry, or inline - registry works for both local and CI
+    default = "inline"  // inline, gha, or registry - inline works everywhere
 }
 
 variable "CACHE_MODE" {

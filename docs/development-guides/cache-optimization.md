@@ -69,9 +69,9 @@ variable "CACHE_MODE" {
 
 #### Cache Sources (Priority Order)
 
-1. **GitHub Actions Cache** - Fastest, scoped per target
-2. **Registry Cache** - Persistent across builds
-3. **Inline Cache** - Immediate reuse within build
+1. **GitHub Actions Cache** - Fastest, scoped per target (CI/CD only)
+2. **Inline Cache** - Immediate reuse within build (works everywhere)
+3. **Registry Cache** - Persistent across builds (requires containerd driver)
 
 ### 3. Build Arguments
 
@@ -108,10 +108,10 @@ args = {
 
 ### Cache Types
 
-#### Registry Cache (Default - Works for both local and CI)
+#### Inline Cache (Default - Works everywhere)
 ```yaml
 set: |
-  *.CACHE_TYPE=registry
+  *.CACHE_TYPE=inline
   *.CACHE_MODE=max
 ```
 
@@ -122,10 +122,10 @@ set: |
   *.CACHE_MODE=max
 ```
 
-#### Hybrid Cache (Best of both worlds)
+#### Registry Cache (Requires containerd driver)
 ```yaml
 set: |
-  *.CACHE_TYPE=gha
+  *.CACHE_TYPE=registry
   *.CACHE_MODE=max
 ```
 
@@ -139,17 +139,17 @@ set: |
 ### Local Development
 
 ```bash
-# Build with default registry cache (recommended)
+# Build with default inline cache (recommended)
 docker buildx bake core
 
-# Build with registry cache (explicit)
-docker buildx bake --set "*.CACHE_TYPE=registry" core
-
-# Build with inline cache only (no persistence)
+# Build with inline cache (explicit)
 docker buildx bake --set "*.CACHE_TYPE=inline" core
 
+# Build with registry cache (requires containerd driver)
+docker buildx bake --set "*.CACHE_TYPE=registry" core
+
 # Build specific target with custom cache
-docker buildx bake --set "*.CACHE_TYPE=registry" --set "*.CACHE_MODE=max" runtime-cuda
+docker buildx bake --set "*.CACHE_TYPE=inline" --set "*.CACHE_MODE=max" runtime-cuda
 ```
 
 ### CI/CD Pipeline
