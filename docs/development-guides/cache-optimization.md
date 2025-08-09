@@ -55,23 +55,25 @@ The Dockerfiles are structured to maximize cache hits:
 
 ### 2. Cache Configuration
 
-#### Docker Bake Variables
+#### Cache Configuration
+
+The cache configuration is set directly in the Docker Bake targets:
 
 ```hcl
-variable "CACHE_TYPE" {
-    default = "gha"  // gha, registry, or inline
-}
-
-variable "CACHE_MODE" {
-    default = "max"  // max or min
-}
+cache-from = [
+    "type=inline",
+    "type=gha,scope=runtime-cuda"
+]
+cache-to = [
+    "type=inline",
+    "type=gha,scope=runtime-cuda,mode=max"
+]
 ```
 
 #### Cache Sources (Priority Order)
 
 1. **GitHub Actions Cache** - Fastest, scoped per target (CI/CD only)
 2. **Inline Cache** - Immediate reuse within build (works everywhere)
-3. **Registry Cache** - Persistent across builds (requires containerd driver)
 
 ### 3. Build Arguments
 
@@ -108,25 +110,28 @@ args = {
 
 ### Cache Types
 
-#### Inline Cache (Default - Works everywhere)
-```yaml
-set: |
-  *.CACHE_TYPE=inline
-  *.CACHE_MODE=max
+#### Default Configuration (Works everywhere)
+The default configuration uses inline cache for local builds and GitHub Actions cache for CI/CD:
+
+```hcl
+# In docker-bake.hcl
+cache-from = [
+    "type=inline",
+    "type=gha,scope=target-name"
+]
+cache-to = [
+    "type=inline",
+    "type=gha,scope=target-name,mode=max"
+]
 ```
 
-#### GitHub Actions Cache (CI/CD only)
-```yaml
-set: |
-  *.CACHE_TYPE=gha
-  *.CACHE_MODE=max
-```
+#### CI/CD Override
+GitHub Actions overrides the cache configuration:
 
-#### Registry Cache (Requires containerd driver)
 ```yaml
 set: |
-  *.CACHE_TYPE=registry
-  *.CACHE_MODE=max
+  *.cache-from=type=gha
+  *.cache-to=type=gha,mode=max
 ```
 
 ### Cache Modes
@@ -139,17 +144,14 @@ set: |
 ### Local Development
 
 ```bash
-# Build with default inline cache (recommended)
+# Build with default configuration (recommended)
 docker buildx bake core
 
-# Build with inline cache (explicit)
-docker buildx bake --set "*.CACHE_TYPE=inline" core
+# Build specific target
+docker buildx bake runtime-cuda
 
-# Build with registry cache (requires containerd driver)
-docker buildx bake --set "*.CACHE_TYPE=registry" core
-
-# Build specific target with custom cache
-docker buildx bake --set "*.CACHE_TYPE=inline" --set "*.CACHE_MODE=max" runtime-cuda
+# Build all targets
+docker buildx bake all
 ```
 
 ### CI/CD Pipeline
