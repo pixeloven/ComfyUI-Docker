@@ -42,6 +42,19 @@ target "runtime-cpu" {
     cache-to   = ["type=inline"]
 }
 
+target "sageattention-builder" {
+    context = "services/builder/sageattention"
+    dockerfile = "dockerfile.sageattention.builder"
+    platforms = PLATFORMS
+    tags = [
+        "${REGISTRY_URL}sageattention-builder:${IMAGE_LABEL}",
+        "${REGISTRY_URL}sageattention-builder:cache"
+    ]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}sageattention-builder:cache,optional=true"]
+    cache-to   = ["type=inline"]
+    target = "sageattention-builder"
+}
+
 target "core-cuda" {
     context = "services/comfy/core"
     contexts = {
@@ -90,6 +103,7 @@ target "complete-cuda" {
     context = "services/comfy/complete"
     contexts = {
         core = "target:core-cuda"
+        sageattention-builder = "target:sageattention-builder"
     }
     dockerfile = "dockerfile.comfy.cuda.complete"
     platforms = PLATFORMS
@@ -103,7 +117,7 @@ target "complete-cuda" {
         "type=registry,ref=${REGISTRY_URL}complete:cuda-cache,optional=true"
     ]
     cache-to   = ["type=inline"]
-    depends_on = ["core-cuda"]
+    depends_on = ["core-cuda", "sageattention-builder"]
 }
 
 // Convenience groups
@@ -129,5 +143,9 @@ group "cuda" {
 
 group "cpu" {
     targets = ["runtime-cpu", "core-cpu"]
+}
+
+group "builders" {
+    targets = ["sageattention-builder"]
 }
 
