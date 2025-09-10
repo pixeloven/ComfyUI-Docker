@@ -6,6 +6,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ComfyUI-Docker is a production-ready Docker containerization setup for ComfyUI, providing GPU-accelerated AI image generation with multiple deployment modes. The project uses a multi-stage build architecture with Docker Buildx Bake for efficient image management.
 
+## Setup
+
+### Data Directory
+The data directory is automatically created with proper ownership using Docker's bind mount with ownership options. By default, it uses `./data` but can be customized:
+
+```bash
+# Default usage (uses ./data)
+docker compose up -d
+
+# Custom data path
+COMFY_DATA_PATH=/path/to/your/data docker compose up -d
+
+# Custom ownership (if different from current user)
+PUID=1001 PGID=1001 docker compose up -d
+```
+
 ## Build Commands
 
 ### Docker Bake (Primary Build System)

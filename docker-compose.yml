@@ -12,10 +12,12 @@
 # Environment Variables:
 # COMFY_PORT - Port to expose ComfyUI (default: 8188)
 # COMFY_IMAGE - Override default image
-# COMFY_BASE_DIRECTORY - Base directory for ComfyUI (default: ./data)
+# COMFY_DATA_PATH - Host path to mount as data directory (default: ./data)
+# PUID - User ID for container ownership (default: 1000)
+# PGID - Group ID for container ownership (default: 1000)
 
 services:
-  # Core GPU mode (--profile core, also default)
+  # Core GPU mode (--profile core, also default)F
   core-cuda:
     image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/core:cuda-latest}
     user: ${PUID:-1000}:${PGID:-1000}
@@ -24,25 +26,20 @@ services:
       - PGID=${PGID:-1000}
       - COMFY_PORT=${COMFY_PORT:-8188}
       - CLI_ARGS=
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     ports:
       - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ./data:/data:delegated
-      # Scripts path - switches based on image being used
+      - ${COMFY_DATA_PATH:-./data}:/data
+      # Scripts path (testing only - not needed for final deployment)
       - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:
       - comfy_network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     profiles: [core]
 
   # Complete GPU mode with all optimizations (--profile complete)
@@ -54,25 +51,20 @@ services:
       - PGID=${PGID:-1000}
       - COMFY_PORT=${COMFY_PORT:-8188}
       - CLI_ARGS=
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     ports:
       - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ./data:/data:delegated
+      - ${COMFY_DATA_PATH:-./data}:/data
       # Scripts path - switches based on image being used
       - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:
       - comfy_network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     profiles: [complete]
 
   # CPU-only mode (--profile cpu)
@@ -83,13 +75,13 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - COMFY_PORT=${COMFY_PORT:-8188}
-      - CLI_ARGS=
+      - CLI_ARGS=--cpu
     ports:
       - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ./data:/data:delegated
+      - ${COMFY_DATA_PATH:-./data}:/data
       # Scripts path - switches based on image being used
       - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
