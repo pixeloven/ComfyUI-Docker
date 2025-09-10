@@ -50,11 +50,17 @@ if [ -z "$COMFY_APP_DIRECTORY" ]; then
 fi
 
 # Ensure persistent volume directories exist with proper ownership
+if [ ! -d "$COMFY_DATA_DIRECTORY" ]; then
+    log_info "Creating data directory at $COMFY_DATA_DIRECTORY..."
+    mkdir -vp "$COMFY_DATA_DIRECTORY"
+    chown -R comfy:comfy "$COMFY_DATA_DIRECTORY"
+fi
+
 if [ ! -d "$COMFY_BASE_DIRECTORY" ]; then
     log_info "Creating ComfyUI persistent directory structure at $COMFY_BASE_DIRECTORY..."
     mkdir -vp "$COMFY_BASE_DIRECTORY"/{custom_nodes,input,models,output,temp,user}
     # mkdir -vp "$COMFY_BASE_DIRECTORY"/models/{checkpoints,vae,loras,embeddings,hypernetworks,controlnet,clip_vision,upscale_models,ipadapter}
-    chown -R comfy:comfy "$COMFY_DATA_DIRECTORY"
+    chown -R comfy:comfy "$COMFY_BASE_DIRECTORY"
     log_success "Created persistent volume structure"
 else
     log_info "Persistent volume structure already exists at $COMFY_BASE_DIRECTORY"
