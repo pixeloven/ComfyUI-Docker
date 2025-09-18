@@ -23,7 +23,7 @@ install_custom_node_from_git "ComfyUI-MultiGPU" "https://github.com/pollockjj/Co
 # @link: https://github.com/robertvoy/ComfyUI-Distributed
 # @use_case: Scale workflows across multiple machines in a cluster
 log_info "Installing ComfyUI-Distributed for multi-node workflow distribution..."
-install_custom_node_from_git "ComfyUI-Distributed" "https://github.com/robertvoy/ComfyUI-Distributed.git"
+install_custom_node_from_git "ComfyUI-Distributed" "https://github.com/pixeloven/ComfyUI-Distributed.git"
 
 # ComfyUI_NetDist
 # @description: Network-based model distribution and caching across infrastructure
