@@ -14,8 +14,8 @@ log_info "Starting ComfyUI distribution systems installation..."
 # @features: Model layer distribution, automatic MultiGPU node creation, WanVideoWrapper integration
 # @link: https://github.com/pollockjj/ComfyUI-MultiGPU
 # @use_case: Maximize VRAM utilization on multi-GPU systems
-log_info "Installing ComfyUI-MultiGPU for single-node multi-GPU optimization..."
-install_custom_node_from_git "ComfyUI-MultiGPU" "https://github.com/pollockjj/ComfyUI-MultiGPU.git"
+# log_info "Installing ComfyUI-MultiGPU for single-node multi-GPU optimization..."
+# install_custom_node_from_git "ComfyUI-MultiGPU" "https://github.com/pollockjj/ComfyUI-MultiGPU.git"
 
 # ComfyUI-Distributed
 # @description: Multi-node distributed computing across multiple machines for workflow execution
@@ -30,6 +30,6 @@ install_custom_node_from_git "ComfyUI-Distributed" "https://github.com/pixeloven
 # @features: Model sharing, distributed model caching, network-based model loading
 # @link: https://github.com/city96/ComfyUI_NetDist
 # @use_case: Efficient model sharing and caching across network infrastructure
-log_info "Installing ComfyUI_NetDist for network-based model distribution..."
-install_custom_node_from_git "ComfyUI_NetDist" "https://github.com/city96/ComfyUI_NetDist.git"
+# log_info "Installing ComfyUI_NetDist for network-based model distribution..."
+# install_custom_node_from_git "ComfyUI_NetDist" "https://github.com/city96/ComfyUI_NetDist.git"
 
