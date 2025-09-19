@@ -2,12 +2,8 @@
 # Based on: https://github.com/loscrossos/crossOS_acceleritor
 # Provides pre-built wheels for all acceleration libraries including SageAttention
 
-# @todo Consider splitting requirements into use cases video, image, audio, 3d, etc.
-
 # Core acceleration libraries (pre-built wheels)
 triton>=3.3.1
-
-# @todo we should try to build this from source ourselves.
 
 # SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + torch 2.8
 https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.3/sageattention-2.2.0-280.129-cp312-cp312-linux_x86_64.whl
