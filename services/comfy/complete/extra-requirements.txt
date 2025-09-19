@@ -5,7 +5,6 @@
 # @todo Consider splitting requirements into use cases video, image, audio, 3d, etc.
 
 # Core acceleration libraries (pre-built wheels)
-xformers
 triton>=3.3.1
 
 # @todo we should try to build this from source ourselves.

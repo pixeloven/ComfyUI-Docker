@@ -39,11 +39,6 @@ if [ -z "$COMFY_BASE_DIRECTORY" ]; then
     export COMFY_BASE_DIRECTORY="$COMFY_DATA_DIRECTORY/comfy"
 fi
 
-if [ -z "$COMFY_OUTPUT_DIRECTORY" ]; then
-    log_warning "COMFY_OUTPUT_DIRECTORY defaulting to $COMFY_BASE_DIRECTORY/output"
-    export COMFY_OUTPUT_DIRECTORY="$COMFY_BASE_DIRECTORY/output"
-fi
-
 if [ -z "$COMFY_APP_DIRECTORY" ]; then
     log_warning "COMFY_APP_DIRECTORY defaulting to /home/comfy/app"
     export COMFY_APP_DIRECTORY="/home/comfy/app"

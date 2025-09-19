@@ -1,29 +1,8 @@
 #!/bin/bash
 set -e
 
-# Color codes for logging
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly NC='\033[0m' # No Color
-
-# Logging functions with colors
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+# Source logging functions
+source "$(dirname "$0")/scripts/lib/logging.sh"
 
 # Function to run all post-install scripts
 run_post_install_scripts() {
@@ -94,4 +73,4 @@ comfy env
 comfy tracking disable
 
 # Start ComfyUI with the specified parameters
-comfy launch -- --listen --port $COMFY_PORT --base-directory $COMFY_BASE_DIRECTORY --output-directory $COMFY_OUTPUT_DIRECTORY $CLI_ARGS 
+comfy launch -- --listen --port $COMFY_PORT --base-directory $COMFY_BASE_DIRECTORY $CLI_ARGS 

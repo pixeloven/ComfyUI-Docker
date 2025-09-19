@@ -8,4 +8,4 @@ comfy env
 comfy tracking disable
 
 # Start ComfyUI with the specified parameters
-comfy launch -- --listen --port $COMFY_PORT --base-directory $COMFY_BASE_DIRECTORY --output-directory $COMFY_OUTPUT_DIRECTORY $CLI_ARGS
+comfy launch -- --listen --port $COMFY_PORT --base-directory $COMFY_BASE_DIRECTORY $CLI_ARGS
