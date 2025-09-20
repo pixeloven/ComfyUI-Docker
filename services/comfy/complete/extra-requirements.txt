@@ -2,32 +2,32 @@
 # Based on: https://github.com/loscrossos/crossOS_acceleritor
 # Provides pre-built wheels for all acceleration libraries including SageAttention
 
-# Core acceleration libraries (pre-built wheels)
-triton>=3.3.1
-
-# SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + torch 2.8
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.3/sageattention-2.2.0-280.129-cp312-cp312-linux_x86_64.whl
-
 # Additional dependencies
-accelerate>=1.1.1
-onnxruntime-gpu>=1.22.0
-diffusers>=0.24.0
+accelerate>=1.10
+onnxruntime-gpu>=1.22
+diffusers>=0.34
 
 # Custom node optimizations - frequently used dependencies baked in for faster startup
-opencv-python>=4.8.0
-scipy>=1.11.0
-matplotlib>=3.7.0
+opencv-python>=4.12
+scipy>=1.16
+matplotlib>=3.10
 
 # PuLID / IPAdapter
-facexlib>=0.3.0
-insightface>=0.7.3
+facexlib>=0.3
+insightface>=0.7
 
 # ComfyUI Impact Pack dependencies
-piexif>=1.1.3
-ultralytics>=8.3.0
+piexif>=1.1
+ultralytics>=8.3
 
 # RMBG
-timm>=1.0.19
+timm>=1.0
 
 # HiDiffusion
 # hidiffusion>=0.1.10 # Can't find how to use this or a node that supports it.
+
+# Core acceleration libraries (pre-built wheels)
+triton>=3.4
+
+# SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + torch 2.8
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.6/sageattention-2.2.0-280.129-cp312-cp312-linux_x86_64.whl

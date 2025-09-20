@@ -27,15 +27,8 @@ RUN touch /var/mail/ubuntu && \
 ARG PUID=1000
 ARG PGID=1000
 RUN groupadd -g $PGID comfy && \
-    useradd -m -u $PUID -g $PGID comfy
-
-# Create persistent data directories structure
-# These directories will be volume-mounted in production for data persistence
-# RUN mkdir -p /data/comfy/{custom_nodes,input,models,output,temp,user} && \
-#     mkdir -p /data/comfy/models/{checkpoints,vae,loras,embeddings,hypernetworks,controlnet,clip_vision,upscale_models,ipadapter} && \
-#     chown -R comfy:comfy /data
-
-RUN mkdir -p /data && \
+    useradd -m -u $PUID -g $PGID comfy && \
+    mkdir -p /data && \
     chown -R comfy:comfy /data
 
 USER comfy
