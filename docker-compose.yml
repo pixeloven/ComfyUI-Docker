@@ -3,16 +3,20 @@
 #
 # Quick Start Commands:
 # docker compose --profile core up -d       # Core ComfyUI with GPU (recommended)
-# docker compose --profile complete up -d   # Complete ComfyUI with all optimizations  
+# docker compose --profile complete up -d   # Complete ComfyUI with all optimizations
 # docker compose --profile cpu up -d        # CPU mode
 #
 # For convenience, core is also the default:
 # docker compose up -d                      # Same as --profile core
+#
+# Multi-Instance Mode:
+# docker compose -f docker-compose.multi.yml up -d
 
 # Environment Variables:
 # COMFY_PORT - Port to expose ComfyUI (default: 8188)
 # COMFY_IMAGE - Override default image
-# COMFY_DATA_PATH - Host path to mount as data directory (default: ./data)
+# COMFY_SHARED_PATH - Host path for shared resources (default: ./storage/shared)
+# COMFY_INSTANCES_PATH - Host path for instance-specific data (default: ./storage/instances)
 # PUID - User ID for container ownership (default: 1000)
 # PGID - Group ID for container ownership (default: 1000)
 
@@ -33,8 +37,11 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ${COMFY_DATA_PATH:-./data}:/data
-      # Scripts path (testing only - not needed for final deployment)
+      # Shared resources (read-only)
+      - ${COMFY_SHARED_PATH:-./storage/shared}:/shared:ro
+      # Instance-specific data (read-write) - defaults to 'comfy' instance
+      - ${COMFY_INSTANCES_PATH:-./storage/instances}/comfy:/instance:rw
+      # Scripts path
       - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
@@ -58,8 +65,11 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ${COMFY_DATA_PATH:-./data}:/data
-      # Scripts path - switches based on image being used
+      # Shared resources (read-only)
+      - ${COMFY_SHARED_PATH:-./storage/shared}:/shared:ro
+      # Instance-specific data (read-write) - defaults to 'comfy' instance
+      - ${COMFY_INSTANCES_PATH:-./storage/instances}/comfy:/instance:rw
+      # Scripts path
       - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
@@ -81,14 +91,18 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ${COMFY_DATA_PATH:-./data}:/data
-      # Scripts path - switches based on image being used
+      # Shared resources (read-only)
+      - ${COMFY_SHARED_PATH:-./storage/shared}:/shared:ro
+      # Instance-specific data (read-write) - defaults to 'comfy' instance
+      - ${COMFY_INSTANCES_PATH:-./storage/instances}/comfy:/instance:rw
+      # Scripts path
       - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:
       - comfy_network
     profiles: [cpu]
+
 
 networks:
   comfy_network:

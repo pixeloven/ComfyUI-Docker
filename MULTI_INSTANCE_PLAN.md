@@ -1,7 +1,7 @@
 # Multi-Instance ComfyUI Docker Project Plan
 
 ## Problem Statement
-Enable multiple ComfyUI Docker installations to share a single data directory while avoiding conflicts in custom nodes, user configurations, and temporary files. Models should remain safely shareable while instance-specific data needs proper isolation.
+Enable multiple ComfyUI Docker instances to safely share resources while avoiding conflicts. Some resources (like models) can be shared between instances, while others (like custom nodes and user configs) must be isolated per instance.
 
 ## Key Findings
 
@@ -11,6 +11,11 @@ Enable multiple ComfyUI Docker installations to share a single data directory wh
 - Models directory is safely shareable
 - comfy-cli provides workspace management capabilities that can inform our approach
 
+**Distribution Systems Available:**
+- **ComfyUI_NetDist** (enabled): Network-based model distribution and caching across infrastructure
+- **ComfyUI-Distributed** (available): Multi-node distributed computing for workflow execution
+- **ComfyUI-MultiGPU** (available): Single-node multi-GPU optimization with Virtual VRAM management
+
 **Identified Conflicts:**
 1. **High-Risk**: `custom_nodes/` - Different versions, dependencies, incompatible nodes
 2. **High-Risk**: `user/` - User-specific configs, themes, settings
@@ -19,39 +24,36 @@ Enable multiple ComfyUI Docker installations to share a single data directory wh
 5. **Low-Risk**: `input/` - Input images (generally shareable)
 6. **Safe**: `models/` - Model files can be safely shared
 
-## Recommended Data Directory Structure
+## Required Directory Structure
 
 ```
-data/
-├── shared/                          # Safely shareable resources
-│   ├── models/                      # All model types
+storage/
+├── shared/                          # Shareable resources
+│   ├── models/                      # All model types (safe to share)
 │   │   ├── checkpoints/
 │   │   ├── vae/
 │   │   ├── loras/
 │   │   ├── embeddings/
-│   │   ├── controlnet/
 │   │   └── ...
-│   └── input/                       # Shared input images
-├── instances/                       # Instance-specific data
-│   ├── instance-core/               # Core GPU instance
-│   │   ├── custom_nodes/
-│   │   ├── user/
-│   │   ├── temp/
-│   │   └── output/
-│   ├── instance-complete/           # Complete GPU instance
-│   │   ├── custom_nodes/
-│   │   ├── user/
-│   │   ├── temp/
-│   │   └── output/
-│   └── instance-cpu/                # CPU-only instance
-│       ├── custom_nodes/
-│       ├── user/
-│       ├── temp/
-│       └── output/
-└── meta/                           # Multi-instance management
-    ├── instance-registry.json      # Track active instances
-    ├── shared-configs/             # Shareable configurations
-    └── backup-snapshots/           # Instance backups
+│   └── input/                       # Common input images (safe to share)
+└── instances/                       # Instance-specific data
+    └── {instance-id}/               # Per-instance isolation
+        ├── custom_nodes/            # Instance-specific nodes
+        ├── user/                    # Instance-specific configs
+        ├── temp/                    # Instance-specific temp files
+        └── output/                  # Instance-specific outputs
+```
+
+**Container View:**
+```
+/shared/                            # Read-only shared resources
+├── models/                         # Mounted from shared storage
+└── input/                          # Mounted from shared storage
+/instance/                          # Read-write instance data
+├── custom_nodes/                   # Mounted from instance storage
+├── user/                           # Mounted from instance storage
+├── temp/                           # Mounted from instance storage
+└── output/                         # Mounted from instance storage
 ```
 
 ## Project Phases
@@ -98,79 +100,137 @@ data/
 - Compatibility layer for existing installations
 - Comprehensive testing suite
 
-### Phase 4: Advanced Features
-**Goal**: Enhance multi-instance capabilities with advanced features
+### Phase 4: Distribution & Advanced Features
+**Goal**: Enhance multi-instance capabilities with distribution systems and advanced features
 
 **Tasks**:
+- Enable ComfyUI-Distributed for multi-node workflow execution
+- Configure ComfyUI_NetDist for intelligent model caching
 - Implement shared configuration templates
 - Add cross-instance model sharing verification
 - Create instance isolation monitoring and health checks
 - Develop workflow sharing system between instances
 
 **Deliverables**:
+- Distribution system integration
 - Enhanced instance management features
+- Intelligent model caching and distribution
 - Monitoring and health check system
 - Inter-instance workflow sharing capabilities
 
-## Implementation Recommendations
+## Implementation Summary
 
-1. **Environment Variables**: Use `COMFY_INSTANCE_ID` to distinguish instances
-2. **Service Profiles**: Extend existing Docker Compose profiles for multi-instance
-3. **Gradual Rollout**: Implement with backward compatibility, allowing single-instance operation
-4. **Safety First**: Include extensive validation and conflict detection
-5. **Documentation**: Comprehensive migration guides and troubleshooting docs
+### Completed Changes
+
+**1. Simplified Startup Script** (`services/comfy/complete/scripts/00-setup-file-structure.sh`)
+- ✅ **Default Instance ID**: `COMFY_INSTANCE_ID` defaults to `"comfy"` for all users
+- ✅ **Unified Logic**: Removed all conditionals - everyone uses the same pattern
+- ✅ **Consistent Mounts**: All instances use `/shared/` and `/instance/` mount points
+- ✅ **No Backward Compatibility Needed**: New unified approach for all users
+
+**2. Environment Variables**
+- ✅ `COMFY_INSTANCE_ID` - Defaults to `"comfy"`, can be overridden for multi-instance
+- ✅ `COMFY_SHARED_PATH` - Host path for shared resources (default: `./storage/shared`)
+- ✅ `COMFY_INSTANCES_PATH` - Host path for instance data (default: `./storage/instances`)
+
+**3. Docker Compose Organization**
+- ✅ **Split Configuration**: `docker-compose.yml` (single-instance) + `docker-compose.multi.yml` (multi-instance)
+- ✅ **Unified Mounts**: All services use same storage pattern
+- ✅ **Simple Usage**: No profiles needed - separate files for different use cases
+
+### Implementation Approach
+1. **Unified Pattern**: All users get the same `/shared/` + `/instance/` structure
+2. **Default Instance**: Single-instance users automatically use `comfy` instance ID
+3. **Storage Agnostic**: Host manages storage type (local, NFS, cloud storage, etc.)
+4. **Simpler Code**: No conditionals or backward compatibility complexity
 
 ## Technical Implementation Details
 
-### Environment Variables for Multi-Instance Support
+### Current Environment Variables
 
 ```bash
-# Instance identification
-COMFY_INSTANCE_ID=core               # Unique identifier for instance
-COMFY_MULTI_INSTANCE=true           # Enable multi-instance mode
+# Instance identification (defaults to "comfy" for single-instance)
+COMFY_INSTANCE_ID=comfy              # Unique identifier for instance
 
-# Updated directory paths
-COMFY_DATA_DIRECTORY=/data           # Root data directory
-COMFY_SHARED_DIRECTORY=/data/shared  # Shared resources
-COMFY_INSTANCE_DIRECTORY=/data/instances/${COMFY_INSTANCE_ID}  # Instance-specific data
-COMFY_BASE_DIRECTORY=${COMFY_INSTANCE_DIRECTORY}  # Instance base (for compatibility)
+# Storage paths (used by Docker Compose)
+COMFY_SHARED_PATH=./storage/shared        # Host path for shared resources
+COMFY_INSTANCES_PATH=./storage/instances  # Host path for instance data
+
+# Container mount points (set by startup script)
+COMFY_SHARED_DIRECTORY=/shared            # Shared resources in container
+COMFY_BASE_DIRECTORY=/instance            # Instance data in container
 ```
 
-### Docker Compose Service Examples
+### Current Usage Examples
 
-```yaml
-services:
-  core-cuda-instance1:
-    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/core:cuda-latest}
-    environment:
-      - COMFY_INSTANCE_ID=core-1
-      - COMFY_MULTI_INSTANCE=true
-      - COMFY_PORT=8188
-    ports:
-      - "8188:8188"
-    volumes:
-      - ${COMFY_DATA_PATH:-./data}:/data
-    profiles: [multi-core]
+**Single-Instance (docker-compose.yml):**
+```bash
+# Uses default "comfy" instance automatically
+docker compose up -d                      # Core
+docker compose --profile complete up -d   # Complete
+docker compose --profile cpu up -d        # CPU
 
-  complete-cuda-instance1:
-    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/complete:cuda-latest}
-    environment:
-      - COMFY_INSTANCE_ID=complete-1
-      - COMFY_MULTI_INSTANCE=true
-      - COMFY_PORT=8189
-    ports:
-      - "8189:8189"
-    volumes:
-      - ${COMFY_DATA_PATH:-./data}:/data
-    profiles: [multi-complete]
+# Results in: storage/instances/comfy/ for this instance
+```
+
+**Multi-Instance (docker-compose.multi.yml):**
+```bash
+# Runs two separate instances
+docker compose -f docker-compose.multi.yml up -d
+
+# Instance 01: localhost:8188 -> storage/instances/instance-01/
+# Instance 02: localhost:8189 -> storage/instances/instance-02/
+```
+
+**Environment Configuration (.env):**
+```bash
+# Customize storage paths
+COMFY_SHARED_PATH=./storage/shared        # Can be local, NFS mount, etc.
+COMFY_INSTANCES_PATH=./storage/instances  # Can be local, NFS mount, etc.
+PUID=1000
+PGID=1000
+```
+
+### Example Storage Configurations
+
+**Local Storage:**
+```bash
+COMFY_SHARED_PATH=./storage/shared
+COMFY_INSTANCES_PATH=./storage/instances
+```
+
+**NFS Storage:**
+```bash
+COMFY_SHARED_PATH=/mnt/nfs/comfy/shared
+COMFY_INSTANCES_PATH=/mnt/nfs/comfy/instances
+```
+
+**Cloud Storage:**
+```bash
+COMFY_SHARED_PATH=/mnt/s3fs/comfy/shared
+COMFY_INSTANCES_PATH=/mnt/s3fs/comfy/instances
 ```
 
 ### Migration Strategy
 
-1. **Detection**: Check for existing single-instance data structure
-2. **Backup**: Create backup of current data before migration
-3. **Transform**: Move instance-specific data to new structure
-4. **Symlink**: Create compatibility symlinks for seamless transition
-5. **Validate**: Verify migration success and data integrity
+**From Legacy Setup:**
+1. **Move Data**: Copy existing data from `./data/` to `./storage/instances/comfy/`
+2. **Update Environment**: Set `COMFY_SHARED_PATH` and `COMFY_INSTANCES_PATH` if using custom paths
+3. **Test**: Verify new structure works with `docker compose up -d`
 
-This approach leverages your existing Docker architecture while providing safe, manageable multi-instance operation with shared model resources and isolated instance-specific data.
+**No Migration Needed for New Installations** - The new structure is the default.
+
+## Summary
+
+✅ **Completed Implementation** - Multi-instance support with unified storage pattern
+
+**Key Benefits:**
+- **Simplified**: All users use the same storage structure
+- **Flexible**: Works with any storage backend (local, NFS, cloud)
+- **Clean**: No complex conditionals or legacy compatibility code
+- **Scalable**: Easy to add more instances by adjusting Docker Compose files
+
+**Usage:**
+- **Single-instance**: `docker compose up -d` (automatic `comfy` instance)
+- **Multi-instance**: `docker compose -f docker-compose.multi.yml up -d`
+- **Custom storage**: Set environment variables in `.env` file

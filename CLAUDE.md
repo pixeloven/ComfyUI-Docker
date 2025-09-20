@@ -107,15 +107,21 @@ services/
 ```
 
 ### Data Persistence
-All user data persists in `./data/`:
+All user data persists in a structured storage layout:
 ```
-data/
-├── models/      # AI models, checkpoints, LoRAs
-├── input/       # Input images
-├── output/      # Generated outputs
-├── user/        # User configurations
-└── temp/        # Temporary files
+storage/
+├── shared/                    # Shared across all instances
+│   ├── models/                # AI models, checkpoints, LoRAs
+│   └── input/                 # Input images
+└── instances/                 # Instance-specific data
+    └── {instance-id}/         # Per-instance directories
+        ├── custom_nodes/      # Instance-specific custom nodes
+        ├── user/              # User configurations
+        ├── temp/              # Temporary files
+        └── output/            # Generated outputs
 ```
+
+**Default Instance:** Single-instance users automatically use `instances/comfy/` as their instance directory.
 
 ## Custom Node Installation
 
@@ -143,12 +149,13 @@ log_success "Installation completed"
 
 ```bash
 # Docker Compose
-COMFY_PORT=8188              # Web interface port
-COMFY_IMAGE=custom:latest    # Override default image
-COMFY_BASE_DIRECTORY=./data  # Data directory
-PUID=1000                    # User ID
-PGID=1000                    # Group ID
-CLI_ARGS="--lowvram"         # ComfyUI launch arguments
+COMFY_PORT=8188                          # Web interface port
+COMFY_IMAGE=custom:latest                # Override default image
+COMFY_SHARED_PATH=./storage/shared       # Shared resources path
+COMFY_INSTANCES_PATH=./storage/instances # Instance-specific data path
+PUID=1000                                # User ID
+PGID=1000                                # Group ID
+CLI_ARGS="--lowvram"                     # ComfyUI launch arguments
 
 # Docker Bake
 REGISTRY_URL=ghcr.io/pixeloven/comfyui-docker/

@@ -1,0 +1,72 @@
+# ComfyUI Multi-Instance Docker Compose Configuration
+# For running multiple ComfyUI instances with shared storage
+#
+# Usage:
+# docker compose -f docker-compose.multi.yml up -d
+#
+# Environment Variables:
+# COMFY_SHARED_PATH - Host path for shared resources (default: ./storage/shared)
+# COMFY_INSTANCES_PATH - Host path for instance-specific data (default: ./storage/instances)
+# PUID - User ID for container ownership (default: 1000)
+# PGID - Group ID for container ownership (default: 1000)
+
+services:
+  # Instance 1 - Core GPU
+  comfy-instance-01:
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/core:cuda-latest}
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - COMFY_INSTANCE_ID=instance-01
+      - COMFY_PORT=8188
+      - CLI_ARGS=
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    ports:
+      - "8188:8188"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      # Shared resources (read-only)
+      - ${COMFY_SHARED_PATH:-./storage/shared}:/shared:ro
+      # Instance-specific data (read-write)
+      - ${COMFY_INSTANCES_PATH:-./storage/instances}/instance-01:/instance:rw
+      # Scripts path
+      - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
+    stop_signal: SIGKILL
+    tty: true
+    networks:
+      - comfy_network
+
+  # Instance 2 - Complete GPU
+  comfy-instance-02:
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/complete:cuda-latest}
+    user: ${PUID:-1000}:${PGID:-1000}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - COMFY_INSTANCE_ID=instance-02
+      - COMFY_PORT=8189
+      - CLI_ARGS=
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    ports:
+      - "8189:8189"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      # Shared resources (read-only)
+      - ${COMFY_SHARED_PATH:-./storage/shared}:/shared:ro
+      # Instance-specific data (read-write)
+      - ${COMFY_INSTANCES_PATH:-./storage/instances}/instance-02:/instance:rw
+      # Scripts path
+      - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
+    stop_signal: SIGKILL
+    tty: true
+    networks:
+      - comfy_network
+
+networks:
+  comfy_network:
+    driver: bridge
