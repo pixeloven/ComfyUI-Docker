@@ -12,9 +12,18 @@
 # Environment Variables:
 # COMFY_PORT - Port to expose ComfyUI (default: 8188)
 # COMFY_IMAGE - Override default image
-# COMFY_DATA_PATH - Host path to mount as data directory (default: ./data)
+# COMFY_DATA_PATH - Host path containing data subdirectories (default: ./data)
 # PUID - User ID for container ownership (default: 1000)
 # PGID - Group ID for container ownership (default: 1000)
+#
+# Volume Structure:
+# Each subdirectory is mounted directly to /app/[subdirectory]:
+# ./data/models -> /app/models
+# ./data/custom_nodes -> /app/custom_nodes
+# ./data/input -> /app/input
+# ./data/output -> /app/output
+# ./data/temp -> /app/temp
+# ./data/user -> /app/user
 
 services:
   # Core GPU mode (--profile core, also default)F
@@ -33,9 +42,15 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ${COMFY_DATA_PATH:-./data}:/data
-      # Scripts path (testing only - not needed for final deployment)
-      - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
+      # Direct mount to ComfyUI default structure
+      - ${COMFY_DATA_PATH:-./data}/models:/app/models
+      - ${COMFY_DATA_PATH:-./data}/custom_nodes:/app/custom_nodes
+      - ${COMFY_DATA_PATH:-./data}/input:/app/input
+      - ${COMFY_DATA_PATH:-./data}/output:/app/output
+      - ${COMFY_DATA_PATH:-./data}/temp:/app/temp
+      - ${COMFY_DATA_PATH:-./data}/user:/app/user
+      # Scripts for complete image features
+      - ./services/comfy/complete/scripts:/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:
@@ -58,9 +73,15 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ${COMFY_DATA_PATH:-./data}:/data
-      # Scripts path - switches based on image being used
-      - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
+      # Direct mount to ComfyUI default structure
+      - ${COMFY_DATA_PATH:-./data}/models:/app/models
+      - ${COMFY_DATA_PATH:-./data}/custom_nodes:/app/custom_nodes
+      - ${COMFY_DATA_PATH:-./data}/input:/app/input
+      - ${COMFY_DATA_PATH:-./data}/output:/app/output
+      - ${COMFY_DATA_PATH:-./data}/temp:/app/temp
+      - ${COMFY_DATA_PATH:-./data}/user:/app/user
+      # Scripts for complete image features
+      - ./services/comfy/complete/scripts:/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:
@@ -81,9 +102,15 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ${COMFY_DATA_PATH:-./data}:/data
-      # Scripts path - switches based on image being used
-      - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro
+      # Direct mount to ComfyUI default structure
+      - ${COMFY_DATA_PATH:-./data}/models:/app/models
+      - ${COMFY_DATA_PATH:-./data}/custom_nodes:/app/custom_nodes
+      - ${COMFY_DATA_PATH:-./data}/input:/app/input
+      - ${COMFY_DATA_PATH:-./data}/output:/app/output
+      - ${COMFY_DATA_PATH:-./data}/temp:/app/temp
+      - ${COMFY_DATA_PATH:-./data}/user:/app/user
+      # Scripts for testing (core image compatibility)
+      - ./services/comfy/complete/scripts:/app/scripts:ro
     stop_signal: SIGKILL
     tty: true
     networks:

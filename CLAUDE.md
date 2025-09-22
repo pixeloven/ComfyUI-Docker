@@ -8,8 +8,8 @@ ComfyUI-Docker is a production-ready Docker containerization setup for ComfyUI, 
 
 ## Setup
 
-### Data Directory
-The data directory is automatically created with proper ownership using Docker's bind mount with ownership options. By default, it uses `./data` but can be customized:
+### Data Directory Structure
+Data is organized in subdirectories that mount directly to ComfyUI's default structure at `/app`. The data directory uses `./data` by default but can be customized:
 
 ```bash
 # Default usage (uses ./data)
@@ -20,6 +20,17 @@ COMFY_DATA_PATH=/path/to/your/data docker compose up -d
 
 # Custom ownership (if different from current user)
 PUID=1001 PGID=1001 docker compose up -d
+```
+
+**Required Data Structure:**
+```
+data/
+├── models/          → /app/models (AI models, checkpoints)
+├── custom_nodes/    → /app/custom_nodes (extensions)
+├── input/          → /app/input (input images/workflows)
+├── output/         → /app/output (generated content)
+├── temp/           → /app/temp (temporary files)
+└── user/           → /app/user (user configs)
 ```
 
 ## Build Commands
@@ -73,13 +84,13 @@ runtime-cuda/cpu → core-cuda/cpu → complete-cuda
 
 **Build Stages:**
 1. **Runtime Layer** (`services/runtime/`): Base Ubuntu + CUDA/CPU runtime
-2. **Core Layer** (`services/comfy/core/`): ComfyUI + GPU/CPU support
-3. **Complete Layer** (`services/comfy/complete/`): Full package with custom nodes
+2. **Core Layer** (`services/comfy/core/`): ComfyUI installed at `/app`
+3. **Complete Layer** (`services/comfy/complete/`): Enhanced with custom nodes and optimizations
 
 ### Service Profiles
-- **Core** (`core-cuda`): Essential ComfyUI with GPU, fastest startup
-- **Complete** (`complete-cuda`): Full features with SageAttention optimization
-- **CPU** (`core-cpu`): CPU-only compatibility mode
+- **Core** (`core-cuda`): Essential ComfyUI at `/app`, direct volume mounting
+- **Complete** (`complete-cuda`): Full features with post-install automation
+- **CPU** (`core-cpu`): CPU-only mode with same `/app` structure
 
 ## Directory Structure
 
@@ -107,15 +118,22 @@ services/
 ```
 
 ### Data Persistence
-All user data persists in `./data/`:
+Direct volume mounting to ComfyUI's default structure at `/app`:
 ```
-data/
-├── models/      # AI models, checkpoints, LoRAs
-├── input/       # Input images
-├── output/      # Generated outputs
-├── user/        # User configurations
-└── temp/        # Temporary files
+Host: ./data/           Container: /app/
+├── models/         →  /app/models/      (AI models, checkpoints, LoRAs)
+├── custom_nodes/   →  /app/custom_nodes/ (Extensions and plugins)
+├── input/          →  /app/input/       (Input images and workflows)
+├── output/         →  /app/output/      (Generated outputs)
+├── temp/           →  /app/temp/        (Temporary files)
+└── user/           →  /app/user/        (User configurations)
 ```
+
+**Benefits:**
+- ✅ Standard Docker app structure at `/app`
+- ✅ No symlinks or complex mounting
+- ✅ Direct alignment with ComfyUI defaults
+- ✅ Faster container startup
 
 ## Custom Node Installation
 
@@ -145,7 +163,7 @@ log_success "Installation completed"
 # Docker Compose
 COMFY_PORT=8188              # Web interface port
 COMFY_IMAGE=custom:latest    # Override default image
-COMFY_BASE_DIRECTORY=./data  # Data directory
+COMFY_DATA_PATH=./data       # Data directory (contains subdirectories)
 PUID=1000                    # User ID
 PGID=1000                    # Group ID
 CLI_ARGS="--lowvram"         # ComfyUI launch arguments
