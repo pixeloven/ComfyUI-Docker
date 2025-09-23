@@ -7,7 +7,7 @@
 # Function to find installed custom node directory with fuzzy matching
 find_installed_node_directory() {
     local node_identifier="$1"
-    local base_dir="$COMFY_BASE_DIRECTORY/custom_nodes"
+    local base_dir="/app/custom_nodes"
     
     # Try exact match first
     local directory="$base_dir/$node_identifier"
@@ -62,7 +62,7 @@ install_custom_node_from_git() {
     fi
     
     # Use the repository name as-is for directory naming
-    local directory="$COMFY_BASE_DIRECTORY/custom_nodes/$repo_name"
+    local directory="/app/custom_nodes/$repo_name"
     
     # Install using git clone (use default branch)
     log_info "Installing $repo_name via git clone from: $git_url"
