@@ -9,12 +9,17 @@ Customize your ComfyUI Docker setup for optimal performance.
 # Port configuration
 COMFY_PORT=8188                    # Web interface port
 
-# User/Group IDs for file permissions  
+# User/Group IDs for file permissions
 PUID=1000                          # User ID
 PGID=1000                          # Group ID
 
-# Base directory for all ComfyUI data
-COMFY_BASE_DIRECTORY=./data        # Data directory path
+# Individual path configuration (used by current docker-compose.yml)
+COMFY_CUSTOM_NODE_PATH=./data/custom_nodes  # Custom nodes directory
+COMFY_INPUT_PATH=./data/input               # Input images/workflows
+COMFY_MODEL_PATH=./data/models              # AI models, checkpoints
+COMFY_OUTPUT_PATH=./data/output             # Generated content
+COMFY_TEMP_PATH=./data/temp                 # Temporary files
+COMFY_USER_PATH=./data/user                 # User configurations
 
 # ComfyUI startup arguments
 CLI_ARGS=                          # Additional CLI arguments
@@ -84,11 +89,11 @@ print('SageAttention test passed')
 
 ### Default Paths
 ```yaml
-# data/extra_model_paths.yaml
-base_path: /data/
+# data/extra_model_paths.yaml (if using custom model paths)
+base_path: /app/
 
 checkpoints: models/checkpoints
-vae: models/vae  
+vae: models/vae
 loras: models/loras
 embeddings: models/embeddings
 controlnet: models/controlnet
@@ -148,21 +153,26 @@ ports:
 
 ### Volume Mounts
 ```yaml
-# Default mounts in docker-compose.yml
+# Default mounts in docker-compose.yml (individual subdirectory mounting)
 volumes:
   - /etc/localtime:/etc/localtime:ro       # System timezone
-  - /etc/timezone:/etc/timezone:ro         # System timezone  
-  - ./data:/data:delegated                 # Main data directory
-  - ./services/comfy/complete/scripts:/home/comfy/app/scripts:ro  # Scripts
+  - /etc/timezone:/etc/timezone:ro         # System timezone
+  - ${COMFY_CUSTOM_NODE_PATH:-./data/custom_nodes}:/app/custom_nodes:rw
+  - ${COMFY_INPUT_PATH:-./data/input}:/app/input:rw
+  - ${COMFY_MODEL_PATH:-./data/models}:/app/models:ro
+  - ${COMFY_OUTPUT_PATH:-./data/output}:/app/output:rw
+  - ${COMFY_TEMP_PATH:-./data/temp}:/app/temp:rw
+  - ${COMFY_USER_PATH:-./data/user}:/app/user:rw
+  - ./services/comfy/complete/scripts:/app/scripts:ro  # Scripts
 ```
 
 ### Custom Mounts
 ```yaml
-# Add custom volume mounts
+# Add custom volume mounts (adjust paths to match current structure)
 volumes:
-  - ./custom-models:/data/models/custom:ro    # Read-only model library
-  - ./shared-workflows:/data/workflows:rw     # Shared workflow directory
-  - /fast-storage/temp:/data/temp:rw          # High-speed temp storage
+  - ./custom-models:/app/models/custom:ro     # Read-only model library
+  - ./shared-workflows:/app/user/workflows:rw # Shared workflow directory
+  - /fast-storage/temp:/app/temp:rw           # High-speed temp storage
 ```
 
 ## Performance Optimization
@@ -256,10 +266,10 @@ CLI_ARGS="--lowvram --novram --cpu"
 **Model loading issues**
 ```bash
 # Check model paths
-docker compose exec core-cuda ls -la /data/models/checkpoints/
+docker compose exec core-cuda ls -la /app/models/checkpoints/
 
 # Verify permissions
-docker compose exec core-cuda ls -la /data/
+docker compose exec core-cuda ls -la /app/
 ```
 
 **GPU not detected**
