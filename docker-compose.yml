@@ -43,12 +43,12 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
       # Direct mount to ComfyUI default structure
-      - ${COMFY_DATA_PATH:-./data}/models:/app/models
-      - ${COMFY_DATA_PATH:-./data}/custom_nodes:/app/custom_nodes
-      - ${COMFY_DATA_PATH:-./data}/input:/app/input
-      - ${COMFY_DATA_PATH:-./data}/output:/app/output
-      - ${COMFY_DATA_PATH:-./data}/temp:/app/temp
-      - ${COMFY_DATA_PATH:-./data}/user:/app/user
+      - ${COMFY_CUSTOM_NODE_PATH:-./data/custom_nodes}:/app/custom_nodes:rw
+      - ${COMFY_INPUT_PATH:-./data/input}:/app/input:rw
+      - ${COMFY_MODEL_PATH:-./data/models}:/app/models:ro
+      - ${COMFY_OUTPUT_PATH:-./data/output}:/app/output:rw
+      - ${COMFY_TEMP_PATH:-./data/temp}:/app/temp:rw
+      - ${COMFY_USER_PATH:-./data/user}:/app/user:rw
       # Scripts for complete image features
       - ./services/comfy/complete/scripts:/app/scripts:ro
     stop_signal: SIGKILL
@@ -74,12 +74,12 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
       # Direct mount to ComfyUI default structure
-      - ${COMFY_DATA_PATH:-./data}/models:/app/models
-      - ${COMFY_DATA_PATH:-./data}/custom_nodes:/app/custom_nodes
-      - ${COMFY_DATA_PATH:-./data}/input:/app/input
-      - ${COMFY_DATA_PATH:-./data}/output:/app/output
-      - ${COMFY_DATA_PATH:-./data}/temp:/app/temp
-      - ${COMFY_DATA_PATH:-./data}/user:/app/user
+      - ${COMFY_CUSTOM_NODE_PATH:-./data/custom_nodes}:/app/custom_nodes:rw
+      - ${COMFY_INPUT_PATH:-./data/input}:/app/input:rw
+      - ${COMFY_MODEL_PATH:-./data/models}:/app/models:ro
+      - ${COMFY_OUTPUT_PATH:-./data/output}:/app/output:rw
+      - ${COMFY_TEMP_PATH:-./data/temp}:/app/temp:rw
+      - ${COMFY_USER_PATH:-./data/user}:/app/user:rw
       # Scripts for complete image features
       - ./services/comfy/complete/scripts:/app/scripts:ro
     stop_signal: SIGKILL
@@ -103,12 +103,12 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
       # Direct mount to ComfyUI default structure
-      - ${COMFY_DATA_PATH:-./data}/models:/app/models
-      - ${COMFY_DATA_PATH:-./data}/custom_nodes:/app/custom_nodes
-      - ${COMFY_DATA_PATH:-./data}/input:/app/input
-      - ${COMFY_DATA_PATH:-./data}/output:/app/output
-      - ${COMFY_DATA_PATH:-./data}/temp:/app/temp
-      - ${COMFY_DATA_PATH:-./data}/user:/app/user
+      - ${COMFY_CUSTOM_NODE_PATH:-./data/custom_nodes}:/app/custom_nodes:rw
+      - ${COMFY_INPUT_PATH:-./data/input}:/app/input:rw
+      - ${COMFY_MODEL_PATH:-./data/models}:/app/models:ro
+      - ${COMFY_OUTPUT_PATH:-./data/output}:/app/output:rw
+      - ${COMFY_TEMP_PATH:-./data/temp}:/app/temp:rw
+      - ${COMFY_USER_PATH:-./data/user}:/app/user:rw
       # Scripts for testing (core image compatibility)
       - ./services/comfy/complete/scripts:/app/scripts:ro
     stop_signal: SIGKILL

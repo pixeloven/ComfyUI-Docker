@@ -9,14 +9,20 @@ ComfyUI-Docker is a production-ready Docker containerization setup for ComfyUI, 
 ## Setup
 
 ### Data Directory Structure
-Data is organized in subdirectories that mount directly to ComfyUI's default structure at `/app`. The data directory uses `./data` by default but can be customized:
+Data is organized in subdirectories that mount directly to ComfyUI's default structure at `/app`. Each subdirectory is mounted individually using environment variables:
 
 ```bash
-# Default usage (uses ./data)
+# Default usage (uses ./data subdirectories)
 docker compose up -d
 
-# Custom data path
-COMFY_DATA_PATH=/path/to/your/data docker compose up -d
+# Custom individual paths
+COMFY_CUSTOM_NODE_PATH=/path/to/custom_nodes \
+COMFY_INPUT_PATH=/path/to/input \
+COMFY_MODEL_PATH=/path/to/models \
+COMFY_OUTPUT_PATH=/path/to/output \
+COMFY_TEMP_PATH=/path/to/temp \
+COMFY_USER_PATH=/path/to/user \
+docker compose up -d
 
 # Custom ownership (if different from current user)
 PUID=1001 PGID=1001 docker compose up -d
@@ -118,7 +124,8 @@ services/
 ```
 
 ### Data Persistence
-Direct volume mounting to ComfyUI's default structure at `/app`:
+Individual subdirectory mounting to ComfyUI's default structure at `/app`:
+
 ```
 Host: ./data/           Container: /app/
 ├── models/         →  /app/models/      (AI models, checkpoints, LoRAs)
@@ -129,20 +136,44 @@ Host: ./data/           Container: /app/
 └── user/           →  /app/user/        (User configurations)
 ```
 
+Each subdirectory is mounted using individual environment variables:
+- `COMFY_CUSTOM_NODE_PATH` → `/app/custom_nodes`
+- `COMFY_INPUT_PATH` → `/app/input`
+- `COMFY_MODEL_PATH` → `/app/models`
+- `COMFY_OUTPUT_PATH` → `/app/output`
+- `COMFY_TEMP_PATH` → `/app/temp`
+- `COMFY_USER_PATH` → `/app/user`
+
 **Benefits:**
+- ✅ Granular control over each data directory
 - ✅ Standard Docker app structure at `/app`
-- ✅ No symlinks or complex mounting
 - ✅ Direct alignment with ComfyUI defaults
-- ✅ Faster container startup
+- ✅ Flexible path customization
 
 ## Custom Node Installation
 
-The complete image uses a sophisticated post-install system:
+The complete image uses a sophisticated post-install system with 9 numbered scripts:
 
-1. **Scripts execute in numerical order** (00-, 01-, 02-, etc.)
+**Available Scripts:**
+- `00-setup-file-structure.sh` - Initialize directory structure
+- `01-setup-example-workflows.sh` - Install example workflows
+- `02-install-platform-essentials.sh` - Core platform tools
+- `03-install-workflow-enhancers.sh` - Workflow enhancement nodes
+- `04-install-detection-segmentation.sh` - Detection/segmentation tools
+- `05-install-image-enhancers.sh` - Image processing nodes
+- `06-install-control-systems.sh` - Control system nodes
+- `07-install-video-animation.sh` - Video/animation tools
+- `08-install-distribution-systems.sh` - Distribution system nodes
+
+**System Features:**
+1. **Scripts execute in numerical order** (00-08)
 2. **One-time execution** using `.post_install_done` marker
-3. **Colored logging** with standardized functions
-4. **Git-based installation** with fuzzy matching for existing nodes
+3. **Colored logging** with standardized functions via `lib/logging.sh`
+4. **Git-based installation** with fuzzy matching via `lib/custom-nodes.sh`
+
+**Library Functions:**
+- `lib/logging.sh`: Provides `log_info()`, `log_success()`, `log_warning()`, `log_error()`
+- `lib/custom-nodes.sh`: Provides `install_custom_node_from_git()` with fuzzy matching
 
 ### Adding Custom Nodes
 Create numbered scripts in `services/comfy/complete/scripts/`:
@@ -160,15 +191,24 @@ log_success "Installation completed"
 ## Environment Variables
 
 ```bash
-# Docker Compose
-COMFY_PORT=8188              # Web interface port
-COMFY_IMAGE=custom:latest    # Override default image
-COMFY_DATA_PATH=./data       # Data directory (contains subdirectories)
-PUID=1000                    # User ID
-PGID=1000                    # Group ID
-CLI_ARGS="--lowvram"         # ComfyUI launch arguments
+# Docker Compose - Server & Setup Configuration
+PUID=1000                               # User ID for container ownership
+PGID=1000                               # Group ID for container ownership
+COMFY_PORT=8188                         # Web interface port
 
-# Docker Bake
+# Docker Compose - Individual Path Configuration
+COMFY_CUSTOM_NODE_PATH=./data/custom_nodes  # Custom nodes directory
+COMFY_INPUT_PATH=./data/input               # Input images/workflows
+COMFY_MODEL_PATH=./data/models              # AI models, checkpoints
+COMFY_OUTPUT_PATH=./data/output             # Generated content
+COMFY_TEMP_PATH=./data/temp                 # Temporary files
+COMFY_USER_PATH=./data/user                 # User configurations
+
+# Docker Compose - Optional Overrides
+COMFY_IMAGE=custom:latest               # Override default image
+CLI_ARGS="--lowvram"                   # ComfyUI launch arguments
+
+# Docker Bake - Build Configuration
 REGISTRY_URL=ghcr.io/pixeloven/comfyui-docker/
 IMAGE_LABEL=latest
 PLATFORMS=linux/amd64,linux/arm64
