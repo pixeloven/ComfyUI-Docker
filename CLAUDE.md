@@ -125,6 +125,7 @@ services/
 
 ### Data Persistence
 Individual subdirectory mounting to ComfyUI's default structure at `/app`:
+
 ```
 Host: ./data/           Container: /app/
 ├── models/         →  /app/models/      (AI models, checkpoints, LoRAs)
