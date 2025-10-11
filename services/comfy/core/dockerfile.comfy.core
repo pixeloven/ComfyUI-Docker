@@ -1,24 +1,5 @@
 FROM runtime AS core
 
-# ComfyUI Docker Image - Standard App Architecture
-#
-# REQUIRED VOLUMES (direct mounts to ComfyUI default structure):
-#   /app/custom_nodes/  - Installed custom nodes (mount: ./data/custom_nodes)
-#   /app/input/         - Input images and workflows (mount: ./data/input)
-#   /app/models/        - AI models (mount: ./data/models)
-#   /app/output/        - Generated images and workflows (mount: ./data/output)
-#   /app/temp/          - Temporary files (mount: ./data/temp)
-#   /app/user/          - User configurations and workflows (mount: ./data/user)
-#
-# VOLUME MOUNT EXAMPLES:
-#   volumes:
-#     - ./data/models:/app/models
-#     - ./data/custom_nodes:/app/custom_nodes
-#     - ./data/input:/app/input
-#     - ./data/output:/app/output
-#     - ./data/temp:/app/temp
-#     - ./data/user:/app/user
-
 # Remove ubuntu user
 # https://askubuntu.com/questions/1513927/ubuntu-24-04-docker-images-now-includes-user-ubuntu-with-uid-gid-1000
 RUN touch /var/mail/ubuntu && \
