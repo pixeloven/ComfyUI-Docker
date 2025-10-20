@@ -188,6 +188,38 @@ install_custom_node_from_git "NodeName" "https://github.com/author/repo.git"
 log_success "Installation completed"
 ```
 
+## Forcing Fresh Dependency Rebuilds
+
+The project provides two mechanisms for rebuilding images with the latest dependencies:
+
+### Automatic Weekly Rebuilds
+- **Schedule:** Every Sunday at 2:00 AM UTC
+- **Workflow:** [.github/workflows/weekly.yml](.github/workflows/weekly.yml)
+- **Purpose:** Automatically pull latest dependencies weekly
+- **Method:** Builds with `no-cache: true` to bypass all layer caching
+- **What gets updated:**
+  - Base images (`nvidia/cuda:12.9.1`, `ubuntu:24.04`)
+  - System packages (`apt-get update`)
+  - Python packages (`pip install comfy-cli`, extra-requirements.txt)
+  - ComfyUI repository (latest git clone via comfy-cli)
+  - Custom nodes and extensions
+
+### Manual On-Demand Rebuild
+- **Location:** Actions → CI → Run workflow
+- **Option:** Check "Force rebuild without cache" checkbox
+- **Purpose:** Emergency updates or debugging cache issues
+- **Method:** Same as weekly rebuild but triggered manually
+- **Use cases:**
+  - Urgent security updates
+  - Debugging build cache issues
+  - Testing fresh dependency versions
+
+### Normal Builds (with cache)
+- **Triggers:** Push to main, Pull requests
+- **Method:** Uses GitHub Actions cache for faster builds
+- **Speed:** ~5-10 minutes (vs ~30-60 minutes for fresh builds)
+- **Purpose:** Fast iteration during development
+
 ## Environment Variables
 
 ```bash

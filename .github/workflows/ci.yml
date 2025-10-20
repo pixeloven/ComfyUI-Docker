@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild without cache'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   validate-config:
@@ -84,12 +90,22 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Clear GitHub Actions cache (if force rebuild)
+      if: github.event.inputs.force_rebuild == 'true'
+      run: |
+        echo "🧹 Clearing GitHub Actions cache..."
+        gh cache delete --all || true
+        echo "✅ Cache cleared"
+      env:
+        GH_TOKEN: ${{ github.token }}
+
     - name: Build images
       uses: docker/bake-action@v5
       with:
         files: docker-bake.hcl
         targets: all
         push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
           *.cache-from=type=gha
