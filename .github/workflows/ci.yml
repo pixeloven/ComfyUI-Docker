@@ -99,6 +99,14 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
 
+    - name: Extract metadata
+      id: meta
+      run: |
+        echo "commit_sha=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+        echo "commit_ref=${GITHUB_SHA}" >> $GITHUB_OUTPUT
+        echo "branch=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
+
     - name: Build images
       uses: docker/bake-action@v5
       with:
@@ -113,6 +121,9 @@ jobs:
         # Ensure proper authentication for multi-image builds
         provenance: false
         sbom: false
+      env:
+        REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
+        IMAGE_LABEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.meta.outputs.commit_sha || 'latest' }}
 
 
   pr-summary:
