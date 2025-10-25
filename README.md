@@ -149,7 +149,7 @@ COMFY_OUTPUT_PATH=/path/to/outputs \
 docker compose up -d
 ```
 
-See [Configuration Guide](docs/user-guides/configuration.md) for details.
+See [Data Management Guide](docs/user-guides/data.md) for details.
 
 ---
 
@@ -174,8 +174,8 @@ COMFY_OUTPUT_PATH=./data/output     # Override output directory
 ```
 
 **For complete configuration options, see:**
-- [Configuration Guide](docs/user-guides/configuration.md) - Full environment variable reference
-- [Usage Guide](docs/user-guides/usage.md) - Advanced usage patterns
+- [Running Containers Guide](docs/user-guides/running.md) - Environment variables and Docker Compose
+- [Performance Tuning Guide](docs/user-guides/performance.md) - CLI arguments and optimization
 
 ---
 
@@ -183,12 +183,15 @@ COMFY_OUTPUT_PATH=./data/output     # Override output directory
 
 ### 📚 User Guides
 
-Essential guides for using ComfyUI Docker:
+**Core Guides:**
+- **[Building Images](docs/user-guides/building.md)** - Build locally or use pre-built GHCR images
+- **[Running Containers](docs/user-guides/running.md)** - Docker Compose operations and `.env` configuration
+- **[Data Management](docs/user-guides/data.md)** - Models, workflows, and persistent storage
+- **[Performance Tuning](docs/user-guides/performance.md)** - CLI arguments and resource optimization
 
+**Additional Guides:**
 - **[Quick Start](docs/user-guides/quick-start.md)** - Get running in 5 minutes
-- **[Usage Guide](docs/user-guides/usage.md)** - Daily operations and workflows
-- **[Configuration](docs/user-guides/configuration.md)** - Environment variables and tuning
-- **[Scripts Guide](docs/user-guides/scripts.md)** - Custom node installation system
+- **[Scripts Guide](docs/user-guides/scripts.md)** - Custom node installation for Complete mode
 
 ### 🛠️ Development Guides
 
@@ -205,7 +208,7 @@ Planning and analysis:
 - **[Repository Analysis](docs/project-management/repository-analysis.md)** - Comparison with other projects
 - **[Custom Nodes Migration](docs/project-management/custom-nodes-migration.md)** - Snapshot-based installation plan
 
-**[View Full Documentation Index](docs/index.md)**
+**[📖 View Full Documentation Index](docs/index.md)**
 
 ---
 
@@ -298,7 +301,7 @@ For **Core** and **Complete** modes, yes - an NVIDIA GPU with CUDA support is re
 
 ### Where are my models and outputs stored?
 
-Everything is stored in the `./data/` directory with subdirectories for models, outputs, custom nodes, etc. You can customize these paths using environment variables. See the [Configuration Guide](docs/user-guides/configuration.md) for details.
+Everything is stored in the `./data/` directory with subdirectories for models, outputs, custom nodes, etc. You can customize these paths using environment variables. See the [Data Management Guide](docs/user-guides/data.md) for details.
 
 ### How do I add custom nodes?
 
