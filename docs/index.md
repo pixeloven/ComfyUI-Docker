@@ -2,41 +2,17 @@
 
 Guides for ComfyUI Docker setup, usage, and development.
 
-## 📚 User Guides
+## 📚 [User Guides](user-guides/index.md)
 
-Essential guides for using ComfyUI Docker.
+Essential guides for using ComfyUI Docker - quick start, daily operations, configuration, and the script system.
 
-### [Quick Start](user-guides/quick-start.md)
-Get running in 5 minutes with one-command setup and basic configuration.
+## 🛠️ [Development Guides](development-guides/index.md)
 
-### [Usage Guide](user-guides/usage.md)
-Daily operations, model management, and common workflows.
+Guides for developers and contributors - development setup, building images, and CI/CD workflows.
 
-### [Scripts Guide](user-guides/scripts.md)
-Complete guide to the script system for customizing container setup and bootstrapping.
+## 📊 [Project Management](project-management/index.md)
 
-### [Configuration](user-guides/configuration.md)
-Complete guide to environment variables, performance tuning, and multi-instance setup.
-
-## 🛠️ Development Guides
-
-Guides for developers and contributors.
-
-### [Development](development-guides/development.md)
-Development setup, building images with Docker Bake, and contribution guidelines.
-
-### [CI/CD](development-guides/ci-cd.md)
-Docker Bake workflows, local testing with Act, and best practices.
-
-## 📊 Project Management
-
-Project planning, analysis, and task tracking.
-
-### [Tasks](project-management/tasks.md)
-Current issues, technical debt, and roadmap items for the ComfyUI Docker project.
-
-### [Repository Analysis](project-management/repository-analysis.md)
-Detailed analysis of existing ComfyUI Docker repositories and comparison with our approach.
+Project planning, analysis, and task tracking - tasks, repository analysis, and migration plans.
 
 ---
 

@@ -10,6 +10,9 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 ### [Repository Analysis](repository-analysis.md)
 Detailed analysis of existing ComfyUI Docker repositories and comparison with our approach.
 
+### [Custom Nodes Migration](custom-nodes-migration.md)
+Migration plan for transitioning from runtime bash scripts to native ComfyUI snapshot-based custom node installation.
+
 ---
 
 **Latest Updates**: 

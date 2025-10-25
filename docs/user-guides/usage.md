@@ -1,6 +1,6 @@
 # Usage Guide
 
-Advanced usage patterns and workflows for ComfyUI Docker.
+Daily operations, workflows, and advanced usage for ComfyUI Docker.
 
 ## Service Management
 
@@ -26,19 +26,12 @@ docker compose restart
 ```
 
 ### Available Profiles
-```bash
-# Default (core mode)
-docker compose up -d                      # core-cuda: Essential ComfyUI with GPU
 
-# Core profile (same as default)
-docker compose --profile core up -d       # core-cuda: Explicit core mode
-
-# Complete profile
-docker compose --profile complete up -d   # complete-cuda: All features + optimizations
-
-# CPU profile  
-docker compose --profile cpu up -d        # core-cpu: CPU-only mode
-```
+| Profile | Command | Service | Description |
+|---------|---------|---------|-------------|
+| Core (default) | `docker compose up -d` | `core-cuda` | Essential ComfyUI with GPU |
+| Complete | `docker compose --profile complete up -d` | `complete-cuda` | All features + 13+ custom nodes |
+| CPU | `docker compose --profile cpu up -d` | `core-cpu` | CPU-only mode |
 
 ## Data Management
 
@@ -60,13 +53,13 @@ data/
 ```
 
 ### Workflow Management
-```bash
-# Workflows are stored in data/user/
-data/user/
-├── default/
-│   └── workflows/          # Your workflow files (.json)
-└── custom_nodes/           # Custom ComfyUI nodes
-```
+
+Workflows are stored as JSON files in `data/user/default/workflows/`:
+
+- Save workflows through ComfyUI's "Save" button
+- Load workflows through ComfyUI's "Load" button
+- Backup important workflows regularly
+- Share workflows by copying the JSON files
 
 ## Performance Optimization
 
@@ -82,14 +75,14 @@ CLI_ARGS="--novram" docker compose up -d
 CLI_ARGS="--cpu" docker compose up -d
 ```
 
-### Advanced Configuration
-```bash
-# Custom model paths
-# Edit data/extra_model_paths.yaml
+### Multiple CLI Arguments
 
-# Custom startup arguments
-CLI_ARGS="--preview-method auto --use-split-cross-attention" docker compose up -d
+Combine multiple arguments:
+```bash
+CLI_ARGS="--lowvram --preview-method auto" docker compose up -d
 ```
+
+See [Configuration Guide](configuration.md) for all available options.
 
 ## Development & Debugging
 
@@ -119,15 +112,23 @@ docker compose logs core-cpu | grep INFO
 ## Maintenance
 
 ### Updates
+
+**Using pre-built images** (recommended):
 ```bash
 # Pull latest images
 docker compose pull
 
-# Rebuild if needed
-docker compose build --no-cache
+# Restart with new image
+docker compose up -d
+```
 
-# Update and restart
-docker compose pull && docker compose up -d
+**Building locally:**
+```bash
+# Rebuild images
+docker buildx bake all --load
+
+# Restart containers
+docker compose up -d
 ```
 
 ### Cleanup

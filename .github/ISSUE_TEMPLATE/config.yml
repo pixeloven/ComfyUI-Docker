@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Feature request? Questions regarding some extension?
+  - name: Questions? Need help getting started?
     url: https://github.com/pixeloven/ComfyUI-Docker/discussions
-    about: Please use the discussions tab
+    about: Please use GitHub Discussions for questions, setup help, and general discussion
+  - name: ComfyUI Support (not Docker-related)
+    url: https://github.com/comfyanonymous/ComfyUI/issues
+    about: For issues with ComfyUI itself (not the Docker setup), please report upstream

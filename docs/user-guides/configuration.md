@@ -41,93 +41,59 @@ CLI_ARGS="--preview-method auto"   # Auto-select preview method
 CLI_ARGS="--preview-method none"   # Disable previews (saves memory)
 ```
 
-## Custom Image Selection
+## Available Images
 
-### Override Default Images
+The project provides pre-built images on GitHub Container Registry:
+
+| Image | Tag | Profile | Description |
+|-------|-----|---------|-------------|
+| `core` | `cuda-latest` | `core` (default) | Essential ComfyUI with CUDA |
+| `complete` | `cuda-latest` | `complete` | Full features + custom nodes |
+| `core` | `cpu-latest` | `cpu` | CPU-only mode |
+
+Images are automatically selected based on the profile you use. Override with:
+
 ```bash
-# Use specific image versions
-COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-latest docker compose up -d
-
-# Use CPU-optimized image for testing  
-COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cpu-latest docker compose --profile cpu up -d
-
-# Use complete package with all features
-COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/complete:cuda-latest docker compose --profile complete up -d
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-dev docker compose up -d
 ```
 
-## SageAttention Configuration
+## SageAttention (Complete Mode Only)
 
-The complete package includes SageAttention 2++ for 2-3x faster attention computation.
+The **Complete** profile includes SageAttention 2++ for 2-3x faster attention computation.
 
-### Automatic Configuration
-1. **Use the complete image**: `docker compose --profile complete up -d`
-2. SageAttention is automatically enabled for compatible operations
-3. No manual configuration required
+**Automatic Configuration:**
+- Start Complete mode: `docker compose --profile complete up -d`
+- SageAttention automatically activates for compatible operations
+- Falls back to standard attention when needed
+- No manual configuration required
 
-### Verification
+**Verify Installation:**
 ```bash
-# Check if SageAttention is loaded
 docker compose exec complete-cuda python -c "import sageattention; print('SageAttention OK')"
-
-# View SageAttention logs
-docker compose logs complete-cuda | grep -i sage
-
-# Test attention performance
-docker compose exec complete-cuda python -c "
-import torch
-from sageattention import sageattn
-print('SageAttention test passed')
-"
 ```
 
-### Fallback Behavior
-- SageAttention automatically falls back to standard attention for incompatible operations
-- No workflow modifications needed
-- Seamless integration with existing models
+## Model Paths
 
-## Model Path Configuration
+ComfyUI uses standard model paths under `/app/models/`:
 
-### Default Paths
-```yaml
-# data/extra_model_paths.yaml (if using custom model paths)
-base_path: /app/
+- `checkpoints/` - Stable Diffusion checkpoints
+- `loras/` - LoRA files
+- `vae/` - VAE models
+- `embeddings/` - Text embeddings
+- `controlnet/` - ControlNet models
+- `clip/` - CLIP models
+- `upscale_models/` - Upscaling models
+- And more...
 
-checkpoints: models/checkpoints
-vae: models/vae
-loras: models/loras
-embeddings: models/embeddings
-controlnet: models/controlnet
-clip: models/clip
-clip_vision: models/clip_vision
-diffusers: models/diffusers
-style_models: models/style_models
-upscale_models: models/upscale_models
-```
-
-### Custom Paths
-```yaml
-# Add custom model directories
-custom_nodes: user/custom_nodes
-workflows: user/workflows  
-scripts: user/scripts
-```
+**Custom paths** can be configured in `data/extra_model_paths.yaml` if needed.
 
 ## Docker Compose Profiles
 
-### Available Profiles
-```bash
-# Default profile (core mode)
-docker compose up -d
-
-# Core profile (explicit)
-docker compose --profile core up -d
-
-# Complete profile with all features
-docker compose --profile complete up -d
-
-# CPU-only profile  
-docker compose --profile cpu up -d
-```
+| Profile | Command | Description |
+|---------|---------|-------------|
+| Core (default) | `docker compose up -d` | Essential ComfyUI + GPU |
+| Complete | `docker compose --profile complete up -d` | All features + custom nodes |
+| CPU | `docker compose --profile cpu up -d` | CPU-only mode |
 
 ## Network Configuration
 
@@ -141,38 +107,33 @@ COMFY_PORT=8188 docker compose up -d    # Instance 1
 COMFY_PORT=8189 docker compose up -d    # Instance 2 (different directory)
 ```
 
-### Network Access
-```bash
-# Allow external access (security risk!)
-# Modify docker-compose.yml ports section:
-ports:
-  - "0.0.0.0:${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
-```
+### External Access
+
+**Warning:** By default, ComfyUI binds to `0.0.0.0` allowing external access. For security:
+
+- Use a firewall or reverse proxy for production
+- Consider binding to `127.0.0.1` only in docker-compose.yml
+- Use authentication if exposing publicly
 
 ## Storage Configuration
 
-### Volume Mounts
+### Default Volume Mounts
+
+The docker-compose.yml mounts individual directories:
+
 ```yaml
-# Default mounts in docker-compose.yml (individual subdirectory mounting)
 volumes:
-  - /etc/localtime:/etc/localtime:ro       # System timezone
-  - /etc/timezone:/etc/timezone:ro         # System timezone
   - ${COMFY_CUSTOM_NODE_PATH:-./data/custom_nodes}:/app/custom_nodes:rw
   - ${COMFY_INPUT_PATH:-./data/input}:/app/input:rw
   - ${COMFY_MODEL_PATH:-./data/models}:/app/models:ro
   - ${COMFY_OUTPUT_PATH:-./data/output}:/app/output:rw
   - ${COMFY_TEMP_PATH:-./data/temp}:/app/temp:rw
   - ${COMFY_USER_PATH:-./data/user}:/app/user:rw
-  - ./services/comfy/complete/scripts:/app/scripts:ro  # Scripts
 ```
 
-### Custom Mounts
-```yaml
-# Add custom volume mounts (adjust paths to match current structure)
-volumes:
-  - ./custom-models:/app/models/custom:ro     # Read-only model library
-  - ./shared-workflows:/app/user/workflows:rw # Shared workflow directory
-  - /fast-storage/temp:/app/temp:rw           # High-speed temp storage
+**Customize paths** using environment variables:
+```bash
+COMFY_MODEL_PATH=/mnt/shared/models docker compose up -d
 ```
 
 ## Performance Optimization
