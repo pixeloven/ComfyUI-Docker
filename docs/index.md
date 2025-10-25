@@ -20,14 +20,12 @@ Essential guides for users:
 
 **[View all User Guides →](user-guides/index.md)**
 
-## 🛠️ Development Guides
+## 🛠️ Development
 
 For developers and contributors:
 
-- **[Development Guide](development-guides/development.md)** - Build images, contribute code
-- **[CI/CD Guide](development-guides/ci-cd.md)** - Build system and automation
-
-**[View all Development Guides →](development-guides/index.md)**
+- **[Building Images](user-guides/building.md)** - Build images locally, use pre-built images, CI/CD automation
+- See the [Contributing section](../README.md#contributing) in the main README for contribution guidelines
 
 ## 📊 Project Management
 

@@ -195,12 +195,9 @@ COMFY_OUTPUT_PATH=./data/output     # Override output directory
 **Advanced:**
 - **[Scripts Guide](docs/user-guides/scripts.md)** - Custom node installation for Complete mode
 
-### 🛠️ Development Guides
+### 🛠️ Development
 
-For developers and contributors:
-
-- **[Development](docs/development-guides/development.md)** - Build images, contribute code
-- **[CI/CD](docs/development-guides/ci-cd.md)** - Build system and automation
+For developers and contributors, see the [Building Images Guide](docs/user-guides/building.md) for local development and the [Contributing](#contributing) section below.
 
 ### 📊 Project Management
 
@@ -244,7 +241,7 @@ We welcome contributions! Whether it's bug reports, feature requests, documentat
 
 1. **Report Issues**: Use [GitHub Issues](https://github.com/pixeloven/ComfyUI-Docker/issues) with our templates
 2. **Suggest Features**: Open a [Feature Request](https://github.com/pixeloven/ComfyUI-Docker/issues/new?template=feature.md)
-3. **Submit PRs**: See [Development Guide](docs/development-guides/development.md) for setup
+3. **Submit PRs**: See [Building Images Guide](docs/user-guides/building.md) for development setup
 4. **Improve Docs**: Documentation PRs are always appreciated!
 
 ### Development Setup
@@ -264,7 +261,7 @@ docker compose --profile core up -d
 docker compose logs -f core-cuda
 ```
 
-**For detailed development instructions, see [Development Guide](docs/development-guides/development.md).**
+**For detailed build instructions, see [Building Images Guide](docs/user-guides/building.md).**
 
 ### Contribution Guidelines
 
