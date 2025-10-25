@@ -86,7 +86,7 @@ COMFY_USER_PATH=./data/user
 CLI_ARGS=--preview-method auto
 
 # Optional: Override image
-# COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-dev
+# COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-dev
 ```
 
 Then start normally:

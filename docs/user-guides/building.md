@@ -10,9 +10,9 @@ Pre-built images are automatically published to GitHub Container Registry and us
 
 | Image | Tag | Description |
 |-------|-----|-------------|
-| `ghcr.io/pixeloven/comfyui-docker/core` | `cuda-latest` | Essential ComfyUI with CUDA GPU support |
-| `ghcr.io/pixeloven/comfyui-docker/complete` | `cuda-latest` | Full features with custom nodes |
-| `ghcr.io/pixeloven/comfyui-docker/core` | `cpu-latest` | CPU-only mode |
+| `ghcr.io/pixeloven/comfyui/core` | `cuda-latest` | Essential ComfyUI with CUDA GPU support |
+| `ghcr.io/pixeloven/comfyui/complete` | `cuda-latest` | Full features with custom nodes |
+| `ghcr.io/pixeloven/comfyui/core` | `cpu-latest` | CPU-only mode |
 
 ### Pull Latest Images
 
@@ -37,10 +37,10 @@ Override the image version:
 
 ```bash
 # In .env file
-COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-dev
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-dev
 
 # Or inline
-COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-abc1234 docker compose up -d
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-abc1234 docker compose up -d
 ```
 
 ## Building Locally

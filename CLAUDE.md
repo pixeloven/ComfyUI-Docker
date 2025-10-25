@@ -241,7 +241,7 @@ COMFY_IMAGE=custom:latest               # Override default image
 CLI_ARGS="--lowvram"                   # ComfyUI launch arguments
 
 # Docker Bake - Build Configuration
-REGISTRY_URL=ghcr.io/pixeloven/comfyui-docker/
+REGISTRY_URL=ghcr.io/pixeloven/comfyui/
 IMAGE_LABEL=latest
 PLATFORMS=linux/amd64,linux/arm64
 ```
@@ -302,4 +302,4 @@ The project uses GitHub Actions for validation and automated builds:
 - **Automatic deployment** on main branch pushes
 
 Build artifacts are pushed to GitHub Container Registry at:
-`ghcr.io/pixeloven/comfyui-docker/`
+`ghcr.io/pixeloven/comfyui/`
