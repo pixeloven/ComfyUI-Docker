@@ -79,9 +79,9 @@ ComfyUI Docker offers three deployment profiles to match your use case:
 
 | Profile | Service | Image | Best For | Features |
 |---------|---------|-------|----------|----------|
-| **Core** | `core-cuda` | `ghcr.io/pixeloven/comfyui-docker/core:cuda-latest` | Most users | Essential ComfyUI + GPU acceleration |
-| **Complete** | `complete-cuda` | `ghcr.io/pixeloven/comfyui-docker/complete:cuda-latest` | Power users | Custom nodes + SageAttention + pre-installed workflows |
-| **CPU** | `core-cpu` | `ghcr.io/pixeloven/comfyui-docker/core:cpu-latest` | Testing/Compatibility | No GPU required |
+| **Core** | `core-cuda` | `ghcr.io/pixeloven/comfyui/core:cuda-latest` | Most users | Essential ComfyUI + GPU acceleration |
+| **Complete** | `complete-cuda` | `ghcr.io/pixeloven/comfyui/complete:cuda-latest` | Power users | Custom nodes + SageAttention + pre-installed workflows |
+| **CPU** | `core-cpu` | `ghcr.io/pixeloven/comfyui/core:cpu-latest` | Testing/Compatibility | No GPU required |
 
 ### Core Mode (`core-cuda`) ⚡
 
