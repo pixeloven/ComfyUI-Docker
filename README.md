@@ -183,14 +183,16 @@ COMFY_OUTPUT_PATH=./data/output     # Override output directory
 
 ### 📚 User Guides
 
+**Getting Started:**
+- **[Quick Start](docs/user-guides/quick-start.md)** - Get running in 5 minutes
+
 **Core Guides:**
 - **[Building Images](docs/user-guides/building.md)** - Build locally or use pre-built GHCR images
 - **[Running Containers](docs/user-guides/running.md)** - Docker Compose operations and `.env` configuration
 - **[Data Management](docs/user-guides/data.md)** - Models, workflows, and persistent storage
 - **[Performance Tuning](docs/user-guides/performance.md)** - CLI arguments and resource optimization
 
-**Additional Guides:**
-- **[Quick Start](docs/user-guides/quick-start.md)** - Get running in 5 minutes
+**Advanced:**
 - **[Scripts Guide](docs/user-guides/scripts.md)** - Custom node installation for Complete mode
 
 ### 🛠️ Development Guides

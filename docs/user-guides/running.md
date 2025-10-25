@@ -2,16 +2,6 @@
 
 How to run ComfyUI using Docker Compose with profile selection and environment configuration.
 
-## Quick Start
-
-```bash
-# Start with default profile (Core mode)
-docker compose up -d
-
-# Access ComfyUI
-# Open http://localhost:8188 in your browser
-```
-
 ## Service Profiles
 
 ComfyUI Docker provides three deployment profiles:
@@ -22,33 +12,22 @@ ComfyUI Docker provides three deployment profiles:
 | **Complete** | `docker compose --profile complete up -d` | `complete-cuda` | Full features + 13+ custom nodes |
 | **CPU** | `docker compose --profile cpu up -d` | `core-cpu` | CPU-only mode (no GPU required) |
 
-### Profile Selection
+### Starting Services
 
 ```bash
-# Core mode (default, recommended for most users)
+# Core mode (default, recommended)
 docker compose up -d
-docker compose --profile core up -d  # Explicit
 
-# Complete mode (power users, slower first startup)
+# Complete mode (power users)
 docker compose --profile complete up -d
 
-# CPU mode (testing, no GPU required)
+# CPU mode (testing, no GPU)
 docker compose --profile cpu up -d
 ```
 
-## Basic Operations
+Access ComfyUI at: **http://localhost:8188**
 
-### Start Services
-
-```bash
-# Start in background
-docker compose up -d
-
-# Start with logs visible
-docker compose up
-```
-
-### Stop Services
+### Stopping Services
 
 ```bash
 # Stop containers (preserves data)
@@ -58,50 +37,34 @@ docker compose down
 docker compose down -v
 ```
 
-### Restart Services
+### Restarting Services
 
 ```bash
 # Restart all services
 docker compose restart
 
-# Restart specific profile
+# Restart specific service
 docker compose restart core-cuda
-docker compose restart complete-cuda
-docker compose restart core-cpu
 ```
 
-### View Logs
+### Viewing Logs
 
 ```bash
-# Follow all logs
+# Follow logs
 docker compose logs -f
 
-# Follow specific service
+# Specific service
 docker compose logs -f core-cuda
-docker compose logs -f complete-cuda
 
 # Last 100 lines
-docker compose logs -f --tail=100
-
-# Search logs
-docker compose logs core-cuda | grep ERROR
-```
-
-### Check Status
-
-```bash
-# View running containers
-docker compose ps
-
-# Detailed status
-docker compose ps -a
+docker compose logs --tail=100
 ```
 
 ## Environment Configuration
 
 Configure ComfyUI using environment variables via `.env` file or inline.
 
-### Create .env File
+### Using .env File
 
 Create `.env` in your project root:
 
@@ -111,7 +74,7 @@ COMFY_PORT=8188
 PUID=1000
 PGID=1000
 
-# Data Paths (individual directories)
+# Data Paths
 COMFY_CUSTOM_NODE_PATH=./data/custom_nodes
 COMFY_INPUT_PATH=./data/input
 COMFY_MODEL_PATH=./data/models
@@ -119,7 +82,7 @@ COMFY_OUTPUT_PATH=./data/output
 COMFY_TEMP_PATH=./data/temp
 COMFY_USER_PATH=./data/user
 
-# ComfyUI Arguments
+# Performance (see Performance Tuning guide)
 CLI_ARGS=--preview-method auto
 
 # Optional: Override image
@@ -165,10 +128,12 @@ COMFY_TEMP_PATH=./data/temp                 # Temporary files
 COMFY_USER_PATH=./data/user                 # User configs
 ```
 
-#### Optional Overrides
+See [Data Management](data.md) for details on directory structure.
+
+#### Performance & Optional
 ```bash
-COMFY_IMAGE=custom:latest    # Override Docker image
 CLI_ARGS="--lowvram"         # ComfyUI launch arguments
+COMFY_IMAGE=custom:latest    # Override Docker image
 ```
 
 See [Performance Tuning](performance.md) for CLI_ARGS options.
@@ -192,34 +157,7 @@ COMFY_PORT=8189 docker compose up -d
 - Different ports (COMFY_PORT)
 - Separate data directories (or shared models with different outputs)
 
-## Container Access
-
-### Interactive Shell
-
-```bash
-# Access running container
-docker compose exec core-cuda bash
-docker compose exec complete-cuda bash
-docker compose exec core-cpu bash
-```
-
-### Run Commands
-
-```bash
-# Check Python version
-docker compose exec core-cuda python --version
-
-# List installed packages
-docker compose exec core-cuda pip list
-
-# Check GPU status
-docker compose exec core-cuda nvidia-smi
-
-# View environment
-docker compose exec core-cuda env | grep COMFY
-```
-
-## Updates
+## Updating
 
 ### Using Pre-Built Images
 
@@ -229,9 +167,6 @@ docker compose pull
 
 # Restart with new images
 docker compose up -d
-
-# Or combine
-docker compose pull && docker compose up -d
 ```
 
 ### Using Local Builds
@@ -244,40 +179,45 @@ docker buildx bake all --load
 docker compose up -d --force-recreate
 ```
 
+See [Building Images](building.md) for build details.
+
 ## Troubleshooting
 
 ### Port Already in Use
 
 ```bash
-# Check what's using the port
-sudo lsof -i :8188
-
 # Use different port
 COMFY_PORT=8189 docker compose up -d
+
+# Or check what's using the port
+sudo lsof -i :8188
 ```
 
 ### Container Won't Start
 
 ```bash
-# Check logs for errors
+# Check logs
 docker compose logs
-
-# Check container status
-docker compose ps -a
 
 # Validate configuration
 docker compose config --quiet
+
+# Check container status
+docker compose ps -a
 ```
 
 ### Permission Issues
 
 ```bash
-# Fix ownership
+# Fix ownership (use your PUID:PGID)
 sudo chown -R $USER:$USER ./data
 
-# Set proper permissions
-chmod -R 755 ./data
+# Or set in .env
+PUID=1000
+PGID=1000
 ```
+
+See [Data Management](data.md) for file permission details.
 
 ### GPU Not Detected
 
@@ -287,21 +227,13 @@ nvidia-smi
 
 # Test Docker GPU support
 docker run --rm --gpus all nvidia/cuda:12.6.0-runtime-ubuntu24.04 nvidia-smi
-
-# Check container GPU access
-docker compose exec core-cuda nvidia-smi
 ```
 
-### Health Check
-
-```bash
-# API health check
-curl -f http://localhost:8188/system_stats
-
-# Check if service is responding
-curl -I http://localhost:8188
-```
+See [Performance Tuning](performance.md) for GPU optimization.
 
 ---
 
-**Next:** [Data Management](data.md) | [Performance Tuning](performance.md) | **Previous:** [Building Images](building.md)
+**See Also:**
+- [Building Images](building.md) - Build or pull images
+- [Data Management](data.md) - Directory structure and paths
+- [Performance Tuning](performance.md) - CLI arguments and optimization

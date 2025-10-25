@@ -6,14 +6,16 @@ Complete guides for using, developing, and contributing to ComfyUI Docker.
 
 Essential guides for users:
 
+### Getting Started
+- **[Quick Start](user-guides/quick-start.md)** - Get running in 5 minutes
+
 ### Core Guides
 - **[Building Images](user-guides/building.md)** - Build locally or use pre-built GHCR images
 - **[Running Containers](user-guides/running.md)** - Docker Compose operations and `.env` configuration
 - **[Data Management](user-guides/data.md)** - Models, workflows, and persistent storage
 - **[Performance Tuning](user-guides/performance.md)** - CLI arguments and resource optimization
 
-### Additional Guides
-- **[Quick Start](user-guides/quick-start.md)** - Get running in 5 minutes
+### Advanced
 - **[Scripts Guide](user-guides/scripts.md)** - Custom node installation for Complete mode
 
 **[View all User Guides →](user-guides/index.md)**

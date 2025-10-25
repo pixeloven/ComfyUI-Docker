@@ -4,7 +4,7 @@ How to build ComfyUI Docker images locally or use pre-built images from GitHub C
 
 ## Using Pre-Built Images (Recommended)
 
-Pre-built images are automatically published to GitHub Container Registry and used by default in docker-compose.yml.
+Pre-built images are automatically published to GitHub Container Registry and used by default.
 
 ### Available Images
 
@@ -31,15 +31,15 @@ Images are rebuilt automatically:
 - **On Release**: When new versions are tagged
 - **Manual**: Via GitHub Actions workflow
 
-### Override Image Version
+### Use Specific Version
 
-Use a specific version or tag:
+Override the image version:
 
 ```bash
-# Use development build
-COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-dev docker compose up -d
+# In .env file
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-dev
 
-# Use specific commit tag
+# Or inline
 COMFY_IMAGE=ghcr.io/pixeloven/comfyui-docker/core:cuda-abc1234 docker compose up -d
 ```
 
@@ -92,9 +92,11 @@ runtime-cuda/cpu → core-cuda/cpu → complete-cuda
 ```bash
 docker buildx bake runtime --load
 docker buildx bake core-cuda --load
-# Now modify complete layer and rebuild quickly
+# Modify complete layer and rebuild quickly
 docker buildx bake complete-cuda --load
 ```
+
+## Build Options
 
 ### Development Builds
 
@@ -109,9 +111,7 @@ docker buildx bake all --load --no-cache
 PLATFORMS=linux/amd64,linux/arm64 docker buildx bake all --push
 ```
 
-## Build Configuration
-
-### Environment Variables
+### Build Configuration
 
 Configure builds using environment variables:
 
@@ -125,7 +125,7 @@ PLATFORMS=linux/amd64
 REGISTRY_URL=myregistry.com/ IMAGE_LABEL=v1.0 docker buildx bake all --load
 ```
 
-### Validate Build Configuration
+### Validate Configuration
 
 ```bash
 # Preview build configuration
@@ -133,18 +133,6 @@ docker buildx bake --print all
 
 # Validate docker-compose.yml
 docker compose config --quiet
-```
-
-## After Building
-
-Use your locally built images:
-
-```bash
-# Docker compose automatically uses local images if available
-docker compose up -d
-
-# Or override the image
-COMFY_IMAGE=localhost/core:cuda-dev docker compose up -d
 ```
 
 ## Troubleshooting
@@ -155,7 +143,7 @@ COMFY_IMAGE=localhost/core:cuda-dev docker compose up -d
 # Remove build cache
 docker buildx prune
 
-# Remove all build cache (including unused)
+# Remove all build cache
 docker buildx prune -a
 ```
 
@@ -169,13 +157,16 @@ docker buildx bake core-cuda --load --progress=plain
 docker buildx bake core-cuda --load 2>&1 | tee build.log
 ```
 
-### Build Fails with Cache Issues
+### Force Clean Rebuild
 
 ```bash
-# Force clean rebuild
+# Rebuild without cache
 docker buildx bake all --load --no-cache
 ```
 
 ---
 
-**Next:** [Running Containers](running.md) | [Data Management](data.md) | [Performance Tuning](performance.md)
+**See Also:**
+- [Running Containers](running.md) - Use built images
+- [Data Management](data.md) - Configure data paths
+- [Performance Tuning](performance.md) - Optimize for your hardware

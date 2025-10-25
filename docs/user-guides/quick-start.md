@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get ComfyUI running in 5 minutes with Docker Compose.
+Get ComfyUI running in 5 minutes.
 
 ## Prerequisites
 
@@ -9,9 +9,10 @@ Get ComfyUI running in 5 minutes with Docker Compose.
 - **8GB+ VRAM** recommended for complete mode
 - **20GB+ disk space** for models and outputs
 
-## Launch ComfyUI
+## Setup
 
 ### 1. Clone Repository
+
 ```bash
 git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd ComfyUI-Docker
@@ -19,18 +20,16 @@ cd ComfyUI-Docker
 
 ### 2. Start ComfyUI
 
-**Core Mode** (recommended - essential features):
+Choose a profile based on your needs:
+
 ```bash
+# Core Mode (recommended - essential features)
 docker compose up -d
-```
 
-**Complete Mode** (all features + 13+ custom nodes):
-```bash
+# Complete Mode (all features + 13+ custom nodes)
 docker compose --profile complete up -d
-```
 
-**CPU Mode** (no GPU required):
-```bash
+# CPU Mode (no GPU required)
 docker compose --profile cpu up -d
 ```
 
@@ -50,11 +49,11 @@ Open **http://localhost:8188** in your browser
 
 ### Download a Model
 
-You'll need at least one Stable Diffusion checkpoint. Download from:
+Download a Stable Diffusion checkpoint from:
 - [Civitai](https://civitai.com/)
 - [Hugging Face](https://huggingface.co/models?pipeline_tag=text-to-image)
 
-Place checkpoint in: `./data/models/checkpoints/`
+Place in: `./data/models/checkpoints/`
 
 ### Generate Your First Image
 
@@ -72,14 +71,14 @@ data/
 ├── models/
 │   ├── checkpoints/     # Main SD models (.safetensors, .ckpt)
 │   ├── loras/          # LoRA files
-│   ├── vae/            # VAE files
-│   └── ...             # Other model types
+│   └── vae/            # VAE files
 ├── custom_nodes/       # Custom node extensions
 ├── input/              # Input images for workflows
 ├── output/             # Generated images
-├── temp/               # Temporary files
 └── user/               # User configs and workflows
 ```
+
+See [Data Management](data.md) for detailed directory structure.
 
 ## Common Commands
 
@@ -94,59 +93,18 @@ docker compose down
 docker compose restart
 
 # Update to latest image
-docker compose pull
-docker compose up -d
+docker compose pull && docker compose up -d
 ```
+
+See [Running Containers](running.md) for all Docker Compose operations.
 
 ## Next Steps
 
-- **[Usage Guide](usage.md)** - Daily operations and advanced workflows
-- **[Configuration](configuration.md)** - Customize ports, paths, and performance
-- **[Scripts Guide](scripts.md)** - Understand custom nodes in Complete mode
-
-## Troubleshooting
-
-### GPU Not Detected
-
-**Check NVIDIA drivers:**
-```bash
-nvidia-smi
-```
-
-**Verify Docker GPU support:**
-```bash
-docker run --rm --gpus all nvidia/cuda:12.6.0-runtime-ubuntu24.04 nvidia-smi
-```
-
-**Install NVIDIA Container Toolkit** if needed:
-- [Official Guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-
-### Port Already in Use
-
-```bash
-# Use different port
-COMFY_PORT=8189 docker compose up -d
-```
-
-### Container Won't Start
-
-```bash
-# Check logs for errors
-docker compose logs
-
-# Check container status
-docker compose ps
-```
-
-### Out of Memory Errors
-
-```bash
-# Use low VRAM mode
-CLI_ARGS="--lowvram" docker compose up -d
-```
-
-**Need more help?** See the [Configuration Guide](configuration.md) or open an [issue](https://github.com/pixeloven/ComfyUI-Docker/issues).
+- **[Running Containers](running.md)** - Profile selection and environment configuration
+- **[Data Management](data.md)** - Organize models and workflows
+- **[Performance Tuning](performance.md)** - Optimize for your hardware
+- **[Scripts Guide](scripts.md)** - Custom nodes in Complete mode
 
 ---
 
-**[⬆ Back to Documentation](../index.md)** | **[📖 Usage Guide](usage.md)** | **[⚙️ Configuration](configuration.md)**
+**Need Help?** [Open an issue](https://github.com/pixeloven/ComfyUI-Docker/issues) or check [GitHub Discussions](https://github.com/pixeloven/ComfyUI-Docker/discussions).

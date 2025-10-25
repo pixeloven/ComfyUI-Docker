@@ -1,12 +1,12 @@
 # Scripts Guide
 
-Complete guide to the custom node installation scripts in ComfyUI Docker's **Complete** mode.
+Understanding the custom node installation script system in Complete mode.
 
 ## Overview
 
-The **Complete** profile includes a post-install script system that automatically installs 13+ custom nodes on first container startup. This guide explains how the system works and how to modify it.
+The **Complete** profile uses a post-install script system that automatically installs 13+ custom nodes on first container startup.
 
-**Note:** Scripts are only used in **Complete mode**. The **Core** and **CPU** modes do not use scripts.
+**Note:** Scripts are only used in **Complete mode**. Core and CPU modes do not use scripts.
 
 ## How It Works
 
@@ -22,7 +22,7 @@ The container:
 1. Checks for `.post_install_done` marker file
 2. If not found, executes scripts in numerical order (00-08)
 3. Creates `.post_install_done` marker to prevent re-execution
-4. Subsequent startups skip script execution
+4. Subsequent startups skip script execution (fast startup)
 
 ### Script Location
 
@@ -33,29 +33,27 @@ services/comfy/complete/scripts/
 ├── lib/
 │   ├── logging.sh              # Colored logging functions
 │   └── custom-nodes.sh         # Node installation utilities
-├── 00-setup-file-structure.sh  # Initialize directories
-├── 01-setup-example-workflows.sh # Install example workflows
-├── 02-install-platform-essentials.sh # Core platform tools
-├── 03-install-workflow-enhancers.sh # Workflow enhancement nodes
-├── 04-install-detection-segmentation.sh # Detection/segmentation
-├── 05-install-image-enhancers.sh # Image processing nodes
-├── 06-install-control-systems.sh # Control system nodes
-├── 07-install-video-animation.sh # Video/animation tools
-└── 08-install-distribution-systems.sh # Distribution systems
+├── 00-setup-file-structure.sh
+├── 01-setup-example-workflows.sh
+├── 02-install-platform-essentials.sh
+├── 03-install-workflow-enhancers.sh
+├── 04-install-detection-segmentation.sh
+├── 05-install-image-enhancers.sh
+├── 06-install-control-systems.sh
+├── 07-install-video-animation.sh
+└── 08-install-distribution-systems.sh
 ```
 
 ## Installed Custom Nodes
-
-The Complete mode pre-installs these custom nodes:
 
 ### Platform Essentials (Script 02)
 - **ComfyUI-Custom-Scripts** - Essential UI improvements and utilities
 
 ### Workflow Enhancers (Script 03)
-- **rgthree-comfy** - Workflow utilities and quality of life improvements
+- **rgthree-comfy** - Workflow utilities and QOL improvements
 - **ComfyUI-KJNodes** - Additional utility nodes
-- **ComfyUI-TeaCache** - Caching for faster workflow execution
-- **ComfyUI-Inspire-Pack** - Workflow inspiration and tools
+- **ComfyUI-TeaCache** - Caching for faster workflows
+- **ComfyUI-Inspire-Pack** - Workflow tools
 
 ### Detection & Segmentation (Script 04)
 - **ComfyUI-Impact-Pack** - Advanced detection and segmentation
@@ -75,69 +73,69 @@ The Complete mode pre-installs these custom nodes:
 
 ## Customizing Scripts
 
-### Adding New Custom Nodes
+### Adding Custom Nodes
 
-To add custom nodes to the installation:
+To add custom nodes to an existing script:
 
-1. **Edit the appropriate script** (or create a new one):
-   ```bash
-   vim services/comfy/complete/scripts/03-install-workflow-enhancers.sh
-   ```
+1. **Edit the script** (e.g., `services/comfy/complete/scripts/03-install-workflow-enhancers.sh`):
 
-2. **Add your node using the helper function**:
-   ```bash
-   #!/bin/bash
-   set -e
-   source "$(dirname "$0")/lib/logging.sh"
-   source "$(dirname "$0")/lib/custom-nodes.sh"
+```bash
+#!/bin/bash
+set -e
+source "$(dirname "$0")/lib/logging.sh"
+source "$(dirname "$0")/lib/custom-nodes.sh"
 
-   log_info "Installing workflow enhancers..."
+log_info "Installing workflow enhancers..."
 
-   install_custom_node_from_git "MyCustomNode" "https://github.com/author/repo.git"
+# Add your custom node
+install_custom_node_from_git "MyCustomNode" "https://github.com/author/repo.git"
 
-   log_success "Workflow enhancers installed"
-   ```
+log_success "Workflow enhancers installed"
+```
 
-3. **Rebuild the Complete image**:
-   ```bash
-   docker buildx bake complete-cuda --load
-   ```
+2. **Rebuild the Complete image**:
+
+```bash
+docker buildx bake complete-cuda --load
+docker compose up -d
+```
+
+See [Building Images](building.md) for build details.
 
 ### Creating New Scripts
 
 To add a new script category:
 
 1. **Create numbered script** (09-19 available):
-   ```bash
-   cat > services/comfy/complete/scripts/09-my-custom-setup.sh << 'SCRIPT'
-   #!/bin/bash
-   set -e
-   source "$(dirname "$0")/lib/logging.sh"
-   source "$(dirname "$0")/lib/custom-nodes.sh"
 
-   log_info "Installing my custom components..."
+```bash
+#!/bin/bash
+set -e
+source "$(dirname "$0")/lib/logging.sh"
+source "$(dirname "$0")/lib/custom-nodes.sh"
 
-   # Install custom nodes
-   install_custom_node_from_git "NodeName" "https://github.com/author/node.git"
+log_info "Installing my custom components..."
 
-   # Install Python packages
-   pip install my-package
+# Install custom nodes
+install_custom_node_from_git "NodeName" "https://github.com/author/node.git"
 
-   log_success "Custom components installed"
-   SCRIPT
-   ```
+# Install Python packages if needed
+pip install my-package
+
+log_success "Custom components installed"
+```
 
 2. **Make it executable**:
-   ```bash
-   chmod +x services/comfy/complete/scripts/09-my-custom-setup.sh
-   ```
 
-3. **Rebuild the image**:
-   ```bash
-   docker buildx bake complete-cuda --load
-   ```
+```bash
+chmod +x services/comfy/complete/scripts/09-my-custom-setup.sh
+```
 
-## Logging Functions
+3. **Rebuild the image** (see [Building Images](building.md))
+
+## Script Libraries
+
+### Logging Functions
 
 Scripts use standardized logging from `lib/logging.sh`:
 
@@ -150,7 +148,7 @@ log_warning "Warning message"       # Yellow [WARNING]
 log_error "Error message"           # Red [ERROR]
 ```
 
-## Custom Node Helper
+### Custom Node Helper
 
 The `lib/custom-nodes.sh` library provides:
 
@@ -162,7 +160,7 @@ install_custom_node_from_git "NodeName" "https://github.com/author/repo.git"
 ```
 
 **Features:**
-- Clones the repository to `/app/custom_nodes/`
+- Clones repository to `/app/custom_nodes/`
 - Installs Python dependencies from `requirements.txt` if present
 - Provides fuzzy name matching
 - Handles errors gracefully
@@ -182,6 +180,8 @@ docker compose restart complete-cuda
 docker compose logs -f complete-cuda
 ```
 
+See [Running Containers](running.md) for Docker Compose operations.
+
 ## Viewing Installation Logs
 
 ```bash
@@ -193,49 +193,6 @@ docker compose logs -f complete-cuda
 
 # Search for specific node
 docker compose logs complete-cuda | grep "NodeName"
-
-# Check for errors
-docker compose logs complete-cuda | grep ERROR
-```
-
-## Troubleshooting
-
-### Scripts Not Running
-
-**Check for marker file:**
-```bash
-docker compose exec complete-cuda ls -la | grep post_install
-```
-
-If `.post_install_done` exists, scripts won't run. Remove it to force execution.
-
-### Script Execution Errors
-
-**View detailed logs:**
-```bash
-docker compose logs complete-cuda | grep -A 10 ERROR
-```
-
-**Test individual script:**
-```bash
-docker compose exec complete-cuda bash /app/scripts/03-install-workflow-enhancers.sh
-```
-
-### Custom Node Installation Fails
-
-**Check node exists:**
-```bash
-docker compose exec complete-cuda ls -la /app/custom_nodes/
-```
-
-**Verify git URL is accessible:**
-```bash
-git ls-remote https://github.com/author/repo.git
-```
-
-**Check Python dependencies:**
-```bash
-docker compose exec complete-cuda pip list | grep package-name
 ```
 
 ## Migration to Snapshot System
@@ -245,9 +202,12 @@ docker compose exec complete-cuda pip list | grep package-name
 The new approach will:
 - Install custom nodes at build time instead of runtime
 - Use ComfyUI's native snapshot format
-- Eliminate the need for custom bash scripts
+- Eliminate custom bash scripts
 - Provide faster container startup
 
 ---
 
-**[⬆ Back to Documentation](../index.md)** | **[🚀 Quick Start](quick-start.md)** | **[⚙️ Configuration](configuration.md)**
+**See Also:**
+- [Building Images](building.md) - Rebuild images with custom scripts
+- [Running Containers](running.md) - Docker Compose operations
+- [Data Management](data.md) - Custom nodes directory structure

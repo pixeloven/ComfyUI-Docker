@@ -2,6 +2,11 @@
 
 Essential guides for using ComfyUI Docker.
 
+## Getting Started
+
+### [Quick Start](quick-start.md)
+Get running in 5 minutes with one-command setup.
+
 ## Core Guides
 
 ### [Building Images](building.md)
@@ -16,13 +21,10 @@ Organize models, workflows, custom nodes, and manage persistent storage.
 ### [Performance Tuning](performance.md)
 Optimize ComfyUI for your hardware with CLI arguments and resource configuration.
 
-## Additional Guides
-
-### [Quick Start](quick-start.md)
-Get running in 5 minutes with one-command setup.
+## Advanced
 
 ### [Scripts Guide](scripts.md)
-Advanced: Custom node installation scripts for Complete mode.
+Custom node installation scripts for Complete mode.
 
 ---
 
