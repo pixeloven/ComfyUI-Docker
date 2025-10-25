@@ -1,6 +1,6 @@
 FROM ubuntu:24.04 AS runtime-cpu
 
-ENV DEBIAN_FRONTEND=noninteractive 
+ENV DEBIAN_FRONTEND=noninteractive
 ENV PIP_PREFER_BINARY=1
 
 RUN apt-get update && \

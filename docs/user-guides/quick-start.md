@@ -1,89 +1,110 @@
 # Quick Start Guide
 
-Get ComfyUI running in 5 minutes with Docker Compose.
+Get ComfyUI running in 5 minutes.
 
 ## Prerequisites
 
-- **Docker** & **Docker Compose** installed
-- **NVIDIA GPU + drivers** (for GPU modes)  
+- **Docker** 20.10+ & **Docker Compose** 2.x installed
+- **NVIDIA GPU + drivers** (for GPU modes) - [Installation Guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 - **8GB+ VRAM** recommended for complete mode
+- **20GB+ disk space** for models and outputs
 
-## Launch ComfyUI
+## Setup
 
-### 1. Clone & Setup
+### 1. Clone Repository
+
 ```bash
 git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd ComfyUI-Docker
 ```
 
-### 2. Start ComfyUI (Choose One)
+### 2. Start ComfyUI
+
+Choose a profile based on your needs:
+
 ```bash
-# Core mode (recommended - essential features with GPU acceleration)
+# Core Mode (recommended - essential features)
 docker compose up -d
 
-# Complete mode (all features including optimizations and custom nodes)
+# Complete Mode (all features + 13+ custom nodes)
 docker compose --profile complete up -d
 
-# CPU mode (universal compatibility)
+# CPU Mode (no GPU required)
 docker compose --profile cpu up -d
 ```
 
 ### 3. Access ComfyUI
+
 Open **http://localhost:8188** in your browser
 
-## Usage Modes
+## Profile Comparison
 
-- **Core Mode** (`core-cuda`): Essential ComfyUI with GPU acceleration, fast startup
-- **Complete Mode** (`complete-cuda`): ⚡ **2-3x faster attention** with SageAttention 2++, all custom nodes included
-- **CPU Mode** (`core-cpu`): Works everywhere, slower generation
+| Profile | Startup Time | Features | Best For |
+|---------|--------------|----------|----------|
+| **Core** | Fast | Essential ComfyUI + GPU | Most users |
+| **Complete** | Slower (first time) | 13+ custom nodes, SageAttention | Power users |
+| **CPU** | Fast | No GPU required | Testing, compatibility |
 
 ## First Workflow
 
-Once ComfyUI loads:
+### Download a Model
 
-1. **Load Example**: Use the "Load Default" workflow button
-2. **Add Models**: Place checkpoint files in `./data/models/checkpoints/`
-3. **Generate**: Click "Queue Prompt" to start generation
+Download a Stable Diffusion checkpoint from:
+- [Civitai](https://civitai.com/)
+- [Hugging Face](https://huggingface.co/models?pipeline_tag=text-to-image)
 
-### Quick Model Setup
-1. Start with core mode: `docker compose up -d`
-2. Download a checkpoint (e.g., Stable Diffusion 1.5) to `./data/models/checkpoints/`
-3. Load the default workflow and select your model
-4. Generate your first image!
+Place in: `./data/models/checkpoints/`
 
-## Data Persistence
+### Generate Your First Image
 
-All your data persists in `./data/`:
+1. **Load Default Workflow**: Click "Load Default" in ComfyUI
+2. **Select Model**: Choose your checkpoint in the workflow
+3. **Queue Prompt**: Click "Queue Prompt" to generate
+4. **View Output**: Images save to `./data/output/`
+
+## Data Structure
+
+All data persists in `./data/`:
+
 ```
 data/
-├── models/          # Place model files here
-├── input/           # Upload images for processing
-├── output/          # Generated images appear here
-├── user/            # Custom nodes and workflows
-└── temp/            # Temporary processing files
+├── models/
+│   ├── checkpoints/     # Main SD models (.safetensors, .ckpt)
+│   ├── loras/          # LoRA files
+│   └── vae/            # VAE files
+├── custom_nodes/       # Custom node extensions
+├── input/              # Input images for workflows
+├── output/             # Generated images
+└── user/               # User configs and workflows
 ```
+
+See [Data Management](data.md) for detailed directory structure.
+
+## Common Commands
+
+```bash
+# View logs
+docker compose logs -f
+
+# Stop ComfyUI
+docker compose down
+
+# Restart ComfyUI
+docker compose restart
+
+# Update to latest image
+docker compose pull && docker compose up -d
+```
+
+See [Running Containers](running.md) for all Docker Compose operations.
 
 ## Next Steps
 
-- **[Usage Guide](usage.md)** - Learn advanced workflows
-- **[Configuration](configuration.md)** - Customize your setup
-- **[Development](../development-guides/development.md)** - Build custom images
+- **[Running Containers](running.md)** - Profile selection and environment configuration
+- **[Data Management](data.md)** - Organize models and workflows
+- **[Performance Tuning](performance.md)** - Optimize for your hardware
+- **[Scripts Guide](scripts.md)** - Custom nodes in Complete mode
 
-## Troubleshooting
+---
 
-**GPU not detected?**
-```bash
-# Check NVIDIA drivers
-nvidia-smi
-
-# Verify Docker can access GPU
-docker run --rm --gpus all nvidia/cuda:11.8-runtime-ubuntu20.04 nvidia-smi
-```
-
-**Port already in use?**
-```bash
-# Use different port
-COMFY_PORT=8189 docker compose up -d
-```
-
-**Need more help?** See the [Configuration Guide](configuration.md) for detailed troubleshooting.
+**Need Help?** [Open an issue](https://github.com/pixeloven/ComfyUI-Docker/issues) or check [GitHub Discussions](https://github.com/pixeloven/ComfyUI-Docker/discussions).

@@ -29,4 +29,9 @@ install_custom_node_from_git "ComfyUI-TeaCache" "https://github.com/welltop-cn/C
 # @link: https://github.com/ltdrdata/ComfyUI-Inspire-Pack
 install_custom_node_from_git "ComfyUI-Inspire-Pack" "https://github.com/ltdrdata/ComfyUI-Inspire-Pack.git"
 
+# WAS Node Suite
+# @description: Extensive node suite with over 220 nodes for image processing, text operations, and workflow utilities
+# @link: https://github.com/WASasquatch/was-node-suite-comfyui
+install_custom_node_from_git "was-node-suite-comfyui" "https://github.com/WASasquatch/was-node-suite-comfyui.git"
+
 log_success "Workflow enhancers installation completed successfully" 
