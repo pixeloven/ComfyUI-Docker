@@ -442,7 +442,7 @@ cat test-snapshot.json  # Verify structure
 docker buildx bake complete-cuda --load
 
 # Verify nodes installed
-docker run --rm --entrypoint bash ghcr.io/pixeloven/comfyui-docker/complete:cuda-latest -c "ls /app/custom_nodes"
+docker run --rm --entrypoint bash ghcr.io/pixeloven/comfyui/complete:cuda-latest -c "ls /app/custom_nodes"
 
 # Verify startup time (should be fast)
 time docker compose --profile complete up -d

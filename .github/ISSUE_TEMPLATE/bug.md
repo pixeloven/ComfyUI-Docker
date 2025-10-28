@@ -38,7 +38,7 @@ Which Docker Compose profile are you using?
 
 - Are you using pre-built images from GHCR or building locally?
 - If building: Which bake target? <!--  e.g. `docker buildx bake core-cuda` -->
-- If using GHCR: Which image tag? <!--  e.g. `ghcr.io/pixeloven/comfyui-docker/core:cuda-latest` -->
+- If using GHCR: Which image tag? <!--  e.g. `ghcr.io/pixeloven/comfyui/core:cuda-latest` -->
 
 **Environment Configuration**
 

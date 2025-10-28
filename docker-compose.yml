@@ -28,7 +28,7 @@
 services:
   # Core GPU mode (--profile core, also default)F
   core-cuda:
-    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/core:cuda-latest}
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui/core:cuda-latest}
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
@@ -59,7 +59,7 @@ services:
 
   # Complete GPU mode with all optimizations (--profile complete)
   complete-cuda:
-    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/complete:cuda-latest}
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui/complete:cuda-latest}
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
@@ -90,7 +90,7 @@ services:
 
   # CPU-only mode (--profile cpu)
   core-cpu:
-    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui-docker/core:cpu-latest}
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui/core:cpu-latest}
     user: ${PUID:-1000}:${PGID:-1000}
     environment:
       - PUID=${PUID:-1000}
