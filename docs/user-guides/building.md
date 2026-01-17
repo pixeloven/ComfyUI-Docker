@@ -117,7 +117,7 @@ Configure builds using environment variables:
 
 ```bash
 # Registry and image naming
-REGISTRY_URL=ghcr.io/myuser/comfyui-docker/
+REGISTRY_URL=ghcr.io/myuser/comfyui/
 IMAGE_LABEL=custom
 PLATFORMS=linux/amd64
 

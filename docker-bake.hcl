@@ -7,7 +7,7 @@ variable "REPOSITORY_OWNER" {
 }
 
 variable "REGISTRY_URL" {
-    default = "ghcr.io/${REPOSITORY_OWNER}/comfyui-docker/"
+    default = "ghcr.io/${REPOSITORY_OWNER}/comfyui/"
 }
 
 variable "IMAGE_LABEL" {

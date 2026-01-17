@@ -1,17 +1,22 @@
-# Project Management
+# Project Management, Research, and Legacy Planning
 
-Project planning, analysis, and task tracking documentation.
+High-level analysis and any remaining legacy planning documentation.
 
-## 📋 Project Planning
-
-### [Tasks](tasks.md)
-Current issues, technical debt, and roadmap items for the ComfyUI Docker project.
+## 📊 Analysis
 
 ### [Repository Analysis](repository-analysis.md)
 Detailed analysis of existing ComfyUI Docker repositories and comparison with our approach.
 
+## 🧩 Legacy Planning Docs
+
+These documents are retained for historical context. Day-to-day work should be guided by SPEC documents and GitHub issues rather than these plans.
+
+### [Tasks](tasks.md)
+Archived roadmap and technical debt list for the ComfyUI Docker project.
+
 ### [Custom Nodes Migration](custom-nodes-migration.md)
-Migration plan for transitioning from runtime bash scripts to native ComfyUI snapshot-based custom node installation.
+Legacy migration notes for transitioning from runtime bash scripts to native ComfyUI tooling. Superseded by the Custom Nodes Snapshot Spec.
+
 
 ---
 

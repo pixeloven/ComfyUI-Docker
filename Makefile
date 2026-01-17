@@ -10,54 +10,54 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 
 # Build all images
-all: ## Build all images (runtime + core + complete)
-	docker buildx bake all
+all: ## Build all images (runtime + core + complete) and load to Docker
+	docker buildx bake all --load
 
 # Runtime images
-runtime: ## Build both runtime images (CUDA + CPU)
-	docker buildx bake runtime
+runtime: ## Build both runtime images (CUDA + CPU) and load to Docker
+	docker buildx bake runtime --load
 
-runtime-cuda: ## Build CUDA runtime image
-	docker buildx bake runtime-cuda
+runtime-cuda: ## Build CUDA runtime image and load to Docker
+	docker buildx bake runtime-cuda --load
 
-runtime-cpu: ## Build CPU runtime image
-	docker buildx bake runtime-cpu
+runtime-cpu: ## Build CPU runtime image and load to Docker
+	docker buildx bake runtime-cpu --load
 
 # Core images 
-core: ## Build core images (runtime + core layers for both CUDA/CPU)
-	docker buildx bake core
+core: ## Build core images (runtime + core layers for both CUDA/CPU) and load to Docker
+	docker buildx bake core --load
 
-core-cuda: ## Build CUDA core image
-	docker buildx bake core-cuda
+core-cuda: ## Build CUDA core image and load to Docker
+	docker buildx bake core-cuda --load
 
-core-cpu: ## Build CPU core image
-	docker buildx bake core-cpu
+core-cpu: ## Build CPU core image and load to Docker
+	docker buildx bake core-cpu --load
 
 # CUDA stack (runtime + core + complete)
-cuda: ## Build complete CUDA stack
-	docker buildx bake cuda
+cuda: ## Build complete CUDA stack and load to Docker
+	docker buildx bake cuda --load
 
 # CPU stack (runtime + core)
-cpu: ## Build complete CPU stack
-	docker buildx bake cpu
+cpu: ## Build complete CPU stack and load to Docker
+	docker buildx bake cpu --load
 
 # Complete images
-complete-cuda: ## Build CUDA complete image
-	docker buildx bake complete-cuda
+complete-cuda: ## Build CUDA complete image and load to Docker
+	docker buildx bake complete-cuda --load
 
 # Development targets
-dev: ## Build all images with 'dev' label
-	IMAGE_LABEL=dev docker buildx bake all
+dev: ## Build all images with 'dev' label and load to Docker
+	IMAGE_LABEL=dev docker buildx bake all --load
 
 clean: ## Clean build cache and rebuild from scratch
-	docker buildx bake all --no-cache
+	docker buildx bake all --no-cache --load
 
 # Utility targets
 validate: ## Validate Docker Compose and Bake configurations
 	docker compose config --quiet
 	docker buildx bake --print all > /dev/null
 
-push: ## Build and push all images to registry
+push: ## Build and push all images to registry (don't load locally)
 	docker buildx bake all --push
 
 # Local testing

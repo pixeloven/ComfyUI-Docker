@@ -29,13 +29,12 @@ For developers and contributors:
 
 ## 📊 Project Management
 
-Planning and analysis:
+Specs and analysis:
 
-- **[Tasks](project-management/tasks.md)** - Roadmap and technical debt
-- **[Repository Analysis](project-management/repository-analysis.md)** - Project comparison
-- **[Custom Nodes Migration](project-management/custom-nodes-migration.md)** - Snapshot-based installation plan
+- **[Custom Nodes Snapshot Spec](specs/custom-nodes-snapshot-spec.md)** - Specification for how the Complete image manages bundled custom nodes
+- **[Repository Analysis](project-management/repository-analysis.md)** - Comparison with other ComfyUI Docker projects
 
-**[View all Project Management →](project-management/index.md)**
+**[View all Specs & Analysis →](specs/index.md)**
 
 ---
 
