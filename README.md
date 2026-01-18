@@ -27,6 +27,7 @@ A complete containerized deployment of ComfyUI with GPU acceleration, flexible d
 - **⚡ Performance Optimized**: SageAttention for 2-3x faster attention computation
 - **🔧 Extensible**: Custom node support via snapshot system
 - **🔄 CI/CD Ready**: Automated builds, weekly dependency updates
+- **🔒 Security**: API/Swarm/K8s ready with arbitrary user support
 
 ---
 
@@ -162,8 +163,8 @@ Common configuration options:
 ```bash
 # Server Configuration
 COMFY_PORT=8188                      # Web interface port
-PUID=1000                            # User ID for file ownership
-PGID=1000                            # Group ID for file ownership
+PUID=1000                            # User ID for host file ownership
+PGID=1000                            # Group ID for host file ownership
 
 # Performance Tuning
 CLI_ARGS="--lowvram"                # ComfyUI launch arguments

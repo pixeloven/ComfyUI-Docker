@@ -6,10 +6,9 @@
 /.vscode
 
 # Service data
-/data/*
-!/data/.gitignore
-/output/*
-!/output/.gitignore
+./data
+./output
+
 
 # Python
-/.venv
+./.venv
