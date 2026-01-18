@@ -53,7 +53,11 @@ COPY --chown=comfy:comfy startup.sh entrypoint.sh ./
 
 RUN pip cache purge && \
   chmod u+x ./entrypoint.sh && \
-  chmod u+x ./startup.sh
+  chmod u+x ./startup.sh && \
+  # Fix permissions for arbitrary user (Swarm/K8s) support
+  chmod -R a+rX /home/comfy/venv && \
+  chmod a+rx /home/comfy && \
+  chmod a+rx /app/entrypoint.sh /app/startup.sh
 
 # Set environment variables (simplified for /app structure)
 ARG CLI_ARGS=""
