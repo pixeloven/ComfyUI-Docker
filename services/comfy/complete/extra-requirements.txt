@@ -28,6 +28,6 @@ groundingdino-py>=0.4.0
 # Core acceleration libraries (pre-built wheels)
 triton>=3.4
 
-# SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + torch 2.8
-pip install https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.8/sageattention-2.2.0-290.128-cp312-cp312-linux_x86_64.whl
+# SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + torch 2.8 (build.10)
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.10/sageattention-2.2.0-290.128-cp312-cp312-linux_x86_64.whl
 PyYAML
