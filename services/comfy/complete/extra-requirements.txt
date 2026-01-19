@@ -1,6 +1,4 @@
-# CrossOS Acceleritor - Complete acceleration library suite
-# Based on: https://github.com/loscrossos/crossOS_acceleritor
-# Provides pre-built wheels for all acceleration libraries including SageAttention
+# Provides common dependencies and pre-built wheels for consistent builds
 
 # Additional dependencies
 accelerate>=1.10
@@ -31,4 +29,5 @@ groundingdino-py>=0.4.0
 triton>=3.4
 
 # SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + torch 2.8
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.6/sageattention-2.2.0-280.129-cp312-cp312-linux_x86_64.whl
+pip install https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.8/sageattention-2.2.0-290.128-cp312-cp312-linux_x86_64.whl
+PyYAML

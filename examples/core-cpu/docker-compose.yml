@@ -1,0 +1,26 @@
+services:
+  comfyui:
+    image: ghcr.io/pixeloven/comfyui/core:cpu-latest
+    container_name: comfyui-core-cpu
+    environment:
+      - COMFY_PORT=${COMFY_PORT:-8188}
+      - CLI_ARGS=--cpu
+    ports:
+      - "${COMFY_PORT:-8188}:8188"
+    volumes:
+      - ${COMFY_CUSTOM_NODE_PATH:-./data/custom_nodes}:/app/custom_nodes
+      - ${COMFY_INPUT_PATH:-./data/input}:/app/input
+      - ${COMFY_MODEL_PATH:-./data/models}:/app/models
+      - ${COMFY_OUTPUT_PATH:-./data/output}:/app/output
+      - ${COMFY_TEMP_PATH:-./data/temp}:/app/temp
+      - ${COMFY_USER_PATH:-./data/user}:/app/user
+      # (Optional) Configuration
+      # - ./extra_model_paths.yaml:/app/extra_model_paths.yaml:ro
+      # - ./comfy-lock.yaml:/app/comfy-lock.yaml:ro
+    restart: unless-stopped
+    networks:
+      - comfy_network
+
+networks:
+  comfy_network:
+    driver: bridge

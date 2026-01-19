@@ -1,0 +1,27 @@
+custom_nodes:
+  comfyui: 8f40b43e0204d5b9780f3e9618e140e929e80594
+  git_custom_nodes:
+    https://github.com/kijai/ComfyUI-KJNodes:
+      disabled: false
+      hash: a40cf52c4779454451c4480c95947045e3f31c94
+
+models:
+  - model: qwen_2.5_vl_7b_fp8_scaled.safetensors
+    url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors
+    paths:
+      - path: models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors
+
+  - model: Qwen-Image-Lightning-4steps-V1.0.safetensors
+    url: https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-4steps-V1.0.safetensors
+    paths:
+      - path: models/loras/Qwen-Image-Lightning-4steps-V1.0.safetensors
+
+  - model: qwen_image_2512_fp8_e4m3fn.safetensors
+    url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors
+    paths:
+      - path: models/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors
+
+  - model: qwen_image_vae.safetensors
+    url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors
+    paths:
+      - path: models/vae/qwen_image_vae.safetensors
