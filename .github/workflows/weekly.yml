@@ -52,6 +52,11 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Extract metadata
+      id: meta
+      run: |
+        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
+
     - name: Build images without cache
       uses: docker/bake-action@v5
       with:
@@ -59,6 +64,8 @@ jobs:
         targets: all
         push: true
         no-cache: true
+      env:
+        REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
           *.cache-to=type=gha,mode=max
