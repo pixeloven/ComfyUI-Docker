@@ -3,7 +3,11 @@ FROM core AS complete
 # Copy the extra requirements file
 COPY --chown=comfy:comfy ./extra-requirements.txt ./
 
+# Set shell to bash to support 'source'
+SHELL ["/bin/bash", "-c"]
+
 # Install additional python requirements
-RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
+# Using the same cache path as the core image
+RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/app/.cache/pip \
     source $VENV_PATH/bin/activate && \
     pip install -r extra-requirements.txt
