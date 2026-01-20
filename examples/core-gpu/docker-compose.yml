@@ -6,7 +6,6 @@ services:
       - COMFY_PORT=${COMFY_PORT:-8188}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - COMFY_LOCK_FILE=/app/comfy-lock.yaml
     ports:
       - "${COMFY_PORT:-8188}:8188"
     volumes:
@@ -18,7 +17,6 @@ services:
       - ${COMFY_USER_PATH:-./data/user}:/app/user
       # (Optional) Configuration
       - ./extra_model_paths.yaml:/app/extra_model_paths.yaml:ro
-      - ./comfy-lock.yaml:/app/comfy-lock.yaml:ro
     restart: unless-stopped
     deploy:
       resources:

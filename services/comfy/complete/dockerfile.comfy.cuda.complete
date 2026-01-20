@@ -4,6 +4,14 @@ FROM core AS complete
 COPY --chown=comfy:comfy ./extra-requirements.txt ./extra-requirements.txt
 
 # Install additional Python requirements
+# Install comfy-cli and upgrade to PyTorch Nightly (for SageAttention support)
 RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
     source $VENV_PATH/bin/activate && \
+    pip install comfy-cli && \
+    pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128 && \
     pip install -r extra-requirements.txt
+
+COPY --chown=comfy:comfy install_from_lock.py startup.sh ./
+
+RUN chmod u+x ./startup.sh && \
+    chmod a+rx ./startup.sh

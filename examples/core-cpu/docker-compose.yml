@@ -15,8 +15,7 @@ services:
       - ${COMFY_TEMP_PATH:-./data/temp}:/app/temp
       - ${COMFY_USER_PATH:-./data/user}:/app/user
       # (Optional) Configuration
-      # - ./extra_model_paths.yaml:/app/extra_model_paths.yaml:ro
-      # - ./comfy-lock.yaml:/app/comfy-lock.yaml:ro
+      - ./extra_model_paths.yaml:/app/extra_model_paths.yaml:ro
     restart: unless-stopped
     networks:
       - comfy_network

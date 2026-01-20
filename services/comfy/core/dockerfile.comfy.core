@@ -32,24 +32,15 @@ ENV PATH="$VENV_PATH/bin:$PATH"
 # Install ComfyUI to temp location and move to /app (standard Docker practice)
 ARG RUNTIME=cuda
 RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
+  git clone https://github.com/comfyanonymous/ComfyUI.git /app && \
   source $VENV_PATH/bin/activate && \
-  pip install comfy-cli && \
-  if [ "$RUNTIME" = "cuda" ]; then \
-  comfy --skip-prompt --workspace /home/comfy/comfyui install --nvidia; \
-  else \
-  comfy --skip-prompt --workspace /home/comfy/comfyui install --cpu; \
-  fi && \
-  mv /home/comfy/comfyui/* /app/ && \
-  mv /home/comfy/comfyui/.* /app/ 2>/dev/null || true && \
-  rmdir /home/comfy/comfyui && \
-  comfy --skip-prompt set-default /app && \
-  comfy --skip-prompt --no-enable-telemetry env
+  pip install -r /app/requirements.txt
 
 # Set working directory to /app after ComfyUI installation
 WORKDIR /app
 
 # Copy startup scripts after ComfyUI installation
-COPY --chown=comfy:comfy startup.sh entrypoint.sh install_from_lock.py ./
+COPY --chown=comfy:comfy startup.sh entrypoint.sh ./
 
 RUN pip cache purge && \
   chmod u+x ./entrypoint.sh && \
