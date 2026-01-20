@@ -1,65 +1,76 @@
+FROM runtime AS builder
+
+# Set shell to bash with pipefail for safety
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Unified app root
+WORKDIR /app
+
+# Setup Python virtual environment
+# umask 022 ensures files are created with 755/644 permissions (World Readable)
+ENV VENV_PATH=/app/.venv
+ENV XDG_CACHE_HOME=/app/.cache
+ENV PATH="$VENV_PATH/bin:$PATH"
+
+# Create venv and install dependencies with correct permissions from the start
+RUN umask 022 && \
+  python3 -m venv $VENV_PATH && \
+  pip install --no-cache-dir --upgrade pip wheel setuptools
+
+# Install ComfyUI
+# We clone into a temporary directory and move to /app/ComfyUI to prevent
+# permission issues if we were to mount /app entirely in dev modes
+ARG RUNTIME=cuda
+RUN --mount=type=cache,target=/app/.cache/pip \
+  umask 022 && \
+  git clone https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI && \
+  pip install -r /app/ComfyUI/requirements.txt
+
+# ==================================================================
+# Final Stage
+# ==================================================================
 FROM runtime AS core
 
-# Remove ubuntu user
-# https://askubuntu.com/questions/1513927/ubuntu-24-04-docker-images-now-includes-user-ubuntu-with-uid-gid-1000
+ARG PUID=1000
+ARG PGID=1000
+
+# Remove default ubuntu user (UID 1000) if it exists to prevent conflict
+# https://askubuntu.com/questions/1513927/
 RUN touch /var/mail/ubuntu && \
   chown ubuntu /var/mail/ubuntu && \
   userdel -r ubuntu
 
-ARG PUID=1000
-ARG PGID=1000
+# Create standard user
 RUN groupadd -g $PGID comfy && \
   useradd -m -u $PUID -g $PGID comfy && \
   mkdir -p /app && \
-  chown -R comfy:comfy /app
+  chown comfy:comfy /app
 
-USER comfy
+# Copy the pre-built environment from builder
+# Docker COPY preserves the "world-readable" permissions created by umask
+COPY --from=builder --chown=comfy:comfy /app /app
 
-WORKDIR /home/comfy
+WORKDIR /app/ComfyUI
 
-SHELL ["/bin/bash", "--login", "-c"]
-
-# Setup Python virtual environment for ComfyUI
-ENV VENV_PATH=/home/comfy/venv
-ENV XDG_CACHE_HOME=/home/comfy/.cache
-
-# Create Python virtual environment
-RUN python3 -m venv $VENV_PATH && \
-  echo "source $VENV_PATH/bin/activate" >> ~/.bashrc
-
+# Setup Environment
+ENV VENV_PATH=/app/.venv
 ENV PATH="$VENV_PATH/bin:$PATH"
+ENV PYTHONPATH="/app/ComfyUI"
 
-# Install ComfyUI to temp location and move to /app (standard Docker practice)
-ARG RUNTIME=cuda
-RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
-  git clone https://github.com/comfyanonymous/ComfyUI.git /app && \
-  source $VENV_PATH/bin/activate && \
-  pip install -r /app/requirements.txt
+# Copy startup scripts to app root
+COPY --chown=comfy:comfy startup.sh entrypoint.sh /app/
 
-# Set working directory to /app after ComfyUI installation
-WORKDIR /app
+# Make scripts executable (fast/cheap operation on single files)
+RUN chmod +x /app/startup.sh /app/entrypoint.sh
 
-# Copy startup scripts after ComfyUI installation
-COPY --chown=comfy:comfy startup.sh entrypoint.sh ./
-
-RUN pip cache purge && \
-  chmod u+x ./entrypoint.sh && \
-  chmod u+x ./startup.sh && \
-  # Fix permissions for arbitrary user (Swarm/K8s) support
-  chmod -R a+rX /home/comfy/venv && \
-  chmod a+rx /home/comfy && \
-  chmod a+rx /app/entrypoint.sh /app/startup.sh
-
-# Set environment variables (simplified for /app structure)
+# Environment variables
 ARG CLI_ARGS=""
 ARG COMFY_PORT=8188
-
-# Only essential environment variables needed
 ENV CLI_ARGS=$CLI_ARGS
 ENV COMFY_PORT=$COMFY_PORT
 
 EXPOSE $COMFY_PORT
 
-ENTRYPOINT ["./entrypoint.sh"]
-
-CMD ["bash", "./startup.sh"]
+USER comfy
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["/app/startup.sh"]
