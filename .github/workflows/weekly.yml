@@ -18,7 +18,7 @@ jobs:
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
       with:
-        tool-cache: false
+        tool-cache: true
         android: true
         dotnet: true
         haskell: true
@@ -28,9 +28,9 @@ jobs:
 
     - name: Clean Docker Images
       run: |
-        echo "🧹 Removing Docker images..."
-        sudo docker rmi $(docker image ls -aq) >/dev/null 2>&1 || true
-        echo "✅ Docker images cleaned"
+        echo "🧹 Removing Docker system..."
+        sudo docker system prune -af --volumes || true
+        echo "✅ Docker system cleaned"
 
     - name: Clear GitHub Actions Cache
       run: |
