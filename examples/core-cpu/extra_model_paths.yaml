@@ -1,0 +1,9 @@
+# https://github.com/comfyanonymous/ComfyUI/blob/master/extra_model_paths.yaml.example
+# https://comfyui-wiki.com/en/tutorial/basic/link-models-between-comfyui-and-a1111
+
+# Unified volume-based paths for persistence across container restarts
+comfyui:
+  is_default: true
+  base_path: /data
+  download_model_base: /data/comfy/models
+  custom_nodes: /data/comfy/custom_nodes

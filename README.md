@@ -223,7 +223,6 @@ Planning and analysis:
 ### ComfyUI Ecosystem
 
 - **[ComfyUI Manager](https://github.com/ltdrdata/ComfyUI-Manager)** - Custom node manager
-- **[ComfyUI CLI](https://github.com/Comfy-Org/comfy-cli)** - Official command-line tool
 - **[Civitai](https://civitai.com/)** - Model sharing platform
 
 ### Docker & NVIDIA

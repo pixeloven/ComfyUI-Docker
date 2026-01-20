@@ -1,0 +1,33 @@
+services:
+  comfyui:
+    image: ghcr.io/pixeloven/comfyui/complete:cuda-latest
+    container_name: comfyui-complete-gpu
+    environment:
+      - COMFY_PORT=${COMFY_PORT:-8188}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    ports:
+      - "${COMFY_PORT:-8188}:8188"
+    volumes:
+      - ${COMFY_CUSTOM_NODE_PATH:-./data/custom_nodes}:/app/custom_nodes
+      - ${COMFY_INPUT_PATH:-./data/input}:/app/input
+      - ${COMFY_OUTPUT_PATH:-./data/output}:/app/output
+      - ${COMFY_MODEL_PATH:-./data/models}:/app/models
+      - ${COMFY_TEMP_PATH:-./data/temp}:/app/temp
+      - ${COMFY_USER_PATH:-./data/user}:/app/user
+      # (Optional) Configuration
+      - ./extra_model_paths.yaml:/app/extra_model_paths.yaml:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+    networks:
+      - comfy_network
+
+networks:
+  comfy_network:
+    driver: bridge

@@ -1,21 +1,13 @@
 FROM core AS complete
 
-# Copy the extended startup script and current directory files
-COPY --chown=comfy:comfy ./extra-requirements.txt ./extra-requirements.txt
+# Copy the extra requirements file
+COPY --chown=comfy:comfy ./extra-requirements.txt ./
 
-# Install additional Python requirements
-RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/home/comfy/.cache/pip \
+# Set shell to bash to support 'source'
+SHELL ["/bin/bash", "-c"]
+
+# Install additional python requirements
+# Using the same cache path as the core image
+RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/app/.cache/pip \
     source $VENV_PATH/bin/activate && \
     pip install -r extra-requirements.txt
-
-# Set executable permissions on the new startup script
-COPY --chown=comfy:comfy ./startup.sh ./startup.sh
-COPY --chown=comfy:comfy ./scripts ./scripts
-RUN chmod u+x ./startup.sh && \
-    chmod u+x ./scripts/*.sh
-
-# Override the core image CMD to use the complete startup script
-CMD ["bash", "./startup.sh"]
-
-# @todo consider creating https://github.com/rgthree/rgthree-comfy/blob/main/prestartup_script.py to run setup instead of external bash
-# https://github.com/Comfy-Org/ComfyUI-Manager/blob/main/prestartup_script.py

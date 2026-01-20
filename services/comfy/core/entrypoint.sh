@@ -2,6 +2,6 @@
 set -e
 
 # Activate Python virtual environment
-source $VENV_PATH/bin/activate
+source /app/.venv/bin/activate
 
 exec "$@"

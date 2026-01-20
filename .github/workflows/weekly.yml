@@ -8,7 +8,7 @@ on:
     # Allow manual triggering
 
 jobs:
-  rebuild-fresh:
+  rebuild-cuda:
     runs-on: ubuntu-latest
     env:
       REGISTRY: ghcr.io
@@ -18,7 +18,7 @@ jobs:
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
       with:
-        tool-cache: false
+        tool-cache: true
         android: true
         dotnet: true
         haskell: true
@@ -28,9 +28,9 @@ jobs:
 
     - name: Clean Docker Images
       run: |
-        echo "🧹 Removing Docker images..."
-        sudo docker rmi $(docker image ls -aq) >/dev/null 2>&1 || true
-        echo "✅ Docker images cleaned"
+        echo "🧹 Removing Docker system..."
+        sudo docker system prune -af --volumes || true
+        echo "✅ Docker system cleaned"
 
     - name: Clear GitHub Actions Cache
       run: |
@@ -52,25 +52,91 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Build images without cache
+    - name: Extract metadata
+      id: meta
+      run: |
+        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
+
+    - name: Build CUDA images without cache
       uses: docker/bake-action@v5
       with:
         files: docker-bake.hcl
-        targets: all
+        targets: cuda
         push: true
         no-cache: true
+      env:
+        REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
           *.cache-to=type=gha,mode=max
         provenance: false
         sbom: false
 
+  rebuild-cpu:
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
+    - name: Clean Docker Images
+      run: |
+        echo "🧹 Removing Docker system..."
+        sudo docker system prune -af --volumes || true
+        echo "✅ Docker system cleaned"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        buildkitd-flags: --debug
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      run: |
+        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
+
+    - name: Build CPU images without cache
+      uses: docker/bake-action@v5
+      with:
+        files: docker-bake.hcl
+        targets: cpu
+        push: true
+        no-cache: true
+      env:
+        REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-to=type=gha,mode=max
+        provenance: false
+        sbom: false
+
+  rebuild-summary:
+    if: always()
+    needs: [rebuild-cuda, rebuild-cpu]
+    runs-on: ubuntu-latest
+    steps:
     - name: Rebuild Summary
-      if: always()
       run: |
         echo "## 🔄 Fresh Rebuild Complete" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Build Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
         echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
         echo "**Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
