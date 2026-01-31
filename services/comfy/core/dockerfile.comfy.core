@@ -31,24 +31,18 @@ RUN --mount=type=cache,target=/app/.cache/pip \
 # ==================================================================
 FROM runtime AS core
 
-ARG PUID=1000
-ARG PGID=1000
-
 # Remove default ubuntu user (UID 1000) if it exists to prevent conflict
 # https://askubuntu.com/questions/1513927/
 RUN touch /var/mail/ubuntu && \
   chown ubuntu /var/mail/ubuntu && \
   userdel -r ubuntu
 
-# Create standard user
-RUN groupadd -g $PGID comfy && \
-  useradd -m -u $PUID -g $PGID comfy && \
-  mkdir -p /app && \
-  chown comfy:comfy /app
+# Create app directory (user/group created at runtime by entrypoint)
+RUN mkdir -p /app
 
 # Copy the pre-built environment from builder
 # Docker COPY preserves the "world-readable" permissions created by umask
-COPY --from=builder --chown=comfy:comfy /app /app
+COPY --from=builder /app /app
 
 WORKDIR /app/ComfyUI
 
@@ -58,7 +52,7 @@ ENV PATH="$VENV_PATH/bin:$PATH"
 ENV PYTHONPATH="/app/ComfyUI"
 
 # Copy startup scripts to app root
-COPY --chown=comfy:comfy startup.sh entrypoint.sh /app/
+COPY startup.sh entrypoint.sh /app/
 
 # Make scripts executable (fast/cheap operation on single files)
 RUN chmod +x /app/startup.sh /app/entrypoint.sh
@@ -71,6 +65,6 @@ ENV COMFY_PORT=$COMFY_PORT
 
 EXPOSE $COMFY_PORT
 
-USER comfy
+# Entrypoint runs as root, drops privileges to PUID:PGID internally via gosu
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["/app/startup.sh"]
