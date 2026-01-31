@@ -138,6 +138,45 @@ COMFY_IMAGE=custom:latest    # Override Docker image
 
 See [Performance Tuning](performance.md) for CLI_ARGS options.
 
+## User ID / Group ID (PUID/PGID)
+
+Run the container with your host user's UID/GID to ensure files created in mounted volumes have correct ownership.
+
+### Why Use PUID/PGID?
+
+When the container creates files (outputs, caches, etc.) in mounted volumes, those files are owned by the container's runtime user. Setting PUID/PGID to match your host user prevents permission issues.
+
+### Usage
+
+```bash
+# Method 1: Environment variables
+PUID=$(id -u) PGID=$(id -g) docker compose up -d
+
+# Method 2: .env file
+echo "PUID=$(id -u)" >> .env
+echo "PGID=$(id -g)" >> .env
+docker compose up -d
+
+# Method 3: Specific UID/GID (e.g., shared server)
+PUID=3000 PGID=3000 docker compose up -d
+```
+
+### Defaults
+
+If PUID/PGID are not specified, the container defaults to UID 1000 and GID 1000, which matches the first non-root user on most Linux systems.
+
+### Verification
+
+```bash
+# Check container user
+docker exec comfyui-core-gpu id
+# Expected: uid=3000(comfy) gid=3000(comfy) groups=3000(comfy)
+
+# Check file ownership
+ls -la ./data/output/
+# Files should be owned by your PUID:PGID
+```
+
 ## Multiple Instances
 
 Run multiple ComfyUI instances on the same machine:

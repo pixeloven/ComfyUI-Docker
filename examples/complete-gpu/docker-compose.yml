@@ -3,6 +3,8 @@ services:
     image: ghcr.io/pixeloven/comfyui/complete:cuda-latest
     container_name: comfyui-complete-gpu
     environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
       - COMFY_PORT=${COMFY_PORT:-8188}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility

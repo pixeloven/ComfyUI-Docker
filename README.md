@@ -163,8 +163,8 @@ Common configuration options:
 ```bash
 # Server Configuration
 COMFY_PORT=8188                      # Web interface port
-PUID=1000                            # User ID for host file ownership
-PGID=1000                            # Group ID for host file ownership
+PUID=1000                            # User ID for file ownership (default: 1000)
+PGID=1000                            # Group ID for file ownership (default: 1000)
 
 # Performance Tuning
 CLI_ARGS="--lowvram"                # ComfyUI launch arguments
@@ -172,6 +172,11 @@ CLI_ARGS="--lowvram"                # ComfyUI launch arguments
 # Custom Paths
 COMFY_MODEL_PATH=./data/models      # Override model directory
 COMFY_OUTPUT_PATH=./data/output     # Override output directory
+```
+
+**Match your host user's UID/GID** to avoid permission issues with mounted volumes:
+```bash
+PUID=$(id -u) PGID=$(id -g) docker compose up -d
 ```
 
 **For complete configuration options, see:**

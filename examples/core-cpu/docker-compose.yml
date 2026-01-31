@@ -3,6 +3,8 @@ services:
     image: ghcr.io/pixeloven/comfyui/core:cpu-latest
     container_name: comfyui-core-cpu
     environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
       - COMFY_PORT=${COMFY_PORT:-8188}
       - CLI_ARGS=--cpu
     ports:
