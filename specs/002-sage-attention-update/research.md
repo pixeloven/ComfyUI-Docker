@@ -16,12 +16,12 @@ Research to determine the correct wheel files for updating SageAttention 2 and a
 Current SageAttention installation:
 ```
 # SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + torch 2.8 (build.10)
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.13/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.14/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
 ```
 
-**Note**: The comment says "build.10" but the URL already points to build.13. The wheel is current.
+**Note**: The comment says "build.10" but the URL already points to build.14. The wheel is current.
 
-### 2. Available Wheels in v2.2.0-build.13
+### 2. Available Wheels in v2.2.0-build.14
 
 Source: GitHub API query of release assets
 
@@ -73,19 +73,19 @@ import sageattn3
 
 **SageAttention 2** (already in place):
 ```
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.13/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.14/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
 ```
 
 **SageAttention 3** (to be added):
 ```
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.13/sageattn3-3.0.0-cp312-cp312-linux_x86_64.whl
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.14/sageattn3-3.0.0-cp312-cp312-linux_x86_64.whl
 ```
 
-## Updated Findings (build.13)
+## Updated Findings (build.14)
 
 ### SageAttention 3.0.0 Packaging Change
 
-The v2.2.0-build.13 release restructured the packages:
+The v2.2.0-build.14 release restructured the packages:
 
 | Package Name | Version | Module Name | GPU Target |
 |--------------|---------|-------------|------------|
@@ -98,6 +98,6 @@ The v2.2.0-build.13 release restructured the packages:
 
 ## Conclusions
 
-1. SageAttention 2 wheel is current (v2.2.0-build.13, 290.129)
+1. SageAttention 2 wheel is current (v2.2.0-build.14, 290.129)
 2. SageAttention 3.0.0 evaluated but not included - Blackwell-only, conflicts with 2.2.0
-3. Comment updated to reflect accurate build version (build.13)
+3. Comment updated to reflect accurate build version (build.14)

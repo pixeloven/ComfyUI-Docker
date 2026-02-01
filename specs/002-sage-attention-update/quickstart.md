@@ -2,7 +2,7 @@
 
 ## Overview
 
-This feature updates SageAttention 2 to v2.2.0-build.13 and adds SageAttention 3 (sageattn3) v3.0.0 support to the complete-cuda Docker image.
+This feature updates SageAttention 2 to v2.2.0-build.14 and adds SageAttention 3 (sageattn3) v3.0.0 support to the complete-cuda Docker image.
 
 ## Prerequisites
 
@@ -18,9 +18,9 @@ Edit `services/comfy/complete/extra-requirements.txt`:
 
 ```diff
 - # SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + torch 2.8 (build.10)
-+ # SageAttention 2.2.0 + SageAttn3 3.0.0 (pre-built) - CUDA 12.9.1 + Python 3.12 (build.13)
-  https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.13/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
-+ https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.13/sageattn3-3.0.0-cp312-cp312-linux_x86_64.whl
++ # SageAttention 2.2.0 + SageAttn3 3.0.0 (pre-built) - CUDA 12.9.1 + Python 3.12 (build.14)
+  https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.14/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
++ https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.14/sageattn3-3.0.0-cp312-cp312-linux_x86_64.whl
 ```
 
 ### Step 2: Rebuild Docker Image
