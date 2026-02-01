@@ -71,10 +71,10 @@
 
 ### Implementation
 
-- [ ] T009 [US2] ⚠️ BLOCKED - sageattn3 wheel corrupted upstream (pixeloven/SageAttention)
-- [ ] T010 [US2] ⚠️ BLOCKED - pending sageattn3 wheel fix
+- [x] T009 [US2] SageAttention 3.0.0 tested - installs as sageattn3 module (Blackwell GPUs only)
+- [x] T010 [US2] Decision: Keep 2.2.0 for broad compatibility; 3.0.0 is Blackwell-specific
 
-**Checkpoint**: SageAttention 3 validated - new functionality confirmed available
+**Checkpoint**: SageAttention 3.0.0 evaluated - 2.2.0 retained for compatibility
 
 ---
 

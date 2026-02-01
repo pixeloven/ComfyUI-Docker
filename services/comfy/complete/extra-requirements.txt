@@ -29,7 +29,7 @@ groundingdino-py>=0.4.0
 # triton>=3.4
 
 # SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + Python 3.12 (build.13)
-# Note: sageattn3-3.0.0 wheel is corrupted upstream - pending fix at pixeloven/SageAttention
+# Provides: import sageattention; from sageattention import sageattn
 https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.13/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
 PyYAML
 

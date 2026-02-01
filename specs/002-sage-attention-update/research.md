@@ -81,8 +81,23 @@ https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.13/sag
 https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.13/sageattn3-3.0.0-cp312-cp312-linux_x86_64.whl
 ```
 
+## Updated Findings (build.13)
+
+### SageAttention 3.0.0 Packaging Change
+
+The v2.2.0-build.13 release restructured the packages:
+
+| Package Name | Version | Module Name | GPU Target |
+|--------------|---------|-------------|------------|
+| sageattention | 2.2.0 | `sageattention` | Ampere, Ada (SM80+) |
+| sageattention | 3.0.0 | `sageattn3` | Blackwell (SM100+) |
+
+**Key Finding**: SageAttention 3.0.0 is packaged under the same `sageattention` package name but installs as `sageattn3` module. Installing both 2.2.0 and 3.0.0 causes a pip conflict since they share the same package name.
+
+**Decision**: Keep sageattention 2.2.0 for broad GPU compatibility. SageAttention 3.0.0 (sageattn3) is Blackwell-specific and would only benefit users with RTX 5000 series GPUs.
+
 ## Conclusions
 
-1. SageAttention 2 wheel is already current (v2.2.0-build.13, 290.129)
-2. Only need to add sageattn3 wheel URL to extra-requirements.txt
-3. Update comment to reflect accurate build version and include sageattn3
+1. SageAttention 2 wheel is current (v2.2.0-build.13, 290.129)
+2. SageAttention 3.0.0 evaluated but not included - Blackwell-only, conflicts with 2.2.0
+3. Comment updated to reflect accurate build version (build.13)
