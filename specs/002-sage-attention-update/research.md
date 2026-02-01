@@ -16,12 +16,12 @@ Research to determine the correct wheel files for updating SageAttention 2 and a
 Current SageAttention installation:
 ```
 # SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + torch 2.8 (build.10)
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.14/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.15/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
 ```
 
-**Note**: The comment says "build.10" but the URL already points to build.14. The wheel is current.
+**Note**: The comment says "build.10" but the URL already points to build.15. The wheel is current.
 
-### 2. Available Wheels in v2.2.0-build.14
+### 2. Available Wheels in v2.2.0-build.15
 
 Source: GitHub API query of release assets
 
@@ -29,7 +29,7 @@ Source: GitHub API query of release assets
 |---------|---------|----------------|----------|
 | sageattention | 2.2.0 | sageattention-2.2.0-290.128-cp312-cp312-linux_x86_64.whl | CUDA 12.8 |
 | sageattention | 2.2.0 | sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl | CUDA 12.9 |
-| sageattn3 | 3.0.0 | sageattn3-3.0.0-cp312-cp312-linux_x86_64.whl | Linux x86_64 |
+| sageattn3 | 1.0.0 | sageattn3-1.0.0-290.129-cp312-cp312-linux_x86_64.whl | CUDA 12.9 |
 
 ### 3. Container Environment
 
@@ -41,7 +41,7 @@ Source: GitHub API query of release assets
 
 ### 4. Wheel Selection
 
-**Decision**: Use CUDA 12.9 wheel (290.129) for SageAttention 2, add sageattn3 3.0.0
+**Decision**: Use CUDA 12.9 wheel (290.129) for SageAttention 2, add sageattn3 1.0.0
 
 **Rationale**:
 - Container uses CUDA 12.9.1, so 290.129 wheel is the correct match
@@ -57,7 +57,7 @@ Source: GitHub API query of release assets
 
 **Evidence**:
 - Separate wheel file in release
-- Different version number (3.0.0 vs 2.2.0)
+- Different version number (1.0.0 vs 2.2.0)
 - Different package name (sageattn3 vs sageattention)
 
 **Import Pattern**:
@@ -73,31 +73,34 @@ import sageattn3
 
 **SageAttention 2** (already in place):
 ```
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.14/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.15/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
 ```
 
 **SageAttention 3** (to be added):
 ```
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.14/sageattn3-3.0.0-cp312-cp312-linux_x86_64.whl
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.15/sageattn3-1.0.0-290.129-cp312-cp312-linux_x86_64.whl
 ```
 
-## Updated Findings (build.14)
+## Updated Findings (build.15)
 
-### SageAttention 3.0.0 Packaging Change
+### Final Package Structure
 
-The v2.2.0-build.14 release restructured the packages:
+The v2.2.0-build.15 release provides properly separated packages:
 
 | Package Name | Version | Module Name | GPU Target |
 |--------------|---------|-------------|------------|
 | sageattention | 2.2.0 | `sageattention` | Ampere, Ada (SM80+) |
-| sageattention | 3.0.0 | `sageattn3` | Blackwell (SM100+) |
+| sageattn3 | 1.0.0 | `sageattn3` | Blackwell (SM100+) |
 
-**Key Finding**: SageAttention 3.0.0 is packaged under the same `sageattention` package name but installs as `sageattn3` module. Installing both 2.2.0 and 3.0.0 causes a pip conflict since they share the same package name.
+**Key Finding**: Both packages now have distinct package names and can be installed together without conflicts.
 
-**Decision**: Keep sageattention 2.2.0 for broad GPU compatibility. SageAttention 3.0.0 (sageattn3) is Blackwell-specific and would only benefit users with RTX 5000 series GPUs.
+**Verified Installation**:
+- `sageattention 2.2.0` - provides `sageattn` function for SM80+ GPUs
+- `sageattn3 1.0.0` - provides `sageattn3_blackwell` for Blackwell GPUs
 
 ## Conclusions
 
-1. SageAttention 2 wheel is current (v2.2.0-build.14, 290.129)
-2. SageAttention 3.0.0 evaluated but not included - Blackwell-only, conflicts with 2.2.0
-3. Comment updated to reflect accurate build version (build.14)
+1. SageAttention 2 wheel installed (v2.2.0-build.15, 290.129) ✅
+2. SageAttention 3 wheel installed (v1.0.0-build.15, 290.129) ✅
+3. Both packages coexist and import correctly ✅
+4. Docker image builds successfully ✅

@@ -2,8 +2,8 @@
 
 **Feature Branch**: `002-sage-attention-update`
 **Created**: 2026-01-31
-**Status**: Draft
-**Input**: User description: "Update the version of sage (sage attention 2) as well as add sage attention 3. Rebuild the images and test they are installed and working. https://github.com/pixeloven/SageAttention/releases/tag/v2.2.0-build.14"
+**Status**: Complete
+**Input**: User description: "Update the version of sage (sage attention 2) as well as add sage attention 3. Rebuild the images and test they are installed and working. https://github.com/pixeloven/SageAttention/releases/tag/v2.2.0-build.15"
 
 ## Clarifications
 
@@ -15,7 +15,7 @@
 
 ### User Story 1 - Verify SageAttention 2 Installation (Priority: P1)
 
-As a ComfyUI user running the complete profile, I want SageAttention 2 to be updated to the latest version (v2.2.0-build.14) so that I have the most current optimizations and bug fixes.
+As a ComfyUI user running the complete profile, I want SageAttention 2 to be updated to the latest version (v2.2.0-build.15) so that I have the most current optimizations and bug fixes.
 
 **Why this priority**: This is the core functionality that already exists. Ensuring the existing SageAttention 2 continues to work correctly after the update is critical for all current users.
 
@@ -72,8 +72,8 @@ As a maintainer, I need to rebuild the Docker images with the updated SageAttent
 
 ### Functional Requirements
 
-- **FR-001**: System MUST install SageAttention 2 version 2.2.0 from the v2.2.0-build.14 release
-- **FR-002**: System MUST install SageAttention 3 (sageattn3) v3.0.0 as a separate wheel for Blackwell GPU support
+- **FR-001**: System MUST install SageAttention 2 version 2.2.0 from the v2.2.0-build.15 release
+- **FR-002**: System MUST install SageAttention 3 (sageattn3) v1.0.0 as a separate wheel for Blackwell GPU support
 - **FR-003**: Both SageAttention versions MUST be importable within the Python environment
 - **FR-004**: System MUST use pre-built wheel files matching the container's Python version (3.12), PyTorch version (2.8+), and CUDA version (12.8+)
 - **FR-005**: Docker image builds MUST complete successfully with both packages installed
@@ -81,7 +81,7 @@ As a maintainer, I need to rebuild the Docker images with the updated SageAttent
 
 ### Key Entities
 
-- **SageAttention 2**: The existing attention optimization library, being updated to v2.2.0-build.14
+- **SageAttention 2**: The existing attention optimization library, being updated to v2.2.0-build.15
 - **SageAttention 3 (SageAttn3)**: New attention optimization targeting Blackwell GPU architecture
 - **Pre-built Wheels**: Platform-specific compiled packages from the pixeloven/SageAttention GitHub releases
 - **extra-requirements.txt**: The file in `services/comfy/complete/` that specifies which wheels to install
@@ -99,6 +99,6 @@ As a maintainer, I need to rebuild the Docker images with the updated SageAttent
 ## Assumptions
 
 - The pixeloven/SageAttention GitHub releases contain pre-built wheels for the required platform specifications (Python 3.12, PyTorch 2.8+, CUDA 12.8+, Linux x86_64)
-- SageAttention 3 (sageattn3) v3.0.0 is available as a separate wheel in the same v2.2.0-build.14 release
+- SageAttention 3 (sageattn3) v1.0.0 is available as a separate wheel in the same v2.2.0-build.15 release
 - The wheel naming convention follows the pattern used by existing wheels
 - No breaking API changes exist between current and updated SageAttention 2 versions

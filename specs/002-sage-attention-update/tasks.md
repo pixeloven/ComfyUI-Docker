@@ -39,7 +39,7 @@
 ### Implementation
 
 - [x] T002 [US3] Update comment in services/comfy/complete/extra-requirements.txt to reflect accurate build version
-- [x] T003 [US3] Update extra-requirements.txt (sageattn3 removed due to corrupted wheel upstream)
+- [x] T003 [US3] Update extra-requirements.txt with sageattention 2.2.0 and sageattn3 1.0.0 (build.15)
 - [x] T004 [US3] Rebuild complete-cuda image with `docker buildx bake complete-cuda`
 - [x] T005 [US3] Verify Docker build completes successfully without errors
 
@@ -65,16 +65,16 @@
 
 ## Phase 4: User Story 2 - Add SageAttention 3 Support (Priority: P2)
 
-**Goal**: Confirm SageAttention 3 (sageattn3) v3.0.0 is properly installed and importable
+**Goal**: Confirm SageAttention 3 (sageattn3) v1.0.0 is properly installed and importable
 
 **Independent Test**: Run `docker compose exec complete-cuda python -c "import sageattn3; print('sageattn3 OK')"` and verify no import errors
 
 ### Implementation
 
-- [x] T009 [US2] SageAttention 3.0.0 tested - installs as sageattn3 module (Blackwell GPUs only)
-- [x] T010 [US2] Decision: Keep 2.2.0 for broad compatibility; 3.0.0 is Blackwell-specific
+- [x] T009 [US2] Verify sageattn3 module imports successfully in container
+- [x] T010 [US2] Verify sageattn3 provides sageattn3_blackwell function
 
-**Checkpoint**: SageAttention 3.0.0 evaluated - 2.2.0 retained for compatibility
+**Checkpoint**: SageAttention 3 validated - sageattn3 1.0.0 installed and working
 
 ---
 
@@ -82,7 +82,7 @@
 
 **Purpose**: Documentation and cleanup
 
-- [x] T011 [P] Review docs/user-guides/performance.md for sageattn3 documentation needs (no changes needed - sageattn3 blocked)
+- [x] T011 [P] Review docs/user-guides/performance.md for sageattn3 documentation needs
 - [x] T012 Run validation - sageattention imports successfully, version 2.2.0 confirmed
 - [x] T013 No persistent containers to stop (used docker run --rm)
 

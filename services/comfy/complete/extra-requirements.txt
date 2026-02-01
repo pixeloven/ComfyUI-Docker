@@ -28,10 +28,10 @@ groundingdino-py>=0.4.0
 # Core acceleration libraries (pre-built wheels)
 # triton>=3.4
 
-# SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + Python 3.12 (build.14)
-# Provides: import sageattention; from sageattention import sageattn
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.14/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.14/sageattn3-1.0.0-290.129-cp312-cp312-linux_x86_64.whl
+# SageAttention 2.2.0 + SageAttn3 1.0.0 (pre-built) - CUDA 12.9.1 + Python 3.12 (build.15)
+# Provides: sageattention (SM80+), sageattn3 (Blackwell/SM100+)
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.15/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.15/sageattn3-1.0.0-290.129-cp312-cp312-linux_x86_64.whl
 
 PyYAML
 
