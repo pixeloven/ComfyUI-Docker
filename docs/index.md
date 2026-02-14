@@ -24,13 +24,6 @@ For developers and contributors:
 - **[Building Images](user-guides/building.md)** - Build images locally, use pre-built images, CI/CD automation
 - See the [Contributing section](../README.md#contributing) in the main README for contribution guidelines
 
-## 📊 Project Management
-
-Specs and analysis:
-
-- **[Custom Nodes Snapshot Spec](specs/custom-nodes-snapshot-spec.md)** - Specification for how the Complete image manages bundled custom nodes
-- **[Repository Analysis](project-management/repository-analysis.md)** - Comparison with other ComfyUI Docker projects
-
 **[View all Specs & Analysis →](specs/index.md)**
 
 ---

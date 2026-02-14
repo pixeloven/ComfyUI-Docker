@@ -210,13 +210,6 @@ PUID=$(id -u) PGID=$(id -g) docker compose up -d   # from within an examples/ di
 
 For developers and contributors, see the [Building Images Guide](docs/user-guides/building.md) for local development and the [Contributing](#contributing) section below.
 
-### 📊 Project Management
-
-Planning and analysis:
-
-- **[Tasks](docs/project-management/tasks.md)** - Roadmap and technical debt
-- **[Repository Analysis](docs/project-management/repository-analysis.md)** - Comparison with other projects
-
 **[📖 View Full Documentation Index](docs/index.md)**
 
 ---
