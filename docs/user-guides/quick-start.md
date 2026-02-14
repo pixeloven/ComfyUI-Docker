@@ -20,17 +20,20 @@ cd ComfyUI-Docker
 
 ### 2. Start ComfyUI
 
-Choose a profile based on your needs:
+Choose an example directory based on your needs:
 
 ```bash
-# Core Mode (recommended - essential features)
+# Core GPU (recommended - essential features)
+cd examples/core-gpu
 docker compose up -d
 
-# Complete Mode (all features + 13+ custom nodes)
-docker compose --profile complete up -d
+# Complete GPU (optimized deps + SageAttention)
+cd examples/complete-gpu
+docker compose up -d
 
-# CPU Mode (no GPU required)
-docker compose --profile cpu up -d
+# Core CPU (no GPU required)
+cd examples/core-cpu
+docker compose up -d
 ```
 
 ### 3. Access ComfyUI
@@ -39,11 +42,11 @@ Open **http://localhost:8188** in your browser
 
 ## Profile Comparison
 
-| Profile | Startup Time | Features | Best For |
+| Example | Startup Time | Features | Best For |
 |---------|--------------|----------|----------|
-| **Core** | Fast | Essential ComfyUI + GPU | Most users |
-| **Complete** | Slower (first time) | 13+ custom nodes, SageAttention | Power users |
-| **CPU** | Fast | No GPU required | Testing, compatibility |
+| **`core-gpu`** | Fast | Essential ComfyUI + GPU | Most users |
+| **`complete-gpu`** | Fast | Pre-installed deps, SageAttention | Power users |
+| **`core-cpu`** | Fast | No GPU required | Testing, compatibility |
 
 ## First Workflow
 
@@ -82,6 +85,8 @@ See [Data Management](data.md) for detailed directory structure.
 
 ## Common Commands
 
+Run these from within your chosen `examples/` directory:
+
 ```bash
 # View logs
 docker compose logs -f
@@ -103,7 +108,6 @@ See [Running Containers](running.md) for all Docker Compose operations.
 - **[Running Containers](running.md)** - Profile selection and environment configuration
 - **[Data Management](data.md)** - Organize models and workflows
 - **[Performance Tuning](performance.md)** - Optimize for your hardware
-- **[Scripts Guide](scripts.md)** - Custom nodes in Complete mode
 
 ---
 

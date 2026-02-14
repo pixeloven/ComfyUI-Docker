@@ -8,7 +8,7 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 - [ ] **Model Path Mapping Conflict**: Fix mappings between `/data/models` and `data/config/comfy/models` (the latter is created by ComfyManager)
 - [ ] **ONNX Integration**: Make ONNX support configurable/optional rather than baked into the image
 - [x] **Virtual Environment**: Ensure everything runs in a proper venv as some extensions expect it
-- [x] **Docker Compose Readability**: Update docker-compose.yml to be more readable and maintainable
+- [x] **Docker Compose Readability**: Refactored to per-example docker-compose.yml files in `examples/`
 - [x] **ComfyUI Manager Integration**: Automatically installs ComfyUI Manager v3.33.8
 - [x] **Post-Install Script**: Automated setup of directories and environment
 
@@ -69,7 +69,7 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 3. Implement multi-workspace support
 4. Improve volume mappings for better workflow management
 5. ✅ Create comprehensive configuration documentation
-6. ✅ Update all documentation to reflect current application state
+6. ✅ Update all documentation to reflect current application state (refactored to examples/ directories)
 
 ### Phase 2: Platform Expansion (Short-term)
 1. Add CPU/ROCM support
@@ -123,10 +123,11 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 
 ## 📝 Notes & Comments from Code
 
-### From docker-compose.yml
+### From example docker-compose.yml files
+- Deployment configs moved to `examples/` directories (`core-gpu`, `complete-gpu`, `core-cpu`)
+- Each example has its own `docker-compose.yml` and `.env.example`
+- Service name is `comfyui` in all examples; container names: `comfyui-core-gpu`, `comfyui-complete-gpu`, `comfyui-core-cpu`
 - Model mapping issues between `/data/models` and `data/config/comfy/models`
-- Need to fix volume mappings and move `/output` to `/data/output`
-- Consider whether repo scope should expand beyond stable diffusion
 - Port configuration is now properly handled via environment variables
 
 ### From Dockerfile

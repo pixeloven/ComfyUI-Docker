@@ -14,10 +14,6 @@ These documents are retained for historical context. Day-to-day work should be g
 ### [Tasks](tasks.md)
 Archived roadmap and technical debt list for the ComfyUI Docker project.
 
-### [Custom Nodes Migration](custom-nodes-migration.md)
-Legacy migration notes for transitioning from runtime bash scripts to native ComfyUI tooling. Superseded by the Custom Nodes Snapshot Spec.
-
-
 ---
 
 **Latest Updates**: 

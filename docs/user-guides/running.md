@@ -2,27 +2,23 @@
 
 How to run ComfyUI using Docker Compose with profile selection and environment configuration.
 
-## Service Profiles
+## Deployment Examples
 
-ComfyUI Docker provides three deployment profiles:
+ComfyUI Docker provides three example configurations in the `examples/` directory:
 
-| Profile | Command | Service | Description |
-|---------|---------|---------|-------------|
-| **Core** (default) | `docker compose up -d` | `core-cuda` | Essential ComfyUI with GPU support |
-| **Complete** | `docker compose --profile complete up -d` | `complete-cuda` | Full features + 13+ custom nodes |
-| **CPU** | `docker compose --profile cpu up -d` | `core-cpu` | CPU-only mode (no GPU required) |
+| Example | Directory | Container | Description |
+|---------|-----------|-----------|-------------|
+| **Core GPU** | `examples/core-gpu` | `comfyui-core-gpu` | Essential ComfyUI with GPU support |
+| **Complete GPU** | `examples/complete-gpu` | `comfyui-complete-gpu` | Pre-installed deps + SageAttention |
+| **Core CPU** | `examples/core-cpu` | `comfyui-core-cpu` | CPU-only mode (no GPU required) |
 
 ### Starting Services
 
+Navigate to your chosen example directory, then run:
+
 ```bash
-# Core mode (default, recommended)
+cd examples/core-gpu    # or complete-gpu, core-cpu
 docker compose up -d
-
-# Complete mode (power users)
-docker compose --profile complete up -d
-
-# CPU mode (testing, no GPU)
-docker compose --profile cpu up -d
 ```
 
 Access ComfyUI at: **http://localhost:8188**
@@ -40,11 +36,8 @@ docker compose down -v
 ### Restarting Services
 
 ```bash
-# Restart all services
+# Restart the service
 docker compose restart
-
-# Restart specific service
-docker compose restart core-cuda
 ```
 
 ### Viewing Logs
@@ -53,11 +46,11 @@ docker compose restart core-cuda
 # Follow logs
 docker compose logs -f
 
-# Specific service
-docker compose logs -f core-cuda
-
 # Last 100 lines
 docker compose logs --tail=100
+
+# Or use the container name directly
+docker logs -f comfyui-core-gpu
 ```
 
 ## Environment Configuration
@@ -66,7 +59,7 @@ Configure ComfyUI using environment variables via `.env` file or inline.
 
 ### Using .env File
 
-Create `.env` in your project root:
+Create `.env` in your example directory (e.g., `examples/core-gpu/.env`):
 
 ```bash
 # Server Configuration
@@ -89,14 +82,14 @@ CLI_ARGS=--preview-method auto
 # COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-dev
 ```
 
-Then start normally:
+Then start normally from that directory:
 ```bash
 docker compose up -d
 ```
 
 ### Inline Environment Variables
 
-Override settings without `.env` file:
+Override settings without `.env` file (from within your example directory):
 
 ```bash
 # Custom port
@@ -149,10 +142,10 @@ When the container creates files (outputs, caches, etc.) in mounted volumes, tho
 ### Usage
 
 ```bash
-# Method 1: Environment variables
+# Method 1: Inline environment variables (from within your example directory)
 PUID=$(id -u) PGID=$(id -g) docker compose up -d
 
-# Method 2: .env file
+# Method 2: .env file (in your example directory)
 echo "PUID=$(id -u)" >> .env
 echo "PGID=$(id -g)" >> .env
 docker compose up -d
@@ -179,15 +172,15 @@ ls -la ./data/output/
 
 ## Multiple Instances
 
-Run multiple ComfyUI instances on the same machine:
+Run multiple ComfyUI instances on the same machine by copying example directories:
 
 ```bash
 # Instance 1 (default)
-cd ~/comfyui-instance-1
+cd ~/comfyui-instance-1    # copy of examples/core-gpu
 COMFY_PORT=8188 docker compose up -d
 
 # Instance 2 (different directory and port)
-cd ~/comfyui-instance-2
+cd ~/comfyui-instance-2    # another copy of examples/core-gpu
 COMFY_PORT=8189 docker compose up -d
 ```
 
@@ -200,6 +193,8 @@ COMFY_PORT=8189 docker compose up -d
 
 ### Using Pre-Built Images
 
+From within your example directory:
+
 ```bash
 # Pull latest images
 docker compose pull
@@ -211,10 +206,10 @@ docker compose up -d
 ### Using Local Builds
 
 ```bash
-# Rebuild images
+# Rebuild images (from repository root)
 docker buildx bake all --load
 
-# Restart containers
+# Restart containers (from your example directory)
 docker compose up -d --force-recreate
 ```
 
@@ -225,7 +220,7 @@ See [Building Images](building.md) for build details.
 ### Port Already in Use
 
 ```bash
-# Use different port
+# Use different port (from within your example directory)
 COMFY_PORT=8189 docker compose up -d
 
 # Or check what's using the port
@@ -235,7 +230,7 @@ sudo lsof -i :8188
 ### Container Won't Start
 
 ```bash
-# Check logs
+# Check logs (from within your example directory)
 docker compose logs
 
 # Validate configuration
@@ -265,7 +260,7 @@ See [Data Management](data.md) for file permission details.
 nvidia-smi
 
 # Test Docker GPU support
-docker run --rm --gpus all nvidia/cuda:12.6.0-runtime-ubuntu24.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.9.1-runtime-ubuntu24.04 nvidia-smi
 ```
 
 See [Performance Tuning](performance.md) for GPU optimization.

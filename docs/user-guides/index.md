@@ -21,11 +21,6 @@ Organize models, workflows, custom nodes, and manage persistent storage.
 ### [Performance Tuning](performance.md)
 Optimize ComfyUI for your hardware with CLI arguments and resource configuration.
 
-## Advanced
-
-### [Scripts Guide](scripts.md)
-Custom node installation scripts for Complete mode.
-
 ---
 
 **[⬆ Back to Documentation](../index.md)** 

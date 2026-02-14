@@ -15,9 +15,6 @@ Essential guides for users:
 - **[Data Management](user-guides/data.md)** - Models, workflows, and persistent storage
 - **[Performance Tuning](user-guides/performance.md)** - CLI arguments and resource optimization
 
-### Advanced
-- **[Scripts Guide](user-guides/scripts.md)** - Custom node installation for Complete mode
-
 **[View all User Guides →](user-guides/index.md)**
 
 ## 🛠️ Development

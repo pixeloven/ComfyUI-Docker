@@ -53,25 +53,29 @@ clean: ## Clean build cache and rebuild from scratch
 	docker buildx bake all --no-cache --load
 
 # Utility targets
-validate: ## Validate Docker Compose and Bake configurations
-	docker compose config --quiet
+validate: ## Validate Bake and example Compose configurations
 	docker buildx bake --print all > /dev/null
+	cd examples/core-gpu && docker compose config --quiet
+	cd examples/complete-gpu && docker compose config --quiet
+	cd examples/core-cpu && docker compose config --quiet
 
 push: ## Build and push all images to registry (don't load locally)
 	docker buildx bake all --push
 
-# Local testing
-test: ## Start services locally for testing
-	docker compose up -d
+# Local testing (uses example directories)
+test: ## Start core-gpu example locally for testing
+	cd examples/core-gpu && docker compose up -d
 
-test-cpu: ## Start CPU services locally for testing
-	docker compose --profile cpu up -d
+test-cpu: ## Start core-cpu example locally for testing
+	cd examples/core-cpu && docker compose up -d
 
-test-complete: ## Start complete services locally for testing
-	docker compose --profile complete up -d
+test-complete: ## Start complete-gpu example locally for testing
+	cd examples/complete-gpu && docker compose up -d
 
-stop: ## Stop running services
-	docker compose down
+stop: ## Stop all example services
+	-cd examples/core-gpu && docker compose down
+	-cd examples/complete-gpu && docker compose down
+	-cd examples/core-cpu && docker compose down
 
-logs: ## Show logs from running services
-	docker compose logs -f
+logs: ## Show logs from core-gpu example
+	cd examples/core-gpu && docker compose logs -f

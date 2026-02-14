@@ -20,7 +20,7 @@ data/
 
 | Directory | Purpose | Mount Mode |
 |-----------|---------|------------|
-| `models/` | AI models, checkpoints, LoRAs, VAEs | Read-only (`:ro`) |
+| `models/` | AI models, checkpoints, LoRAs, VAEs | Read-write (`:rw`) |
 | `custom_nodes/` | Custom node extensions | Read-write (`:rw`) |
 | `input/` | Input images and workflow files | Read-write (`:rw`) |
 | `output/` | Generated images and results | Read-write (`:rw`) |
@@ -110,7 +110,7 @@ Then restart the container (see [Running Containers](running.md)).
 
 ### Complete Mode
 
-Complete mode includes 13+ pre-installed custom nodes. See [Scripts Guide](scripts.md) for the full list.
+Complete mode includes pre-installed Python dependencies for common custom node setups and SageAttention optimization. Custom nodes can be added by cloning them into `data/custom_nodes/` or through the ComfyUI interface.
 
 ## Custom Paths
 

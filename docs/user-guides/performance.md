@@ -104,7 +104,8 @@ CLI_ARGS=--preview-method auto
 
 Use Complete mode for best performance:
 ```bash
-docker compose --profile complete up -d
+cd examples/complete-gpu
+docker compose up -d
 ```
 
 ### CPU-Only System
@@ -112,14 +113,15 @@ docker compose --profile complete up -d
 CLI_ARGS=--cpu --preview-method none
 ```
 
-Use CPU profile:
+Use the CPU example:
 ```bash
-docker compose --profile cpu up -d
+cd examples/core-cpu
+docker compose up -d
 ```
 
 ## SageAttention (Complete Mode Only)
 
-The **Complete** profile includes [SageAttention 2++](https://github.com/thu-ml/SageAttention) for 2-3x faster attention computation.
+The **Complete** image includes [SageAttention 2.2.0](https://github.com/thu-ml/SageAttention) and [SageAttn3 3.0.0](https://github.com/thu-ml/SageAttention) for 2-3x faster attention computation.
 
 ### Features
 
@@ -127,22 +129,23 @@ The **Complete** profile includes [SageAttention 2++](https://github.com/thu-ml/
 - **2-3x faster** - Attention computation speedup
 - **Minimal quality impact** - <1% difference
 - **Smart fallback** - Uses standard attention when needed
+- **Blackwell GPU support** - SageAttn3 supports NVIDIA Blackwell architecture
 
 ### Verify Installation
 
 ```bash
-docker compose exec complete-cuda python -c "import sageattention; print('SageAttention OK')"
+docker exec comfyui-complete-gpu python -c "import sageattention; print('SageAttention OK')"
 ```
 
 ## Docker Resource Limits
 
-Configure resource limits in `docker-compose.yml`:
+Configure resource limits in your example's `docker-compose.yml`:
 
 ### Memory Limits
 
 ```yaml
 services:
-  core-cuda:
+  comfyui:
     deploy:
       resources:
         limits:
@@ -208,7 +211,7 @@ See [Data Management](data.md) for path configuration.
 watch -n 1 nvidia-smi
 
 # Inside container
-docker compose exec core-cuda nvidia-smi
+docker exec comfyui-core-gpu nvidia-smi
 ```
 
 ### Container Resources
@@ -243,10 +246,7 @@ CLI_ARGS=--cpu
 
 ### Container Slow to Start
 
-**Complete mode first startup:**
-- Expected: Scripts install custom nodes (2-5 minutes)
-- Subsequent startups are fast
-- Use Core mode if you don't need custom nodes
+**Complete mode** has a larger image due to pre-installed Python dependencies and SageAttention. Use Core mode if you don't need the extra optimizations.
 
 ---
 

@@ -1,5 +1,8 @@
 # ComfyUI Docker 🐳
 
+[![Sponsor](https://img.shields.io/github/sponsors/pixeloven?label=Sponsor&logo=github&style=flat-square)](https://github.com/sponsors/pixeloven)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/pixeloven)
+
 **Production-ready Docker setup for [ComfyUI](https://github.com/comfyanonymous/ComfyUI)**
 
 A complete containerized deployment of ComfyUI with GPU acceleration, flexible deployment profiles, and persistent data management. Built with Docker Buildx Bake for efficient multi-stage builds.
@@ -25,7 +28,7 @@ A complete containerized deployment of ComfyUI with GPU acceleration, flexible d
 - **📁 Persistent Storage**: Individual volume mounts for models, outputs, custom nodes, etc.
 - **🐳 Production Ready**: Multi-stage builds, layer caching, and pre-built GHCR images
 - **⚡ Performance Optimized**: SageAttention for 2-3x faster attention computation
-- **🔧 Extensible**: Custom node support via snapshot system
+- **🔧 Extensible**: Custom node support via volume mounts
 - **🔄 CI/CD Ready**: Automated builds, weekly dependency updates
 - **🔒 Security**: API/Swarm/K8s ready with arbitrary user support
 
@@ -49,19 +52,24 @@ cd ComfyUI-Docker
 
 ### 2. Launch ComfyUI
 
-**Core Mode** (recommended for most users):
+Choose an example directory and start the service:
+
+**Core GPU** (recommended for most users):
 ```bash
+cd examples/core-gpu
 docker compose up -d
 ```
 
-**Complete Mode** (all features + custom nodes):
+**Complete GPU** (optimized dependencies + SageAttention):
 ```bash
-docker compose --profile complete up -d
+cd examples/complete-gpu
+docker compose up -d
 ```
 
-**CPU Mode** (no GPU required):
+**Core CPU** (no GPU required):
 ```bash
-docker compose --profile cpu up -d
+cd examples/core-cpu
+docker compose up -d
 ```
 
 ### 3. Access the Interface
@@ -78,17 +86,18 @@ Place your Stable Diffusion checkpoints in `./data/models/checkpoints/` or downl
 
 ComfyUI Docker offers three deployment profiles to match your use case:
 
-| Profile | Service | Image | Best For | Features |
-|---------|---------|-------|----------|----------|
-| **Core** | `core-cuda` | `ghcr.io/pixeloven/comfyui/core:cuda-latest` | Most users | Essential ComfyUI + GPU acceleration |
-| **Complete** | `complete-cuda` | `ghcr.io/pixeloven/comfyui/complete:cuda-latest` | Power users | Custom nodes + SageAttention + pre-installed workflows |
-| **CPU** | `core-cpu` | `ghcr.io/pixeloven/comfyui/core:cpu-latest` | Testing/Compatibility | No GPU required |
+| Example | Container | Image | Best For | Features |
+|---------|-----------|-------|----------|----------|
+| **`core-gpu`** | `comfyui-core-gpu` | `ghcr.io/pixeloven/comfyui/core:cuda-latest` | Most users | Essential ComfyUI + GPU acceleration |
+| **`complete-gpu`** | `comfyui-complete-gpu` | `ghcr.io/pixeloven/comfyui/complete:cuda-latest` | Power users | Pre-installed Python deps + SageAttention optimization |
+| **`core-cpu`** | `comfyui-core-cpu` | `ghcr.io/pixeloven/comfyui/core:cpu-latest` | Testing/Compatibility | No GPU required |
 
-### Core Mode (`core-cuda`) ⚡
+### Core GPU (`examples/core-gpu`) ⚡
 
 Fast, lightweight ComfyUI with GPU support.
 
 ```bash
+cd examples/core-gpu
 docker compose up -d
 ```
 
@@ -97,30 +106,26 @@ docker compose up -d
 - ✅ Fast startup
 - ✅ Smaller image size
 
-### Complete Mode (`complete-cuda`) 🚀
+### Complete GPU (`examples/complete-gpu`) 🚀
 
-Full-featured deployment with custom nodes and optimizations.
+Optimized deployment with pre-installed Python dependencies and SageAttention.
 
 ```bash
-docker compose --profile complete up -d
+cd examples/complete-gpu
+docker compose up -d
 ```
 - ✅ Everything core has
-- ✅ 13+ pre-installed custom nodes
-- ✅ SageAttention optimization (2-3x faster)
-- ⚠️  Larger image and longer startup
+- ✅ Pre-installed Python dependencies for common custom node setups
+- ✅ SageAttention 2.2.0 + SageAttn3 3.0.0 optimization (2-3x faster)
+- ⚠️  Larger image size
 
-**Included Custom Nodes:**
-- ComfyUI-Custom-Scripts, rgthree-comfy, ComfyUI-KJNodes
-- ComfyUI-Impact-Pack, ComfyUI-IPAdapter-plus
-- ComfyUI_UltimateSDUpscale, ComfyUI-IC-Light
-- [Full list in scripts documentation](docs/user-guides/scripts.md)
-
-### CPU Mode (`core-cpu`)
+### Core CPU (`examples/core-cpu`)
 
 No GPU required, universal compatibility.
 
 ```bash
-docker compose --profile cpu up -d
+cd examples/core-cpu
+docker compose up -d
 ```
 
 - ✅ Works without NVIDIA GPU
@@ -147,7 +152,7 @@ ComfyUI Docker uses **individual volume mounts** for each data directory, provid
 ```bash
 COMFY_MODEL_PATH=/path/to/models \
 COMFY_OUTPUT_PATH=/path/to/outputs \
-docker compose up -d
+docker compose up -d   # from within an examples/ directory
 ```
 
 See [Data Management Guide](docs/user-guides/data.md) for details.
@@ -176,7 +181,7 @@ COMFY_OUTPUT_PATH=./data/output     # Override output directory
 
 **Match your host user's UID/GID** to avoid permission issues with mounted volumes:
 ```bash
-PUID=$(id -u) PGID=$(id -g) docker compose up -d
+PUID=$(id -u) PGID=$(id -g) docker compose up -d   # from within an examples/ directory
 ```
 
 **For complete configuration options, see:**
@@ -199,7 +204,7 @@ PUID=$(id -u) PGID=$(id -g) docker compose up -d
 - **[Performance Tuning](docs/user-guides/performance.md)** - CLI arguments and resource optimization
 
 **Advanced:**
-- **[Scripts Guide](docs/user-guides/scripts.md)** - Custom node installation for Complete mode
+- **[Custom Nodes Snapshot Spec](docs/specs/custom-nodes-snapshot-spec.md)** - How the Complete image manages bundled dependencies
 
 ### 🛠️ Development
 
@@ -211,7 +216,6 @@ Planning and analysis:
 
 - **[Tasks](docs/project-management/tasks.md)** - Roadmap and technical debt
 - **[Repository Analysis](docs/project-management/repository-analysis.md)** - Comparison with other projects
-- **[Custom Nodes Migration](docs/project-management/custom-nodes-migration.md)** - Snapshot-based installation plan
 
 **[📖 View Full Documentation Index](docs/index.md)**
 
@@ -257,13 +261,14 @@ git clone https://github.com/pixeloven/ComfyUI-Docker.git
 cd ComfyUI-Docker
 
 # Build images locally
-docker buildx bake all
+docker buildx bake all --load
 
-# Test a specific profile
-docker compose --profile core up -d
+# Test a specific example
+cd examples/core-gpu
+docker compose up -d
 
 # View logs
-docker compose logs -f core-cuda
+docker compose logs -f
 ```
 
 **For detailed build instructions, see [Building Images Guide](docs/user-guides/building.md).**
@@ -296,7 +301,7 @@ Perfect for local development, production deployments, or CI/CD pipelines.
 ### Which profile should I use?
 
 - **Core Mode**: Best for most users - fast startup, essential features, GPU acceleration
-- **Complete Mode**: Best for power users - includes 13+ custom nodes, SageAttention optimization
+- **Complete Mode**: Best for power users - pre-installed Python dependencies for common custom nodes, SageAttention optimization
 - **CPU Mode**: Best for testing or when no GPU is available
 
 ### Do I need a GPU?
@@ -309,9 +314,7 @@ Everything is stored in the `./data/` directory with subdirectories for models, 
 
 ### How do I add custom nodes?
 
-**Core mode**: Install custom nodes through the ComfyUI interface or mount them to `./data/custom_nodes/`
-
-**Complete mode**: 13+ custom nodes are pre-installed. See the [Scripts Guide](docs/user-guides/scripts.md) for the full list and how to add more.
+Install custom nodes through the ComfyUI interface or mount them to `./data/custom_nodes/`. See the [Data Management Guide](docs/user-guides/data.md) for details.
 
 ### Can I use my own models?
 
@@ -319,7 +322,7 @@ Yes! Place your checkpoints, LoRAs, and other models in the appropriate subdirec
 
 ### How do I update ComfyUI?
 
-Pull the latest image:
+Pull the latest image from within your example directory:
 ```bash
 docker compose pull
 docker compose up -d
@@ -332,7 +335,7 @@ docker buildx bake all --no-cache
 
 ### Why is my container slow to start?
 
-**Complete mode** performs post-install scripts on first startup. This is normal and only happens once. Subsequent startups will be fast. Consider using **Core mode** if you don't need the extra custom nodes.
+**Complete mode** has a larger image due to pre-installed Python dependencies and SageAttention. If startup time is a concern and you don't need the extra optimizations, consider using **Core mode**.
 
 ---
 

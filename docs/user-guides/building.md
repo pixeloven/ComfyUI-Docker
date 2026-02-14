@@ -16,12 +16,10 @@ Pre-built images are automatically published to GitHub Container Registry and us
 
 ### Pull Latest Images
 
-```bash
-# Pull all configured images
-docker compose pull
+From within your chosen example directory (e.g., `examples/core-gpu`):
 
-# Pull specific profile
-docker compose --profile complete pull
+```bash
+docker compose pull
 ```
 
 ### Image Updates
@@ -131,7 +129,8 @@ REGISTRY_URL=myregistry.com/ IMAGE_LABEL=v1.0 docker buildx bake all --load
 # Preview build configuration
 docker buildx bake --print all
 
-# Validate docker-compose.yml
+# Validate an example's docker-compose.yml
+cd examples/core-gpu
 docker compose config --quiet
 ```
 
