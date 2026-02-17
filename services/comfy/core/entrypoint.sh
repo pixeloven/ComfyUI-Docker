@@ -54,9 +54,12 @@ fi
 # Directory Ownership
 # =============================================================================
 
-# Set ownership of critical application directories only
-# Mounted volumes retain host ownership (intended behavior)
+# Set ownership of application root directories
 chown "$PUID:$PGID" /app /app/ComfyUI
+
+# Set ownership of immediate subdirectories (handles volume mount points)
+# Non-recursive for performance — avoids traversing large model directories
+find /app/ComfyUI -maxdepth 1 -mindepth 1 -type d -exec chown "$PUID:$PGID" {} +
 
 # =============================================================================
 # Startup Logging
