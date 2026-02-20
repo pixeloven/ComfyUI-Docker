@@ -5,7 +5,7 @@
 
 ## Summary
 
-Update SageAttention 2 to v2.2.0-build.15 and add SageAttention 3 (sageattn3) v3.0.0 support to the complete-cuda Docker image. The implementation involves updating `extra-requirements.txt` with the new wheel URLs, rebuilding the Docker images, and validating that both packages import successfully.
+Update SageAttention 2 to v2.2.0-build.16 and add SageAttention 3 (sageattn3) v3.0.0 support to the complete-cuda Docker image. The implementation involves updating `extra-requirements.txt` with the new wheel URLs, rebuilding the Docker images, and validating that both packages import successfully.
 
 ## Technical Context
 
@@ -87,7 +87,7 @@ No constitution violations requiring justification. This is a straightforward de
 Research confirmed via GitHub API:
 - SageAttention 2 wheel already current: `sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl`
 - SageAttention 3 available: `sageattn3-3.0.0-cp312-cp312-linux_x86_64.whl`
-- Both from same release: v2.2.0-build.15
+- Both from same release: v2.2.0-build.16
 
 ### Phase 1: Implementation Tasks
 

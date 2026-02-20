@@ -16,12 +16,12 @@ Research to determine the correct wheel files for updating SageAttention 2 and a
 Current SageAttention installation:
 ```
 # SageAttention 2.2.0 (pre-built) - CUDA 12.9.1 + torch 2.8 (build.10)
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.15/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.16/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
 ```
 
 **Note**: The comment says "build.10" but the URL already points to build.15. The wheel is current.
 
-### 2. Available Wheels in v2.2.0-build.15
+### 2. Available Wheels in v2.2.0-build.16
 
 Source: GitHub API query of release assets
 
@@ -73,19 +73,19 @@ import sageattn3
 
 **SageAttention 2** (already in place):
 ```
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.15/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.16/sageattention-2.2.0-290.129-cp312-cp312-linux_x86_64.whl
 ```
 
 **SageAttention 3** (to be added):
 ```
-https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.15/sageattn3-1.0.0-290.129-cp312-cp312-linux_x86_64.whl
+https://github.com/pixeloven/SageAttention/releases/download/v2.2.0-build.16/sageattn3-1.0.0-290.129-cp312-cp312-linux_x86_64.whl
 ```
 
 ## Updated Findings (build.15)
 
 ### Final Package Structure
 
-The v2.2.0-build.15 release provides properly separated packages:
+The v2.2.0-build.16 release provides properly separated packages:
 
 | Package Name | Version | Module Name | GPU Target |
 |--------------|---------|-------------|------------|
@@ -100,7 +100,7 @@ The v2.2.0-build.15 release provides properly separated packages:
 
 ## Conclusions
 
-1. SageAttention 2 wheel installed (v2.2.0-build.15, 290.129) ✅
+1. SageAttention 2 wheel installed (v2.2.0-build.16, 290.129) ✅
 2. SageAttention 3 wheel installed (v1.0.0-build.15, 290.129) ✅
 3. Both packages coexist and import correctly ✅
 4. Docker image builds successfully ✅

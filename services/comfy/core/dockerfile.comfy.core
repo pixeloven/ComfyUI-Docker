@@ -24,7 +24,9 @@ ARG RUNTIME=cuda
 RUN --mount=type=cache,target=/app/.cache/pip \
   umask 022 && \
   git clone https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI && \
-  pip install -r /app/ComfyUI/requirements.txt
+  pip install --extra-index-url https://download.pytorch.org/whl/cu128 \
+    -r /app/ComfyUI/requirements.txt && \
+  pip install -r /app/ComfyUI/manager_requirements.txt
 
 # ==================================================================
 # Final Stage
