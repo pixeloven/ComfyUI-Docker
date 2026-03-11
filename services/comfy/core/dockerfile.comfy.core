@@ -68,7 +68,8 @@ RUN chmod +x /app/startup.sh /app/entrypoint.sh
 # install custom node deps at runtime regardless of the effective UID
 # (Docker Compose PUID/PGID, K8s securityContext.runAsUser, etc.)
 RUN chmod -R a+w /app/.venv/lib/python3.12/site-packages && \
-  chmod a+w /app/.venv/lib/python3.12
+  chmod a+w /app/.venv/lib/python3.12 && \
+  chmod -R a+w /app/.cache
 
 # Environment variables
 ARG CLI_ARGS=""
