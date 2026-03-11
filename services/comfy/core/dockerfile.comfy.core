@@ -55,6 +55,8 @@ WORKDIR /app/ComfyUI
 ENV VENV_PATH=/app/.venv
 ENV PATH="$VENV_PATH/bin:$PATH"
 ENV PYTHONPATH="/app/ComfyUI"
+ENV HOME=/app
+ENV XDG_CACHE_HOME=/app/.cache
 
 # Copy startup scripts to app root
 COPY --chown=comfy:comfy startup.sh entrypoint.sh /app/
