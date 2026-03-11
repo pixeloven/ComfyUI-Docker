@@ -173,9 +173,13 @@ spec:
 
 No PUID/PGID environment variables are needed in this mode — the UID/GID comes from the Kubernetes security context. The `fsGroup` setting ensures volume mounts are group-accessible.
 
-### File Ownership
+### Arbitrary UID Support
 
-At build time, all application files under `/app` are owned by a `comfy` user (UID 1000). The venv `site-packages` directory is world-writable so that ComfyUI Manager can install custom node dependencies at runtime regardless of the effective UID.
+The image supports running as any UID without prior configuration:
+
+- **`/etc/passwd` injection**: The entrypoint dynamically adds a passwd entry for unknown UIDs so that Python's `getpass.getuser()`, `os.path.expanduser("~")`, and PyTorch's cache directory resolution all work correctly.
+- **World-writable directories**: `site-packages`, `.cache` are writable by any UID at build time so ComfyUI Manager can install custom node dependencies and uv/pip can cache packages.
+- **File ownership**: All files under `/app` are owned by the `comfy` user (UID 1000) at build time. Runtime file creation in mounted volumes uses the effective UID.
 
 ### Verification
 

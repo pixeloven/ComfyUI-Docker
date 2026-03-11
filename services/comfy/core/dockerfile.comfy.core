@@ -64,11 +64,16 @@ COPY --chown=comfy:comfy startup.sh entrypoint.sh /app/
 # Make scripts executable (fast/cheap operation on single files)
 RUN chmod +x /app/startup.sh /app/entrypoint.sh
 
-# Make venv site-packages writable by any user so ComfyUI Manager can
-# install custom node deps at runtime regardless of the effective UID
+# Make directories writable by any user for arbitrary UID support
 # (Docker Compose PUID/PGID, K8s securityContext.runAsUser, etc.)
+#   - site-packages: ComfyUI Manager installs custom node deps at runtime
+#   - .cache: uv/pip cache operations
+#   - /etc/passwd: entrypoint injects passwd entry for arbitrary UIDs
+#     so getpwuid(), getpass.getuser(), and expanduser("~") work
 RUN chmod -R a+w /app/.venv/lib/python3.12/site-packages && \
-  chmod a+w /app/.venv/lib/python3.12
+  chmod a+w /app/.venv/lib/python3.12 && \
+  chmod -R a+w /app/.cache && \
+  chmod g+w /etc/passwd
 
 # Environment variables
 ARG CLI_ARGS=""
