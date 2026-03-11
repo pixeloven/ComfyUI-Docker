@@ -1,6 +1,24 @@
 #!/bin/bash
 set -e
 
+# =============================================================================
+# Root Detection
+# =============================================================================
+
+# When running as non-root (K8s securityContext.runAsUser), activate the
+# venv and exec directly — no privilege management needed.
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Starting as non-root UID:GID = $(id -u):$(id -g)"
+    source /app/.venv/bin/activate
+    exec "$@"
+fi
+
+# =============================================================================
+# Root-mode: Dynamic User Setup (Docker/Compose PUID/PGID support)
+# =============================================================================
+# Default path when running as root (Docker/Compose). Set PUID/PGID
+# env vars to control the runtime user identity.
+
 # Default UID/GID values for backward compatibility
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
