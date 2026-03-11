@@ -9,6 +9,10 @@ set -e
 # venv and exec directly — no privilege management needed.
 if [ "$(id -u)" -ne 0 ]; then
     echo "Starting as non-root UID:GID = $(id -u):$(id -g)"
+    # Set USER if not already set — Python's getpass.getuser() and
+    # PyTorch's cache_dir lookup require it when the UID has no
+    # /etc/passwd entry (common with arbitrary K8s UIDs).
+    export USER="${USER:-comfy}"
     source /app/.venv/bin/activate
     exec "$@"
 fi
