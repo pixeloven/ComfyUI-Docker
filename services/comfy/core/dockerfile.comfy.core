@@ -72,7 +72,7 @@ RUN chmod +x /app/startup.sh /app/entrypoint.sh
 #     so getpwuid(), getpass.getuser(), and expanduser("~") work
 RUN chmod -R a+w /app/.venv/lib/python3.12/site-packages && \
   chmod a+w /app/.venv/lib/python3.12 && \
-  chmod -R a+w /app/.cache && \
+  mkdir -p /app/.cache && chmod -R a+w /app/.cache && \
   chmod g+w /etc/passwd
 
 # Environment variables
