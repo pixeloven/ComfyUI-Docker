@@ -56,6 +56,7 @@ fi
 
 # Set ownership of application root directories
 chown "$PUID:$PGID" /app /app/ComfyUI
+chown -R "$PUID:$PGID" /app/.venv
 
 # Set ownership of immediate subdirectories (handles volume mount points)
 # Non-recursive for performance — avoids traversing large model directories
