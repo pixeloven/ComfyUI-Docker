@@ -131,15 +131,13 @@ COMFY_IMAGE=custom:latest    # Override Docker image
 
 See [Performance Tuning](performance.md) for CLI_ARGS options.
 
-## User ID / Group ID (PUID/PGID)
+## User Identity
 
-Run the container with your host user's UID/GID to ensure files created in mounted volumes have correct ownership.
+The entrypoint supports two modes for controlling the runtime user identity, selected automatically based on how the container starts.
 
-### Why Use PUID/PGID?
+### Docker Compose: PUID/PGID (Root Entrypoint)
 
-When the container creates files (outputs, caches, etc.) in mounted volumes, those files are owned by the container's runtime user. Setting PUID/PGID to match your host user prevents permission issues.
-
-### Usage
+When the container starts as root (the default for Docker Compose), the entrypoint uses `gosu` to create and drop privileges to the specified PUID/PGID. This ensures files in mounted volumes have correct ownership.
 
 ```bash
 # Method 1: Inline environment variables (from within your example directory)
@@ -150,18 +148,39 @@ echo "PUID=$(id -u)" >> .env
 echo "PGID=$(id -g)" >> .env
 docker compose up -d
 
-# Method 3: Specific UID/GID (e.g., shared server)
+# Method 3: Specific UID/GID (e.g., shared NAS server)
 PUID=3000 PGID=3000 docker compose up -d
 ```
 
-### Defaults
-
 If PUID/PGID are not specified, the container defaults to UID 1000 and GID 1000, which matches the first non-root user on most Linux systems.
+
+### Kubernetes: securityContext (Non-Root Entrypoint)
+
+When the container starts as a non-root user (e.g., via Kubernetes `securityContext.runAsUser`), the entrypoint detects this and skips all gosu/PUID/PGID logic. It activates the Python virtual environment and executes directly as the assigned UID.
+
+```yaml
+# Kubernetes Pod spec example
+spec:
+  securityContext:
+    fsGroup: 3000
+  containers:
+    - name: comfyui
+      image: ghcr.io/pixeloven/comfyui/core:cuda-latest
+      securityContext:
+        runAsUser: 3000
+        runAsGroup: 3000
+```
+
+No PUID/PGID environment variables are needed in this mode — the UID/GID comes from the Kubernetes security context. The `fsGroup` setting ensures volume mounts are group-accessible.
+
+### File Ownership
+
+At build time, all application files under `/app` are owned by a `comfy` user (UID 1000). The venv `site-packages` directory is world-writable so that ComfyUI Manager can install custom node dependencies at runtime regardless of the effective UID.
 
 ### Verification
 
 ```bash
-# Check container user
+# Docker Compose: check container user
 docker exec comfyui-core-gpu id
 # Expected: uid=3000(comfy) gid=3000(comfy) groups=3000(comfy)
 
@@ -246,7 +265,7 @@ docker compose ps -a
 # Fix ownership (use your PUID:PGID)
 sudo chown -R $USER:$USER ./data
 
-# Or set in .env
+# Or set PUID/PGID in .env (Docker Compose only)
 PUID=1000
 PGID=1000
 ```
