@@ -33,6 +33,9 @@ RUN --mount=type=cache,target=/app/.cache/pip \
 # ==================================================================
 FROM runtime AS core
 
+# Set shell to bash with pipefail for safety (not inherited across FROM)
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Remove default ubuntu user (UID 1000) if it exists to prevent conflict
 # https://askubuntu.com/questions/1513927/
 RUN touch /var/mail/ubuntu && \
@@ -58,6 +61,10 @@ ENV PYTHONPATH="/app/ComfyUI"
 ENV HOME=/app
 ENV XDG_CACHE_HOME=/app/.cache
 
+# Suppress .pyc writes — avoids silent permission failures when running
+# as an arbitrary UID that can't write to source directories
+ENV PYTHONDONTWRITEBYTECODE=1
+
 # Copy startup scripts to app root
 COPY --chown=comfy:comfy startup.sh entrypoint.sh /app/
 
@@ -65,15 +72,23 @@ COPY --chown=comfy:comfy startup.sh entrypoint.sh /app/
 RUN chmod +x /app/startup.sh /app/entrypoint.sh
 
 # Make directories writable by any user for arbitrary UID support
-# (Docker Compose PUID/PGID, K8s securityContext.runAsUser, etc.)
+# (Docker Compose PUID/PGID, K8s securityContext.runAsUser, OpenShift, etc.)
+#
+# Detect the Python version dynamically to avoid hardcoding python3.12
+# Writable targets:
 #   - site-packages: ComfyUI Manager installs custom node deps at runtime
+#   - venv/bin: pip-installed packages create entry point scripts here
 #   - .cache: uv/pip cache operations
-#   - /etc/passwd: entrypoint injects passwd entry for arbitrary UIDs
-#     so getpwuid(), getpass.getuser(), and expanduser("~") work
-RUN chmod -R a+w /app/.venv/lib/python3.12/site-packages && \
-  chmod a+w /app/.venv/lib/python3.12 && \
+#   - ComfyUI data dirs: ComfyUI creates these at startup if missing
+#   - /etc/passwd, /etc/group: entrypoint injects entries for arbitrary UIDs
+#     so getpwuid(), getgrgid(), getpass.getuser(), expanduser("~") all work
+RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')") && \
+  chmod -R a+w /app/.venv/lib/${PYTHON_VERSION}/site-packages && \
+  chmod a+w /app/.venv/lib/${PYTHON_VERSION} && \
+  chmod a+w /app/.venv/bin && \
   mkdir -p /app/.cache && chmod -R a+w /app/.cache && \
-  chmod g+w /etc/passwd
+  chmod a+w /app /app/ComfyUI && \
+  chmod a+w /etc/passwd /etc/group
 
 # Environment variables
 ARG CLI_ARGS=""
