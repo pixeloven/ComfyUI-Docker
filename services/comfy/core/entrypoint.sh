@@ -9,6 +9,16 @@ set -e
 # venv and exec directly — no privilege management needed.
 if [ "$(id -u)" -ne 0 ]; then
     echo "Starting as non-root UID:GID = $(id -u):$(id -g)"
+
+    # Inject a passwd entry for the current UID if one doesn't exist.
+    # Many tools (Python's getpass.getuser(), PyTorch's cache_dir,
+    # os.path.expanduser) call getpwuid() which fails with KeyError
+    # for UIDs not in /etc/passwd. This is standard practice for
+    # containers supporting arbitrary UIDs (e.g., OpenShift).
+    if ! whoami &>/dev/null 2>&1; then
+        echo "comfy:x:$(id -u):$(id -g):ComfyUI User:/app:/bin/bash" >> /etc/passwd
+    fi
+
     source /app/.venv/bin/activate
     exec "$@"
 fi
