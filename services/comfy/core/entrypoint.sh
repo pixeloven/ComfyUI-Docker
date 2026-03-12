@@ -10,13 +10,16 @@ set -e
 if [ "$(id -u)" -ne 0 ]; then
     echo "Starting as non-root UID:GID = $(id -u):$(id -g)"
 
-    # Inject a passwd entry for the current UID if one doesn't exist.
-    # Many tools (Python's getpass.getuser(), PyTorch's cache_dir,
-    # os.path.expanduser) call getpwuid() which fails with KeyError
-    # for UIDs not in /etc/passwd. This is standard practice for
-    # containers supporting arbitrary UIDs (e.g., OpenShift).
-    if ! whoami &>/dev/null 2>&1; then
-        echo "comfy:x:$(id -u):$(id -g):ComfyUI User:/app:/bin/bash" >> /etc/passwd
+    # Inject /etc/passwd and /etc/group entries for the current UID/GID
+    # if they don't already exist. Many tools depend on these lookups:
+    #   - Python: getpass.getuser(), os.path.expanduser("~"), grp.getgrgid()
+    #   - PyTorch: cache_dir resolution via getpwuid()
+    # This is standard practice for arbitrary UID containers (OpenShift, etc.)
+    if ! getent passwd "$(id -u)" &>/dev/null; then
+        echo "comfyuser:x:$(id -u):$(id -g):ComfyUI User:/app:/bin/bash" >> /etc/passwd
+    fi
+    if ! getent group "$(id -g)" &>/dev/null; then
+        echo "comfygroup:x:$(id -g):" >> /etc/group
     fi
 
     source /app/.venv/bin/activate
