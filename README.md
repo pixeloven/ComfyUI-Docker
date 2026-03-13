@@ -1,7 +1,7 @@
 # ComfyUI Docker 🐳
 
-[![Sponsor](https://img.shields.io/github/sponsors/pixeloven?label=Sponsor&logo=github&style=flat-square)](https://github.com/sponsors/pixeloven)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/pixeloven)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/pixeloven?style=for-the-badge&logo=github&label=Sponsor)](https://github.com/sponsors/pixeloven)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=for-the-badge&logo=buymeacoffee)](https://buymeacoffee.com/pixeloven)
 
 **Production-ready Docker setup for [ComfyUI](https://github.com/comfyanonymous/ComfyUI)**
 
