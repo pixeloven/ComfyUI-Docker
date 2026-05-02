@@ -43,6 +43,7 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cpu"
         docker buildx bake --file docker-bake.hcl --print | grep -q "runtime-cuda"
         docker buildx bake --file docker-bake.hcl --print | grep -q "complete-cuda"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
 
   build-cuda:
     runs-on: ubuntu-latest
