@@ -115,13 +115,33 @@ target "complete-cuda" {
     depends_on = ["core-cuda"]
 }
 
+target "mcp" {
+    context = "services/mcp"
+    dockerfile = "dockerfile.comfy.mcp"
+    platforms = PLATFORMS
+    tags = [
+        "${REGISTRY_URL}mcp:${IMAGE_LABEL}",
+        "${REGISTRY_URL}mcp:cache",
+        notequal("",IMAGE_LABEL) && notequal("latest",IMAGE_LABEL) ? "${REGISTRY_URL}mcp:latest" : ""
+    ]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}mcp:cache,optional=true"]
+    cache-to   = ["type=inline"]
+    args = {
+        MCP_VERSION = "v1.1.1"
+    }
+}
+
+group "mcp" {
+    targets = ["mcp"]
+}
+
 // Convenience groups
 group "default" {
     targets = ["all"]
 }
 
 group "all" {
-    targets = ["runtime", "cuda", "cpu"]
+    targets = ["runtime", "cuda", "cpu", "mcp"]
 }
 
 group "core" {
@@ -139,4 +159,3 @@ group "cuda" {
 group "cpu" {
     targets = ["runtime-cpu", "core-cpu"]
 }
-
