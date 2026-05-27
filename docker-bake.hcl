@@ -67,6 +67,7 @@ target "core-cuda" {
     cache-to   = ["type=inline"]
     args = {
         RUNTIME = "cuda"
+        TORCH_INDEX = "cu128"
     }
     depends_on = ["runtime-cuda"]
 }
@@ -90,6 +91,7 @@ target "core-cpu" {
     cache-to   = ["type=inline"]
     args = {
         RUNTIME = "cpu"
+        TORCH_INDEX = "cpu"
     }
     depends_on = ["runtime-cpu"]
 }
