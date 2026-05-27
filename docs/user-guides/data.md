@@ -142,12 +142,21 @@ volumes:
 
 ## File Permissions
 
-Data directories use the user/group ID specified by `PUID` and `PGID` environment variables (default: 1000:1000).
+### Build-Time Ownership
 
-**To set ownership:**
+All files under `/app` (including ComfyUI and the Python virtual environment) are owned by a `comfy` user (UID 1000, GID 1000) at build time. The venv `site-packages` directory is world-writable (`a+w`) so ComfyUI Manager can install custom node Python dependencies at runtime regardless of the effective UID.
+
+### Runtime Ownership
+
+Files created in mounted volumes are owned by the runtime user:
+
+- **Docker Compose**: Set `PUID` and `PGID` environment variables to match your host user (default: 1000:1000). The entrypoint uses `gosu` to run as that UID/GID.
+- **Kubernetes**: Use `securityContext.runAsUser` and `fsGroup` to control file ownership. No PUID/PGID env vars needed.
+
+**To set ownership (Docker Compose):**
 ```bash
 # Use your user ID
-id  # Shows your PUID and PGID
+id  # Shows your UID and GID
 
 # Set in .env file
 PUID=1000

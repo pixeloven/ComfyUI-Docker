@@ -33,18 +33,24 @@ RUN --mount=type=cache,target=/app/.cache/pip \
 # ==================================================================
 FROM runtime AS core
 
+# Set shell to bash with pipefail for safety (not inherited across FROM)
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Remove default ubuntu user (UID 1000) if it exists to prevent conflict
 # https://askubuntu.com/questions/1513927/
 RUN touch /var/mail/ubuntu && \
   chown ubuntu /var/mail/ubuntu && \
   userdel -r ubuntu
 
-# Create app directory (user/group created at runtime by entrypoint)
-RUN mkdir -p /app
+# Create non-root app user at build time
+ARG APP_UID=1000
+ARG APP_GID=1000
+RUN groupadd -g $APP_GID comfy && \
+  useradd -u $APP_UID -g $APP_GID -d /app -s /bin/bash -M comfy && \
+  mkdir -p /app
 
-# Copy the pre-built environment from builder
-# Docker COPY preserves the "world-readable" permissions created by umask
-COPY --from=builder /app /app
+# Copy the pre-built environment from builder, owned by comfy
+COPY --from=builder --chown=comfy:comfy /app /app
 
 WORKDIR /app/ComfyUI
 
@@ -52,12 +58,37 @@ WORKDIR /app/ComfyUI
 ENV VENV_PATH=/app/.venv
 ENV PATH="$VENV_PATH/bin:$PATH"
 ENV PYTHONPATH="/app/ComfyUI"
+ENV HOME=/app
+ENV XDG_CACHE_HOME=/app/.cache
+
+# Suppress .pyc writes — avoids silent permission failures when running
+# as an arbitrary UID that can't write to source directories
+ENV PYTHONDONTWRITEBYTECODE=1
 
 # Copy startup scripts to app root
-COPY startup.sh entrypoint.sh /app/
+COPY --chown=comfy:comfy startup.sh entrypoint.sh /app/
 
 # Make scripts executable (fast/cheap operation on single files)
 RUN chmod +x /app/startup.sh /app/entrypoint.sh
+
+# Make directories writable by any user for arbitrary UID support
+# (Docker Compose PUID/PGID, K8s securityContext.runAsUser, OpenShift, etc.)
+#
+# Detect the Python version dynamically to avoid hardcoding python3.12
+# Writable targets:
+#   - site-packages: ComfyUI Manager installs custom node deps at runtime
+#   - venv/bin: pip-installed packages create entry point scripts here
+#   - .cache: uv/pip cache operations
+#   - ComfyUI data dirs: ComfyUI creates these at startup if missing
+#   - /etc/passwd, /etc/group: entrypoint injects entries for arbitrary UIDs
+#     so getpwuid(), getgrgid(), getpass.getuser(), expanduser("~") all work
+RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')") && \
+  chmod -R a+w /app/.venv/lib/${PYTHON_VERSION}/site-packages && \
+  chmod a+w /app/.venv/lib/${PYTHON_VERSION} && \
+  chmod a+w /app/.venv/bin && \
+  mkdir -p /app/.cache && chmod -R a+w /app/.cache && \
+  chmod a+w /app /app/ComfyUI && \
+  chmod a+w /etc/passwd /etc/group
 
 # Environment variables
 ARG CLI_ARGS=""
@@ -67,6 +98,8 @@ ENV COMFY_PORT=$COMFY_PORT
 
 EXPOSE $COMFY_PORT
 
-# Entrypoint runs as root, drops privileges to PUID:PGID internally via gosu
+# Entrypoint runs as root by default for Docker Compose PUID/PGID support.
+# K8s users override with securityContext.runAsUser — the entrypoint detects
+# non-root and skips gosu, executing directly as the assigned UID.
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["/app/startup.sh"]

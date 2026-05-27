@@ -1,0 +1,47 @@
+# MCP server for ComfyUI — joenorton/comfyui-mcp-server
+# Standalone Python image; does NOT depend on the ComfyUI runtime image.
+# Communicates with ComfyUI over HTTP (COMFYUI_URL env var).
+#
+# Published as: ghcr.io/pixeloven/comfyui/mcp:<IMAGE_LABEL>
+
+ARG MCP_VERSION=v1.1.1
+
+FROM python:3.12-slim
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+ARG APP_UID=1000
+ARG APP_GID=1000
+RUN groupadd -g "$APP_GID" comfy && \
+    useradd -u "$APP_UID" -g "$APP_GID" -d /app -s /bin/bash -M comfy && \
+    mkdir -p /app
+
+WORKDIR /app
+
+# Fetch pinned upstream source
+ARG MCP_VERSION
+RUN git clone --depth 1 --branch "$MCP_VERSION" \
+      https://github.com/joenorton/comfyui-mcp-server.git . && \
+    pip install --no-cache-dir -r requirements.txt && \
+    rm -rf .git
+
+# Upstream FastMCP() defaults host="127.0.0.1" via its __init__ kwarg default,
+# which explicit-kwarg initialization makes impossible to override via env var.
+# Patch the constructor call directly so the server binds all interfaces.
+RUN sed -i 's/port=9000,/port=9000, host="0.0.0.0",/' server.py
+
+RUN chown -R comfy:comfy /app
+
+USER comfy
+
+# COMFYUI_URL is required at runtime — point to the ComfyUI service
+ENV COMFYUI_URL=http://localhost:8188
+
+EXPOSE 9000
+
+CMD ["python", "server.py"]

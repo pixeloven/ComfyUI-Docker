@@ -1,7 +1,7 @@
 # ComfyUI Docker 🐳
 
-[![Sponsor](https://img.shields.io/github/sponsors/pixeloven?label=Sponsor&logo=github&style=flat-square)](https://github.com/sponsors/pixeloven)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/pixeloven)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/pixeloven?style=for-the-badge&logo=github&label=Sponsor)](https://github.com/sponsors/pixeloven)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=for-the-badge&logo=buymeacoffee)](https://buymeacoffee.com/pixeloven)
 
 **Production-ready Docker setup for [ComfyUI](https://github.com/comfyanonymous/ComfyUI)**
 
@@ -30,7 +30,7 @@ A complete containerized deployment of ComfyUI with GPU acceleration, flexible d
 - **⚡ Performance Optimized**: SageAttention for 2-3x faster attention computation
 - **🔧 Extensible**: Custom node support via volume mounts
 - **🔄 CI/CD Ready**: Automated builds, weekly dependency updates
-- **🔒 Security**: API/Swarm/K8s ready with arbitrary user support
+- **🔒 Security**: Runs as non-root by default, supports Docker Compose PUID/PGID and Kubernetes securityContext
 
 ---
 
@@ -184,8 +184,21 @@ COMFY_OUTPUT_PATH=./data/output     # Override output directory
 PUID=$(id -u) PGID=$(id -g) docker compose up -d   # from within an examples/ directory
 ```
 
+### Kubernetes Deployment
+
+The images support Kubernetes natively via `securityContext.runAsUser`. When the entrypoint detects a non-root UID, it skips the gosu/PUID/PGID logic and executes directly:
+
+```yaml
+securityContext:
+  runAsUser: 3000
+  runAsGroup: 3000
+  fsGroup: 3000
+```
+
+The Python virtual environment's `site-packages` directory is world-writable at build time, so ComfyUI Manager can install custom node dependencies regardless of the runtime UID.
+
 **For complete configuration options, see:**
-- [Running Containers Guide](docs/user-guides/running.md) - Environment variables and Docker Compose
+- [Running Containers Guide](docs/user-guides/running.md) - Environment variables, Docker Compose, and Kubernetes
 - [Performance Tuning Guide](docs/user-guides/performance.md) - CLI arguments and optimization
 
 ---
