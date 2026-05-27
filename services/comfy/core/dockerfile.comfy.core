@@ -21,11 +21,29 @@ RUN umask 022 && \
 # We clone into a temporary directory and move to /app/ComfyUI to prevent
 # permission issues if we were to mount /app entirely in dev modes
 ARG RUNTIME=cuda
+
+# CUDA wheel index for the torch family (torch / torchaudio / torchvision).
+# Defaults to cu128 for the cuda target; the cpu target overrides this to
+# "cpu" via docker-bake.hcl. Future cuda variants (cu130, etc.) can be
+# added by introducing a new bake target with `args = { TORCH_INDEX = "cu130" }`.
+ARG TORCH_INDEX=cu128
+
 RUN --mount=type=cache,target=/app/.cache/pip \
   umask 022 && \
   git clone https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI && \
-  pip install --extra-index-url https://download.pytorch.org/whl/cu128 \
-    -r /app/ComfyUI/requirements.txt && \
+  # Install torch family from the wheel index ONLY (not --extra-index-url).
+  # --extra-index-url is additive, so pip picks the highest version across
+  # PyPI + the index. When PyPI ships a newer torch than the cu* index
+  # (which happens regularly), pip picks the PyPI build, leaving torch and
+  # torchaudio compiled against different CUDA versions. Using --index-url
+  # replaces PyPI for this command, so resolution is constrained to the
+  # specified index and the CUDA ABI stays consistent across all three.
+  pip install --index-url https://download.pytorch.org/whl/${TORCH_INDEX} \
+    torch torchaudio torchvision && \
+  # Install the rest of ComfyUI's requirements normally. torch, torchaudio,
+  # and torchvision are already installed; pip will see them satisfied and
+  # skip re-resolution.
+  pip install -r /app/ComfyUI/requirements.txt && \
   pip install -r /app/ComfyUI/manager_requirements.txt
 
 # ==================================================================
