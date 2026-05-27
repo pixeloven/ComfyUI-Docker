@@ -8,9 +8,20 @@ COPY --chown=comfy:comfy ./extra-requirements.txt ./
 
 # Install additional python requirements
 # Using the same cache path as the core image
+#
+# --extra-index-url cu130 is REQUIRED. The base image's PyTorch is built
+# against CUDA 13.0 (torch==2.12.0+cu130). Without the cu130 index, pip
+# only sees the stock cu128 torchaudio wheel on PyPI and will replace
+# the cu130 one whenever a transitive dep triggers re-resolution,
+# producing at runtime:
+#   RuntimeError: Detected that PyTorch and TorchAudio were compiled
+#   with different CUDA versions. PyTorch has CUDA version 13.0 whereas
+#   TorchAudio has CUDA version 12.8.
 RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/app/.cache/pip \
     source $VENV_PATH/bin/activate && \
-    pip install -r extra-requirements.txt
+    pip install \
+      --extra-index-url https://download.pytorch.org/whl/cu130 \
+      -r extra-requirements.txt
 
 # Re-apply world-writable permissions after installing extra packages.
 # The core stage's chmod doesn't cover files added in this layer — newly
