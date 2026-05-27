@@ -14,9 +14,14 @@ matplotlib>=3.10
 facexlib>=0.3
 insightface>=0.7
 
-# ComfyUI Impact Pack dependencies
+# ComfyUI Impact Pack + Subpack dependencies
 piexif>=1.1
 ultralytics>=8.3
+segment-anything>=1.0
+dill>=0.3
+
+# ComfyUI Inspire Pack dependencies
+webcolors>=24.0
 
 # RMBG and AILab Segmentation
 timm>=1.0
