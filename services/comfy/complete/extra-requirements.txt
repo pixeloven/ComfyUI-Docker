@@ -4,11 +4,20 @@
 accelerate>=1.10
 onnxruntime-gpu>=1.22
 diffusers>=0.34
+huggingface-hub>=0.19
+transformers>=4.30
+peft
+typing_extensions
 
 # Custom node optimizations - frequently used dependencies baked in for faster startup
 opencv-python-headless>=4.12
 scipy>=1.16
 matplotlib>=3.10
+spandrel
+sentencepiece
+lark
+ftfy
+protobuf>=3.20.2,<6.0.0
 
 # PuLID / IPAdapter
 facexlib>=0.3
@@ -19,6 +28,9 @@ piexif>=1.1
 ultralytics>=8.3
 segment-anything>=1.0
 dill>=0.3
+# SAM2 from facebookresearch — pinned to the commit Manager installed in
+# production (2026-05-26). Unpin only after testing a newer revision.
+git+https://github.com/facebookresearch/sam2@2b90b9f5ceec907a1c18123530e92e794ad901a4
 
 # ComfyUI Inspire Pack dependencies
 webcolors>=24.0
