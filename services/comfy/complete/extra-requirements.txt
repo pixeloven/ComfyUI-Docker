@@ -35,6 +35,17 @@ git+https://github.com/facebookresearch/sam2@2b90b9f5ceec907a1c18123530e92e794ad
 # ComfyUI Inspire Pack dependencies
 webcolors>=24.0
 
+# ComfyUI-Lora-Manager dependencies (node is runtime-installed onto the
+# custom_nodes volume, so its imports must already exist in the venv —
+# a missing module here crash-loops ComfyUI at startup)
+natsort>=8.4
+olefile>=0.47
+toml>=0.10
+GitPython>=3.1
+aiosqlite>=0.20
+beautifulsoup4>=4.12
+platformdirs>=4.0
+
 # RMBG and AILab Segmentation
 timm>=1.0
 groundingdino-py>=0.4.0
