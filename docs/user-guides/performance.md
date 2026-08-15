@@ -12,8 +12,8 @@ ComfyUI provides command-line arguments for performance tuning. Configure via th
 # Standard GPU (8GB+ VRAM) - in .env
 CLI_ARGS=
 
-# Low VRAM systems (4-6GB) - in .env
-CLI_ARGS=--lowvram
+# Leave Dynamic VRAM enabled; reserve additional headroom for the desktop
+CLI_ARGS="--vram-headroom 1"
 
 # Ultra-low VRAM systems (<4GB) - in .env
 CLI_ARGS=--novram
@@ -46,10 +46,13 @@ For complete documentation, see the [ComfyUI Manual Install Guide](https://docs.
 ### Memory Management
 
 ```bash
---lowvram                # For 4-6GB VRAM systems
+--lowvram                # Legacy text-encoder offload when Dynamic VRAM is disabled
 --novram                 # For <4GB VRAM systems (slowest)
 --cpu                    # Force CPU-only mode
 --normalvram             # Normal VRAM usage (default)
+--vram-headroom 1        # Keep an extra 1 GB free for Dynamic VRAM
+--disable-dynamic-vram   # Return to estimate-based model loading
+--fast-disk              # Prefer disk-backed offload on a fast NVMe device
 ```
 
 ### Precision Settings
@@ -67,16 +70,17 @@ For complete documentation, see the [ComfyUI Manual Install Guide](https://docs.
 --use-split-cross-attention     # Split attention (memory efficient)
 --use-quad-cross-attention      # Quad split attention
 --use-pytorch-cross-attention   # PyTorch native attention
+--use-ck-attention              # Maintained Comfy Kitchen attention backend
 --disable-xformers              # Disable xformers optimization
 ```
 
 ### Preview Settings
 
 ```bash
---preview-method auto       # Auto-select preview method (default)
+--preview-method auto       # Auto-select preview method
 --preview-method latent2rgb # Latent2RGB previews
 --preview-method taesd      # TAESD previews (faster)
---preview-method none       # Disable previews (saves memory)
+--preview-method none       # Disable previews (default; saves memory)
 ```
 
 ### Logging
@@ -89,12 +93,12 @@ For complete documentation, see the [ComfyUI Manual Install Guide](https://docs.
 
 ### Low-End GPU (4-6GB VRAM)
 ```bash
-CLI_ARGS=--lowvram --preview-method none --fp16-vae
+CLI_ARGS="--vram-headroom 0.5 --preview-method none --fp16-vae"
 ```
 
 ### Mid-Range GPU (6-8GB VRAM)
 ```bash
-CLI_ARGS=--lowvram --preview-method taesd
+CLI_ARGS="--vram-headroom 1 --preview-method taesd"
 ```
 
 ### High-End GPU (12GB+ VRAM)
@@ -119,22 +123,23 @@ cd examples/core-cpu
 docker compose up -d
 ```
 
-## SageAttention (Complete Mode Only)
+## Current Acceleration Backends
 
-The **Complete** image includes [SageAttention 2.2.0](https://github.com/thu-ml/SageAttention) and [SageAttn3 3.0.0](https://github.com/thu-ml/SageAttention) for 2-3x faster attention computation.
+ComfyUI enables Dynamic VRAM and NVIDIA async offload by default when the
+hardware supports them. It also ships the maintained Comfy Kitchen kernels.
 
 ### Features
 
-- **Automatic activation** - No configuration needed
-- **2-3x faster** - Attention computation speedup
-- **Minimal quality impact** - <1% difference
-- **Smart fallback** - Uses standard attention when needed
-- **Blackwell GPU support** - SageAttn3 supports NVIDIA Blackwell architecture
+- `CLI_ARGS=--use-ck-attention` selects Comfy Kitchen attention.
+- `CLI_ARGS=--fast` enables all experimental optimizations; use named options
+  such as `--fast fp16_accumulation` when you want narrower risk.
+- `CLI_ARGS=--disable-cuda-graphs` disables the current CUDA graph path when a
+  workflow or custom node is incompatible.
 
 ### Verify Installation
 
 ```bash
-docker exec comfyui-complete-gpu python -c "import sageattention; print('SageAttention OK')"
+docker exec comfyui-core-gpu python -c "import torch; print(torch.__version__, torch.version.cuda)"
 ```
 
 ## Docker Resource Limits
@@ -242,18 +247,17 @@ CLI_ARGS=--cpu
 
 - Check GPU is being used: `nvidia-smi`
 - Try different attention mechanism: `CLI_ARGS="--use-pytorch-cross-attention"`
-- Use Complete mode for SageAttention optimization
+- Try `--use-ck-attention` on compatible hardware
 
 ### Container Slow to Start
 
-**Complete mode** has a larger image due to pre-installed Python dependencies and SageAttention. Use Core mode if you don't need the extra optimizations.
+**Complete mode** has a larger image due to pre-installed custom-node dependencies. The core ComfyUI acceleration paths are available in both Core and Complete.
 
 ---
 
 **External Resources:**
 - [ComfyUI CLI Arguments](https://docs.comfy.org/essentials/comfyui_manual_install#optional-setup)
 - [ComfyUI GitHub](https://github.com/comfyanonymous/ComfyUI)
-- [SageAttention](https://github.com/thu-ml/SageAttention)
 
 **See Also:**
 - [Running Containers](running.md) - Set CLI_ARGS via environment variables

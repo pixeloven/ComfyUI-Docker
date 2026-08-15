@@ -1,7 +1,7 @@
 services:
   comfyui:
-    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui/core:cuda-latest}
-    container_name: comfyui-core-gpu
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui/core:xpu-latest}
+    container_name: comfyui-core-intel
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -9,10 +9,13 @@ services:
       - COMFY_ENABLE_MANAGER=${COMFY_ENABLE_MANAGER:-true}
       - COMFY_ENABLE_ASSETS=${COMFY_ENABLE_ASSETS:-true}
       - CLI_ARGS=${CLI_ARGS:-}
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     ports:
       - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-109}"
     volumes:
       - ${COMFY_CUSTOM_NODE_PATH:-./data/custom_nodes}:/app/custom_nodes
       - ${COMFY_DATASET_PATH:-./data/datasets}:/app/datasets
@@ -21,19 +24,5 @@ services:
       - ${COMFY_MODEL_PATH:-./data/models}:/app/models
       - ${COMFY_TEMP_PATH:-./data/temp}:/app/temp
       - ${COMFY_USER_PATH:-./data/user}:/app/user
-      # (Optional) Configuration
       - ./extra_model_paths.yaml:/app/extra_model_paths.yaml:ro
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [ gpu ]
-    networks:
-      - comfy_network
-
-networks:
-  comfy_network:
-    driver: bridge

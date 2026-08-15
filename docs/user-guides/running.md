@@ -4,13 +4,15 @@ How to run ComfyUI using Docker Compose with profile selection and environment c
 
 ## Deployment Examples
 
-ComfyUI Docker provides three example configurations in the `examples/` directory:
+ComfyUI Docker provides five example configurations in the `examples/` directory:
 
 | Example | Directory | Container | Description |
 |---------|-----------|-----------|-------------|
 | **Core GPU** | `examples/core-gpu` | `comfyui-core-gpu` | Essential ComfyUI with GPU support |
-| **Complete GPU** | `examples/complete-gpu` | `comfyui-complete-gpu` | Pre-installed deps + SageAttention |
+| **Complete GPU** | `examples/complete-gpu` | `comfyui-complete-gpu` | CUDA + pre-installed custom-node dependencies |
 | **Core CPU** | `examples/core-cpu` | `comfyui-core-cpu` | CPU-only mode (no GPU required) |
+| **Core AMD** | `examples/core-amd` | `comfyui-core-amd` | AMD ROCm 7.2 on Linux |
+| **Core Intel** | `examples/core-intel` | `comfyui-core-intel` | Intel XPU on Linux |
 
 ### Starting Services
 
@@ -74,6 +76,11 @@ COMFY_MODEL_PATH=./data/models
 COMFY_OUTPUT_PATH=./data/output
 COMFY_TEMP_PATH=./data/temp
 COMFY_USER_PATH=./data/user
+COMFY_DATASET_PATH=./data/datasets
+
+# Built-in services
+COMFY_ENABLE_MANAGER=true
+COMFY_ENABLE_ASSETS=true
 
 # Performance (see Performance Tuning guide)
 CLI_ARGS=--preview-method auto
@@ -119,13 +126,16 @@ COMFY_MODEL_PATH=./data/models              # AI models
 COMFY_OUTPUT_PATH=./data/output             # Generated content
 COMFY_TEMP_PATH=./data/temp                 # Temporary files
 COMFY_USER_PATH=./data/user                 # User configs
+COMFY_DATASET_PATH=./data/datasets          # Native trainer datasets
 ```
 
 See [Data Management](data.md) for details on directory structure.
 
 #### Performance & Optional
 ```bash
-CLI_ARGS="--lowvram"         # ComfyUI launch arguments
+COMFY_ENABLE_MANAGER=true     # Registry-backed Manager UI and endpoints
+COMFY_ENABLE_ASSETS=true      # Assets API/sidebar and persistent index
+CLI_ARGS="--vram-headroom 1" # Additional ComfyUI launch arguments
 COMFY_IMAGE=custom:latest    # Override Docker image
 ```
 
@@ -283,7 +293,7 @@ See [Data Management](data.md) for file permission details.
 nvidia-smi
 
 # Test Docker GPU support
-docker run --rm --gpus all nvidia/cuda:12.9.1-runtime-ubuntu24.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:13.0.2-runtime-ubuntu24.04 nvidia-smi
 ```
 
 See [Performance Tuning](performance.md) for GPU optimization.

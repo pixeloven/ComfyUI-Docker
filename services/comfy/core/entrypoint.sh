@@ -85,12 +85,21 @@ fi
 # Directory Ownership
 # =============================================================================
 
-# Set ownership of application root directories
+# Set ownership of application and persistent volume roots. Keep this
+# non-recursive: model stores can contain terabytes of data.
 chown "$PUID:$PGID" /app /app/ComfyUI
-
-# Set ownership of immediate subdirectories (handles volume mount points)
-# Non-recursive for performance — avoids traversing large model directories
-find /app/ComfyUI -maxdepth 1 -mindepth 1 -type d -exec chown "$PUID:$PGID" {} +
+for directory in \
+    /app/models \
+    /app/custom_nodes \
+    /app/datasets \
+    /app/input \
+    /app/output \
+    /app/temp \
+    /app/user; do
+    if [ -d "$directory" ]; then
+        chown "$PUID:$PGID" "$directory"
+    fi
+done
 
 # =============================================================================
 # Startup Logging

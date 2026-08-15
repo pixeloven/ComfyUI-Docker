@@ -11,8 +11,10 @@ Pre-built images are automatically published to GitHub Container Registry and us
 | Image | Tag | Description |
 |-------|-----|-------------|
 | `ghcr.io/pixeloven/comfyui/core` | `cuda-latest` | Essential ComfyUI with CUDA GPU support |
-| `ghcr.io/pixeloven/comfyui/complete` | `cuda-latest` | Full features with custom nodes |
+| `ghcr.io/pixeloven/comfyui/complete` | `cuda-latest` | Common custom-node dependencies pre-installed |
 | `ghcr.io/pixeloven/comfyui/core` | `cpu-latest` | CPU-only mode |
+| `ghcr.io/pixeloven/comfyui/core` | `rocm-latest` | AMD ROCm 7.2 |
+| `ghcr.io/pixeloven/comfyui/core` | `xpu-latest` | Intel XPU |
 
 ### Pull Latest Images
 
@@ -25,8 +27,8 @@ docker compose pull
 ### Image Updates
 
 Images are rebuilt automatically:
-- **Weekly**: Every Sunday at 2:00 AM UTC with latest dependencies
-- **On Release**: When new versions are tagged
+- **Weekly**: Every Sunday at 2:00 AM UTC, resolving the newest stable upstream release
+- **On project changes**: CI resolves the newest stable upstream release
 - **Manual**: Via GitHub Actions workflow
 
 ### Use Specific Version
@@ -34,8 +36,8 @@ Images are rebuilt automatically:
 Override the image version:
 
 ```bash
-# In .env file
-COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-dev
+# Mirror the upstream ComfyUI release tag
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-v0.33.1
 
 # Or inline
 COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-abc1234 docker compose up -d
@@ -54,6 +56,8 @@ docker buildx bake all --load
 # Build specific groups
 docker buildx bake cuda --load        # CUDA GPU images
 docker buildx bake cpu --load         # CPU-only images
+docker buildx bake rocm --load        # AMD ROCm images
+docker buildx bake xpu --load         # Intel XPU images
 docker buildx bake runtime --load     # Base runtime layers only
 docker buildx bake core --load        # Core ComfyUI images
 ```
@@ -64,6 +68,8 @@ docker buildx bake core --load        # Core ComfyUI images
 # Core images
 docker buildx bake core-cuda --load
 docker buildx bake core-cpu --load
+docker buildx bake core-rocm --load
+docker buildx bake core-xpu --load
 
 # Complete image
 docker buildx bake complete-cuda --load
@@ -78,13 +84,13 @@ docker buildx bake runtime-cpu --load
 The project uses a multi-stage build hierarchy:
 
 ```
-runtime-cuda/cpu → core-cuda/cpu → complete-cuda
+runtime-{cuda,cpu,rocm,xpu} → core-{cuda,cpu,rocm,xpu} → complete-cuda
 ```
 
 **Build Stages:**
 1. **Runtime** (`services/runtime/`): Base Ubuntu + CUDA/CPU runtime
 2. **Core** (`services/comfy/core/`): ComfyUI installed at `/app`
-3. **Complete** (`services/comfy/complete/`): Enhanced with custom nodes
+3. **Complete** (`services/comfy/complete/`): Enhanced with common custom-node dependencies
 
 **Tip:** Build base images first for faster iteration:
 ```bash
@@ -118,6 +124,10 @@ Configure builds using environment variables:
 REGISTRY_URL=ghcr.io/myuser/comfyui/
 IMAGE_LABEL=custom
 PLATFORMS=linux/amd64
+COMFYUI_VERSION=v0.33.1                # Stable source tag (the default)
+
+# Explicit nightly build
+COMFYUI_VERSION=master IMAGE_LABEL=nightly docker buildx bake cuda --load
 
 # Build with custom settings
 REGISTRY_URL=myregistry.com/ IMAGE_LABEL=v1.0 docker buildx bake all --load

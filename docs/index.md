@@ -14,6 +14,7 @@ Essential guides for users:
 - **[Running Containers](user-guides/running.md)** - Docker Compose operations and `.env` configuration
 - **[Data Management](user-guides/data.md)** - Models, workflows, and persistent storage
 - **[Performance Tuning](user-guides/performance.md)** - CLI arguments and resource optimization
+- **[Current Feature Support](user-guides/features.md)** - Ecosystem audit and container support matrix
 
 **[View all User Guides →](user-guides/index.md)**
 

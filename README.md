@@ -3,7 +3,7 @@
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/pixeloven?style=for-the-badge&logo=github&label=Sponsor)](https://github.com/sponsors/pixeloven)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=for-the-badge&logo=buymeacoffee)](https://buymeacoffee.com/pixeloven)
 
-**Production-ready Docker setup for [ComfyUI](https://github.com/comfyanonymous/ComfyUI)**
+**Production-ready Docker setup for [ComfyUI](https://github.com/Comfy-Org/ComfyUI)**
 
 A complete containerized deployment of ComfyUI with GPU acceleration, flexible deployment profiles, and persistent data management. Built with Docker Buildx Bake for efficient multi-stage builds.
 
@@ -23,11 +23,11 @@ A complete containerized deployment of ComfyUI with GPU acceleration, flexible d
 
 ## Key Features
 
-- **🚀 GPU-Accelerated**: NVIDIA CUDA 12.9 support with optimized runtime
-- **🎯 Multiple Profiles**: Core (minimal), Complete (full-featured), CPU-only
+- **🚀 Current Accelerators**: NVIDIA CUDA 13.0, AMD ROCm 7.2, Intel XPU, and CPU
+- **🎯 Versioned ComfyUI**: Stable release tags by default, explicit nightly builds when wanted
 - **📁 Persistent Storage**: Individual volume mounts for models, outputs, custom nodes, etc.
 - **🐳 Production Ready**: Multi-stage builds, layer caching, and pre-built GHCR images
-- **⚡ Performance Optimized**: SageAttention for 2-3x faster attention computation
+- **⚡ Performance Optimized**: Dynamic VRAM, async offload, CUDA graphs, and Comfy Kitchen attention support
 - **🔧 Extensible**: Custom node support via volume mounts
 - **🔄 CI/CD Ready**: Automated builds, weekly dependency updates
 - **🔒 Security**: Runs as non-root by default, supports Docker Compose PUID/PGID and Kubernetes securityContext
@@ -60,7 +60,7 @@ cd examples/core-gpu
 docker compose up -d
 ```
 
-**Complete GPU** (optimized dependencies + SageAttention):
+**Complete GPU** (extra custom-node dependencies):
 ```bash
 cd examples/complete-gpu
 docker compose up -d
@@ -84,12 +84,14 @@ Place your Stable Diffusion checkpoints in `./data/models/checkpoints/` or downl
 
 ## Deployment Profiles
 
-ComfyUI Docker offers three deployment profiles to match your use case:
+ComfyUI Docker offers five deployment examples to match your hardware and use case:
 
 | Example | Container | Image | Best For | Features |
 |---------|-----------|-------|----------|----------|
 | **`core-gpu`** | `comfyui-core-gpu` | `ghcr.io/pixeloven/comfyui/core:cuda-latest` | Most users | Essential ComfyUI + GPU acceleration |
-| **`complete-gpu`** | `comfyui-complete-gpu` | `ghcr.io/pixeloven/comfyui/complete:cuda-latest` | Power users | Pre-installed Python deps + SageAttention optimization |
+| **`complete-gpu`** | `comfyui-complete-gpu` | `ghcr.io/pixeloven/comfyui/complete:cuda-latest` | Power users | Pre-installed common custom-node dependencies |
+| **`core-amd`** | `comfyui-core-amd` | `ghcr.io/pixeloven/comfyui/core:rocm-latest` | AMD Linux | PyTorch ROCm 7.2 |
+| **`core-intel`** | `comfyui-core-intel` | `ghcr.io/pixeloven/comfyui/core:xpu-latest` | Intel Arc Linux | PyTorch XPU |
 | **`core-cpu`** | `comfyui-core-cpu` | `ghcr.io/pixeloven/comfyui/core:cpu-latest` | Testing/Compatibility | No GPU required |
 
 ### Core GPU (`examples/core-gpu`) ⚡
@@ -102,13 +104,13 @@ docker compose up -d
 ```
 
 - ✅ Essential ComfyUI functionality
-- ✅ GPU acceleration (CUDA 12.9)
+- ✅ GPU acceleration (CUDA 13.0 / PyTorch cu130)
 - ✅ Fast startup
 - ✅ Smaller image size
 
 ### Complete GPU (`examples/complete-gpu`) 🚀
 
-Optimized deployment with pre-installed Python dependencies and SageAttention.
+CUDA deployment with pre-installed Python dependencies used by common custom nodes.
 
 ```bash
 cd examples/complete-gpu
@@ -116,7 +118,7 @@ docker compose up -d
 ```
 - ✅ Everything core has
 - ✅ Pre-installed Python dependencies for common custom node setups
-- ✅ SageAttention 2.2.0 + SageAttn3 3.0.0 optimization (2-3x faster)
+- ✅ Current Comfy Kitchen attention backend available with `CLI_ARGS=--use-ck-attention`
 - ⚠️  Larger image size
 
 ### Core CPU (`examples/core-cpu`)
@@ -142,6 +144,7 @@ ComfyUI Docker uses **individual volume mounts** for each data directory, provid
 ./data/
 ├── models/          → /app/models          (AI models, checkpoints, LoRAs)
 ├── custom_nodes/    → /app/custom_nodes    (Extensions and plugins)
+├── datasets/        → /app/datasets        (LoRA training datasets)
 ├── input/           → /app/input           (Input images/workflows)
 ├── output/          → /app/output          (Generated outputs)
 ├── temp/            → /app/temp            (Temporary files)
@@ -195,7 +198,7 @@ securityContext:
   fsGroup: 3000
 ```
 
-The Python virtual environment's `site-packages` directory is world-writable at build time, so ComfyUI Manager can install custom node dependencies regardless of the runtime UID.
+The Python virtual environment's package and entry-point directories are world-writable at build time, so ComfyUI Manager can install custom node dependencies regardless of the runtime UID.
 
 **For complete configuration options, see:**
 - [Running Containers Guide](docs/user-guides/running.md) - Environment variables, Docker Compose, and Kubernetes
@@ -282,7 +285,7 @@ docker compose logs -f
 ### Contribution Guidelines
 
 - Follow existing code style and structure
-- Test your changes with all three profiles
+- Test your changes with all five examples
 - Update documentation for new features
 - Add meaningful commit messages
 - Ensure CI/CD checks pass
@@ -293,11 +296,11 @@ docker compose logs -f
 
 ### What is ComfyUI Docker?
 
-ComfyUI Docker is a production-ready containerization of **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)**, a powerful node-based interface for Stable Diffusion and other AI image generation models. This project provides:
+ComfyUI Docker is a production-ready containerization of **[ComfyUI](https://github.com/Comfy-Org/ComfyUI)**, a node-based engine for image, video, audio, 3D, and language workflows. This project provides:
 
 - **Multiple deployment profiles** (core, complete, CPU-only)
 - **Multi-stage Docker builds** using Docker Buildx Bake
-- **GPU acceleration** with NVIDIA CUDA support
+- **GPU acceleration** for NVIDIA CUDA, AMD ROCm, and Intel XPU on Linux
 - **Persistent data management** with granular volume mounting
 - **Pre-built images** available on GitHub Container Registry
 - **Flexible configuration** via environment variables
@@ -307,12 +310,13 @@ Perfect for local development, production deployments, or CI/CD pipelines.
 ### Which profile should I use?
 
 - **Core Mode**: Best for most users - fast startup, essential features, GPU acceleration
-- **Complete Mode**: Best for power users - pre-installed Python dependencies for common custom nodes, SageAttention optimization
+- **Complete Mode**: Best for NVIDIA power users who want common custom-node dependencies pre-installed
+- **AMD/Intel Modes**: Core images using the official PyTorch ROCm or XPU wheel channels
 - **CPU Mode**: Best for testing or when no GPU is available
 
 ### Do I need a GPU?
 
-For **Core** and **Complete** modes, yes - an NVIDIA GPU with CUDA support is required. For **CPU mode**, no GPU is needed, but image generation will be significantly slower.
+The CUDA and Complete examples require NVIDIA, the AMD example requires a ROCm-supported GPU, and the Intel example requires a supported Intel GPU. CPU mode needs no GPU but is significantly slower.
 
 ### Where are my models and outputs stored?
 
@@ -341,7 +345,7 @@ docker buildx bake all --no-cache
 
 ### Why is my container slow to start?
 
-**Complete mode** has a larger image due to pre-installed Python dependencies and SageAttention. If startup time is a concern and you don't need the extra optimizations, consider using **Core mode**.
+**Complete mode** has a larger image due to pre-installed Python dependencies. Use **Core mode** when custom nodes can manage their own dependencies.
 
 ---
 
@@ -349,7 +353,7 @@ docker buildx bake all --no-cache
 
 This project is licensed under the **[MIT License](LICENSE)**.
 
-**ComfyUI** itself is licensed under **GPL-3.0** - see the [ComfyUI repository](https://github.com/comfyanonymous/ComfyUI/blob/master/LICENSE) for details.
+**ComfyUI** itself is licensed under **GPL-3.0** - see the [ComfyUI repository](https://github.com/Comfy-Org/ComfyUI/blob/master/LICENSE) for details.
 
 ---
 
