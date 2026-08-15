@@ -1,7 +1,7 @@
 # ComfyUI-Docker Makefile
 # Provides convenient targets for local development and building
 
-.PHONY: help all runtime core cuda cpu clean
+.PHONY: help all runtime core cuda cpu rocm xpu clean
 
 # Default target
 help: ## Show this help message
@@ -41,6 +41,12 @@ cuda: ## Build complete CUDA stack and load to Docker
 cpu: ## Build complete CPU stack and load to Docker
 	docker buildx bake cpu --load
 
+rocm: ## Build AMD ROCm stack and load to Docker
+	docker buildx bake rocm --load
+
+xpu: ## Build Intel XPU stack and load to Docker
+	docker buildx bake xpu --load
+
 # Complete images
 complete-cuda: ## Build CUDA complete image and load to Docker
 	docker buildx bake complete-cuda --load
@@ -58,6 +64,8 @@ validate: ## Validate Bake and example Compose configurations
 	cd examples/core-gpu && docker compose config --quiet
 	cd examples/complete-gpu && docker compose config --quiet
 	cd examples/core-cpu && docker compose config --quiet
+	cd examples/core-amd && docker compose config --quiet
+	cd examples/core-intel && docker compose config --quiet
 
 push: ## Build and push all images to registry (don't load locally)
 	docker buildx bake all --push
@@ -72,10 +80,18 @@ test-cpu: ## Start core-cpu example locally for testing
 test-complete: ## Start complete-gpu example locally for testing
 	cd examples/complete-gpu && docker compose up -d
 
+test-amd: ## Start the AMD ROCm example locally for testing
+	cd examples/core-amd && docker compose up -d
+
+test-intel: ## Start the Intel XPU example locally for testing
+	cd examples/core-intel && docker compose up -d
+
 stop: ## Stop all example services
 	-cd examples/core-gpu && docker compose down
 	-cd examples/complete-gpu && docker compose down
 	-cd examples/core-cpu && docker compose down
+	-cd examples/core-amd && docker compose down
+	-cd examples/core-intel && docker compose down
 
 logs: ## Show logs from core-gpu example
 	cd examples/core-gpu && docker compose logs -f

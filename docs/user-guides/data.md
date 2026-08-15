@@ -10,6 +10,7 @@ All persistent data is stored in `./data/` with subdirectories that map to Comfy
 data/
 ├── models/              → /app/models (AI models, checkpoints, LoRAs)
 ├── custom_nodes/        → /app/custom_nodes (Extensions and plugins)
+├── datasets/            → /app/datasets (Native LoRA trainer datasets)
 ├── input/               → /app/input (Input images and workflows)
 ├── output/              → /app/output (Generated images)
 ├── temp/                → /app/temp (Temporary files)
@@ -22,6 +23,7 @@ data/
 |-----------|---------|------------|
 | `models/` | AI models, checkpoints, LoRAs, VAEs | Read-write (`:rw`) |
 | `custom_nodes/` | Custom node extensions | Read-write (`:rw`) |
+| `datasets/` | Training datasets | Read-write (`:rw`) |
 | `input/` | Input images and workflow files | Read-write (`:rw`) |
 | `output/` | Generated images and results | Read-write (`:rw`) |
 | `temp/` | Temporary processing files | Read-write (`:rw`) |
@@ -44,7 +46,16 @@ data/models/
 ├── clip_vision/        # CLIP vision models
 ├── upscale_models/     # Upscaling models (ESRGAN, etc.)
 ├── style_models/       # Style transfer models
-└── ipadapter/          # IP-Adapter models
+├── diffusion_models/   # Diffusion/UNet model components
+├── text_encoders/      # T5, CLIP, and language encoders
+├── audio_encoders/     # Native audio workflow encoders
+├── latent_upscale_models/
+├── model_patches/
+├── background_removal/
+├── frame_interpolation/
+├── geometry_estimation/
+├── optical_flow/
+└── detection/
 ```
 
 ### Adding Models
@@ -110,7 +121,7 @@ Then restart the container (see [Running Containers](running.md)).
 
 ### Complete Mode
 
-Complete mode includes pre-installed Python dependencies for common custom node setups and SageAttention optimization. Custom nodes can be added by cloning them into `data/custom_nodes/` or through the ComfyUI interface.
+Complete mode includes pre-installed Python dependencies for common custom node setups. Custom nodes can be added by cloning them into `data/custom_nodes/` or through the registry-backed Manager interface.
 
 ## Custom Paths
 
@@ -144,7 +155,7 @@ volumes:
 
 ### Build-Time Ownership
 
-All files under `/app` (including ComfyUI and the Python virtual environment) are owned by a `comfy` user (UID 1000, GID 1000) at build time. The venv `site-packages` directory is world-writable (`a+w`) so ComfyUI Manager can install custom node Python dependencies at runtime regardless of the effective UID.
+All files under `/app` (including ComfyUI and the Python virtual environment) are owned by a `comfy` user (UID 1000, GID 1000) at build time. Package directories under venv `site-packages` and the venv entry-point directory are world-writable so ComfyUI Manager can add, replace, or remove custom-node dependencies regardless of the effective UID.
 
 ### Runtime Ownership
 

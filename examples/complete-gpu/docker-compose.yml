@@ -1,17 +1,21 @@
 services:
   comfyui:
-    image: ghcr.io/pixeloven/comfyui/complete:cuda-latest
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui/complete:cuda-latest}
     container_name: comfyui-complete-gpu
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - COMFY_PORT=${COMFY_PORT:-8188}
+      - COMFY_ENABLE_MANAGER=${COMFY_ENABLE_MANAGER:-true}
+      - COMFY_ENABLE_ASSETS=${COMFY_ENABLE_ASSETS:-true}
+      - CLI_ARGS=${CLI_ARGS:-}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     ports:
-      - "${COMFY_PORT:-8188}:8188"
+      - "${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
     volumes:
       - ${COMFY_CUSTOM_NODE_PATH:-./data/custom_nodes}:/app/custom_nodes
+      - ${COMFY_DATASET_PATH:-./data/datasets}:/app/datasets
       - ${COMFY_INPUT_PATH:-./data/input}:/app/input
       - ${COMFY_OUTPUT_PATH:-./data/output}:/app/output
       - ${COMFY_MODEL_PATH:-./data/models}:/app/models

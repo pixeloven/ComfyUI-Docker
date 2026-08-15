@@ -12,9 +12,7 @@ RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/app/.cache/pip \
     source $VENV_PATH/bin/activate && \
     pip install -r extra-requirements.txt
 
-# Re-apply world-writable permissions after installing extra packages.
-# The core stage's chmod doesn't cover files added in this layer — newly
-# installed packages and entry point scripts would be root-owned 644/755.
+# Re-apply writable directory permissions after installing extra packages.
 RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')") && \
-    chmod -R a+w /app/.venv/lib/${PYTHON_VERSION}/site-packages && \
+    find /app/.venv/lib/${PYTHON_VERSION}/site-packages -type d -exec chmod a+w {} + && \
     chmod a+w /app/.venv/bin

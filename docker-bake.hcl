@@ -22,6 +22,19 @@ variable "PLATFORMS" {
     default = ["linux/amd64"]
 }
 
+variable "COMFYUI_VERSION" {
+    // Repository builds pin a stable upstream source tag by default. Scheduled
+    // publishing resolves the latest upstream release and overrides this.
+    // Set to "master" explicitly for a nightly build.
+    default = "v0.33.1"
+}
+
+variable "PUBLISH_LATEST" {
+    // CI sets this only for stable publishing. A nightly/custom IMAGE_LABEL
+    // must never move the stable *-latest tags.
+    default = false
+}
+
 target "runtime-cuda" {
     context = "services/runtime"
     dockerfile = "dockerfile.cuda.runtime"
@@ -29,7 +42,7 @@ target "runtime-cuda" {
     tags = [
         "${REGISTRY_URL}runtime:cuda-${IMAGE_LABEL}",
         "${REGISTRY_URL}runtime:cuda-cache",
-        notequal("",IMAGE_LABEL) && notequal("latest",IMAGE_LABEL) ? "${REGISTRY_URL}runtime:cuda-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:cuda-latest" : ""
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cuda-cache,optional=true"]
     cache-to   = ["type=inline"]
@@ -42,9 +55,35 @@ target "runtime-cpu" {
     tags = [
         "${REGISTRY_URL}runtime:cpu-${IMAGE_LABEL}",
         "${REGISTRY_URL}runtime:cpu-cache",
-        notequal("",IMAGE_LABEL) && notequal("latest",IMAGE_LABEL) ? "${REGISTRY_URL}runtime:cpu-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:cpu-latest" : ""
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cpu-cache,optional=true"]
+    cache-to   = ["type=inline"]
+}
+
+target "runtime-rocm" {
+    context = "services/runtime"
+    dockerfile = "dockerfile.cpu.runtime"
+    platforms = PLATFORMS
+    tags = [
+        "${REGISTRY_URL}runtime:rocm-${IMAGE_LABEL}",
+        "${REGISTRY_URL}runtime:rocm-cache",
+        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:rocm-latest" : ""
+    ]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:rocm-cache,optional=true"]
+    cache-to   = ["type=inline"]
+}
+
+target "runtime-xpu" {
+    context = "services/runtime"
+    dockerfile = "dockerfile.cpu.runtime"
+    platforms = PLATFORMS
+    tags = [
+        "${REGISTRY_URL}runtime:xpu-${IMAGE_LABEL}",
+        "${REGISTRY_URL}runtime:xpu-cache",
+        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:xpu-latest" : ""
+    ]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:xpu-cache,optional=true"]
     cache-to   = ["type=inline"]
 }
 
@@ -57,8 +96,9 @@ target "core-cuda" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:cuda-${IMAGE_LABEL}",
+        "${REGISTRY_URL}core:cuda-${COMFYUI_VERSION}",
         "${REGISTRY_URL}core:cuda-cache",
-        notequal("",IMAGE_LABEL) && notequal("latest",IMAGE_LABEL) ? "${REGISTRY_URL}core:cuda-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}core:cuda-latest" : ""
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime:cuda-cache,optional=true",
@@ -67,7 +107,8 @@ target "core-cuda" {
     cache-to   = ["type=inline"]
     args = {
         RUNTIME = "cuda"
-        TORCH_INDEX = "cu128"
+        TORCH_INDEX = "cu130"
+        COMFYUI_VERSION = COMFYUI_VERSION
     }
     depends_on = ["runtime-cuda"]
 }
@@ -81,8 +122,9 @@ target "core-cpu" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:cpu-${IMAGE_LABEL}",
+        "${REGISTRY_URL}core:cpu-${COMFYUI_VERSION}",
         "${REGISTRY_URL}core:cpu-cache",
-        notequal("",IMAGE_LABEL) && notequal("latest",IMAGE_LABEL) ? "${REGISTRY_URL}core:cpu-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}core:cpu-latest" : ""
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime:cpu-cache,optional=true",
@@ -92,8 +134,61 @@ target "core-cpu" {
     args = {
         RUNTIME = "cpu"
         TORCH_INDEX = "cpu"
+        COMFYUI_VERSION = COMFYUI_VERSION
     }
     depends_on = ["runtime-cpu"]
+}
+
+target "core-rocm" {
+    context = "services/comfy/core"
+    contexts = {
+        runtime = "target:runtime-rocm"
+    }
+    dockerfile = "dockerfile.comfy.core"
+    platforms = PLATFORMS
+    tags = [
+        "${REGISTRY_URL}core:rocm-${IMAGE_LABEL}",
+        "${REGISTRY_URL}core:rocm-${COMFYUI_VERSION}",
+        "${REGISTRY_URL}core:rocm-cache",
+        PUBLISH_LATEST ? "${REGISTRY_URL}core:rocm-latest" : ""
+    ]
+    cache-from = [
+        "type=registry,ref=${REGISTRY_URL}runtime:rocm-cache,optional=true",
+        "type=registry,ref=${REGISTRY_URL}core:rocm-cache,optional=true"
+    ]
+    cache-to = ["type=inline"]
+    args = {
+        RUNTIME = "rocm"
+        TORCH_INDEX = "rocm7.2"
+        COMFYUI_VERSION = COMFYUI_VERSION
+    }
+    depends_on = ["runtime-rocm"]
+}
+
+target "core-xpu" {
+    context = "services/comfy/core"
+    contexts = {
+        runtime = "target:runtime-xpu"
+    }
+    dockerfile = "dockerfile.comfy.core"
+    platforms = PLATFORMS
+    tags = [
+        "${REGISTRY_URL}core:xpu-${IMAGE_LABEL}",
+        "${REGISTRY_URL}core:xpu-${COMFYUI_VERSION}",
+        "${REGISTRY_URL}core:xpu-cache",
+        PUBLISH_LATEST ? "${REGISTRY_URL}core:xpu-latest" : ""
+    ]
+    cache-from = [
+        "type=registry,ref=${REGISTRY_URL}runtime:xpu-cache,optional=true",
+        "type=registry,ref=${REGISTRY_URL}core:xpu-cache,optional=true"
+    ]
+    cache-to = ["type=inline"]
+    args = {
+        RUNTIME = "xpu"
+        TORCH_INDEX = "xpu"
+        COMFYUI_VERSION = COMFYUI_VERSION
+    }
+    depends_on = ["runtime-xpu"]
 }
 
 target "complete-cuda" {
@@ -105,8 +200,9 @@ target "complete-cuda" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}complete:cuda-${IMAGE_LABEL}",
+        "${REGISTRY_URL}complete:cuda-${COMFYUI_VERSION}",
         "${REGISTRY_URL}complete:cuda-cache",
-        notequal("",IMAGE_LABEL) && notequal("latest",IMAGE_LABEL) ? "${REGISTRY_URL}complete:cuda-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-latest" : ""
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime:cuda-cache,optional=true",
@@ -124,7 +220,7 @@ target "mcp" {
     tags = [
         "${REGISTRY_URL}mcp:${IMAGE_LABEL}",
         "${REGISTRY_URL}mcp:cache",
-        notequal("",IMAGE_LABEL) && notequal("latest",IMAGE_LABEL) ? "${REGISTRY_URL}mcp:latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}mcp:latest" : ""
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}mcp:cache,optional=true"]
     cache-to   = ["type=inline"]
@@ -143,15 +239,15 @@ group "default" {
 }
 
 group "all" {
-    targets = ["runtime", "cuda", "cpu", "mcp"]
+    targets = ["runtime", "cuda", "cpu", "rocm", "xpu", "mcp"]
 }
 
 group "core" {
-    targets = ["runtime-cuda", "runtime-cpu", "core-cuda", "core-cpu"]
+    targets = ["runtime-cuda", "runtime-cpu", "runtime-rocm", "runtime-xpu", "core-cuda", "core-cpu", "core-rocm", "core-xpu"]
 }
 
 group "runtime" {
-    targets = ["runtime-cuda", "runtime-cpu"]
+    targets = ["runtime-cuda", "runtime-cpu", "runtime-rocm", "runtime-xpu"]
 }
 
 group "cuda" {
@@ -160,4 +256,12 @@ group "cuda" {
 
 group "cpu" {
     targets = ["runtime-cpu", "core-cpu"]
+}
+
+group "rocm" {
+    targets = ["runtime-rocm", "core-rocm"]
+}
+
+group "xpu" {
+    targets = ["runtime-xpu", "core-xpu"]
 }

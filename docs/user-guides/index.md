@@ -21,6 +21,9 @@ Organize models, workflows, custom nodes, and manage persistent storage.
 ### [Performance Tuning](performance.md)
 Optimize ComfyUI for your hardware with CLI arguments and resource configuration.
 
+### [Current Feature Support](features.md)
+See what the modern ComfyUI ecosystem provides and how this image exposes it.
+
 ---
 
-**[⬆ Back to Documentation](../index.md)** 
+**[⬆ Back to Documentation](../index.md)**

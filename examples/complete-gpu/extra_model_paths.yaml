@@ -4,6 +4,6 @@
 # Unified volume-based paths for persistence across container restarts
 comfyui:
   is_default: true
-  base_path: /data
-  download_model_base: /data/comfy/models
-  custom_nodes: /data/comfy/custom_nodes
+  base_path: /app
+  download_model_base: /app/models
+  custom_nodes: /app/custom_nodes

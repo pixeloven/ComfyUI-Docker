@@ -27,7 +27,7 @@ Choose an example directory based on your needs:
 cd examples/core-gpu
 docker compose up -d
 
-# Complete GPU (optimized deps + SageAttention)
+# Complete GPU (common custom-node dependencies)
 cd examples/complete-gpu
 docker compose up -d
 
@@ -45,7 +45,9 @@ Open **http://localhost:8188** in your browser
 | Example | Startup Time | Features | Best For |
 |---------|--------------|----------|----------|
 | **`core-gpu`** | Fast | Essential ComfyUI + GPU | Most users |
-| **`complete-gpu`** | Fast | Pre-installed deps, SageAttention | Power users |
+| **`complete-gpu`** | Fast | Pre-installed custom-node dependencies | Power users |
+| **`core-amd`** | Fast | ROCm 7.2 | Supported AMD GPUs on Linux |
+| **`core-intel`** | Fast | PyTorch XPU | Supported Intel GPUs on Linux |
 | **`core-cpu`** | Fast | No GPU required | Testing, compatibility |
 
 ## First Workflow
