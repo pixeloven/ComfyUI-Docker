@@ -128,6 +128,65 @@ jobs:
         COMFYUI_VERSION: ${{ steps.meta.outputs.comfyui_version }}
         PUBLISH_LATEST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
+  build-cuda-arch:
+    runs-on: ubuntu-latest
+    needs: build-cuda
+    env:
+      REGISTRY: ghcr.io
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+      with:
+        buildkitd-flags: --debug
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v4
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      run: |
+        echo "commit_sha=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
+        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
+        echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> $GITHUB_OUTPUT
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Build architecture-specific CUDA images
+      uses: docker/bake-action@v7
+      with:
+        files: docker-bake.hcl
+        targets: cuda-arch
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-from=type=gha
+          *.cache-to=type=gha,mode=max
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
+        IMAGE_LABEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.meta.outputs.commit_sha || 'latest' }}
+        COMFYUI_VERSION: ${{ steps.meta.outputs.comfyui_version }}
+        PUBLISH_LATEST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
   build-cpu:
     runs-on: ubuntu-latest
     needs: [validate-examples, test-bake-targets]

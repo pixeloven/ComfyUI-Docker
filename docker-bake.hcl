@@ -318,7 +318,7 @@ group "default" {
 }
 
 group "all" {
-    targets = ["runtime", "cuda", "cpu", "rocm", "xpu", "mcp"]
+    targets = ["runtime", "cuda", "cuda-arch", "cpu", "rocm", "xpu", "mcp"]
 }
 
 group "core" {
@@ -333,7 +333,14 @@ group "cuda" {
     targets = [
         "runtime-cuda",
         "core-cuda",
-        "complete-cuda",
+        "complete-cuda"
+    ]
+}
+
+// Architecture-specific wheels are version-coupled to PyTorch/CUDA. Build
+// them separately so an upstream ABI change cannot block generic CUDA images.
+group "cuda-arch" {
+    targets = [
         "complete-cuda-sm80",
         "complete-cuda-sm86",
         "complete-cuda-sm89",
