@@ -21,12 +21,12 @@ ARG SAGEATTENTION_WHEEL_SHA256=""
 RUN if [[ -n "$SAGEATTENTION_WHEEL_URL" ]]; then \
         [[ -n "$SAGEATTENTION_ARCH" && -n "$SAGEATTENTION_WHEEL_SHA256" ]] || \
             { echo "SageAttention URL, architecture, and checksum must be set together" >&2; exit 1; }; \
-        wheel="/tmp/${SAGEATTENTION_WHEEL_URL##*/}"; \
-        curl -fsSL --retry 5 --retry-all-errors "$SAGEATTENTION_WHEEL_URL" -o "$wheel"; \
-        echo "$SAGEATTENTION_WHEEL_SHA256  $wheel" | sha256sum --check --strict; \
-        source "$VENV_PATH/bin/activate"; \
-        pip install --no-deps "$wheel"; \
-        python -c "import importlib, importlib.metadata as m; import sageattention; dist=m.distribution('sageattention'); assert '$SAGEATTENTION_ARCH' in dist.version; modules={f'sageattention.{p.name.split(\".\")[0]}' for p in (dist.files or ()) if p.parts[0] == 'sageattention' and p.name.startswith('_') and p.name.endswith('.so')}; assert modules, 'SageAttention wheel contains no compiled kernel modules'; [importlib.import_module(module) for module in sorted(modules)]"; \
+        wheel="/tmp/${SAGEATTENTION_WHEEL_URL##*/}" && \
+        curl -fsSL --retry 5 --retry-all-errors "$SAGEATTENTION_WHEEL_URL" -o "$wheel" && \
+        echo "$SAGEATTENTION_WHEEL_SHA256  $wheel" | sha256sum --check --strict && \
+        source "$VENV_PATH/bin/activate" && \
+        pip install --no-deps "$wheel" && \
+        python -c "import importlib, importlib.metadata as m; import sageattention; dist=m.distribution('sageattention'); assert '$SAGEATTENTION_ARCH' in dist.version; modules={f'sageattention.{p.name.split(\".\")[0]}' for p in (dist.files or ()) if p.parts[0] == 'sageattention' and p.name.startswith('_') and p.name.endswith('.so')}; assert modules, 'SageAttention wheel contains no compiled kernel modules'; [importlib.import_module(module) for module in sorted(modules)]" && \
         rm -f "$wheel"; \
     fi
 
