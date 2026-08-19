@@ -12,6 +12,24 @@ RUN --mount=type=cache,mode=0755,uid=1000,gid=1000,target=/app/.cache/pip \
     source $VENV_PATH/bin/activate && \
     pip install -r extra-requirements.txt
 
+# SageAttention contains architecture-specific CUDA kernels, so each published
+# variant installs exactly one checksum-pinned wheel. The generic complete-cuda
+# image leaves these arguments empty and remains portable across CUDA GPUs.
+ARG SAGEATTENTION_ARCH=""
+ARG SAGEATTENTION_WHEEL_URL=""
+ARG SAGEATTENTION_WHEEL_SHA256=""
+RUN if [[ -n "$SAGEATTENTION_WHEEL_URL" ]]; then \
+        [[ -n "$SAGEATTENTION_ARCH" && -n "$SAGEATTENTION_WHEEL_SHA256" ]] || \
+            { echo "SageAttention URL, architecture, and checksum must be set together" >&2; exit 1; }; \
+        wheel="/tmp/${SAGEATTENTION_WHEEL_URL##*/}"; \
+        curl -fsSL "$SAGEATTENTION_WHEEL_URL" -o "$wheel"; \
+        echo "$SAGEATTENTION_WHEEL_SHA256  $wheel" | sha256sum --check --strict; \
+        source "$VENV_PATH/bin/activate"; \
+        pip install --no-deps "$wheel"; \
+        python -c "import importlib.metadata as m; import sageattention; assert '$SAGEATTENTION_ARCH' in m.version('sageattention')"; \
+        rm -f "$wheel"; \
+    fi
+
 # Re-apply writable directory permissions after installing extra packages.
 RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')") && \
     find /app/.venv/lib/${PYTHON_VERSION}/site-packages -type d -exec chmod a+w {} + && \

@@ -27,7 +27,7 @@ A complete containerized deployment of ComfyUI with GPU acceleration, flexible d
 - **🎯 Versioned ComfyUI**: Stable release tags by default, explicit nightly builds when wanted
 - **📁 Persistent Storage**: Individual volume mounts for models, outputs, custom nodes, etc.
 - **🐳 Production Ready**: Multi-stage builds, layer caching, and pre-built GHCR images
-- **⚡ Performance Optimized**: Dynamic VRAM, async offload, CUDA graphs, and Comfy Kitchen attention support
+- **⚡ Performance Optimized**: Dynamic VRAM, async offload, CUDA graphs, Comfy Kitchen, and architecture-specific SageAttention images
 - **🔧 Extensible**: Custom node support via volume mounts
 - **🔄 CI/CD Ready**: Automated builds, weekly dependency updates
 - **🔒 Security**: Runs as non-root by default, supports Docker Compose PUID/PGID and Kubernetes securityContext
@@ -119,7 +119,14 @@ docker compose up -d
 - ✅ Everything core has
 - ✅ Pre-installed Python dependencies for common custom node setups
 - ✅ Current Comfy Kitchen attention backend available with `CLI_ARGS=--use-ck-attention`
+- ✅ SageAttention 2.2.0 variants for Ampere through Blackwell GPUs
 - ⚠️  Larger image size
+
+For SageAttention, select the tag matching the GPU compute capability and add
+`--use-sage-attention` to `CLI_ARGS`. For example, RTX 50-series (Blackwell)
+uses `ghcr.io/pixeloven/comfyui/complete:cuda-sm120-latest`. See the
+[Performance Tuning Guide](docs/user-guides/performance.md#sageattention) for
+the full architecture table and verification steps.
 
 ### Core CPU (`examples/core-cpu`)
 
