@@ -26,7 +26,7 @@ RUN if [[ -n "$SAGEATTENTION_WHEEL_URL" ]]; then \
         echo "$SAGEATTENTION_WHEEL_SHA256  $wheel" | sha256sum --check --strict && \
         source "$VENV_PATH/bin/activate" && \
         pip install --no-deps "$wheel" && \
-        python -c "import importlib, importlib.metadata as m; import sageattention; dist=m.distribution('sageattention'); assert '$SAGEATTENTION_ARCH' in dist.version; modules={f'sageattention.{p.name.split(\".\")[0]}' for p in (dist.files or ()) if p.parts[0] == 'sageattention' and p.name.startswith('_') and p.name.endswith('.so')}; assert modules, 'SageAttention wheel contains no compiled kernel modules'; [importlib.import_module(module) for module in sorted(modules)]" && \
+        LD_LIBRARY_PATH="/usr/local/cuda/compat:${LD_LIBRARY_PATH:-}" python -c "import importlib, importlib.metadata as m; import sageattention; dist=m.distribution('sageattention'); assert '$SAGEATTENTION_ARCH' in dist.version; modules={f'sageattention.{p.name.split(\".\")[0]}' for p in (dist.files or ()) if p.parts[0] == 'sageattention' and p.name.startswith('_') and p.name.endswith('.so')}; assert modules, 'SageAttention wheel contains no compiled kernel modules'; [importlib.import_module(module) for module in sorted(modules)]" && \
         rm -f "$wheel"; \
     fi
 
