@@ -77,6 +77,62 @@ jobs:
         COMFYUI_VERSION: ${{ steps.meta.outputs.comfyui_version }}
         PUBLISH_LATEST: true
 
+  rebuild-cuda-arch:
+    runs-on: ubuntu-latest
+    needs: rebuild-cuda
+    env:
+      REGISTRY: ghcr.io
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+      with:
+        buildkitd-flags: --debug
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v4
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      run: |
+        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
+        echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> $GITHUB_OUTPUT
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+    - name: Build architecture-specific CUDA images
+      uses: docker/bake-action@v7
+      with:
+        files: docker-bake.hcl
+        targets: cuda-arch
+        push: true
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-from=type=gha
+          *.cache-to=type=gha,mode=max
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
+        COMFYUI_VERSION: ${{ steps.meta.outputs.comfyui_version }}
+        PUBLISH_LATEST: true
+
   rebuild-cpu:
     runs-on: ubuntu-latest
     env:
@@ -197,7 +253,7 @@ jobs:
 
   rebuild-summary:
     if: always()
-    needs: [rebuild-cuda, rebuild-cpu, rebuild-linux-accelerators]
+    needs: [rebuild-cuda, rebuild-cuda-arch, rebuild-cpu, rebuild-linux-accelerators]
     runs-on: ubuntu-latest
     steps:
     - name: Rebuild Summary

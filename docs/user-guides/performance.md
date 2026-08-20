@@ -71,6 +71,7 @@ For complete documentation, see the [ComfyUI Manual Install Guide](https://docs.
 --use-quad-cross-attention      # Quad split attention
 --use-pytorch-cross-attention   # PyTorch native attention
 --use-ck-attention              # Maintained Comfy Kitchen attention backend
+--use-sage-attention            # SageAttention (matching sm* image required)
 --disable-xformers              # Disable xformers optimization
 ```
 
@@ -131,6 +132,8 @@ hardware supports them. It also ships the maintained Comfy Kitchen kernels.
 ### Features
 
 - `CLI_ARGS=--use-ck-attention` selects Comfy Kitchen attention.
+- `CLI_ARGS=--use-sage-attention` selects SageAttention when using one of the
+  architecture-specific Complete images described below.
 - `CLI_ARGS=--fast` enables all experimental optimizations; use named options
   such as `--fast fp16_accumulation` when you want narrower risk.
 - `CLI_ARGS=--disable-cuda-graphs` disables the current CUDA graph path when a
@@ -141,6 +144,51 @@ hardware supports them. It also ships the maintained Comfy Kitchen kernels.
 ```bash
 docker exec comfyui-core-gpu python -c "import torch; print(torch.__version__, torch.version.cuda)"
 ```
+
+### SageAttention
+
+SageAttention 2.2.0 is available in immutable Complete image variants built
+for CUDA 13.0, PyTorch 2.13, Python 3.12, and one NVIDIA compute capability.
+The generic `complete:cuda-latest` image intentionally does not contain
+SageAttention because a wheel compiled for one architecture is not portable to
+every CUDA GPU.
+
+| Compute capability | Common GPU families | Image tag |
+| --- | --- | --- |
+| `sm80` | A100, A30 | `complete:cuda-sm80-latest` |
+| `sm86` | RTX 30-series, A40 | `complete:cuda-sm86-latest` |
+| `sm89` | RTX 40-series, L4, L40 | `complete:cuda-sm89-latest` |
+| `sm90` | H100, H200 | `complete:cuda-sm90-latest` |
+| `sm120` | RTX 50-series | `complete:cuda-sm120-latest` |
+
+Check the compute capability before choosing an image:
+
+```bash
+nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader
+```
+
+Then set both the image and ComfyUI flag. For an RTX 50-series GPU:
+
+```bash
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui/complete:cuda-sm120-latest \
+CLI_ARGS=--use-sage-attention \
+docker compose up -d
+```
+
+Verify the installed wheel matches the selected image and ComfyUI selected the
+backend:
+
+```bash
+docker compose exec comfyui python -c \
+  "import importlib.metadata as m; print(m.version('sageattention'))"
+docker compose logs comfyui | grep "Using sage attention"
+```
+
+These wheels are published separately by
+[SageAttention-Wheels](https://github.com/pixeloven/SageAttention-Wheels) and
+are checksum-pinned by each image target. SageAttention is opt-in because
+performance and numerical behavior vary by model and workload; compare it with
+Comfy Kitchen and PyTorch attention on a representative workflow.
 
 ## Docker Resource Limits
 

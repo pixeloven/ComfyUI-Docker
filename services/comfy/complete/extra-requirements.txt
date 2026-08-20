@@ -56,10 +56,9 @@ groundingdino-py>=0.4.0
 # Core acceleration libraries (pre-built wheels)
 # triton>=3.4
 
-# ComfyUI now ships its maintained Comfy Kitchen attention backend and CUDA
-# graph support. The old SageAttention wheels were compiled for PyTorch 2.9 /
-# CUDA 12.9 and cannot be loaded by the current cu130 runtime. Users can select
-# the maintained backend with CLI_ARGS="--use-ck-attention".
+# ComfyUI ships its maintained Comfy Kitchen attention backend and CUDA graph
+# support. Architecture-specific SageAttention wheels are installed by the
+# complete-cuda-sm* bake targets rather than this shared requirements file.
 
 PyYAML
 

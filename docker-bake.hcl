@@ -35,6 +35,12 @@ variable "PUBLISH_LATEST" {
     default = false
 }
 
+variable "SAGEATTENTION_RELEASE_URL" {
+    // Immutable release produced from thu-ml/SageAttention v2.2.0 for the
+    // Python, PyTorch, and CUDA ABI used by the current CUDA image.
+    default = "https://github.com/pixeloven/SageAttention-Wheels/releases/download/sageattention-v2.2.0-cu130-torch2.13.0"
+}
+
 target "runtime-cuda" {
     context = "services/runtime"
     dockerfile = "dockerfile.cuda.runtime"
@@ -213,6 +219,79 @@ target "complete-cuda" {
     depends_on = ["core-cuda"]
 }
 
+// SageAttention wheels contain native kernels for one NVIDIA compute
+// capability. Keep the generic complete image portable and publish explicit,
+// immutable variants so a deployment can select the architecture it runs on.
+target "complete-cuda-sm80" {
+    inherits = ["complete-cuda"]
+    tags = [
+        "${REGISTRY_URL}complete:cuda-sm80-${IMAGE_LABEL}",
+        "${REGISTRY_URL}complete:cuda-sm80-${COMFYUI_VERSION}",
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm80-latest" : ""
+    ]
+    args = {
+        SAGEATTENTION_ARCH = "sm80"
+        SAGEATTENTION_WHEEL_URL = "${SAGEATTENTION_RELEASE_URL}/sageattention-2.2.0+cu130.torch2.13.0.sm80-cp312-cp312-linux_x86_64.whl"
+        SAGEATTENTION_WHEEL_SHA256 = "a0273034509e3ef909fcd6a60557e594899f5e1fcb3af2146cbf84dceeedeb2a"
+    }
+}
+
+target "complete-cuda-sm86" {
+    inherits = ["complete-cuda"]
+    tags = [
+        "${REGISTRY_URL}complete:cuda-sm86-${IMAGE_LABEL}",
+        "${REGISTRY_URL}complete:cuda-sm86-${COMFYUI_VERSION}",
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm86-latest" : ""
+    ]
+    args = {
+        SAGEATTENTION_ARCH = "sm86"
+        SAGEATTENTION_WHEEL_URL = "${SAGEATTENTION_RELEASE_URL}/sageattention-2.2.0+cu130.torch2.13.0.sm86-cp312-cp312-linux_x86_64.whl"
+        SAGEATTENTION_WHEEL_SHA256 = "057130f7b64ab2ee87e01b222e95faac84bcb355c4b1f6309550b7aa91b32086"
+    }
+}
+
+target "complete-cuda-sm89" {
+    inherits = ["complete-cuda"]
+    tags = [
+        "${REGISTRY_URL}complete:cuda-sm89-${IMAGE_LABEL}",
+        "${REGISTRY_URL}complete:cuda-sm89-${COMFYUI_VERSION}",
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm89-latest" : ""
+    ]
+    args = {
+        SAGEATTENTION_ARCH = "sm89"
+        SAGEATTENTION_WHEEL_URL = "${SAGEATTENTION_RELEASE_URL}/sageattention-2.2.0+cu130.torch2.13.0.sm89-cp312-cp312-linux_x86_64.whl"
+        SAGEATTENTION_WHEEL_SHA256 = "ec903e7cb330aa26719a9a2459450ffc94e9079719f4989aa193486ef9177bba"
+    }
+}
+
+target "complete-cuda-sm90" {
+    inherits = ["complete-cuda"]
+    tags = [
+        "${REGISTRY_URL}complete:cuda-sm90-${IMAGE_LABEL}",
+        "${REGISTRY_URL}complete:cuda-sm90-${COMFYUI_VERSION}",
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm90-latest" : ""
+    ]
+    args = {
+        SAGEATTENTION_ARCH = "sm90"
+        SAGEATTENTION_WHEEL_URL = "${SAGEATTENTION_RELEASE_URL}/sageattention-2.2.0+cu130.torch2.13.0.sm90-cp312-cp312-linux_x86_64.whl"
+        SAGEATTENTION_WHEEL_SHA256 = "31ec9edf793c69f280b5d0f657e05fdfc35539473d9ee6b840f3a3adf3f4eaa2"
+    }
+}
+
+target "complete-cuda-sm120" {
+    inherits = ["complete-cuda"]
+    tags = [
+        "${REGISTRY_URL}complete:cuda-sm120-${IMAGE_LABEL}",
+        "${REGISTRY_URL}complete:cuda-sm120-${COMFYUI_VERSION}",
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm120-latest" : ""
+    ]
+    args = {
+        SAGEATTENTION_ARCH = "sm120"
+        SAGEATTENTION_WHEEL_URL = "${SAGEATTENTION_RELEASE_URL}/sageattention-2.2.0+cu130.torch2.13.0.sm120-cp312-cp312-linux_x86_64.whl"
+        SAGEATTENTION_WHEEL_SHA256 = "cd91503f88aafddcab0cd8603c61920e221ed4e7b4cfd3610bf063eeb5ce7acb"
+    }
+}
+
 target "mcp" {
     context = "services/mcp"
     dockerfile = "dockerfile.comfy.mcp"
@@ -239,7 +318,7 @@ group "default" {
 }
 
 group "all" {
-    targets = ["runtime", "cuda", "cpu", "rocm", "xpu", "mcp"]
+    targets = ["runtime", "cuda", "cuda-arch", "cpu", "rocm", "xpu", "mcp"]
 }
 
 group "core" {
@@ -251,7 +330,23 @@ group "runtime" {
 }
 
 group "cuda" {
-    targets = ["runtime-cuda", "core-cuda", "complete-cuda"]
+    targets = [
+        "runtime-cuda",
+        "core-cuda",
+        "complete-cuda"
+    ]
+}
+
+// Architecture-specific wheels are version-coupled to PyTorch/CUDA. Build
+// them separately so an upstream ABI change cannot block generic CUDA images.
+group "cuda-arch" {
+    targets = [
+        "complete-cuda-sm80",
+        "complete-cuda-sm86",
+        "complete-cuda-sm89",
+        "complete-cuda-sm90",
+        "complete-cuda-sm120"
+    ]
 }
 
 group "cpu" {
