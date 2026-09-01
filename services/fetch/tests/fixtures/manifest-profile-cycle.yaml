@@ -1,0 +1,12 @@
+# `a -> b -> a`. A self-reference check would miss this, which is why detection
+# is by bounded expansion.
+name: profile-cycle
+models:
+  - name: real
+    files:
+      - source: hf:madebyollin/taesd
+        file: taesd_decoder.safetensors
+        install: models/vae_approx/
+profiles:
+  a: [b]
+  b: [a]

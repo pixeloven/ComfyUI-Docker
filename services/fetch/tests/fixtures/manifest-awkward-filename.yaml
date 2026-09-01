@@ -1,0 +1,10 @@
+# Spaces and parentheses in an upstream filename. curl given a raw space returns
+# NO output and no error, so the file reads as absent rather than as a malformed
+# request -- the path must be percent-encoded.
+name: awkward-filename
+models:
+  - name: spaced
+    files:
+      - source: hf:thisisdom4/Dramatic_Lighting_Slider
+        file: Dramatic Lighting Slider.safetensors
+        install: models/loras/

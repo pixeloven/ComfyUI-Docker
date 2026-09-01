@@ -46,6 +46,8 @@ UA="comfyui-fetch/1.0 (+https://github.com/pixeloven/ComfyUI-Docker)"
 
 # shellcheck source=services/fetch/lib-profiles.sh
 . "$(dirname "$0")/lib-profiles.sh"
+# shellcheck source=services/fetch/lib-auth.sh
+. "$(dirname "$0")/lib-auth.sh"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -85,7 +87,9 @@ if [ -n "$PROFILE" ]; then
     declared=$((declared + n))
   done
 else
-  declared="$(yq -r '[.models[].files[]] | length' "$MANIFEST")"
+  auth_load "$MANIFEST"
+
+declared="$(yq -r '[.models[].files[]] | length' "$MANIFEST")"
 fi
 records=0
 failures=0
@@ -102,7 +106,14 @@ hf_head() {  # <repo> <revision> <file>  -> commit<TAB>sha256
   # NOT -sIL. `x-linked-etag` is the sha256 only on the FIRST hop; following the
   # redirect returns the CDN's Xet content-address, a different and equally
   # plausible-looking 64-hex value.
-  curl -sI -A "$UA" "https://huggingface.co/$1/resolve/$2/$3" \
+  #
+  # Authenticated when the manifest maps huggingface.co to a variable that is
+  # set. Gated repos -- black-forest-labs publishes as `gated: auto` -- answer
+  # 401 without it, which is indistinguishable from a missing file.
+  _u="https://huggingface.co/$1/resolve/$2/$(urlencode_path "$3")"
+  _t="$(token_for_url "$_u")"
+  if [ -n "$_t" ]; then set -- -H "Authorization: Bearer $_t"; else set --; fi
+  curl -sI -A "$UA" "$@" "$_u" \
     | tr -d '\r' \
     | awk 'BEGIN{IGNORECASE=1}
            /^x-repo-commit:/ {c=$2}
@@ -136,11 +147,21 @@ while read -r marker; do
       repo="${source#hf:}"
       if [ -z "$file" ]; then fail "$source: hf source needs \`file\`"; continue; fi
       got="$(hf_head "$repo" "$revision" "$file")"
-      if [ -z "$got" ]; then fail "hf:$repo@$revision/$file: not found, or gated and no token"; continue; fi
+      if [ -z "$got" ]; then
+        _m="$(missing_cred_for_url "https://huggingface.co/")"
+        if [ -n "$_m" ]; then
+          fail "hf:$repo@$revision/$file: not found, or gated (\$$_m is not set)"
+        else
+          fail "hf:$repo@$revision/$file: not found, or you lack access to a gated repo"
+        fi
+        continue
+      fi
       commit="$(printf '%s' "$got" | cut -f1)"
       sha="$(printf '%s' "$got" | cut -f2)"
       # The lock pins the COMMIT, never the moving ref it was resolved from.
-      url="https://huggingface.co/$repo/resolve/$commit/$file"
+      # Encoded, so a filename with spaces survives into the lock and the
+      # fetcher does not have to re-derive it.
+      url="https://huggingface.co/$repo/resolve/$commit/$(urlencode_path "$file")"
       base="$(basename "$file")"
       ;;
     civitai:*)

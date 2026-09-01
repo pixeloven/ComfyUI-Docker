@@ -1,0 +1,9 @@
+name: lock-good
+models:
+  - name: upscaler
+    files:
+      - source: hf:ximso/RealESRGAN_x4plus_anime_6B
+        file: RealESRGAN_x4plus_anime_6B.pth
+        as: anime6b.pth
+        install: models/upscale_models/
+        type: upscale_model

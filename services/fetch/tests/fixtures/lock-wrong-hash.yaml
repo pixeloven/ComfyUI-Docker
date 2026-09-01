@@ -1,0 +1,9 @@
+models:
+  - model: anime6b.pth
+    url: https://huggingface.co/ximso/RealESRGAN_x4plus_anime_6B/resolve/main/RealESRGAN_x4plus_anime_6B.pth
+    paths:
+      - path: models/upscale_models/anime6b.pth
+    hashes:
+      - hash: 0000000000000000000000000000000000000000000000000000000000000000
+        type: SHA256
+    type: upscale_model

@@ -79,7 +79,7 @@ jobs:
           https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz \
           | tar -xJ --strip-components=1 -C /usr/local/bin shellcheck-v0.10.0/shellcheck
         shellcheck --version
-        shellcheck --severity=style --shell=sh services/fetch/*.sh
+        shellcheck --severity=style --shell=sh -x services/fetch/*.sh services/fetch/tests/*.sh
 
     - name: Validate the manifest and the lock against their schemas
       run: |
@@ -94,75 +94,13 @@ jobs:
       # resolve.sh run, like any other diff.
       run: sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml
 
-    - name: Selftest — the consistency gate still fails on a real edit
-      # A gate that cannot fail is not a gate. An earlier version of the gate
-      # this replaced reported PASS against four injected faults because its
-      # comparison silently produced two empty files.
-      run: |
-        set -u
-        yq -i 'del(.models[0].hashes)' comfy-lock.yaml
-        if sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml; then
-          echo "SELFTEST FAILED: an unhashed lock entry was accepted"
-          exit 1
-        fi
-        git checkout -- comfy-lock.yaml
-        yq -i 'del(.models[0])' comfy.yaml
-        if sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml; then
-          echo "SELFTEST FAILED: a lock entry with no manifest declaration was accepted"
-          exit 1
-        fi
-        git checkout -- comfy.yaml
-        yq -i '.profiles.broken = ["no-such-capability"]' comfy.yaml
-        if sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml; then
-          echo "SELFTEST FAILED: a profile naming an unknown capability was accepted"
-          exit 1
-        fi
-        git checkout -- comfy.yaml
-        yq -i '.profiles.a = ["b"] | .profiles.b = ["a"]' comfy.yaml
-        if sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml; then
-          echo "SELFTEST FAILED: a profile cycle was accepted"
-          exit 1
-        fi
-        git checkout -- comfy.yaml
-        echo "selftest ok: rejects an unhashed entry, an undeclared one, a bad profile member, and a cycle"
-
-    - name: Selftest — resolve reports EVERY bad source, in one pass
-      # A manifest of 161 files with one dead source used to resolve nothing and
-      # report a single problem, so finding N broken sources cost N full passes
-      # over the network. This asserts all of them surface at once, and that no
-      # partial lock is written -- one that looks complete is worse than none.
-      run: |
-        set -u
-        cat > /tmp/bad.yaml <<'YAML'
-        name: selftest
-        models:
-          - name: dead-civitai
-            files:
-              - source: civitai:2068000
-                as: gone.safetensors
-                install: models/unet/
-          - name: bad-repo
-            files:
-              - source: hf:does-not-exist-xyz/nope
-                file: nope.safetensors
-                install: models/loras/
-          - name: url-without-hash
-            files:
-              - source: https://example.com/thing.safetensors
-                install: models/loras/
-        YAML
-        if sh services/fetch/resolve.sh /tmp/bad.yaml > /tmp/bad.lock 2> /tmp/bad.err; then
-          echo "SELFTEST FAILED: resolve succeeded against three broken sources"; exit 1
-        fi
-        if [ -s /tmp/bad.lock ]; then
-          echo "SELFTEST FAILED: a partial lock was written"; cat /tmp/bad.lock; exit 1
-        fi
-        for want in "civitai:2068000" "does-not-exist-xyz" "needs \`sha256\`"; do
-          grep -qF "$want" /tmp/bad.err || {
-            echo "SELFTEST FAILED: '$want' missing from the report"; cat /tmp/bad.err; exit 1
-          }
-        done
-        echo "selftest ok: all three failures reported in one pass, no lock written"
+    - name: Test suite
+      # Cases and fixtures live in services/fetch/tests/, not inline here, so
+      # they run identically on a laptop before pushing and are linted like the
+      # rest of the shell.
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: sh services/fetch/tests/run.sh
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4

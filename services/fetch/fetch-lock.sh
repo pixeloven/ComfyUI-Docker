@@ -59,37 +59,9 @@ records=0
 # Credentials are resolved by the URL's HOST, from the lock's top-level `auth`
 # map, so no model entry carries an auth field and `models[]` stays exactly
 # comfy-cli's documented shape.
-#
-# The map's values are ${ENV_VAR} references, never literals -- the schema
-# rejects a literal so a token cannot be committed.
-auth_map="$(yq -r '.auth // {} | to_entries[] | .key + " " + .value' "$LOCK" 2>/dev/null || true)"
-
-host_of() { h="${1#*://}"; h="${h%%/*}"; printf '%s' "${h%%:*}"; }
-
-# The env var mapped to a host, or empty.
-var_for_host() {
-  printf '%s\n' "$auth_map" | while read -r host ref; do
-    if [ "$host" = "$1" ]; then
-      ref="${ref#\$\{}"; printf '%s' "${ref%\}}"; return
-    fi
-  done
-}
-
-token_for_url() {
-  v="$(var_for_host "$(host_of "$1")")"
-  [ -n "$v" ] || return 0
-  eval "printf '%s' \"\${$v:-}\""
-}
-
-# Named only to make a failure message accurate: a host with a declared
-# credential whose variable is unset is the likeliest cause of a 401 or of an
-# HTML error page failing the hash check.
-missing_cred_for_url() {
-  v="$(var_for_host "$(host_of "$1")")"
-  [ -n "$v" ] || return 0
-  eval "t=\"\${$v:-}\""
-  [ -n "$t" ] || printf '%s' "$v"
-}
+# shellcheck source=services/fetch/lib-auth.sh
+. "$(dirname "$0")/lib-auth.sh"
+auth_load "$LOCK"
 
 hash_of() { sha256sum "$1" | cut -d' ' -f1; }
 
