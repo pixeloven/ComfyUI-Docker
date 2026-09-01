@@ -51,10 +51,85 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-rocm"
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-xpu"
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
+
+  validate-models:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Install yq 4.47.1
+      # The same version the fetch image pins. yq changed how it renders "\t"
+      # in an expression between 4.47 and 4.53 -- the older one emits it
+      # literally -- so a gate on a different version is a gate on different
+      # behaviour.
+      run: |
+        sudo curl -fsSL --retry 3 -o /usr/local/bin/yq \
+          https://github.com/mikefarah/yq/releases/download/v4.47.1/yq_linux_amd64
+        sudo chmod 0555 /usr/local/bin/yq
+        yq --version
+
+    - name: Shellcheck the fetch scripts
+      run: |
+        sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+        shellcheck --shell=sh services/fetch/*.sh
+
+    - name: Validate every package against the schema
+      run: |
+        pipx install check-jsonschema
+        for f in models/packages/*.yaml; do
+          if [ "$(yq -r 'has("package")' "$f")" = "true" ]; then
+            echo "checking $f"
+            check-jsonschema --schemafile models/packages/package.schema.json "$f"
+          fi
+        done
+
+    - name: comfy-lock.yaml is generated, not hand-edited
+      # comfy-lock is the lossy projection of the packages. If someone edits it
+      # directly the sha256 in the package no longer describes what a fetch
+      # actually pulls, which is the whole property this repository adds.
+      run: |
+        sh services/fetch/emit-comfy-lock.sh models/packages > /tmp/emitted.yaml
+        yq -o=json -I0 '[.models[] | {"m":.model,"u":.url,"p":[.paths[].path]}] | sort_by(.p[0])' \
+          comfy-lock.yaml > /tmp/committed.json
+        yq -o=json -I0 '[.models[] | {"m":.model,"u":.url,"p":[.paths[].path]}] | sort_by(.p[0])' \
+          /tmp/emitted.yaml > /tmp/emitted.json
+        if ! diff -u /tmp/committed.json /tmp/emitted.json; then
+          echo ""
+          echo "comfy-lock.yaml has drifted from models/packages/."
+          echo "Regenerate it rather than editing it by hand:"
+          echo "  sh services/fetch/emit-comfy-lock.sh models/packages > /tmp/m.yaml"
+          echo "  yq -i '.models = load(\"/tmp/m.yaml\").models' comfy-lock.yaml"
+          exit 1
+        fi
+        echo "comfy-lock.yaml matches the packages"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Build the fetch image
+      uses: docker/bake-action@v7
+      with:
+        files: docker-bake.hcl
+        targets: fetch
+        load: true
+        push: false
+      env:
+        REGISTRY_URL: ghcr.io/pixeloven/comfyui/
+        IMAGE_LABEL: ci
+
+    - name: Verify — it actually fetches, and actually rejects
+      # A real fetch, not a --help probe: a fetcher whose build check is
+      # `--help` proves nothing about fetching. The script is piped in over
+      # stdin rather than bind-mounted so this works on any runner topology,
+      # including DinD where the job's filesystem is not the Docker host's.
+      run: |
+        docker run --rm -i --entrypoint sh \
+          ghcr.io/pixeloven/comfyui/fetch:ci -s < services/fetch/verify.sh
 
   build-cuda:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets]
+    needs: [validate-examples, test-bake-targets, validate-models]
     env:
       REGISTRY: ghcr.io
     steps:
@@ -189,7 +264,7 @@ jobs:
 
   build-cpu:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets]
+    needs: [validate-examples, test-bake-targets, validate-models]
     env:
       REGISTRY: ghcr.io
     steps:
@@ -256,7 +331,7 @@ jobs:
 
   build-linux-accelerators:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets]
+    needs: [validate-examples, test-bake-targets, validate-models]
     strategy:
       fail-fast: false
       matrix:
