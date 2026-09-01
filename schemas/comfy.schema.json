@@ -45,8 +45,8 @@
               "properties": {
                 "source": {
                   "type": "string",
-                  "pattern": "^(hf:[^/]+/[^/]+|civitai:[0-9]+|https?://.+)$",
-                  "description": "hf:<owner>/<repo>, civitai:<modelVersionId>, or a direct URL."
+                  "pattern": "^(hf:[^/]+/[^/]+|gh:[^/]+/[^/]+@.+|civitai:[0-9]+|https?://.+)$",
+                  "description": "hf:<owner>/<repo>, gh:<owner>/<repo>@<tag>, civitai:<modelVersionId>, or a direct URL."
                 },
                 "file": {
                   "type": "string",
@@ -69,13 +69,6 @@
                 "type": {
                   "type": "string",
                   "description": "Model type: lora, vae, checkpoint, diffusion_model, ..."
-                },
-                "auth": {
-                  "enum": [
-                    "civitai",
-                    "huggingface"
-                  ],
-                  "description": "Credential the source needs, taken from the environment at fetch time."
                 },
                 "sha256": {
                   "type": "string",
@@ -106,6 +99,18 @@
             }
           }
         }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "description": "Host -> environment variable holding that host's credential. The CLI resolves a source's credential by the URL's host, so no per-model annotation is needed.",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^\\$\\{[A-Z_][A-Z0-9_]*\\}$",
+        "description": "MUST be an ${ENV_VAR} reference. A literal is rejected by the schema so a token cannot be committed by accident."
+      },
+      "propertyNames": {
+        "pattern": "^[a-z0-9.-]+$"
       }
     }
   }

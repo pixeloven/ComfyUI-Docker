@@ -50,33 +50,54 @@ n_present=0; n_fetched=0; n_skipped=0; n_failed=0; n_would=0; bytes=0
 EXPR='.models[] |
   ["F", .model, .url,
    ([(.hashes // [])[] | select(.type == "SHA256") | .hash][0] // "-"),
-   (.auth // "-"),
    ((.paths // []) | length | tostring)]
   + [(.paths // [])[].path] | .[]'
 
 declared="$(yq -r '.models | length' "$LOCK")"
 records=0
 
-# The token an auth kind needs. Absent means the file is not attempted: an
-# unauthenticated Civitai request returns an HTML error page with HTTP 200,
-# which would be written to disk and then fail the hash check with a message
-# naming the wrong cause.
-token_for() {
-  case "$1" in
-    civitai)     printf '%s' "${CIVITAI_TOKEN:-}" ;;
-    huggingface) printf '%s' "${HF_TOKEN:-}" ;;
-    *)           printf '' ;;
-  esac
+# Credentials are resolved by the URL's HOST, from the lock's top-level `auth`
+# map, so no model entry carries an auth field and `models[]` stays exactly
+# comfy-cli's documented shape.
+#
+# The map's values are ${ENV_VAR} references, never literals -- the schema
+# rejects a literal so a token cannot be committed.
+auth_map="$(yq -r '.auth // {} | to_entries[] | .key + " " + .value' "$LOCK" 2>/dev/null || true)"
+
+host_of() { h="${1#*://}"; h="${h%%/*}"; printf '%s' "${h%%:*}"; }
+
+# The env var mapped to a host, or empty.
+var_for_host() {
+  printf '%s\n' "$auth_map" | while read -r host ref; do
+    if [ "$host" = "$1" ]; then
+      ref="${ref#\$\{}"; printf '%s' "${ref%\}}"; return
+    fi
+  done
+}
+
+token_for_url() {
+  v="$(var_for_host "$(host_of "$1")")"
+  [ -n "$v" ] || return 0
+  eval "printf '%s' \"\${$v:-}\""
+}
+
+# Named only to make a failure message accurate: a host with a declared
+# credential whose variable is unset is the likeliest cause of a 401 or of an
+# HTML error page failing the hash check.
+missing_cred_for_url() {
+  v="$(var_for_host "$(host_of "$1")")"
+  [ -n "$v" ] || return 0
+  eval "t=\"\${$v:-}\""
+  [ -n "$t" ] || printf '%s' "$v"
 }
 
 hash_of() { sha256sum "$1" | cut -d' ' -f1; }
 
 while read -r marker; do
   [ "$marker" = "F" ] || { echo "record desync at '$marker'" >&2; exit 3; }
-  read -r model; read -r url; read -r want; read -r auth; read -r npaths
+  read -r model; read -r url; read -r want; read -r npaths
   records=$((records + 1))
   [ "$want" = "-" ] && want=""
-  [ "$auth" = "-" ] && auth=""
   want="$(echo "$want" | tr '[:upper:]' '[:lower:]')"
 
   # Every path this model installs to. The first is fetched; the rest are
@@ -106,11 +127,16 @@ while read -r marker; do
   elif [ "$DRY" = 1 ]; then
     n_would=$((n_would + 1))
   else
-    tok="$(token_for "$auth")"
-    if [ -n "$auth" ] && [ -z "$tok" ]; then
-      echo "  FAILED  $model: needs a $auth token"
-      n_failed=$((n_failed + 1))
-    else
+    tok="$(token_for_url "$url")"
+    # A host with a declared credential whose variable is unset is NOT blocked:
+    # most HuggingFace files are public, and refusing them because HF_TOKEN
+    # happens to be unset would be wrong. It is recorded instead, and named in
+    # the failure message if the fetch then fails -- which is the case a bare
+    # "sha256 mismatch" would otherwise misattribute, since an unauthenticated
+    # Civitai request returns an HTML error page with HTTP 200.
+    miss="$(missing_cred_for_url "$url")"
+    if [ -n "$miss" ]; then hint=" (\$$miss is not set)"; else hint=""; fi
+    if true; then
       tmp="$target.fetch-tmp"
       # A destination that cannot be written is not a transfer problem. Checked
       # before the request so the error names the real cause.
@@ -121,11 +147,11 @@ while read -r marker; do
         if [ -n "$tok" ]; then set -- -H "Authorization: Bearer $tok"; else set --; fi
         if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 30 "$@" -o "$tmp" "$url"; then
           rm -f "$tmp"
-          echo "  FAILED  $model: transfer failed"
+          echo "  FAILED  $model: transfer failed$hint"
           n_failed=$((n_failed + 1))
         elif [ "$(hash_of "$tmp")" != "$want" ]; then
           rm -f "$tmp"
-          echo "  FAILED  $model: sha256 mismatch"
+          echo "  FAILED  $model: sha256 mismatch$hint"
           n_failed=$((n_failed + 1))
         else
           sz=$(wc -c < "$tmp")

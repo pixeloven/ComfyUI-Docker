@@ -42,7 +42,7 @@ trap 'rm -rf "$work"' EXIT
 # shellcheck disable=SC2016  # $m is a yq variable, not a shell one.
 EXPR='.models[] as $m | $m.files[] |
   ["F", $m.name, .source, (.file // "-"), (.revision // "main"),
-   .install, (.as // "-"), (.type // "-"), (.auth // "-"), (.sha256 // "-")] | .[]'
+   .install, (.as // "-"), (.type // "-"), (.sha256 // "-")] | .[]'
 
 declared="$(yq -r '[.models[].files[]] | length' "$MANIFEST")"
 records=0
@@ -65,13 +65,12 @@ while read -r marker; do
   [ "$marker" = "END" ] && break
   [ "$marker" = "F" ] || { echo "record desync at '$marker'" >&2; exit 3; }
   read -r capability; read -r source; read -r file; read -r revision
-  read -r install; read -r as; read -r type; read -r auth; read -r sha
+  read -r install; read -r as; read -r type; read -r sha
   records=$((records + 1))
   # "-" is the absent marker the extractor emits; turn it back into empty.
   [ "$file" = "-" ] && file=""
   [ "$as"   = "-" ] && as=""
   [ "$type" = "-" ] && type=""
-  [ "$auth" = "-" ] && auth=""
   [ "$sha"  = "-" ] && sha=""
   :
 
@@ -92,15 +91,45 @@ while read -r marker; do
       id="${source#civitai:}"
       curl -sf -A "$UA" "https://civitai.com/api/v1/model-versions/$id" > "$work/cv.json" \
         || { echo "could not resolve $source" >&2; exit 1; }
-      url="$(yq -p json -r '.files[0].downloadUrl' "$work/cv.json")"
-      sha="$(yq -p json -r '.files[0].hashes.SHA256 // ""' "$work/cv.json" | tr '[:upper:]' '[:lower:]')"
-      size="$(yq -p json -r '((.files[0].sizeKB // 0) * 1024) | round' "$work/cv.json")"
-      base="$(yq -p json -r '.files[0].name' "$work/cv.json")"
+      url="$(yq -p json -o yaml -r '.files[0].downloadUrl' "$work/cv.json")"
+      sha="$(yq -p json -o yaml -r '.files[0].hashes.SHA256 // ""' "$work/cv.json" | tr '[:upper:]' '[:lower:]')"
+      size="$(yq -p json -o yaml -r '((.files[0].sizeKB // 0) * 1024) | round' "$work/cv.json")"
+      base="$(yq -p json -o yaml -r '.files[0].name' "$work/cv.json")"
       # `if`, not `A && B || C` -- the latter runs C when A is true and B is
       # false, which is not if-then-else and would misreport the reason.
       if [ -z "$sha" ] || [ "$sha" = "null" ]; then
         echo "$source has no SHA256" >&2; exit 1
       fi
+      ;;
+    gh:*)
+      # gh:<owner>/<repo>@<tag>. The asset is `file`.
+      spec="${source#gh:}"; repo="${spec%@*}"; tag="${spec##*@}"
+      [ -n "$file" ] || { echo "gh source needs \`file\` (the asset name): $source" >&2; exit 1; }
+      set --
+      if [ -n "${GITHUB_TOKEN:-}" ]; then set -- -H "Authorization: Bearer $GITHUB_TOKEN"; fi
+      curl -sf -A "$UA" "$@" "https://api.github.com/repos/$repo/releases/tags/$tag" > "$work/gh.json" \
+        || { echo "could not read release $repo@$tag" >&2; exit 1; }
+      url="$(ASSET="$file" yq -p json -o yaml -r '.assets[] | select(.name == strenv(ASSET)) | .browser_download_url' "$work/gh.json")"
+      if [ -z "$url" ] || [ "$url" = "null" ]; then
+        echo "no asset named $file in $repo@$tag" >&2; exit 1
+      fi
+      size="$(ASSET="$file" yq -p json -o yaml -r '.assets[] | select(.name == strenv(ASSET)) | .size' "$work/gh.json")"
+      digest="$(ASSET="$file" yq -p json -o yaml -r '.assets[] | select(.name == strenv(ASSET)) | .digest // ""' "$work/gh.json")"
+      if [ -n "$digest" ] && [ "$digest" != "null" ]; then
+        sha="${digest#sha256:}"
+      elif [ -z "$sha" ]; then
+        # GitHub only computes digests for newer uploads, and much of the
+        # ComfyUI ecosystem's models sit on releases from 2021. Downloading is
+        # the only honest way to learn the hash -- an unverifiable lock entry
+        # would defeat the point -- but it is avoidable by stating `sha256` in
+        # the manifest.
+        echo "no digest for $file in $repo@$tag; downloading to hash it (state \`sha256\` to skip)" >&2
+        curl -fsSL -A "$UA" "$url" -o "$work/asset" \
+          || { echo "could not download $url" >&2; exit 1; }
+        sha="$(sha256sum "$work/asset" | cut -d' ' -f1)"
+        rm -f "$work/asset"
+      fi
+      base="$file"
       ;;
     http://*|https://*)
       # Nothing about a bare URL can be resolved from headers, so the manifest
@@ -116,8 +145,8 @@ while read -r marker; do
   esac
 
   if [ -n "$as" ]; then base="$as"; fi
-  printf '%s%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$install" "$base" "$base" "$url" "$sha" "${size:-0}" "$type" "$auth" >> "$work/rows"
+  printf '%s%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$install" "$base" "$base" "$url" "$sha" "${size:-0}" "$type" >> "$work/rows"
   echo "resolved $capability: $base" >&2
 done <<EOF
 $(yq -r "$EXPR" "$MANIFEST")
@@ -133,8 +162,15 @@ fi
 
 sort -u "$work/rows" > "$work/sorted"
 
+# The credential map is copied through verbatim. It lives at the TOP LEVEL of
+# the lock, never inside a model entry, so `models[]` stays exactly comfy-cli's
+# documented shape.
+if [ "$(yq -r 'has("auth")' "$MANIFEST")" = "true" ]; then
+  yq -o yaml -r '{"auth": .auth}' "$MANIFEST"
+fi
+
 echo "models:"
-while IFS='	' read -r install base url sha size type auth; do
+while IFS='	' read -r install base url sha size type; do
   printf '  - model: %s\n' "$base"
   printf '    url: %s\n' "$url"
   printf '    paths:\n'
@@ -147,6 +183,4 @@ while IFS='	' read -r install base url sha size type auth; do
   # mid-way through -- which is exactly how this silently emitted nothing.
   if [ "$size" != "0" ]; then printf '    size_bytes: %s\n' "$size"; fi
   if [ -n "$type" ]; then printf '    type: %s\n' "$type"; fi
-  # The one field comfy-lock has no concept of, and the reason we extend it.
-  if [ -n "$auth" ]; then printf '    auth: %s\n' "$auth"; fi
 done < "$work/sorted"

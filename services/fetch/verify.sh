@@ -68,9 +68,22 @@ grep -q 'no SHA256 in the lock' /tmp/v/nh.log \
 [ ! -e /tmp/v/r3/models/upscale_models/anime6b.pth ] \
   || { echo "FETCHED AN ENTRY IT COULD NOT VERIFY"; exit 1; }
 
+echo "--- a mapped-but-unset credential must not block a PUBLIC file ---"
+# Behaviour that changed when credentials moved from a per-entry `auth` field
+# to a host-keyed map: a host can be listed in `auth` while most of its files
+# are public. Refusing them because the variable happens to be unset would be
+# wrong, so the credential is recorded and only NAMED if the fetch then fails.
+mkdir -p /tmp/v/r4
+{ echo "auth:"; echo "  huggingface.co: \${HF_TOKEN}"; lock "$WANT"; } > /tmp/v/authmap.yaml
+( unset HF_TOKEN; fetch-lock.sh /tmp/v/authmap.yaml /tmp/v/r4 --apply ) > /tmp/v/am.log 2>&1 || {
+  echo "A MAPPED-BUT-UNSET CREDENTIAL BLOCKED A PUBLIC FILE:"; cat /tmp/v/am.log; exit 1
+}
+[ -f /tmp/v/r4/models/upscale_models/anime6b.pth ] \
+  || { echo "PUBLIC FILE NOT FETCHED UNDER AN AUTH MAP"; cat /tmp/v/am.log; exit 1; }
+
 echo "--- the record parser reads every model the lock declares ---"
 # The assertion that makes the yq-escape class of silent pass impossible.
 fetch-lock.sh /tmp/v/good.yaml /tmp/v/root | grep -qE '^(present|would fetch): *1' \
   || { echo "PARSER READ NOTHING"; exit 1; }
 
-echo "verify ok: fetches, is idempotent, rejects a mismatch, refuses the unverifiable, parses records"
+echo "verify ok: fetches, idempotent, rejects a mismatch, refuses the unverifiable, honours the auth map, parses records"

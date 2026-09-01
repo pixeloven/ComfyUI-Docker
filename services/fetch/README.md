@@ -75,14 +75,46 @@ docker run --rm -v comfyui:/workspace -v "$PWD/comfy-lock.yaml:/lock.yaml:ro" \
   ghcr.io/pixeloven/comfyui/fetch:latest /lock.yaml /workspace --apply
 ```
 
-Credentials come from the environment — `CIVITAI_TOKEN`, `HF_TOKEN` — never from
-either file. A source needing a token you do not have is **not attempted**,
-because an unauthenticated Civitai request returns an HTML error page with HTTP
-200, which would be written to disk and then fail the hash check with a message
-naming the wrong cause.
+## Credentials
 
-Resolution needs no credentials at all: HuggingFace returns hashes in headers and
-Civitai's `model-versions` endpoint is public. Tokens are needed to *fetch*.
+A host-keyed map, declared once in the manifest and copied through to the lock:
+
+```yaml
+auth:
+  civitai.com: ${CIVITAI_TOKEN}
+  huggingface.co: ${HF_TOKEN}
+  github.com: ${GITHUB_TOKEN}
+```
+
+The fetcher resolves a credential by the URL's **host**, so **no model entry
+carries an auth field** — which is why `models[]` in the lock stays comfy-cli's
+documented shape.
+
+Values must be `${ENV_VAR}` references. **The schema rejects a literal**, so a
+token cannot be committed by accident.
+
+A host listed here whose variable is *unset* does not block anything — most
+HuggingFace files are public, and refusing them because `HF_TOKEN` happens to be
+unset would be wrong. The missing variable is recorded and **named in the error
+if the fetch then fails**, which is the case a bare `sha256 mismatch` would
+otherwise misattribute: an unauthenticated Civitai request returns an HTML error
+page with HTTP 200.
+
+Resolution needs no credentials at all — HuggingFace returns hashes in headers,
+Civitai's `model-versions` endpoint is public, and GitHub's release API is too
+(a `GITHUB_TOKEN` only raises the rate limit). Tokens are needed to *fetch*.
+
+## Sources
+
+| form | resolved from |
+|---|---|
+| `hf:<owner>/<repo>` + `file:` | `x-repo-commit`, `x-linked-etag`, `x-linked-size` headers |
+| `gh:<owner>/<repo>@<tag>` + `file:` | the release API's asset `digest`, `size` |
+| `civitai:<modelVersionId>` | `files[0].hashes.SHA256`, `downloadUrl`, `sizeKB` |
+| `https://…` | nothing — **you must supply `sha256:`** |
+
+`civitai:` sources require `as:`, because the filename comes from the API and
+would otherwise be unknowable offline — which `check-lock.sh` depends on.
 
 ## Why CI does not re-resolve
 
@@ -110,6 +142,10 @@ would need network access to do it. Hash changes arrive through a deliberate
 - **`x-linked-etag` is the sha256 — but only on the first hop.** Following the
   redirect gives the CDN's Xet content-address instead: a different, equally
   plausible-looking value. Resolve with `curl -sI`, never `-sIL`.
+- **GitHub only computes asset digests for newer uploads.** Much of the ComfyUI
+  ecosystem's models sit on releases from 2021 — `xinntao/Real-ESRGAN@v0.1.0`
+  has none. `resolve.sh` falls back to downloading and hashing, which is correct
+  but slow; state `sha256:` in the manifest to skip it.
 - **Bind mounts and DinD.** Where CI's filesystem is not the Docker host's,
   `-v "$(mktemp -d):/w"` silently mounts an empty directory. `verify.sh` is
   piped in over stdin for exactly that reason.
