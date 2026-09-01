@@ -49,3 +49,19 @@ models:
       - hash: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f
         type: SHA256
     type: vae
+  - model: taesd_decoder.safetensors
+    url: https://huggingface.co/madebyollin/taesd/resolve/614f76814bbe30edbe2e627ace1c2234c81a2c0e/taesd_decoder.safetensors
+    paths:
+      - path: models/vae_approx/taesd_decoder.safetensors
+    hashes:
+      - hash: f0fb51dd10d41c26612c070fa0b52ea0215a5ff90792134b4971109dd713c019
+        type: SHA256
+    type: vae_approx
+  - model: taesdxl_decoder.safetensors
+    url: https://huggingface.co/madebyollin/taesdxl/resolve/b20258aaef75ef61e659c1e0f14f251cf0ad153e/taesdxl_decoder.safetensors
+    paths:
+      - path: models/vae_approx/taesdxl_decoder.safetensors
+    hashes:
+      - hash: f6013131e7eb412ef20113f1acc2ea7d3e47e53196ca0530fa65d9b61d814b61
+        type: SHA256
+    type: vae_approx

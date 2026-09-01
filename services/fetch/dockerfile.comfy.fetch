@@ -23,7 +23,7 @@ FROM mikefarah/yq:${YQ_VERSION} AS yq
 FROM curlimages/curl:${CURL_VERSION}
 
 COPY --from=yq --chmod=0555 /usr/bin/yq /usr/local/bin/yq
-COPY --chmod=0555 fetch-lock.sh resolve.sh check-lock.sh /usr/local/bin/
+COPY --chmod=0555 fetch-lock.sh resolve.sh check-lock.sh lib-profiles.sh /usr/local/bin/
 
 # Prove the three tools the scripts depend on are present and usable at BUILD
 # time. The image is useless without any one of them, and discovering that from

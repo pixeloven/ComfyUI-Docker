@@ -64,6 +64,23 @@ models:
         install: models/upscale_models/
         type: upscale_model
 
+  - name: preview-decoders
+    description: >-
+      TAESD: the tiny autoencoders ComfyUI uses to render live previews during
+      sampling. 4.7 MB each, useful with every model line, and the smallest
+      real thing this repository can demonstrate a verified fetch with -- which
+      is why the `preview` profile is what the compose examples and the
+      end-to-end CI job use.
+    files:
+      - source: hf:madebyollin/taesd
+        file: taesd_decoder.safetensors
+        install: models/vae_approx/
+        type: vae_approx
+      - source: hf:madebyollin/taesdxl
+        file: taesdxl_decoder.safetensors
+        install: models/vae_approx/
+        type: vae_approx
+
 # Named sets to resolve together. A member is a model `name` above, or another
 # profile -- so `everything` below is set union, which is the "sometimes I want
 # both" case without inheritance, overrides or diamonds.
@@ -76,6 +93,10 @@ models:
 #
 # Without --profile, every model is resolved -- which is what comfy-lock.yaml is.
 profiles:
+  # Small and fast on purpose: 9.5 MB total. This is what the compose examples
+  # default to and what the end-to-end CI job fetches, so the proof stays cheap
+  # enough to run on every PR.
+  preview:    [preview-decoders]
   image:      [qwen-image, real-esrgan]
   image-fast: [qwen-image, qwen-image-lightning, real-esrgan]
   everything: [image-fast]
