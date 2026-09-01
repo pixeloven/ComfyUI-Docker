@@ -64,6 +64,22 @@ models:
         install: models/upscale_models/
         type: upscale_model
 
+# Named sets to resolve together. A member is a model `name` above, or another
+# profile -- so `everything` below is set union, which is the "sometimes I want
+# both" case without inheritance, overrides or diamonds.
+#
+# Models shared between profiles are defined ONCE here. They appear in both
+# locks, and materialising both installs them once: the fetch is
+# content-addressed, so the second pass sees a matching sha256 and skips.
+#
+#   resolve.sh comfy.yaml --profile image > locks/image.yaml
+#
+# Without --profile, every model is resolved -- which is what comfy-lock.yaml is.
+profiles:
+  image:      [qwen-image, real-esrgan]
+  image-fast: [qwen-image, qwen-image-lightning, real-esrgan]
+  everything: [image-fast]
+
   # Civitai needs a token at fetch time, resolved from the `auth` map above by
   # host. `as` is required for civitai sources: the filename comes from the API,
   # so without it the install path is not knowable offline and check-lock.sh

@@ -53,6 +53,39 @@ missing one** — a missing file fails loudly at load; a wrong one renders subtl
 wrong images forever, with no error anywhere. An entry with no `SHA256` is
 refused rather than fetched unverified.
 
+## Profiles
+
+Named sets of capabilities, resolved into separate locks:
+
+```yaml
+models:
+  - name: qwen-image     …
+  - name: real-esrgan    …     # defined ONCE, shared
+
+profiles:
+  image:      [qwen-image, real-esrgan]
+  image-fast: [qwen-image, qwen-image-lightning, real-esrgan]
+  everything: [image-fast]     # a member may be another profile
+```
+
+```sh
+resolve.sh comfy.yaml --profile image > locks/image.yaml
+resolve.sh comfy.yaml --profile video > locks/video.yaml
+
+fetch-lock.sh locks/image.yaml /workspace --apply
+fetch-lock.sh locks/video.yaml /workspace --apply   # shared files already correct, skipped
+```
+
+Profiles compose by **set union**, not inheritance — no resolution order, no
+overrides, no diamonds. A model shared between two profiles is defined once and
+appears in both locks; materialising both installs it once, because the fetch is
+content-addressed and the second pass sees a matching hash.
+
+`check-lock.sh` validates profiles offline: every member must be a known model
+or another profile, and expansion must terminate. Cycle detection is by bounded
+expansion rather than a self-reference check, because `a → b → a` is the same
+defect one step further out.
+
 ## Usage
 
 ```sh

@@ -14,16 +14,26 @@
 # returns hashes in headers, and Civitai's model-versions endpoint is public.
 # Tokens are needed to FETCH, not to resolve.
 #
-# Usage: resolve.sh <comfy.yaml>
+# Usage: resolve.sh <comfy.yaml> [--profile <name>]
 # Writes a `models:` document to stdout. Redirect it into the lock.
+#
+# Without --profile every model is resolved. With one, only the capabilities
+# that profile names -- expanded transitively, since a profile may name another.
 
 set -eu
 
 LC_ALL=C
 export LC_ALL
 
-MANIFEST="${1:?usage: resolve.sh <comfy.yaml>}"
+MANIFEST="${1:?usage: resolve.sh <comfy.yaml> [--profile <name>]}"
 [ -f "$MANIFEST" ] || { echo "no such manifest: $MANIFEST" >&2; exit 2; }
+
+PROFILE=""
+case "${2:-}" in
+  --profile) PROFILE="${3:?--profile needs a name}" ;;
+  "")        ;;
+  *)         echo "unknown argument: $2" >&2; exit 2 ;;
+esac
 
 UA="comfyui-fetch/1.0 (+https://github.com/pixeloven/ComfyUI-Docker)"
 
@@ -44,7 +54,51 @@ EXPR='.models[] as $m | $m.files[] |
   ["F", $m.name, .source, (.file // "-"), (.revision // "main"),
    .install, (.as // "-"), (.type // "-"), (.sha256 // "-")] | .[]'
 
-declared="$(yq -r '[.models[].files[]] | length' "$MANIFEST")"
+# Expand a profile to the capability names it selects. A member may be another
+# profile, so this iterates to a fixed point -- and a bounded one, because a
+# profile that names itself would otherwise loop forever.
+selected=""
+if [ -n "$PROFILE" ]; then
+  if [ "$(PROF="$PROFILE" yq -r '.profiles // {} | has(strenv(PROF))' "$MANIFEST")" != "true" ]; then
+    echo "no such profile: $PROFILE" >&2; exit 2
+  fi
+  known_models="$(yq -r '.models[].name' "$MANIFEST")"
+  frontier="$PROFILE"
+  rounds=0
+  while [ -n "$frontier" ]; do
+    rounds=$((rounds + 1))
+    if [ "$rounds" -gt 32 ]; then
+      echo "profile expansion did not settle after 32 rounds: cycle in profiles?" >&2; exit 2
+    fi
+    next=""
+    for member in $frontier; do
+      if printf '%s\n' "$known_models" | grep -qx "$member"; then
+        case " $selected " in *" $member "*) ;; *) selected="$selected $member" ;; esac
+      elif [ "$(PROF="$member" yq -r '.profiles // {} | has(strenv(PROF))' "$MANIFEST")" = "true" ]; then
+        next="$next $(PROF="$member" yq -r '.profiles[strenv(PROF)][]' "$MANIFEST" | tr '\n' ' ')"
+      else
+        echo "profile member is neither a model nor a profile: $member" >&2; exit 2
+      fi
+    done
+    frontier="$next"
+  done
+  echo "profile $PROFILE selects:$selected" >&2
+fi
+
+in_selection() {
+  [ -z "$PROFILE" ] && return 0
+  case " $selected " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
+if [ -n "$PROFILE" ]; then
+  declared=0
+  for m in $selected; do
+    n="$(NAME="$m" yq -r '[.models[] | select(.name == strenv(NAME)) | .files[]] | length' "$MANIFEST")"
+    declared=$((declared + n))
+  done
+else
+  declared="$(yq -r '[.models[].files[]] | length' "$MANIFEST")"
+fi
 records=0
 
 hf_head() {  # <repo> <revision> <file>  -> commit<TAB>sha256<TAB>size
@@ -66,6 +120,10 @@ while read -r marker; do
   [ "$marker" = "F" ] || { echo "record desync at '$marker'" >&2; exit 3; }
   read -r capability; read -r source; read -r file; read -r revision
   read -r install; read -r as; read -r type; read -r sha
+  # Skipped BEFORE the record counter and before any network call: an
+  # unselected capability must not be resolved, and must not count toward the
+  # records assertion either.
+  if ! in_selection "$capability"; then continue; fi
   records=$((records + 1))
   # "-" is the absent marker the extractor emits; turn it back into empty.
   [ "$file" = "-" ] && file=""

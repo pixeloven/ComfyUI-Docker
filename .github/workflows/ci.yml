@@ -112,7 +112,19 @@ jobs:
           exit 1
         fi
         git checkout -- comfy.yaml
-        echo "selftest ok: the gate rejects both an unhashed entry and an undeclared one"
+        yq -i '.profiles.broken = ["no-such-capability"]' comfy.yaml
+        if sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml; then
+          echo "SELFTEST FAILED: a profile naming an unknown capability was accepted"
+          exit 1
+        fi
+        git checkout -- comfy.yaml
+        yq -i '.profiles.a = ["b"] | .profiles.b = ["a"]' comfy.yaml
+        if sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml; then
+          echo "SELFTEST FAILED: a profile cycle was accepted"
+          exit 1
+        fi
+        git checkout -- comfy.yaml
+        echo "selftest ok: rejects an unhashed entry, an undeclared one, a bad profile member, and a cycle"
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4

@@ -112,6 +112,20 @@
       "propertyNames": {
         "pattern": "^[a-z0-9.-]+$"
       }
+    },
+    "profiles": {
+      "type": "object",
+      "description": "Named sets of capabilities to resolve together. A member is either a model's `name` or another profile's name, so profiles compose by set union -- which is the composition case (\"sometimes I want both\") without inheritance, overrides, or diamonds.",
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "string"
+        }
+      },
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9-]*$"
+      }
     }
   }
 }

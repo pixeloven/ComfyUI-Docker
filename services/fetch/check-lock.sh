@@ -27,6 +27,44 @@ LOCK="${2:?usage: check-lock.sh <comfy.yaml> <comfy-lock.yaml>}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# Profiles are validated here rather than at resolve time: a typo in a profile
+# member is only discovered when someone resolves THAT profile, which may be
+# never. This is offline and costs nothing.
+prof_bad=0
+known="$(yq -r '.models[].name' "$MANIFEST")"
+profiles="$(yq -r '.profiles // {} | keys | .[]' "$MANIFEST")"
+for prof in $profiles; do
+  for member in $(PROF="$prof" yq -r '.profiles[strenv(PROF)][]' "$MANIFEST"); do
+    if printf '%s\n' "$known" | grep -qx "$member"; then continue; fi
+    if printf '%s\n' "$profiles" | grep -qx "$member"; then continue; fi
+    echo "  BAD PROFILE $prof -> $member is neither a model nor a profile"
+    prof_bad=1
+  done
+done
+
+# Cycle detection, by bounded expansion. Checking only for a profile that names
+# ITSELF would miss `a -> b -> a`, which is the same defect one step further
+# out -- and the resolver would then be the only thing that caught it, at run
+# time, on whoever happened to select that profile.
+for prof in $profiles; do
+  frontier="$prof"; rounds=0
+  while [ -n "$frontier" ]; do
+    rounds=$((rounds + 1))
+    if [ "$rounds" -gt 32 ]; then
+      echo "  BAD PROFILE $prof does not settle: cycle"
+      prof_bad=1
+      break
+    fi
+    next=""
+    for member in $frontier; do
+      if printf '%s\n' "$profiles" | grep -qx "$member"; then
+        next="$next $(PROF="$member" yq -r '.profiles[strenv(PROF)][]' "$MANIFEST" | tr '\n' ' ')"
+      fi
+    done
+    frontier="$next"
+  done
+done
+
 # Expected install paths, derived from the manifest alone. `as` wins; otherwise
 # the basename of `file`. The schema requires `as` for civitai sources, whose
 # filename is only knowable from the API.
@@ -73,5 +111,6 @@ if [ -n "$unhashed" ]; then
   echo "  -> unverifiable; fetch-lock.sh will refuse these"
   rc=1
 fi
-[ "$rc" = 0 ] && echo "manifest and lock agree"
+if [ "$prof_bad" != 0 ]; then rc=1; fi
+[ "$rc" = 0 ] && echo "manifest and lock agree; $(printf '%s\n' "$profiles" | grep -c .) profiles valid"
 exit "$rc"
