@@ -9,16 +9,40 @@ a Helm pre-install hook without imposing anything on the consumer.
 
 ## Why not just `comfy-lock.yaml`
 
-`comfy-lock.yaml` records **where to get** a file. It has no field for a content
-hash, so nothing that reads it can tell a correct download from a corrupted one,
-a truncated one, or an HTML error page saved under a `.safetensors` name.
+comfy-lock's **documented** format does have somewhere to put a content hash:
 
-That matters more for model weights than for most payloads: **a
-wrong-but-plausible model file is worse than a missing one.** A missing file
-fails loudly at load. A wrong one renders subtly wrong images forever, with no
-error anywhere.
+```yaml
+    hashes:
+      - hash: [hash]
+        type: [AutoV1, AutoV2, SHA256, CRC32, and Blake3]
+```
 
-A *package* is `comfy-lock` plus the answer to "what should arrive":
+so `emit-comfy-lock.sh` fills it in, and the projection is *not* lossy on the
+thing that matters most. What it cannot carry is everything else a package
+knows: additional ranked sources to fail over to, credential kinds, file sizes,
+install roles beyond the single `type` field.
+
+The larger gap is that **upstream comfy-lock is a spec, not a working feature.**
+As of `comfy-cli` HEAD:
+
+- `ComfyLockYAMLStruct.models` is initialised `[]` and never appended to, so
+  `save_yaml` writes an empty model list;
+- the dataclass carries a singular scalar `hash`, not the README's
+  `hashes: [{hash, type}]`, so spec and implementation disagree;
+- `load_metadata()` returns a raw dict that nothing consumes;
+- `custom_nodes` is `[]` in code but a ComfyUI-Manager-shaped dict in the README
+  and in real lock files.
+
+It has been `# Todo: Add custom node fields for comfy-lock.yaml` in
+`workspace_manager.py` for some time. So nothing yet reads a comfy-lock to fetch
+anything — here or upstream — and a hash sitting in a file no reader checks
+verifies nothing.
+
+That is what a *package* is for: the same information, in a format that a
+fetcher actually consumes, with the verification performed. It matters more for
+model weights than for most payloads — **a wrong-but-plausible model file is
+worse than a missing one.** A missing file fails loudly at load. A wrong one
+renders subtly wrong images forever, with no error anywhere.
 
 ```yaml
 package: qwen-image

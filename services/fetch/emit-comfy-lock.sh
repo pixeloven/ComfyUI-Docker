@@ -1,13 +1,20 @@
 #!/bin/sh
 # Render packages down to the `models:` section of a comfy-lock.yaml.
 #
-# Packages are the authoring format: they carry a sha256 and every known source
-# for each file. comfy-lock is the ecosystem-compatible projection of that --
-# model, url, paths -- and is therefore GENERATED, never hand-edited.
+# Packages are the authoring format. comfy-lock is the ecosystem-compatible
+# projection of them, and is therefore GENERATED, never hand-edited.
 #
-# The downgrade is lossy by design. comfy-lock has no field for a content hash,
-# so what it cannot express is dropped rather than smuggled into a comment. What
-# survives is exactly what comfy-cli and friends can consume.
+# The projection carries the content hash. comfy-cli's documented format has a
+# `hashes:` block -- a list of {hash, type} with type in AutoV1, AutoV2, SHA256,
+# CRC32, Blake3 -- so the sha256 a package records survives into comfy-lock
+# rather than being dropped. (Its current IMPLEMENTATION writes a singular
+# scalar `hash` instead, and never populates models at all, so the README is the
+# only contract that exists to target.)
+#
+# What does not survive is everything a package knows that comfy-lock cannot
+# express: additional ranked sources, credential kinds, install roles beyond the
+# `type` field, file sizes. Those are dropped rather than smuggled into a
+# comment.
 #
 # Output is sorted by install path so the result is byte-stable and a drift gate
 # can diff it.
@@ -25,14 +32,12 @@ export LC_ALL
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-# One line per file: <install-path> <TAB> <basename> <TAB> <url>. Sorting on the
-# first field gives a stable document regardless of the order packages declare
-# their models in.
-#
-# Field-per-line extraction, then joined here -- yq 4.47 emits "\t" in an
-# expression literally where 4.53 interprets it, so no escape may appear inside
-# the expression itself.
-EXPR='.models[].files[] | (["F", .path, ((.sources // [])[0].url // "")]) | .[]'
+# Field-per-line extraction: yq 4.47 emits "\t" inside an expression literally
+# where 4.53 interprets it, so no escape may appear in the expression itself.
+# `.models[] as $m` carries the model's role down to each of its files.
+# shellcheck disable=SC2016  # $m is a yq variable, not a shell one.
+EXPR='.models[] as $m | $m.files[] |
+  ["F", .path, (.sha256 // ""), ((.sources // [])[0].url // ""), ($m.role // "")] | .[]'
 
 for dir in "$@"; do
   for pkg in "$dir"/*.yaml "$dir"/*.yml; do
@@ -42,14 +47,17 @@ for dir in "$@"; do
     yq -r "$EXPR" "$pkg" | while read -r marker; do
       [ "$marker" = "F" ] || { echo "record desync in $pkg" >&2; exit 3; }
       read -r path
+      read -r sha
       read -r url
+      read -r role
       # A file with no source cannot appear in a comfy-lock entry, whose whole
       # content is a URL. Reported so it is not silently dropped.
       if [ -z "$url" ]; then
         echo "no source, omitted from comfy-lock: $path" >&2
         continue
       fi
-      printf 'models/%s\t%s\t%s\n' "$path" "$(basename "$path")" "$url"
+      printf 'models/%s\t%s\t%s\t%s\t%s\n' \
+        "$path" "$(basename "$path")" "$url" "$sha" "$role"
     done >> "$work/rows"
   done
 done
@@ -59,9 +67,15 @@ done
 sort -u "$work/rows" > "$work/sorted"
 
 echo "models:"
-while IFS='	' read -r install base url; do
+while IFS='	' read -r install base url sha role; do
   printf '  - model: %s\n' "$base"
   printf '    url: %s\n' "$url"
   printf '    paths:\n'
   printf '      - path: %s\n' "$install"
+  if [ -n "$sha" ]; then
+    printf '    hashes:\n'
+    printf '      - hash: %s\n' "$sha"
+    printf '        type: SHA256\n'
+  fi
+  [ -n "$role" ] && printf '    type: %s\n' "$role"
 done < "$work/sorted"

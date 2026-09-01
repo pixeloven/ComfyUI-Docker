@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pixeloven.github.io/ComfyUI-Docker/schemas/model-package.json",
   "title": "ComfyUI model package",
-  "description": "A capability and the files that deliver it, expressed so any consumer can rebuild it. Validated in CI; see documentation/decisions/0009, 0015 and 0019.",
+  "description": "A capability and the files that deliver it, expressed so any consumer can rebuild it byte-for-byte. Hand-authored and reviewed like source; not generated. Every file carries a sha256 and its known sources ranked best-first, which is what lets services/fetch verify a download rather than trust it. comfy-lock.yaml is generated FROM these by services/fetch/emit-comfy-lock.sh; packages are the authoring format and comfy-lock is its ecosystem-compatible projection. Validated in CI by the validate-models job. See services/fetch/README.md.",
   "type": "object",
   "required": [
     "package",

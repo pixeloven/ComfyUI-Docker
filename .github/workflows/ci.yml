@@ -89,12 +89,29 @@ jobs:
       # directly the sha256 in the package no longer describes what a fetch
       # actually pulls, which is the whole property this repository adds.
       run: |
+        set -euo pipefail
+
+        # Covers EVERY field the emitter writes. Comparing only model/url/paths
+        # would let a changed sha256 through, which is precisely the value
+        # comfy-lock is here to carry.
+        norm='[.models[] | {"m": .model, "u": .url, "p": [.paths[].path], "h": [(.hashes // [])[] | .hash + ":" + .type], "t": (.type // "")}] | sort_by(.p[0])'
+
         sh services/fetch/emit-comfy-lock.sh models/packages > /tmp/emitted.yaml
-        yq -o=json -I0 '[.models[] | {"m":.model,"u":.url,"p":[.paths[].path]}] | sort_by(.p[0])' \
-          comfy-lock.yaml > /tmp/committed.json
-        yq -o=json -I0 '[.models[] | {"m":.model,"u":.url,"p":[.paths[].path]}] | sort_by(.p[0])' \
-          /tmp/emitted.yaml > /tmp/emitted.json
-        if ! diff -u /tmp/committed.json /tmp/emitted.json; then
+        yq -o=json -I0 "$norm" comfy-lock.yaml   > /tmp/committed.json
+        yq -o=json -I0 "$norm" /tmp/emitted.yaml > /tmp/normalised.json
+
+        # Two empty files diff clean. Without this, a yq syntax error or an
+        # emitter that produced nothing would report the gate as PASSING -- which
+        # is exactly what an earlier version of this step did against four
+        # injected faults.
+        for f in /tmp/committed.json /tmp/normalised.json; do
+          if [ ! -s "$f" ] || [ "$(cat "$f")" = "[]" ]; then
+            echo "GATE BROKEN: $f is empty; the comparison would be vacuous"
+            exit 1
+          fi
+        done
+
+        if ! diff -u /tmp/committed.json /tmp/normalised.json; then
           echo ""
           echo "comfy-lock.yaml has drifted from models/packages/."
           echo "Regenerate it rather than editing it by hand:"
@@ -103,6 +120,23 @@ jobs:
           exit 1
         fi
         echo "comfy-lock.yaml matches the packages"
+
+    - name: Selftest — the drift gate still fails on a real edit
+      # A gate that cannot fail is not a gate, and this one already reported
+      # PASS against four injected faults when its yq expression was broken.
+      run: |
+        set -uo pipefail
+        norm='[.models[] | {"m": .model, "u": .url, "p": [.paths[].path], "h": [(.hashes // [])[] | .hash + ":" + .type], "t": (.type // "")}] | sort_by(.p[0])'
+        yq -i '.models[0].hashes[0].hash = "0000000000000000000000000000000000000000000000000000000000000000"' comfy-lock.yaml
+        sh services/fetch/emit-comfy-lock.sh models/packages > /tmp/e2.yaml
+        yq -o=json -I0 "$norm" comfy-lock.yaml > /tmp/c2.json
+        yq -o=json -I0 "$norm" /tmp/e2.yaml    > /tmp/n2.json
+        if diff -q /tmp/c2.json /tmp/n2.json > /dev/null; then
+          echo "SELFTEST FAILED: a tampered hash in comfy-lock.yaml was not detected"
+          exit 1
+        fi
+        echo "selftest ok: the drift gate rejects a tampered hash"
+        git checkout -- comfy-lock.yaml
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4

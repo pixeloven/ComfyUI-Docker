@@ -9,15 +9,31 @@ models:
     url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors
     paths:
       - path: models/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors
+    hashes:
+      - hash: 5dc80554d5d83390046a2f4a94ece06afb7700bf7b0aaf8bde9769793875876b
+        type: SHA256
+    type: diffusion_model
   - model: Qwen-Image-Lightning-4steps-V1.0.safetensors
     url: https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-4steps-V1.0.safetensors
     paths:
       - path: models/loras/Qwen-Image-Lightning-4steps-V1.0.safetensors
+    hashes:
+      - hash: 9526e90d71c4290392feeccf3c2172cb77ab3a489f1faeb956637f97acb4c8b1
+        type: SHA256
+    type: lora
   - model: qwen_2.5_vl_7b_fp8_scaled.safetensors
     url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors
     paths:
       - path: models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors
+    hashes:
+      - hash: cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4
+        type: SHA256
+    type: text_encoder
   - model: qwen_image_vae.safetensors
     url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors
     paths:
       - path: models/vae/qwen_image_vae.safetensors
+    hashes:
+      - hash: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f
+        type: SHA256
+    type: vae
