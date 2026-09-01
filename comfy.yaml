@@ -1,0 +1,49 @@
+# comfy.yaml — the human-authored manifest. Declares INTENT.
+#
+# comfy-lock.yaml records the RESOLUTION: exact URLs, exact hashes, exact
+# revisions. Manifest is edited; lock is generated; fetch reads the lock.
+#
+# Scope today is models. custom_nodes / workflows / config slot in as sibling
+# top-level keys when we get there -- comfy-lock already has a custom_nodes
+# section to resolve into.
+name: pixeloven-comfyui
+description: Default model set for the ComfyUI images.
+
+models:
+  - name: qwen-image
+    description: Qwen-Image 20B text-to-image, fp8, with its text encoder and VAE.
+    files:
+      - source: hf:Comfy-Org/Qwen-Image_ComfyUI
+        file: split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors
+        install: models/diffusion_models/
+        type: diffusion_model
+
+      - source: hf:Comfy-Org/Qwen-Image_ComfyUI
+        file: split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors
+        install: models/text_encoders/
+        type: text_encoder
+
+      - source: hf:Comfy-Org/Qwen-Image_ComfyUI
+        file: split_files/vae/qwen_image_vae.safetensors
+        install: models/vae/
+        type: vae
+
+  - name: qwen-image-lightning
+    description: Step-distilled LoRA rendering Qwen-Image in 4 steps. Optional.
+    files:
+      - source: hf:lightx2v/Qwen-Image-Lightning
+        # `revision` is the unresolved intent -- a moving ref that the lock
+        # pins to a commit. This is the `^18` -> `18.3.1` moment.
+        revision: main
+        file: Qwen-Image-Lightning-4steps-V1.0.safetensors
+        install: models/loras/
+        type: lora
+
+  # Civitai needs a token at fetch time. The manifest declares WHICH credential;
+  # the token itself comes from the environment and never appears in either file.
+  # - name: some-finetune
+  #   files:
+  #     - source: civitai:1234567       # modelVersionId
+  #       install: models/checkpoints/
+  #       type: checkpoint
+  #       auth: civitai

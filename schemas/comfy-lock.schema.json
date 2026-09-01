@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pixeloven.github.io/ComfyUI-Docker/schemas/comfy-lock.json",
+  "title": "comfy-lock",
+  "description": "comfy-cli's comfy-lock.yaml, plus the one field a VERIFYING fetcher needs that it lacks: `auth`. Everything else is upstream's documented shape.",
+  "type": "object",
+  "required": ["models"],
+  "properties": {
+    "basics": {
+      "type": "object",
+      "properties": {
+        "name": {"type": "string"},
+        "updated_at": {"type": ["string", "null"]}
+      }
+    },
+    "custom_nodes": {"type": "object"},
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["model", "url", "paths"],
+        "additionalProperties": false,
+        "properties": {
+          "model": {"type": "string", "description": "Filename as ComfyUI will see it."},
+          "url": {"type": "string", "format": "uri"},
+          "paths": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object", "required": ["path"], "additionalProperties": false,
+              "properties": {"path": {"type": "string", "pattern": "^models/"}}
+            }
+          },
+          "hashes": {
+            "type": "array",
+            "items": {
+              "type": "object", "required": ["hash", "type"], "additionalProperties": false,
+              "properties": {
+                "hash": {"type": "string"},
+                "type": {"enum": ["AutoV1", "AutoV2", "SHA256", "CRC32", "Blake3"]}
+              }
+            }
+          },
+          "type": {"type": "string", "description": "Model type, e.g. lora, vae, diffusion_model."},
+          "size_bytes": {"type": "integer", "minimum": 1},
+          "auth": {
+            "enum": ["civitai", "huggingface"],
+            "description": "EXTENSION. Which credential the source needs, taken from the environment at fetch time. A package is published; a token is not."
+          }
+        }
+      }
+    }
+  }
+}

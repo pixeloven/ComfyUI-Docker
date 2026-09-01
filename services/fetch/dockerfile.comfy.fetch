@@ -23,7 +23,7 @@ FROM mikefarah/yq:${YQ_VERSION} AS yq
 FROM curlimages/curl:${CURL_VERSION}
 
 COPY --from=yq --chmod=0555 /usr/bin/yq /usr/local/bin/yq
-COPY --chmod=0555 fetch-package.sh check-packages.sh emit-comfy-lock.sh /usr/local/bin/
+COPY --chmod=0555 fetch-lock.sh resolve.sh check-lock.sh /usr/local/bin/
 
 # Prove the three tools the scripts depend on are present and usable at BUILD
 # time. The image is useless without any one of them, and discovering that from
@@ -39,4 +39,4 @@ LABEL org.opencontainers.image.source="https://github.com/pixeloven/ComfyUI-Dock
 # ownership the consuming pod or compose file can arrange (fsGroup, or a
 # matching --user). The uid itself is the consumer's to choose.
 USER 1000
-ENTRYPOINT ["/usr/local/bin/fetch-package.sh"]
+ENTRYPOINT ["/usr/local/bin/fetch-lock.sh"]

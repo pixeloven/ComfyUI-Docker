@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pixeloven.github.io/ComfyUI-Docker/schemas/comfy.json",
+  "title": "comfy.yaml",
+  "description": "Human-authored manifest. Declares what a workspace should contain; comfy-lock.yaml records how it resolved.",
+  "type": "object",
+  "required": [
+    "models"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "files"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Capability name. Groups the files that must be installed together."
+          },
+          "description": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "source",
+                "install"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "pattern": "^(hf:[^/]+/[^/]+|civitai:[0-9]+|https?://.+)$",
+                  "description": "hf:<owner>/<repo>, civitai:<modelVersionId>, or a direct URL."
+                },
+                "file": {
+                  "type": "string",
+                  "description": "Path within the source repo. Omit for sources that name a single file."
+                },
+                "revision": {
+                  "type": "string",
+                  "default": "main",
+                  "description": "Moving ref the lock pins to a commit."
+                },
+                "install": {
+                  "type": "string",
+                  "pattern": "^models/.+/$",
+                  "description": "Directory to install into."
+                },
+                "as": {
+                  "type": "string",
+                  "description": "Local filename, if it should differ from upstream's."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "Model type: lora, vae, checkpoint, diffusion_model, ..."
+                },
+                "auth": {
+                  "enum": [
+                    "civitai",
+                    "huggingface"
+                  ],
+                  "description": "Credential the source needs, taken from the environment at fetch time."
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "REQUIRED for a direct-URL source: nothing about a bare URL can be resolved from headers, so the hash must be stated. Ignored for hf:/civitai: sources, which resolve it."
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "source": {
+                        "pattern": "^civitai:"
+                      }
+                    },
+                    "required": [
+                      "source"
+                    ]
+                  },
+                  "then": {
+                    "required": [
+                      "as"
+                    ],
+                    "$comment": "A civitai source's filename comes from the API, so it is not knowable offline. `as` makes the install path derivable from the manifest alone, which is what lets check-lock.sh run without network."
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
