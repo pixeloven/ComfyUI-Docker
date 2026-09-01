@@ -70,9 +70,16 @@ jobs:
         yq --version
 
     - name: Shellcheck the fetch scripts
+      # Pinned, and --severity=style so CI is not quietly stricter or laxer than
+      # a contributor's local shellcheck. A distro-provided version silently
+      # differing from the author's is how an SC2015 reached CI having passed
+      # locally.
       run: |
-        sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-        shellcheck --shell=sh services/fetch/*.sh
+        curl -fsSL --retry 3 \
+          https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz \
+          | tar -xJ --strip-components=1 -C /usr/local/bin shellcheck-v0.10.0/shellcheck
+        shellcheck --version
+        shellcheck --severity=style --shell=sh services/fetch/*.sh
 
     - name: Validate the manifest and the lock against their schemas
       run: |

@@ -96,7 +96,11 @@ while read -r marker; do
       sha="$(yq -p json -r '.files[0].hashes.SHA256 // ""' "$work/cv.json" | tr '[:upper:]' '[:lower:]')"
       size="$(yq -p json -r '((.files[0].sizeKB // 0) * 1024) | round' "$work/cv.json")"
       base="$(yq -p json -r '.files[0].name' "$work/cv.json")"
-      [ -n "$sha" ] && [ "$sha" != "null" ] || { echo "$source has no SHA256" >&2; exit 1; }
+      # `if`, not `A && B || C` -- the latter runs C when A is true and B is
+      # false, which is not if-then-else and would misreport the reason.
+      if [ -z "$sha" ] || [ "$sha" = "null" ]; then
+        echo "$source has no SHA256" >&2; exit 1
+      fi
       ;;
     http://*|https://*)
       # Nothing about a bare URL can be resolved from headers, so the manifest
