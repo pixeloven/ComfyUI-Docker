@@ -16,7 +16,6 @@ models:
     hashes:
       - hash: 5dc80554d5d83390046a2f4a94ece06afb7700bf7b0aaf8bde9769793875876b
         type: SHA256
-    size_bytes: 20430679144
     type: diffusion_model
   - model: Qwen-Image-Lightning-4steps-V1.0.safetensors
     url: https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/e74da8d4e71a54b341de86aa9f8d2509165aa513/Qwen-Image-Lightning-4steps-V1.0.safetensors
@@ -25,7 +24,6 @@ models:
     hashes:
       - hash: 9526e90d71c4290392feeccf3c2172cb77ab3a489f1faeb956637f97acb4c8b1
         type: SHA256
-    size_bytes: 1698951104
     type: lora
   - model: qwen_2.5_vl_7b_fp8_scaled.safetensors
     url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/7beb7b647f04469fbe64ba8adc2bb0d7e5e9f73f/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors
@@ -34,7 +32,6 @@ models:
     hashes:
       - hash: cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4
         type: SHA256
-    size_bytes: 9384670680
     type: text_encoder
   - model: RealESRGAN_x4plus.pth
     url: https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth
@@ -43,7 +40,6 @@ models:
     hashes:
       - hash: 4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1
         type: SHA256
-    size_bytes: 67040989
     type: upscale_model
   - model: qwen_image_vae.safetensors
     url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/7beb7b647f04469fbe64ba8adc2bb0d7e5e9f73f/split_files/vae/qwen_image_vae.safetensors
@@ -52,5 +48,4 @@ models:
     hashes:
       - hash: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f
         type: SHA256
-    size_bytes: 253806246
     type: vae

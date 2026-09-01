@@ -101,14 +101,16 @@ else
 fi
 records=0
 
-hf_head() {  # <repo> <revision> <file>  -> commit<TAB>sha256<TAB>size
+hf_head() {  # <repo> <revision> <file>  -> commit<TAB>sha256
+  # NOT -sIL. `x-linked-etag` is the sha256 only on the FIRST hop; following the
+  # redirect returns the CDN's Xet content-address, a different and equally
+  # plausible-looking 64-hex value.
   curl -sI -A "$UA" "https://huggingface.co/$1/resolve/$2/$3" \
     | tr -d '\r' \
     | awk 'BEGIN{IGNORECASE=1}
-           /^x-repo-commit:/  {c=$2}
-           /^x-linked-etag:/  {h=$2; gsub(/"/,"",h)}
-           /^x-linked-size:/  {s=$2}
-           END{ if (c && h && s) printf "%s\t%s\t%s", c, h, s }'
+           /^x-repo-commit:/ {c=$2}
+           /^x-linked-etag:/ {h=$2; gsub(/"/,"",h)}
+           END{ if (c && h) printf "%s\t%s", c, h }'
 }
 
 # The `END` sentinel is load-bearing. $(...) strips TRAILING newlines, so a
@@ -140,7 +142,6 @@ while read -r marker; do
       [ -n "$got" ] || { echo "could not resolve hf:$repo@$revision/$file" >&2; exit 1; }
       commit="$(printf '%s' "$got" | cut -f1)"
       sha="$(printf '%s' "$got" | cut -f2)"
-      size="$(printf '%s' "$got" | cut -f3)"
       # The lock pins the COMMIT, never the moving ref it was resolved from.
       url="https://huggingface.co/$repo/resolve/$commit/$file"
       base="$(basename "$file")"
@@ -151,7 +152,6 @@ while read -r marker; do
         || { echo "could not resolve $source" >&2; exit 1; }
       url="$(yq -p json -o yaml -r '.files[0].downloadUrl' "$work/cv.json")"
       sha="$(yq -p json -o yaml -r '.files[0].hashes.SHA256 // ""' "$work/cv.json" | tr '[:upper:]' '[:lower:]')"
-      size="$(yq -p json -o yaml -r '((.files[0].sizeKB // 0) * 1024) | round' "$work/cv.json")"
       base="$(yq -p json -o yaml -r '.files[0].name' "$work/cv.json")"
       # `if`, not `A && B || C` -- the latter runs C when A is true and B is
       # false, which is not if-then-else and would misreport the reason.
@@ -171,7 +171,6 @@ while read -r marker; do
       if [ -z "$url" ] || [ "$url" = "null" ]; then
         echo "no asset named $file in $repo@$tag" >&2; exit 1
       fi
-      size="$(ASSET="$file" yq -p json -o yaml -r '.assets[] | select(.name == strenv(ASSET)) | .size' "$work/gh.json")"
       digest="$(ASSET="$file" yq -p json -o yaml -r '.assets[] | select(.name == strenv(ASSET)) | .digest // ""' "$work/gh.json")"
       if [ -n "$digest" ] && [ "$digest" != "null" ]; then
         sha="${digest#sha256:}"
@@ -195,16 +194,14 @@ while read -r marker; do
       # entry with no hash would produce a fetch that verifies nothing.
       [ -n "$sha" ] || { echo "direct URL needs \`sha256\` in the manifest: $source" >&2; exit 1; }
       url="$source"
-      size="$(curl -sI -A "$UA" "$source" | tr -d '\r' \
-              | awk 'BEGIN{IGNORECASE=1} /^content-length:/{print $2}' | tail -1)"
       base="$(basename "${source%%\?*}")"
       ;;
     *) echo "unknown source scheme: $source" >&2; exit 1 ;;
   esac
 
   if [ -n "$as" ]; then base="$as"; fi
-  printf '%s%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$install" "$base" "$base" "$url" "$sha" "${size:-0}" "$type" >> "$work/rows"
+  printf '%s%s\t%s\t%s\t%s\t%s\n' \
+    "$install" "$base" "$base" "$url" "$sha" "$type" >> "$work/rows"
   echo "resolved $capability: $base" >&2
 done <<EOF
 $(yq -r "$EXPR" "$MANIFEST")
@@ -228,7 +225,7 @@ if [ "$(yq -r 'has("auth")' "$MANIFEST")" = "true" ]; then
 fi
 
 echo "models:"
-while IFS='	' read -r install base url sha size type; do
+while IFS='	' read -r install base url sha type; do
   printf '  - model: %s\n' "$base"
   printf '    url: %s\n' "$url"
   printf '    paths:\n'
@@ -239,6 +236,8 @@ while IFS='	' read -r install base url sha size type; do
   # `if`, not `[ ... ] && ...`: a false test as the LAST command in the loop
   # body makes the body return non-zero, and `set -e` then kills the loop
   # mid-way through -- which is exactly how this silently emitted nothing.
-  if [ "$size" != "0" ]; then printf '    size_bytes: %s\n' "$size"; fi
+  #
+  # Nothing else is written. `models[]` is byte-for-byte comfy-cli's documented
+  # shape, so anything that learns to read a comfy-lock reads ours unmodified.
   if [ -n "$type" ]; then printf '    type: %s\n' "$type"; fi
 done < "$work/sorted"

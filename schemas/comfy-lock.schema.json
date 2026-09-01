@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pixeloven.github.io/ComfyUI-Docker/schemas/comfy-lock.json",
   "title": "comfy-lock",
-  "description": "comfy-cli's comfy-lock.yaml. `models[]` entries are exactly upstream's documented shape; the only addition is a top-level `auth` map, which upstream has no equivalent for and which never appears inside a model entry.",
+  "description": "comfy-cli's comfy-lock.yaml. `models[]` entries are exactly upstream's documented shape -- model, url, paths, hashes, type -- with no additions. The only extension anywhere is the top-level `auth` map, which upstream has no equivalent for.",
   "type": "object",
   "required": [
     "models"
@@ -90,10 +90,6 @@
           "type": {
             "type": "string",
             "description": "Model type, e.g. lora, vae, diffusion_model."
-          },
-          "size_bytes": {
-            "type": "integer",
-            "minimum": 1
           }
         }
       }

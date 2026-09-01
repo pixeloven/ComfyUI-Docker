@@ -39,14 +39,13 @@ the sha256 of the bytes that commit serves:
     hashes:
       - hash: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f
         type: SHA256
-    size_bytes: 253806246
     type: vae
 ```
 
-The lock is comfy-cli's documented `comfy-lock.yaml` shape, including its
-`hashes: [{hash, type}]` block. **One field is an extension: `auth`**, naming
-which credential a source needs. It is the only thing the upstream format cannot
-express that a *verifying* fetcher requires.
+The lock's `models[]` entries are **byte-for-byte** comfy-cli's documented
+`comfy-lock.yaml` shape — `model`, `url`, `paths`, `hashes`, `type` — with no
+additions, so anything that learns to read a comfy-lock reads ours unmodified. **The only extension anywhere is the top-level `auth` map**, which upstream has
+no equivalent for and which never appears inside a model entry.
 
 Verification is the point. **A wrong-but-plausible model file is worse than a
 missing one** — a missing file fails loudly at load; a wrong one renders subtly
