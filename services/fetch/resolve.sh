@@ -22,6 +22,13 @@
 
 set -eu
 
+# Source failures are COLLECTED, not fatal. `set -e` aborting on the first one
+# means a manifest of 161 files with a single dead source resolves nothing and
+# tells you about one problem per run -- so finding N broken sources costs N
+# full passes over the network. Every failure is reported in one pass instead,
+# and no lock is written unless all of them resolved: a partial lock that looks
+# complete is worse than none.
+
 LC_ALL=C
 export LC_ALL
 
@@ -81,6 +88,15 @@ else
   declared="$(yq -r '[.models[].files[]] | length' "$MANIFEST")"
 fi
 records=0
+failures=0
+failed_list=""
+
+fail() {  # <what> ; records the failure and moves on
+  echo "  UNRESOLVED  $1" >&2
+  failed_list="${failed_list}  $1
+"
+  failures=$((failures + 1))
+}
 
 hf_head() {  # <repo> <revision> <file>  -> commit<TAB>sha256
   # NOT -sIL. `x-linked-etag` is the sha256 only on the FIRST hop; following the
@@ -118,9 +134,9 @@ while read -r marker; do
   case "$source" in
     hf:*)
       repo="${source#hf:}"
-      [ -n "$file" ] || { echo "hf source needs \`file\`: $source" >&2; exit 1; }
+      if [ -z "$file" ]; then fail "$source: hf source needs \`file\`"; continue; fi
       got="$(hf_head "$repo" "$revision" "$file")"
-      [ -n "$got" ] || { echo "could not resolve hf:$repo@$revision/$file" >&2; exit 1; }
+      if [ -z "$got" ]; then fail "hf:$repo@$revision/$file: not found, or gated and no token"; continue; fi
       commit="$(printf '%s' "$got" | cut -f1)"
       sha="$(printf '%s' "$got" | cut -f2)"
       # The lock pins the COMMIT, never the moving ref it was resolved from.
@@ -129,28 +145,30 @@ while read -r marker; do
       ;;
     civitai:*)
       id="${source#civitai:}"
-      curl -sf -A "$UA" "https://civitai.com/api/v1/model-versions/$id" > "$work/cv.json" \
-        || { echo "could not resolve $source" >&2; exit 1; }
+      if ! curl -sf -A "$UA" "https://civitai.com/api/v1/model-versions/$id" > "$work/cv.json"; then
+        fail "$source: not found (deleted upstream, or the version id is wrong)"; continue
+      fi
       url="$(yq -p json -o yaml -r '.files[0].downloadUrl' "$work/cv.json")"
       sha="$(yq -p json -o yaml -r '.files[0].hashes.SHA256 // ""' "$work/cv.json" | tr '[:upper:]' '[:lower:]')"
       base="$(yq -p json -o yaml -r '.files[0].name' "$work/cv.json")"
       # `if`, not `A && B || C` -- the latter runs C when A is true and B is
       # false, which is not if-then-else and would misreport the reason.
       if [ -z "$sha" ] || [ "$sha" = "null" ]; then
-        echo "$source has no SHA256" >&2; exit 1
+        fail "$source: no SHA256 in the API response"; continue
       fi
       ;;
     gh:*)
       # gh:<owner>/<repo>@<tag>. The asset is `file`.
       spec="${source#gh:}"; repo="${spec%@*}"; tag="${spec##*@}"
-      [ -n "$file" ] || { echo "gh source needs \`file\` (the asset name): $source" >&2; exit 1; }
+      if [ -z "$file" ]; then fail "$source: gh source needs \`file\` (the asset name)"; continue; fi
       set --
       if [ -n "${GITHUB_TOKEN:-}" ]; then set -- -H "Authorization: Bearer $GITHUB_TOKEN"; fi
-      curl -sf -A "$UA" "$@" "https://api.github.com/repos/$repo/releases/tags/$tag" > "$work/gh.json" \
-        || { echo "could not read release $repo@$tag" >&2; exit 1; }
+      if ! curl -sf -A "$UA" "$@" "https://api.github.com/repos/$repo/releases/tags/$tag" > "$work/gh.json"; then
+        fail "gh:$repo@$tag: release not found"; continue
+      fi
       url="$(ASSET="$file" yq -p json -o yaml -r '.assets[] | select(.name == strenv(ASSET)) | .browser_download_url' "$work/gh.json")"
       if [ -z "$url" ] || [ "$url" = "null" ]; then
-        echo "no asset named $file in $repo@$tag" >&2; exit 1
+        fail "gh:$repo@$tag: no asset named $file"; continue
       fi
       digest="$(ASSET="$file" yq -p json -o yaml -r '.assets[] | select(.name == strenv(ASSET)) | .digest // ""' "$work/gh.json")"
       if [ -n "$digest" ] && [ "$digest" != "null" ]; then
@@ -162,8 +180,9 @@ while read -r marker; do
         # would defeat the point -- but it is avoidable by stating `sha256` in
         # the manifest.
         echo "no digest for $file in $repo@$tag; downloading to hash it (state \`sha256\` to skip)" >&2
-        curl -fsSL -A "$UA" "$url" -o "$work/asset" \
-          || { echo "could not download $url" >&2; exit 1; }
+        if ! curl -fsSL -A "$UA" "$url" -o "$work/asset"; then
+          fail "gh:$repo@$tag/$file: download failed"; continue
+        fi
         sha="$(sha256sum "$work/asset" | cut -d' ' -f1)"
         rm -f "$work/asset"
       fi
@@ -173,11 +192,11 @@ while read -r marker; do
       # Nothing about a bare URL can be resolved from headers, so the manifest
       # must state the hash. Refusing is the honest outcome: writing a lock
       # entry with no hash would produce a fetch that verifies nothing.
-      [ -n "$sha" ] || { echo "direct URL needs \`sha256\` in the manifest: $source" >&2; exit 1; }
+      if [ -z "$sha" ]; then fail "$source: a direct URL needs \`sha256\` in the manifest"; continue; fi
       url="$source"
       base="$(basename "${source%%\?*}")"
       ;;
-    *) echo "unknown source scheme: $source" >&2; exit 1 ;;
+    *) fail "$source: unknown source scheme"; continue ;;
   esac
 
   if [ -n "$as" ]; then base="$as"; fi
@@ -191,6 +210,16 @@ EOF
 
 # Reading zero records from a manifest that declares files must never be
 # reported as success.
+if [ "$failures" != 0 ]; then
+  echo "" >&2
+  echo "$failures of $declared sources did not resolve:" >&2
+  printf '%s' "$failed_list" >&2
+  echo "" >&2
+  echo "No lock written. Fix the manifest and re-run -- every failure above is" >&2
+  echo "reported in this one pass, so this should not need repeating." >&2
+  exit 1
+fi
+
 if [ "$records" != "$declared" ]; then
   echo "read $records records but the manifest declares $declared files" >&2
   exit 3
