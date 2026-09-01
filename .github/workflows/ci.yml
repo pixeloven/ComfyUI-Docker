@@ -126,6 +126,44 @@ jobs:
         git checkout -- comfy.yaml
         echo "selftest ok: rejects an unhashed entry, an undeclared one, a bad profile member, and a cycle"
 
+    - name: Selftest — resolve reports EVERY bad source, in one pass
+      # A manifest of 161 files with one dead source used to resolve nothing and
+      # report a single problem, so finding N broken sources cost N full passes
+      # over the network. This asserts all of them surface at once, and that no
+      # partial lock is written -- one that looks complete is worse than none.
+      run: |
+        set -u
+        cat > /tmp/bad.yaml <<'YAML'
+        name: selftest
+        models:
+          - name: dead-civitai
+            files:
+              - source: civitai:2068000
+                as: gone.safetensors
+                install: models/unet/
+          - name: bad-repo
+            files:
+              - source: hf:does-not-exist-xyz/nope
+                file: nope.safetensors
+                install: models/loras/
+          - name: url-without-hash
+            files:
+              - source: https://example.com/thing.safetensors
+                install: models/loras/
+        YAML
+        if sh services/fetch/resolve.sh /tmp/bad.yaml > /tmp/bad.lock 2> /tmp/bad.err; then
+          echo "SELFTEST FAILED: resolve succeeded against three broken sources"; exit 1
+        fi
+        if [ -s /tmp/bad.lock ]; then
+          echo "SELFTEST FAILED: a partial lock was written"; cat /tmp/bad.lock; exit 1
+        fi
+        for want in "civitai:2068000" "does-not-exist-xyz" "needs \`sha256\`"; do
+          grep -qF "$want" /tmp/bad.err || {
+            echo "SELFTEST FAILED: '$want' missing from the report"; cat /tmp/bad.err; exit 1
+          }
+        done
+        echo "selftest ok: all three failures reported in one pass, no lock written"
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
 
@@ -157,6 +195,44 @@ jobs:
     needs: validate-models
     steps:
     - uses: actions/checkout@v7
+
+    - name: Selftest — resolve reports EVERY bad source, in one pass
+      # A manifest of 161 files with one dead source used to resolve nothing and
+      # report a single problem, so finding N broken sources cost N full passes
+      # over the network. This asserts all of them surface at once, and that no
+      # partial lock is written -- one that looks complete is worse than none.
+      run: |
+        set -u
+        cat > /tmp/bad.yaml <<'YAML'
+        name: selftest
+        models:
+          - name: dead-civitai
+            files:
+              - source: civitai:2068000
+                as: gone.safetensors
+                install: models/unet/
+          - name: bad-repo
+            files:
+              - source: hf:does-not-exist-xyz/nope
+                file: nope.safetensors
+                install: models/loras/
+          - name: url-without-hash
+            files:
+              - source: https://example.com/thing.safetensors
+                install: models/loras/
+        YAML
+        if sh services/fetch/resolve.sh /tmp/bad.yaml > /tmp/bad.lock 2> /tmp/bad.err; then
+          echo "SELFTEST FAILED: resolve succeeded against three broken sources"; exit 1
+        fi
+        if [ -s /tmp/bad.lock ]; then
+          echo "SELFTEST FAILED: a partial lock was written"; cat /tmp/bad.lock; exit 1
+        fi
+        for want in "civitai:2068000" "does-not-exist-xyz" "needs \`sha256\`"; do
+          grep -qF "$want" /tmp/bad.err || {
+            echo "SELFTEST FAILED: '$want' missing from the report"; cat /tmp/bad.err; exit 1
+          }
+        done
+        echo "selftest ok: all three failures reported in one pass, no lock written"
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
