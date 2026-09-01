@@ -85,6 +85,25 @@ or another profile, and expansion must terminate. Cycle detection is by bounded
 expansion rather than a self-reference check, because `a → b → a` is the same
 defect one step further out.
 
+## Trying it
+
+```sh
+cd examples/core-gpu
+cp .env.example .env
+docker compose --profile models up
+```
+
+Materialises the `preview` lock — 9.5 MB of TAESD decoders, ComfyUI's live
+preview autoencoders — into `data/models/vae_approx/`, verifying each file, then
+starts ComfyUI. A plain `docker compose up` skips it entirely. Point
+`COMFY_LOCK` at `../../comfy-lock.yaml` for the full set.
+
+`data/models/.gitkeep` is shipped deliberately: **Docker creates a missing
+bind-mount source directory as root**, and this image runs non-root by design,
+so without it the first run fails with `destination not writable`. The comfyui
+service survives the same situation only because its entrypoint starts as root
+and drops privileges via gosu.
+
 ## Usage
 
 ```sh

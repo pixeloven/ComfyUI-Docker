@@ -10,7 +10,11 @@
 # network access in CI to do it. Hash changes come from a deliberate
 # `resolve.sh` run, reviewed like any other diff.
 #
-# Usage: check-lock.sh <comfy.yaml> <comfy-lock.yaml>
+# Usage: check-lock.sh <comfy.yaml> <comfy-lock.yaml> [--profile <name>]
+#
+# With --profile, only that profile's capabilities are expected in the lock --
+# which is how a profile lock (locks/preview.yaml) is checked without every
+# unselected model reading as missing.
 # Exit 1 on a file declared but not locked, locked but not declared, or a lock
 # entry with no SHA256.
 
@@ -19,10 +23,20 @@ set -eu
 LC_ALL=C
 export LC_ALL
 
-MANIFEST="${1:?usage: check-lock.sh <comfy.yaml> <comfy-lock.yaml>}"
-LOCK="${2:?usage: check-lock.sh <comfy.yaml> <comfy-lock.yaml>}"
+MANIFEST="${1:?usage: check-lock.sh <comfy.yaml> <comfy-lock.yaml> [--profile <name>]}"
+LOCK="${2:?usage: check-lock.sh <comfy.yaml> <comfy-lock.yaml> [--profile <name>]}"
 [ -f "$MANIFEST" ] || { echo "no such manifest: $MANIFEST" >&2; exit 2; }
 [ -f "$LOCK" ]     || { echo "no such lock: $LOCK" >&2; exit 2; }
+
+PROFILE=""
+case "${3:-}" in
+  --profile) PROFILE="${4:?--profile needs a name}" ;;
+  "")        ;;
+  *)         echo "unknown argument: $3" >&2; exit 2 ;;
+esac
+
+# shellcheck source=services/fetch/lib-profiles.sh
+. "$(dirname "$0")/lib-profiles.sh"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -69,8 +83,18 @@ done
 # the basename of `file`. The schema requires `as` for civitai sources, whose
 # filename is only knowable from the API.
 # shellcheck disable=SC2016  # $m is a yq variable.
-yq -r '.models[] as $m | $m.files[] |
-  .install + (.as // (.file // "" | sub(".*/"; "")))' "$MANIFEST" | sort -u > "$work/declared"
+if [ -n "$PROFILE" ]; then
+  selected="$(expand_profile "$MANIFEST" "$PROFILE")" || exit 2
+  : > "$work/declared"
+  for cap in $selected; do
+    NAME="$cap" yq -r '.models[] | select(.name == strenv(NAME)) | .files[] |
+      .install + (.as // (.file // "" | sub(".*/"; "")))' "$MANIFEST" >> "$work/declared"
+  done
+  sort -u -o "$work/declared" "$work/declared"
+else
+  yq -r '.models[] as $m | $m.files[] |
+    .install + (.as // (.file // "" | sub(".*/"; "")))' "$MANIFEST" | sort -u > "$work/declared"
+fi
 
 yq -r '.models[] | (.paths // [])[].path' "$LOCK" | sort -u > "$work/locked"
 

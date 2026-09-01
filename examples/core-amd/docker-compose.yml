@@ -1,4 +1,29 @@
 services:
+  # Materialise the models a lock declares, verifying every file, before ComfyUI
+  # starts. Opt-in: `docker compose --profile models up` runs it, a plain
+  # `docker compose up` behaves exactly as before.
+  #
+  # COMFY_LOCK defaults to the `preview` lock -- 9.5 MB of TAESD decoders, which
+  # is small enough to be a demonstration rather than a download. Point it at
+  # ../../comfy-lock.yaml for the full set.
+  fetch:
+    image: ${COMFY_FETCH_IMAGE:-ghcr.io/pixeloven/comfyui/fetch:latest}
+    container_name: comfyui-fetch-core-amd
+    profiles: [models]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      # Credentials are read from the environment by host, never from the lock.
+      - CIVITAI_TOKEN=${CIVITAI_TOKEN:-}
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      # The lock's paths begin `models/` and are relative to the ComfyUI ROOT,
+      # which is /app -- the same base_path extra_model_paths.yaml declares.
+      - ${COMFY_MODEL_PATH:-./data/models}:/app/models
+      - ${COMFY_LOCK:-../../locks/preview.yaml}:/comfy-lock.yaml:ro
+    command: ["/comfy-lock.yaml", "/app", "--apply"]
+    networks:
+      - comfy_network
+
   comfyui:
     image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui/core:rocm-latest}
     container_name: comfyui-core-amd
@@ -29,4 +54,8 @@ services:
       - ${COMFY_TEMP_PATH:-./data/temp}:/app/temp
       - ${COMFY_USER_PATH:-./data/user}:/app/user
       - ./extra_model_paths.yaml:/app/extra_model_paths.yaml:ro
+    depends_on:
+      fetch:
+        condition: service_completed_successfully
+        required: false
     restart: unless-stopped

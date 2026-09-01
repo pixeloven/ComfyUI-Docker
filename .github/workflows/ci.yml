@@ -140,6 +140,9 @@ jobs:
         REGISTRY_URL: ghcr.io/pixeloven/comfyui/
         IMAGE_LABEL: ci
 
+    - name: Manifest and the preview lock agree
+      run: sh services/fetch/check-lock.sh comfy.yaml locks/preview.yaml --profile preview
+
     - name: Verify — it actually fetches, and actually rejects
       # A real fetch, not a --help probe. Piped in over stdin rather than
       # bind-mounted so it works on any runner topology, including DinD where
@@ -148,9 +151,87 @@ jobs:
         docker run --rm -i --entrypoint sh \
           ghcr.io/pixeloven/comfyui/fetch:ci -s < services/fetch/verify.sh
 
+  end-to-end:
+    name: compose materialises models
+    runs-on: ubuntu-latest
+    needs: validate-models
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Build the fetch image
+      uses: docker/bake-action@v7
+      with:
+        files: docker-bake.hcl
+        targets: fetch
+        load: true
+        push: false
+      env:
+        REGISTRY_URL: ghcr.io/pixeloven/comfyui/
+        IMAGE_LABEL: ci
+
+    # The proof the rest of this job exists for: schema validation says the lock
+    # is well-formed, and the image test says the fetcher works in isolation.
+    # NEITHER catches a wiring problem -- and the first real run of this failed
+    # with "destination not writable", because Docker creates a missing
+    # bind-mount source as ROOT while the fetch image runs non-root by design.
+    #
+    # Deliberately small: the `preview` lock is 9.5 MB of TAESD decoders, so
+    # this runs on every PR in seconds rather than pulling a model set.
+    - name: docker compose --profile models, into a real volume
+      working-directory: examples/core-gpu
+      env:
+        COMFY_FETCH_IMAGE: ghcr.io/pixeloven/comfyui/fetch:ci
+      run: |
+        set -eu
+        cp .env.example .env
+        docker compose --profile models run --rm fetch
+
+    - name: The files are on the host, at the paths ComfyUI reads
+      working-directory: examples/core-gpu
+      run: |
+        set -eu
+        sudo curl -fsSL --retry 3 -o /usr/local/bin/yq \
+          https://github.com/mikefarah/yq/releases/download/v4.47.1/yq_linux_amd64
+        sudo chmod 0555 /usr/local/bin/yq
+
+        n=0
+        while read -r path want; do
+          n=$((n + 1))
+          got="$(sha256sum "data/$path" | cut -d' ' -f1)"
+          if [ "$got" != "$want" ]; then
+            echo "HASH MISMATCH $path: got $got want $want"; exit 1
+          fi
+          echo "ok $path"
+        done <<EOF
+        $(yq -r '.models[] | .paths[0].path + " " + .hashes[0].hash' ../../locks/preview.yaml)
+        EOF
+
+        # Reading zero entries would make every assertion above vacuous.
+        declared="$(yq -r '.models | length' ../../locks/preview.yaml)"
+        if [ "$n" != "$declared" ]; then
+          echo "checked $n files but the lock declares $declared"; exit 1
+        fi
+
+        # extra_model_paths.yaml declares base_path /app, and the lock's paths
+        # are relative to that root -- so this is the join that has to hold.
+        base="$(yq -r '.comfyui.base_path' extra_model_paths.yaml)"
+        [ "$base" = "/app" ] || { echo "base_path moved to $base; the lock's paths assume /app"; exit 1; }
+
+    - name: Re-running changes nothing
+      working-directory: examples/core-gpu
+      env:
+        COMFY_FETCH_IMAGE: ghcr.io/pixeloven/comfyui/fetch:ci
+      run: |
+        docker compose --profile models run --rm fetch | tee /tmp/second.log
+        grep -q '^present:     2' /tmp/second.log || { echo "NOT IDEMPOTENT"; cat /tmp/second.log; exit 1; }
+        grep -q '^fetched:     0' /tmp/second.log || { echo "REFETCHED"; cat /tmp/second.log; exit 1; }
+
   build-cuda:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets, validate-models]
+    needs: [validate-examples, test-bake-targets, validate-models, end-to-end]
     env:
       REGISTRY: ghcr.io
     steps:
@@ -285,7 +366,7 @@ jobs:
 
   build-cpu:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets, validate-models]
+    needs: [validate-examples, test-bake-targets, validate-models, end-to-end]
     env:
       REGISTRY: ghcr.io
     steps:
@@ -352,7 +433,7 @@ jobs:
 
   build-linux-accelerators:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets, validate-models]
+    needs: [validate-examples, test-bake-targets, validate-models, end-to-end]
     strategy:
       fail-fast: false
       matrix:

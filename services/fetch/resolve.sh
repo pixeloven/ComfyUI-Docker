@@ -37,6 +37,9 @@ esac
 
 UA="comfyui-fetch/1.0 (+https://github.com/pixeloven/ComfyUI-Docker)"
 
+# shellcheck source=services/fetch/lib-profiles.sh
+. "$(dirname "$0")/lib-profiles.sh"
+
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -59,29 +62,7 @@ EXPR='.models[] as $m | $m.files[] |
 # profile that names itself would otherwise loop forever.
 selected=""
 if [ -n "$PROFILE" ]; then
-  if [ "$(PROF="$PROFILE" yq -r '.profiles // {} | has(strenv(PROF))' "$MANIFEST")" != "true" ]; then
-    echo "no such profile: $PROFILE" >&2; exit 2
-  fi
-  known_models="$(yq -r '.models[].name' "$MANIFEST")"
-  frontier="$PROFILE"
-  rounds=0
-  while [ -n "$frontier" ]; do
-    rounds=$((rounds + 1))
-    if [ "$rounds" -gt 32 ]; then
-      echo "profile expansion did not settle after 32 rounds: cycle in profiles?" >&2; exit 2
-    fi
-    next=""
-    for member in $frontier; do
-      if printf '%s\n' "$known_models" | grep -qx "$member"; then
-        case " $selected " in *" $member "*) ;; *) selected="$selected $member" ;; esac
-      elif [ "$(PROF="$member" yq -r '.profiles // {} | has(strenv(PROF))' "$MANIFEST")" = "true" ]; then
-        next="$next $(PROF="$member" yq -r '.profiles[strenv(PROF)][]' "$MANIFEST" | tr '\n' ' ')"
-      else
-        echo "profile member is neither a model nor a profile: $member" >&2; exit 2
-      fi
-    done
-    frontier="$next"
-  done
+  selected=" $(expand_profile "$MANIFEST" "$PROFILE")"
   echo "profile $PROFILE selects:$selected" >&2
 fi
 

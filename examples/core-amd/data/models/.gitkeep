@@ -1,0 +1,7 @@
+# Shipped so this directory exists in a fresh clone.
+#
+# Docker creates a missing bind-mount source directory as ROOT. The fetch
+# service runs as a non-root uid by design, so without this it fails with
+# "destination not writable" on the very first `--profile models` run -- while
+# the comfyui service survives, because its entrypoint starts as root and drops
+# privileges via gosu.
