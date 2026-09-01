@@ -1,0 +1,183 @@
+# fetch — manifest, lock, and verified materialisation
+
+Three small shell tools and an image, following npm's shape:
+
+| | | |
+|---|---|---|
+| **`comfy.yaml`** | manifest | Hand-authored. Declares *intent*. |
+| **`resolve.sh`** | resolver | Manifest → lock. Talks to the network. Run when you change the manifest or want to move a ref. |
+| **`comfy-lock.yaml`** | lock | **Generated.** Exact commits, exact URLs, exact hashes. |
+| **`fetch-lock.sh`** | fetcher | Lock → disk, verifying every file. Never reads the manifest. |
+| **`check-lock.sh`** | gate | Manifest and lock still agree. Offline. |
+
+Dependencies: `curl`, `sha256sum`, `yq`. No language runtime, ~48 MB image.
+
+## Why a lock at all
+
+A lock file — `package-lock.json`, `Cargo.lock`, `uv.lock`, `go.sum` — is
+generated rather than authored, records the *resolved* result of a separately
+declared intent, and exists for reproducibility plus integrity. `package.json`
+says `react ^18`; `package-lock.json` says `18.3.1` with a `sha512`.
+
+Here, `revision: main` is the `^18`. The lock pins it to a commit and records
+the sha256 of the bytes that commit serves:
+
+```yaml
+# comfy.yaml — you edit this
+      - source: hf:Comfy-Org/Qwen-Image_ComfyUI
+        file: split_files/vae/qwen_image_vae.safetensors
+        install: models/vae/
+        type: vae
+```
+
+```yaml
+# comfy-lock.yaml — resolve.sh writes this
+  - model: qwen_image_vae.safetensors
+    url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/7beb7b64…/split_files/vae/qwen_image_vae.safetensors
+    paths:
+      - path: models/vae/qwen_image_vae.safetensors
+    hashes:
+      - hash: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f
+        type: SHA256
+    type: vae
+```
+
+The lock's `models[]` entries are **byte-for-byte** comfy-cli's documented
+`comfy-lock.yaml` shape — `model`, `url`, `paths`, `hashes`, `type` — with no
+additions, so anything that learns to read a comfy-lock reads ours unmodified. **The only extension anywhere is the top-level `auth` map**, which upstream has
+no equivalent for and which never appears inside a model entry.
+
+Verification is the point. **A wrong-but-plausible model file is worse than a
+missing one** — a missing file fails loudly at load; a wrong one renders subtly
+wrong images forever, with no error anywhere. An entry with no `SHA256` is
+refused rather than fetched unverified.
+
+## Profiles
+
+Named sets of capabilities, resolved into separate locks:
+
+```yaml
+models:
+  - name: qwen-image     …
+  - name: real-esrgan    …     # defined ONCE, shared
+
+profiles:
+  image:      [qwen-image, real-esrgan]
+  image-fast: [qwen-image, qwen-image-lightning, real-esrgan]
+  everything: [image-fast]     # a member may be another profile
+```
+
+```sh
+resolve.sh comfy.yaml --profile image > locks/image.yaml
+resolve.sh comfy.yaml --profile video > locks/video.yaml
+
+fetch-lock.sh locks/image.yaml /workspace --apply
+fetch-lock.sh locks/video.yaml /workspace --apply   # shared files already correct, skipped
+```
+
+Profiles compose by **set union**, not inheritance — no resolution order, no
+overrides, no diamonds. A model shared between two profiles is defined once and
+appears in both locks; materialising both installs it once, because the fetch is
+content-addressed and the second pass sees a matching hash.
+
+`check-lock.sh` validates profiles offline: every member must be a known model
+or another profile, and expansion must terminate. Cycle detection is by bounded
+expansion rather than a self-reference check, because `a → b → a` is the same
+defect one step further out.
+
+## Usage
+
+```sh
+resolve.sh comfy.yaml > /tmp/m.yaml            # then splice into comfy-lock.yaml
+yq -i '.models = load("/tmp/m.yaml").models' comfy-lock.yaml
+
+fetch-lock.sh comfy-lock.yaml /workspace       # dry run
+fetch-lock.sh comfy-lock.yaml /workspace --apply
+
+check-lock.sh comfy.yaml comfy-lock.yaml       # offline; what CI runs
+```
+
+Paths in the lock begin `models/`, so the fetcher's second argument is the
+**ComfyUI root**, not the models directory.
+
+Docker:
+
+```sh
+docker run --rm -v comfyui:/workspace -v "$PWD/comfy-lock.yaml:/lock.yaml:ro" \
+  ghcr.io/pixeloven/comfyui/fetch:latest /lock.yaml /workspace --apply
+```
+
+## Credentials
+
+A host-keyed map, declared once in the manifest and copied through to the lock:
+
+```yaml
+auth:
+  civitai.com: ${CIVITAI_TOKEN}
+  huggingface.co: ${HF_TOKEN}
+  github.com: ${GITHUB_TOKEN}
+```
+
+The fetcher resolves a credential by the URL's **host**, so **no model entry
+carries an auth field** — which is why `models[]` in the lock stays comfy-cli's
+documented shape.
+
+Values must be `${ENV_VAR}` references. **The schema rejects a literal**, so a
+token cannot be committed by accident.
+
+A host listed here whose variable is *unset* does not block anything — most
+HuggingFace files are public, and refusing them because `HF_TOKEN` happens to be
+unset would be wrong. The missing variable is recorded and **named in the error
+if the fetch then fails**, which is the case a bare `sha256 mismatch` would
+otherwise misattribute: an unauthenticated Civitai request returns an HTML error
+page with HTTP 200.
+
+Resolution needs no credentials at all — HuggingFace returns hashes in headers,
+Civitai's `model-versions` endpoint is public, and GitHub's release API is too
+(a `GITHUB_TOKEN` only raises the rate limit). Tokens are needed to *fetch*.
+
+## Sources
+
+| form | resolved from |
+|---|---|
+| `hf:<owner>/<repo>` + `file:` | `x-repo-commit`, `x-linked-etag`, `x-linked-size` headers |
+| `gh:<owner>/<repo>@<tag>` + `file:` | the release API's asset `digest`, `size` |
+| `civitai:<modelVersionId>` | `files[0].hashes.SHA256`, `downloadUrl`, `sizeKB` |
+| `https://…` | nothing — **you must supply `sha256:`** |
+
+`civitai:` sources require `as:`, because the filename comes from the API and
+would otherwise be unknowable offline — which `check-lock.sh` depends on.
+
+## Why CI does not re-resolve
+
+`check-lock.sh` compares manifest against lock **offline** and never re-resolves.
+A moving `revision:` is *supposed* to yield a new commit once upstream advances —
+so a re-resolve gate would fail for the one reason that is not a mistake, and
+would need network access to do it. Hash changes arrive through a deliberate
+`resolve.sh` run and are reviewed like any other diff.
+
+## Things that will bite you
+
+- **`yq` version matters.** 4.47 emits `"\t"` inside an expression literally;
+  4.53 interprets it as a tab. Every record format here is therefore
+  escape-free — one field per line — and each script asserts that the number of
+  records it read equals the number the file declares. Without that, a parser
+  matching nothing reports `0 failed` and exits 0.
+- **`$(...)` strips trailing newlines**, so a record whose last fields are empty
+  loses them and `read` desynchronises or hits EOF — under `set -e`, silently,
+  mid-loop. Absent values are emitted as `-`, never as an empty line. A sentinel
+  line appended *after* the substitution does not help; the stripping happens
+  first.
+- **`[ cond ] && cmd` as the last statement of a loop body** makes the body
+  return non-zero when the test fails, and `set -e` then kills the loop. Use
+  `if`.
+- **`x-linked-etag` is the sha256 — but only on the first hop.** Following the
+  redirect gives the CDN's Xet content-address instead: a different, equally
+  plausible-looking value. Resolve with `curl -sI`, never `-sIL`.
+- **GitHub only computes asset digests for newer uploads.** Much of the ComfyUI
+  ecosystem's models sit on releases from 2021 — `xinntao/Real-ESRGAN@v0.1.0`
+  has none. `resolve.sh` falls back to downloading and hashing, which is correct
+  but slow; state `sha256:` in the manifest to skip it.
+- **Bind mounts and DinD.** Where CI's filesystem is not the Docker host's,
+  `-v "$(mktemp -d):/w"` silently mounts an empty directory. `verify.sh` is
+  piped in over stdin for exactly that reason.

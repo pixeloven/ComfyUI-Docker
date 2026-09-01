@@ -1,0 +1,42 @@
+# comfy-fetch — materialise a model package onto a volume, verifying every file.
+#
+# Its whole dependency list is curl, sha256sum and yq. No Python, no language
+# runtime: this image is meant to be dropped into an initContainer, a compose
+# service, or a Helm chart's pre-install hook without imposing anything on the
+# consumer.
+#
+# Consumers should pin by digest.
+
+ARG CURL_VERSION=8.11.1
+ARG YQ_VERSION=4.47.1
+
+# Both tools come from their own published images rather than `apk add`. Alpine
+# moves package versions without notice, so `apk add curl` pins nothing -- and a
+# YAML parser whose version drifts under a content-addressed fetcher is exactly
+# the wrong thing to leave floating: yq 4.47 and 4.53 do not agree on whether
+# "\t" inside an expression is an escape or two literal characters.
+#
+# Starting FROM the curl image rather than adding curl to alpine also means
+# there is no package-manager step at all, and no layer written as root.
+FROM mikefarah/yq:${YQ_VERSION} AS yq
+
+FROM curlimages/curl:${CURL_VERSION}
+
+COPY --from=yq --chmod=0555 /usr/bin/yq /usr/local/bin/yq
+COPY --chmod=0555 fetch-lock.sh resolve.sh check-lock.sh /usr/local/bin/
+
+# Prove the three tools the scripts depend on are present and usable at BUILD
+# time. The image is useless without any one of them, and discovering that from
+# a half-fetched model volume is expensive.
+RUN yq --version \
+ && curl --version > /dev/null \
+ && sha256sum /usr/local/bin/yq > /dev/null
+
+LABEL org.opencontainers.image.source="https://github.com/pixeloven/ComfyUI-Docker" \
+      org.opencontainers.image.description="Fetch a ComfyUI model package: content-addressed, hash-verified, no Python"
+
+# Writes to a mounted model volume, so it must run as a non-root uid whose
+# ownership the consuming pod or compose file can arrange (fsGroup, or a
+# matching --user). The uid itself is the consumer's to choose.
+USER 1000
+ENTRYPOINT ["/usr/local/bin/fetch-lock.sh"]

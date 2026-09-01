@@ -312,13 +312,32 @@ group "mcp" {
     targets = ["mcp"]
 }
 
+// Model fetcher. Independent of RUNTIME: it moves bytes and checks hashes, so
+// there is no CUDA/CPU/ROCm variant to build.
+target "fetch" {
+    context = "services/fetch"
+    dockerfile = "dockerfile.comfy.fetch"
+    platforms = PLATFORMS
+    tags = [
+        "${REGISTRY_URL}fetch:${IMAGE_LABEL}",
+        "${REGISTRY_URL}fetch:cache",
+        PUBLISH_LATEST ? "${REGISTRY_URL}fetch:latest" : ""
+    ]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}fetch:cache,optional=true"]
+    cache-to   = ["type=inline"]
+}
+
+group "fetch" {
+    targets = ["fetch"]
+}
+
 // Convenience groups
 group "default" {
     targets = ["all"]
 }
 
 group "all" {
-    targets = ["runtime", "cuda", "cuda-arch", "cpu", "rocm", "xpu", "mcp"]
+    targets = ["runtime", "cuda", "cuda-arch", "cpu", "rocm", "xpu", "mcp", "fetch"]
 }
 
 group "core" {

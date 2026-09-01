@@ -51,10 +51,106 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-rocm"
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-xpu"
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
+
+  validate-models:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Install yq 4.47.1
+      # The same version the fetch image pins. yq changed how it renders "\t"
+      # inside an expression between 4.47 and 4.53 -- the older one emits it
+      # literally -- so a gate on a different version is a gate on different
+      # behaviour.
+      run: |
+        sudo curl -fsSL --retry 3 -o /usr/local/bin/yq \
+          https://github.com/mikefarah/yq/releases/download/v4.47.1/yq_linux_amd64
+        sudo chmod 0555 /usr/local/bin/yq
+        yq --version
+
+    - name: Shellcheck the fetch scripts
+      # Pinned, and --severity=style so CI is not quietly stricter or laxer than
+      # a contributor's local shellcheck. A distro-provided version silently
+      # differing from the author's is how an SC2015 reached CI having passed
+      # locally.
+      run: |
+        curl -fsSL --retry 3 \
+          https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz \
+          | tar -xJ --strip-components=1 -C /usr/local/bin shellcheck-v0.10.0/shellcheck
+        shellcheck --version
+        shellcheck --severity=style --shell=sh services/fetch/*.sh
+
+    - name: Validate the manifest and the lock against their schemas
+      run: |
+        pipx install check-jsonschema
+        check-jsonschema --schemafile schemas/comfy.schema.json      comfy.yaml
+        check-jsonschema --schemafile schemas/comfy-lock.schema.json comfy-lock.yaml
+
+    - name: Manifest and lock agree
+      # OFFLINE, deliberately. Re-resolving would hit the network and would
+      # fail whenever a moving `revision:` legitimately advanced upstream --
+      # the one case that is not a mistake. Hash changes come from a reviewed
+      # resolve.sh run, like any other diff.
+      run: sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml
+
+    - name: Selftest — the consistency gate still fails on a real edit
+      # A gate that cannot fail is not a gate. An earlier version of the gate
+      # this replaced reported PASS against four injected faults because its
+      # comparison silently produced two empty files.
+      run: |
+        set -u
+        yq -i 'del(.models[0].hashes)' comfy-lock.yaml
+        if sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml; then
+          echo "SELFTEST FAILED: an unhashed lock entry was accepted"
+          exit 1
+        fi
+        git checkout -- comfy-lock.yaml
+        yq -i 'del(.models[0])' comfy.yaml
+        if sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml; then
+          echo "SELFTEST FAILED: a lock entry with no manifest declaration was accepted"
+          exit 1
+        fi
+        git checkout -- comfy.yaml
+        yq -i '.profiles.broken = ["no-such-capability"]' comfy.yaml
+        if sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml; then
+          echo "SELFTEST FAILED: a profile naming an unknown capability was accepted"
+          exit 1
+        fi
+        git checkout -- comfy.yaml
+        yq -i '.profiles.a = ["b"] | .profiles.b = ["a"]' comfy.yaml
+        if sh services/fetch/check-lock.sh comfy.yaml comfy-lock.yaml; then
+          echo "SELFTEST FAILED: a profile cycle was accepted"
+          exit 1
+        fi
+        git checkout -- comfy.yaml
+        echo "selftest ok: rejects an unhashed entry, an undeclared one, a bad profile member, and a cycle"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Build the fetch image
+      uses: docker/bake-action@v7
+      with:
+        files: docker-bake.hcl
+        targets: fetch
+        load: true
+        push: false
+      env:
+        REGISTRY_URL: ghcr.io/pixeloven/comfyui/
+        IMAGE_LABEL: ci
+
+    - name: Verify — it actually fetches, and actually rejects
+      # A real fetch, not a --help probe. Piped in over stdin rather than
+      # bind-mounted so it works on any runner topology, including DinD where
+      # the job's filesystem is not the Docker host's.
+      run: |
+        docker run --rm -i --entrypoint sh \
+          ghcr.io/pixeloven/comfyui/fetch:ci -s < services/fetch/verify.sh
 
   build-cuda:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets]
+    needs: [validate-examples, test-bake-targets, validate-models]
     env:
       REGISTRY: ghcr.io
     steps:
@@ -189,7 +285,7 @@ jobs:
 
   build-cpu:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets]
+    needs: [validate-examples, test-bake-targets, validate-models]
     env:
       REGISTRY: ghcr.io
     steps:
@@ -256,7 +352,7 @@ jobs:
 
   build-linux-accelerators:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets]
+    needs: [validate-examples, test-bake-targets, validate-models]
     strategy:
       fail-fast: false
       matrix:

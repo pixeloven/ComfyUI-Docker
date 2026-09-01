@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pixeloven.github.io/ComfyUI-Docker/schemas/comfy-lock.json",
+  "title": "comfy-lock",
+  "description": "comfy-cli's comfy-lock.yaml. `models[]` entries are exactly upstream's documented shape -- model, url, paths, hashes, type -- with no additions. The only extension anywhere is the top-level `auth` map, which upstream has no equivalent for.",
+  "type": "object",
+  "required": [
+    "models"
+  ],
+  "properties": {
+    "basics": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "custom_nodes": {
+      "type": "object"
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "model",
+          "url",
+          "paths"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "Filename as ComfyUI will see it."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "pattern": "^models/"
+                }
+              }
+            }
+          },
+          "hashes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "hash",
+                "type"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "hash": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "AutoV1",
+                    "AutoV2",
+                    "SHA256",
+                    "CRC32",
+                    "Blake3"
+                  ]
+                }
+              }
+            }
+          },
+          "type": {
+            "type": "string",
+            "description": "Model type, e.g. lora, vae, diffusion_model."
+          }
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "description": "Copied through from the manifest. Host -> ${ENV_VAR}. Top-level, so `models[]` stays exactly comfy-cli's documented shape with no per-entry extension.",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^\\$\\{[A-Z_][A-Z0-9_]*\\}$"
+      }
+    }
+  }
+}
