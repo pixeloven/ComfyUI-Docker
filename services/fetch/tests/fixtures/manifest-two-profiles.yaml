@@ -1,0 +1,15 @@
+name: two-profiles
+models:
+  - name: a
+    files:
+      - source: hf:madebyollin/taesd
+        file: taesd_decoder.safetensors
+        install: models/vae_approx/
+  - name: b
+    files:
+      - source: hf:madebyollin/taesdxl
+        file: taesdxl_decoder.safetensors
+        install: models/vae_approx/
+profiles:
+  just-a: [a]
+  both: [a, b]

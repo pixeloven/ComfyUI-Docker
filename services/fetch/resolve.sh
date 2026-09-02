@@ -14,11 +14,18 @@
 # returns hashes in headers, and Civitai's model-versions endpoint is public.
 # Tokens are needed to FETCH, not to resolve.
 #
-# Usage: resolve.sh <comfy.yaml> [--profile <name>]
+# Usage: resolve.sh <comfy.yaml> [--profile <name>] [--from-lock <lock.yaml>]
 # Writes a `models:` document to stdout. Redirect it into the lock.
 #
 # Without --profile every model is resolved. With one, only the capabilities
 # that profile names -- expanded transitively, since a profile may name another.
+#
+# --from-lock SELECTS from an existing lock instead of resolving. Producing N
+# profile locks otherwise means N network passes over heavily overlapping files,
+# and -- worse -- locks resolved minutes apart can legitimately pin DIFFERENT
+# commits if a moving ref advanced between runs. Deriving them all from one
+# parent makes every profile pin identical commits by construction, and the
+# result is a strict subset of that parent.
 
 set -eu
 
@@ -36,11 +43,21 @@ MANIFEST="${1:?usage: resolve.sh <comfy.yaml> [--profile <name>]}"
 [ -f "$MANIFEST" ] || { echo "no such manifest: $MANIFEST" >&2; exit 2; }
 
 PROFILE=""
-case "${2:-}" in
-  --profile) PROFILE="${3:?--profile needs a name}" ;;
-  "")        ;;
-  *)         echo "unknown argument: $2" >&2; exit 2 ;;
-esac
+FROM_LOCK=""
+shift
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --profile)   PROFILE="${2:?--profile needs a name}"; shift 2 ;;
+    --from-lock) FROM_LOCK="${2:?--from-lock needs a path}"; shift 2 ;;
+    *)           echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+if [ -n "$FROM_LOCK" ] && [ ! -f "$FROM_LOCK" ]; then
+  echo "no such lock: $FROM_LOCK" >&2; exit 2
+fi
+if [ -n "$FROM_LOCK" ] && [ -z "$PROFILE" ]; then
+  echo "--from-lock needs --profile: without one it would copy the lock verbatim" >&2; exit 2
+fi
 
 UA="comfyui-fetch/1.0 (+https://github.com/pixeloven/ComfyUI-Docker)"
 
@@ -85,6 +102,62 @@ in_selection() {
 # path nobody uses, and the failure is silent: gated repos simply report as
 # "not found".
 auth_load "$MANIFEST"
+
+# --- selection from an existing lock ------------------------------------------
+# No network, no resolution: the parent already holds resolved entries, so this
+# filters it to the paths the profile selects and copies them VERBATIM.
+if [ -n "$FROM_LOCK" ]; then
+  selected="$(expand_profile "$MANIFEST" "$PROFILE")" || exit 2
+  echo "profile $PROFILE selects (from $FROM_LOCK): $selected" >&2
+
+  want="$(mktemp)"; trap 'rm -f "$want"' EXIT
+  for cap in $selected; do
+    NAME="$cap" yq -r '.models[] | select(.name == strenv(NAME)) | .files[] |
+      "models/" + .install[7:] + (.as // (.file // "" | sub(".*/"; "")))' "$MANIFEST" >> "$want"
+  done
+  sort -u -o "$want" "$want"
+
+  n_want="$(wc -l < "$want")"
+  if [ "$n_want" = 0 ]; then
+    echo "profile $PROFILE selects no files" >&2; exit 1
+  fi
+
+  # A path the profile wants that the parent does not hold means the parent is
+  # stale. Emitting a short lock silently would hide that.
+  missing=""
+  while read -r path; do
+    if [ "$(P="$path" yq -r '[.models[] | select((.paths // [])[0].path == strenv(P))] | length' "$FROM_LOCK")" = "0" ]; then
+      missing="${missing}  $path
+"
+    fi
+  done < "$want"
+  if [ -n "$missing" ]; then
+    echo "" >&2
+    echo "these files are selected by $PROFILE but absent from $FROM_LOCK:" >&2
+    printf '%s' "$missing" >&2
+    echo "The parent lock is stale -- re-resolve it before deriving from it." >&2
+    exit 1
+  fi
+
+  # Nothing is written until the parent is known to hold every selected path.
+  # Emitting the auth block first wrote a partial lock on the stale-parent path
+  # -- the same "no partial lock" rule the resolve path already follows.
+  if [ "$(yq -r 'has("auth")' "$FROM_LOCK")" = "true" ]; then
+    yq -o yaml -r '{"auth": .auth}' "$FROM_LOCK"
+  fi
+
+  # One lookup per selected path. Obviously correct beats clever: entries are
+  # copied VERBATIM from the parent, so a derived lock is a strict subset of it
+  # and every profile pins the same commits.
+  echo "models:"
+  while read -r path; do
+    P="$path" yq -o yaml -r \
+      '.models[] | select((.paths // [])[0].path == strenv(P))' "$FROM_LOCK" \
+      | sed '1s/^/  - /; 2,$s/^/    /'
+  done < "$want"
+
+  exit 0
+fi
 
 if [ -n "$PROFILE" ]; then
   declared=0

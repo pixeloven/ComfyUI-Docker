@@ -112,6 +112,44 @@ YAML
   fi
 }
 
+# --- resolve --from-lock: selection without re-resolving -----------------------
+t_from_lock_is_strict_subset() {
+  name="--from-lock copies entries verbatim (strict subset of the parent)"
+  if ! sh "$BIN/resolve.sh" "$FIX/manifest-two-profiles.yaml" --profile just-a \
+        --from-lock "$FIX/lock-two-entries.yaml" > "$WORK/sub" 2> "$WORK/sube"; then
+    bad "$name" "$WORK/sube"; return
+  fi
+  # One entry, and byte-identical to the parent's.
+  if [ "$(grep -c '^  - model:' "$WORK/sub")" != 1 ]; then
+    bad "$name (wrong entry count)" "$WORK/sub"; return
+  fi
+  want="$(P=models/vae_approx/taesd_decoder.safetensors yq -o yaml -r \
+    '.models[] | select((.paths // [])[0].path == strenv(P))' "$FIX/lock-two-entries.yaml")"
+  got="$(P=models/vae_approx/taesd_decoder.safetensors yq -o yaml -r \
+    '.models[] | select((.paths // [])[0].path == strenv(P))' "$WORK/sub")"
+  if [ "$want" = "$got" ]; then ok "$name"; else bad "$name (entry differs from parent)"; fi
+}
+
+t_from_lock_detects_stale_parent() {
+  name="--from-lock refuses a parent missing a selected file"
+  if sh "$BIN/resolve.sh" "$FIX/manifest-two-profiles.yaml" --profile both \
+       --from-lock "$FIX/lock-stale-parent.yaml" > "$WORK/st" 2> "$WORK/ste"; then
+    bad "$name (accepted a stale parent)" "$WORK/st"; return
+  fi
+  if [ -s "$WORK/st" ]; then bad "$name (wrote a partial lock)" "$WORK/st"; return; fi
+  if grep -q 'stale' "$WORK/ste"; then ok "$name"; else bad "$name" "$WORK/ste"; fi
+}
+
+t_from_lock_needs_profile() {
+  name="--from-lock without --profile is rejected"
+  if sh "$BIN/resolve.sh" "$FIX/manifest-two-profiles.yaml" \
+       --from-lock "$FIX/lock-two-entries.yaml" > "$WORK/np" 2> "$WORK/npe"; then
+    bad "$name (accepted)" "$WORK/np"
+  else
+    ok "$name"
+  fi
+}
+
 # --- check-lock: profiles ------------------------------------------------------
 t_check_rejects_unknown_member() {
   name="check-lock rejects a profile naming an unknown capability"
@@ -154,6 +192,9 @@ t_resolve_reports_all
 t_resolve_encodes_paths
 t_resolve_authenticates
 t_resolve_authenticates_with_profile
+t_from_lock_is_strict_subset
+t_from_lock_detects_stale_parent
+t_from_lock_needs_profile
 t_check_rejects_unknown_member
 t_check_rejects_cycle
 t_check_rejects_unhashed_entry

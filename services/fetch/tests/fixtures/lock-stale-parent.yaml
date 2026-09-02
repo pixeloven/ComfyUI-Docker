@@ -1,0 +1,11 @@
+auth:
+  huggingface.co: ${HF_TOKEN}
+models:
+  - model: taesd_decoder.safetensors
+    url: https://huggingface.co/madebyollin/taesd/resolve/614f76814bbe30edbe2e627ace1c2234c81a2c0e/taesd_decoder.safetensors
+    paths:
+      - path: models/vae_approx/taesd_decoder.safetensors
+    hashes:
+      - hash: f0fb51dd10d41c26612c070fa0b52ea0215a5ff90792134b4971109dd713c019
+        type: SHA256
+    type: vae_approx
