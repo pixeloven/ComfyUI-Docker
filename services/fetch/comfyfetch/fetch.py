@@ -59,7 +59,7 @@ class Report:
 
 
 def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
-               report: Report) -> None:
+               report: Report, progress=None) -> None:
     name = model.get("model") or "<unnamed>"
     rel = lockfile.lock_path(model)
     url = model.get("url")
@@ -74,6 +74,8 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     target = root / rel
     if target.is_file() and want and sha256_file(target).lower() == want:
         report.present += 1
+        if progress:
+            progress(name, "present")
         return
     if not url:
         report.lines.append(f"  SKIP    {name}: no url recorded")
@@ -89,6 +91,9 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     if dry_run:
         report.would += 1
         return
+
+    if progress:
+        progress(name, "fetching")
 
     missing = auth.missing_var_for(url)
     hint = f" (${missing} is not set)" if missing else ""
@@ -124,6 +129,8 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     tmp.replace(target)
     report.bytes += size
     report.fetched += 1
+    if progress:
+        progress(name, f"fetched {size // 1_000_000} MB")
 
     # Additional install paths get a copy of the verified bytes: ComfyUI
     # resolves some models through more than one search path, and the lock is
@@ -134,13 +141,18 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
         shutil.copyfile(target, dest)
 
 
-def run(lock_path: pathlib.Path, root: pathlib.Path, *, dry_run: bool) -> Report:
+def run(lock_path: pathlib.Path, root: pathlib.Path, *, dry_run: bool,
+        progress=None) -> Report:
     doc = lockfile.load(lock_path)
     auth = AuthMap.from_document(doc)
     models = doc.get("models") or []
     report = Report()
-    for model in models:
-        _fetch_one(model, root, auth, dry_run=dry_run, report=report)
+    for i, model in enumerate(models, 1):
+        def note(name: str, what: str, _i=i) -> None:
+            if progress:
+                progress(f"[{_i}/{len(models)}] {name}: {what}")
+        _fetch_one(model, root, auth, dry_run=dry_run, report=report,
+                   progress=lambda n, w: note(n, w))
     seen = report.present + report.fetched + report.skipped + report.failed + report.would
     if seen != len(models):
         # Reading fewer entries than the lock declares must never be reported as

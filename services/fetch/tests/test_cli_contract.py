@@ -95,3 +95,22 @@ def test_version_is_reportable():
     r = runner.invoke(app, ["--version"])
     assert r.exit_code == 0
     assert r.stdout.strip() == importlib.metadata.version("comfyfetch")
+
+
+def test_progress_goes_to_stderr_not_stdout(fixtures, tmp_path):
+    """A long fetch must say what it is doing, without polluting the result.
+
+    The first real in-cluster run printed nothing for several minutes, which is
+    indistinguishable from a hung job — but progress on stdout would break
+    `fetch | grep` and the json contract.
+    """
+    r = CliRunner().invoke(app, ["fetch", str(fixtures / "lock-good.yaml"),
+                                 str(tmp_path)])
+    assert "present:" in r.stdout
+
+
+def test_json_mode_emits_no_progress(fixtures, tmp_path):
+    import json
+    r = runner.invoke(app, ["fetch", str(fixtures / "lock-good.yaml"),
+                            str(tmp_path), "-o", "json"])
+    json.loads(r.stdout)

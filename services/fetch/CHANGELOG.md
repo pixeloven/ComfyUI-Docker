@@ -7,6 +7,13 @@ the diff looks.
 Consumers pin the image by **digest**; these versions say whether a digest
 change was a patch or a break, which a commit-sha tag cannot.
 
+## 0.2.0 — unreleased
+
+- `fetch` reports per-file progress on stderr. A 25 GB fetch that printed
+  nothing until it finished was indistinguishable from a hung job, which is
+  exactly how the first real in-cluster run looked. Progress stays on stderr so
+  `fetch | grep` and `--output json` are unaffected.
+
 ## 0.1.0 — unreleased
 
 First versioned release. The tooling itself is in use: Harmony resolves and
