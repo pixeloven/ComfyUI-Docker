@@ -68,12 +68,24 @@ profiles:
 ```
 
 ```sh
-resolve.sh comfy.yaml --profile image > locks/image.yaml
-resolve.sh comfy.yaml --profile video > locks/video.yaml
+# Resolve the full set ONCE, then derive each profile from it.
+resolve.sh comfy.yaml                                       > locks/everything.yaml
+resolve.sh comfy.yaml --profile image --from-lock locks/everything.yaml > locks/image.yaml
+resolve.sh comfy.yaml --profile video --from-lock locks/everything.yaml > locks/video.yaml
 
 fetch-lock.sh locks/image.yaml /workspace --apply
 fetch-lock.sh locks/video.yaml /workspace --apply   # shared files already correct, skipped
 ```
+
+`--from-lock` selects from an existing lock instead of resolving. Producing N
+profile locks otherwise means N network passes over heavily overlapping files —
+and, worse, locks resolved minutes apart can legitimately pin *different*
+commits if a moving `revision:` advanced between runs. Deriving them from one
+parent makes every profile pin identical commits by construction, and each
+derived lock is a **strict subset** of that parent, copied verbatim.
+
+If the parent does not hold a file the profile selects, it is stale: the command
+says so and writes nothing, rather than emitting a lock that is quietly short.
 
 Profiles compose by **set union**, not inheritance — no resolution order, no
 overrides, no diamonds. A model shared between two profiles is defined once and
