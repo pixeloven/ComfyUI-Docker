@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import pathlib
 import shutil
 import sys
@@ -26,6 +27,44 @@ from . import http, lockfile
 from .auth import AuthMap
 
 CHUNK = 1 << 20
+
+# How much may sit in the page cache before it is handed back to the kernel.
+# Streaming tens of gigabytes to NFS produces dirty pages faster than they are
+# written back, and in cgroup v2 page cache counts toward memory.max -- so a
+# container with a modest limit is OOM-killed while the process itself holds
+# almost nothing. The first real in-cluster run died at exit 137 against a 2 GiB
+# limit with a peak RSS of 35 MB.
+FLUSH_EVERY = 64 << 20
+
+
+def _release_cache(fh, upto: int) -> None:
+    """Tell the kernel we will not re-read what we have written.
+
+    Without this the pages stay cached and count against the cgroup; with it a
+    streaming write stays flat regardless of file size. Best-effort: not every
+    platform or filesystem implements it, and failing to hint is harmless.
+    """
+    try:
+        os.fsync(fh.fileno())
+        os.posix_fadvise(fh.fileno(), 0, upto, os.POSIX_FADV_DONTNEED)
+    except (OSError, AttributeError):
+        pass
+
+
+def _stream(src, dst) -> None:
+    """Copy, releasing page cache as we go rather than at the end."""
+    written = since_flush = 0
+    while True:
+        block = src.read(CHUNK)
+        if not block:
+            break
+        dst.write(block)
+        written += len(block)
+        since_flush += len(block)
+        if since_flush >= FLUSH_EVERY:
+            _release_cache(dst, written)
+            since_flush = 0
+    _release_cache(dst, written)
 
 
 def sha256_file(path: pathlib.Path) -> str:
@@ -59,7 +98,7 @@ class Report:
 
 
 def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
-               report: Report) -> None:
+               report: Report, progress=None) -> None:
     name = model.get("model") or "<unnamed>"
     rel = lockfile.lock_path(model)
     url = model.get("url")
@@ -74,6 +113,8 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     target = root / rel
     if target.is_file() and want and sha256_file(target).lower() == want:
         report.present += 1
+        if progress:
+            progress(name, "present")
         return
     if not url:
         report.lines.append(f"  SKIP    {name}: no url recorded")
@@ -89,6 +130,9 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     if dry_run:
         report.would += 1
         return
+
+    if progress:
+        progress(name, "fetching")
 
     missing = auth.missing_var_for(url)
     hint = f" (${missing} is not set)" if missing else ""
@@ -107,7 +151,7 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     try:
         with http.request(url, token=auth.token_for(url), timeout=300) as resp, \
                 open(tmp, "wb") as out:
-            shutil.copyfileobj(resp, out, CHUNK)
+            _stream(resp, out)
     except Exception as exc:
         tmp.unlink(missing_ok=True)
         report.lines.append(f"  FAILED  {name}: transfer failed: {type(exc).__name__}{hint}")
@@ -124,6 +168,8 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     tmp.replace(target)
     report.bytes += size
     report.fetched += 1
+    if progress:
+        progress(name, f"fetched {size // 1_000_000} MB")
 
     # Additional install paths get a copy of the verified bytes: ComfyUI
     # resolves some models through more than one search path, and the lock is
@@ -134,13 +180,18 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
         shutil.copyfile(target, dest)
 
 
-def run(lock_path: pathlib.Path, root: pathlib.Path, *, dry_run: bool) -> Report:
+def run(lock_path: pathlib.Path, root: pathlib.Path, *, dry_run: bool,
+        progress=None) -> Report:
     doc = lockfile.load(lock_path)
     auth = AuthMap.from_document(doc)
     models = doc.get("models") or []
     report = Report()
-    for model in models:
-        _fetch_one(model, root, auth, dry_run=dry_run, report=report)
+    for i, model in enumerate(models, 1):
+        def note(name: str, what: str, _i=i) -> None:
+            if progress:
+                progress(f"[{_i}/{len(models)}] {name}: {what}")
+        _fetch_one(model, root, auth, dry_run=dry_run, report=report,
+                   progress=lambda n, w: note(n, w))
     seen = report.present + report.fetched + report.skipped + report.failed + report.would
     if seen != len(models):
         # Reading fewer entries than the lock declares must never be reported as

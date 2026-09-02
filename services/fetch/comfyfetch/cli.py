@@ -160,7 +160,11 @@ def fetch(
     if not lock.is_file():
         typer.echo(f"no such lock: {lock}", err=True)
         raise typer.Exit(2)
-    report = fetch_mod.run(lock, root, dry_run=not apply)
+    # Per-file progress on STDERR. A 25 GB fetch that prints nothing until it
+    # finishes is indistinguishable from a hung one -- which is exactly how the
+    # first real in-cluster run looked for its first several minutes.
+    report = fetch_mod.run(lock, root, dry_run=not apply,
+                           progress=None if out.is_json else out.note)
     for line in report.lines:
         out.problem(line)
     out.result(report.render(dry_run=not apply), {
