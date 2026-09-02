@@ -64,22 +64,23 @@ jobs:
       # literally -- so a gate on a different version is a gate on different
       # behaviour.
       run: |
-        sudo curl -fsSL --retry 3 -o /usr/local/bin/yq \
+        sudo curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o /usr/local/bin/yq \
           https://github.com/mikefarah/yq/releases/download/v4.47.1/yq_linux_amd64
         sudo chmod 0555 /usr/local/bin/yq
         yq --version
 
     - name: Shellcheck the fetch scripts
-      # Pinned, and --severity=style so CI is not quietly stricter or laxer than
-      # a contributor's local shellcheck. A distro-provided version silently
-      # differing from the author's is how an SC2015 reached CI having passed
-      # locally.
+      # The published image rather than a release tarball: same pinned binary a
+      # contributor runs locally, and one less network fetch to fail. This step
+      # went red once on `curl: (35) Connection reset by peer` with nothing
+      # wrong in the tree.
+      #
+      # --severity=style so CI is not quietly stricter or laxer than a local
+      # run; a distro-provided shellcheck differing from the author's is how an
+      # SC2015 reached CI having passed locally.
       run: |
-        curl -fsSL --retry 3 \
-          https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz \
-          | tar -xJ --strip-components=1 -C /usr/local/bin shellcheck-v0.10.0/shellcheck
-        shellcheck --version
-        shellcheck --severity=style --shell=sh -x services/fetch/*.sh services/fetch/tests/*.sh
+        docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0 \
+          --severity=style --shell=sh -x services/fetch/*.sh services/fetch/tests/*.sh
 
     - name: Validate the manifest and the lock against their schemas
       run: |
@@ -207,7 +208,7 @@ jobs:
       working-directory: examples/core-gpu
       run: |
         set -eu
-        sudo curl -fsSL --retry 3 -o /usr/local/bin/yq \
+        sudo curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o /usr/local/bin/yq \
           https://github.com/mikefarah/yq/releases/download/v4.47.1/yq_linux_amd64
         sudo chmod 0555 /usr/local/bin/yq
 
