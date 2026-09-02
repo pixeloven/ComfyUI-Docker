@@ -131,6 +131,24 @@ or another profile, and expansion must terminate. Cycle detection is by bounded
 expansion rather than a self-reference check, because `a → b → a` is the same
 defect one step further out.
 
+## Versions
+
+Semver, and the version lives in `pyproject.toml`. A release is a tag:
+
+```sh
+git tag comfyfetch/v0.1.0 && git push --tags
+```
+
+CI **refuses a tag that disagrees with the package version**, so a `v0.2.0` tag
+cannot ship `0.1.0` code. It publishes `fetch:0.1.0` and `fetch:0.1` alongside
+the commit-sha and `latest` tags an ordinary push produces.
+
+**Pin by digest** — the semver tags say whether a digest change was a patch or a
+break; they are not themselves a safe pin, because a tag can move.
+
+`comfyfetch --version` reports what an installed copy is. See
+[CHANGELOG.md](CHANGELOG.md).
+
 ## Trying it
 
 ```sh

@@ -3,6 +3,10 @@ name: CI
 on:
   push:
     branches: [ main ]
+    tags:
+      # Semver releases. `comfyfetch/v1.2.3` publishes :1.2.3 and :1.2 alongside
+      # the commit-sha and :latest tags an ordinary push produces.
+      - 'comfyfetch/v*.*.*'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -273,6 +277,28 @@ jobs:
       run: |
         echo "commit_sha=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
         echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
+        version=""
+        if [[ "${GITHUB_REF}" == refs/tags/comfyfetch/v* ]]; then
+          version="${GITHUB_REF#refs/tags/comfyfetch/v}"
+        fi
+        echo "version=$version" >> $GITHUB_OUTPUT
+
+    # A tag that disagrees with the package would ship 0.1.0 code as v0.2.0, and
+    # nothing downstream could tell. The version lives in pyproject.toml; the tag
+    # only selects it.
+    - name: The tag matches the package version
+      if: steps.meta.outputs.version != ''
+      run: |
+        set -eu
+        declared="$(python3 -c "
+        import tomllib
+        print(tomllib.load(open('services/fetch/pyproject.toml','rb'))['project']['version'])")"
+        tagged="${{ steps.meta.outputs.version }}"
+        if [ "$declared" != "$tagged" ]; then
+          echo "tag comfyfetch/v$tagged does not match pyproject version $declared"
+          exit 1
+        fi
+        echo "version $declared confirmed"
 
     - name: Build and push
       id: build
@@ -280,7 +306,7 @@ jobs:
       with:
         files: docker-bake.hcl
         targets: fetch
-        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        push: ${{ github.event_name == 'push' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
           *.cache-from=type=gha
@@ -289,8 +315,9 @@ jobs:
         sbom: false
       env:
         REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
-        IMAGE_LABEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.meta.outputs.commit_sha || 'latest' }}
-        PUBLISH_LATEST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        IMAGE_LABEL: ${{ startsWith(github.ref, 'refs/tags/') && steps.meta.outputs.version || (github.ref == 'refs/heads/main' && steps.meta.outputs.commit_sha) || 'latest' }}
+        PUBLISH_LATEST: ${{ github.ref == 'refs/heads/main' }}
+        FETCH_VERSION: ${{ steps.meta.outputs.version }}
 
     # Consumers pin by digest, so the digest has to be findable without digging
     # through logs. Harmony pins this one in a Job manifest.

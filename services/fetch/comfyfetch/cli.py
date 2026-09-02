@@ -25,6 +25,7 @@ a lock file stays correct.
 
 from __future__ import annotations
 
+import importlib.metadata
 import pathlib
 from typing import Annotated
 
@@ -48,6 +49,21 @@ app = typer.Typer(
 OutputOpt = Annotated[Mode, typer.Option(
     "--output", "-o",
     help="auto: colour at a terminal, plain when piped. json: machine-readable.")]
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(importlib.metadata.version("comfyfetch"))
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: Annotated[bool, typer.Option(
+        "--version", callback=_version_callback, is_eager=True,
+        help="Show the version and exit.")] = False,
+) -> None:
+    """comfyfetch — resolve, verify and materialise ComfyUI model locks."""
 
 
 def _load(path: pathlib.Path, what: str) -> dict:

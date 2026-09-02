@@ -29,6 +29,12 @@ variable "COMFYUI_VERSION" {
     default = "v0.33.1"
 }
 
+variable "FETCH_VERSION" {
+    // Semver for the fetch image, set only by a release tag. Empty on ordinary
+    // pushes, which publish the commit-sha and :latest tags alone.
+    default = ""
+}
+
 variable "PUBLISH_LATEST" {
     // CI sets this only for stable publishing. A nightly/custom IMAGE_LABEL
     // must never move the stable *-latest tags.
@@ -321,7 +327,11 @@ target "fetch" {
     tags = [
         "${REGISTRY_URL}fetch:${IMAGE_LABEL}",
         "${REGISTRY_URL}fetch:cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}fetch:latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}fetch:latest" : "",
+        // Consumers pin by DIGEST; these say whether a digest change was a
+        // patch or a break, which a sha tag cannot.
+        FETCH_VERSION != "" ? "${REGISTRY_URL}fetch:${FETCH_VERSION}" : "",
+        FETCH_VERSION != "" ? "${REGISTRY_URL}fetch:${regex_replace(FETCH_VERSION, "\\.[0-9]+$", "")}" : ""
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}fetch:cache,optional=true"]
     cache-to   = ["type=inline"]

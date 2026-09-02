@@ -10,8 +10,11 @@ Three consumers with different needs, and one flag:
 `auto` picks plain when stdout is not a TTY, which is the case in every CI job
 and every container, so the useful default needs no flag.
 
-Everything human-facing goes to STDERR. Stdout carries the artifact -- a lock
-document, or JSON -- so `comfyfetch resolve ... > lock.yaml` stays correct.
+PROGRESS goes to stderr; the RESULT goes to stdout. That distinction is not
+cosmetic: `comfyfetch resolve ... > lock.yaml` must capture the lock and not the
+chatter, and `comfyfetch fetch ... | grep present` must see the summary. Sending
+both to stderr leaves stdout empty and every such pipeline silently matching
+nothing.
 """
 
 from __future__ import annotations
@@ -35,8 +38,12 @@ class Out:
         if mode is Mode.auto:
             mode = Mode.plain if not sys.stdout.isatty() else Mode.auto
         self.mode = mode
-        self._console = Console(stderr=True, no_color=mode is Mode.plain,
-                                highlight=mode is not Mode.plain)
+        # Two consoles on purpose: chatter on stderr, outcome on stdout.
+        self._err = Console(stderr=True, no_color=mode is Mode.plain,
+                            highlight=mode is not Mode.plain)
+        self._out = Console(no_color=mode is Mode.plain,
+                            highlight=mode is not Mode.plain,
+                            soft_wrap=True)
 
     @property
     def is_json(self) -> bool:
@@ -45,12 +52,12 @@ class Out:
     def note(self, message: str) -> None:
         """Progress. Suppressed entirely in json mode so stdout stays parseable."""
         if not self.is_json:
-            self._console.print(message)
+            self._err.print(message)
 
     def problem(self, message: str) -> None:
         if not self.is_json:
-            self._console.print(f"[red]{message}[/red]" if self.mode is Mode.auto
-                                else message)
+            self._err.print(f"[red]{message}[/red]" if self.mode is Mode.auto
+                            else message)
 
     def result(self, human: str, machine: dict[str, Any]) -> None:
         """The outcome, in whichever form the caller asked for."""
@@ -58,4 +65,6 @@ class Out:
             json.dump(machine, sys.stdout, indent=2, sort_keys=True)
             sys.stdout.write("\n")
         else:
-            self._console.print(human)
+            # soft_wrap: a terminal width must never reflow a line something
+            # downstream greps for.
+            self._out.print(human)
