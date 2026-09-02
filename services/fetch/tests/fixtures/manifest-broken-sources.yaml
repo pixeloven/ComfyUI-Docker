@@ -1,0 +1,18 @@
+# Three distinct failure modes at once. resolve.sh must report ALL of them in a
+# single pass and write no lock.
+name: broken-sources
+models:
+  - name: dead-civitai
+    files:
+      - source: civitai:2068000        # 404 — version deleted upstream
+        as: gone.safetensors
+        install: models/unet/
+  - name: missing-repo
+    files:
+      - source: hf:does-not-exist-xyz/nope
+        file: nope.safetensors
+        install: models/loras/
+  - name: url-without-hash
+    files:
+      - source: https://example.com/thing.safetensors
+        install: models/loras/

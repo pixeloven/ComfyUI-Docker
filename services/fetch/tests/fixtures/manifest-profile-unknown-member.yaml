@@ -1,0 +1,9 @@
+name: unknown-member
+models:
+  - name: real
+    files:
+      - source: hf:madebyollin/taesd
+        file: taesd_decoder.safetensors
+        install: models/vae_approx/
+profiles:
+  broken: [real, no-such-capability]

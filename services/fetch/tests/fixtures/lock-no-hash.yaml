@@ -1,0 +1,6 @@
+models:
+  - model: anime6b.pth
+    url: https://huggingface.co/ximso/RealESRGAN_x4plus_anime_6B/resolve/main/RealESRGAN_x4plus_anime_6B.pth
+    paths:
+      - path: models/upscale_models/anime6b.pth
+    type: upscale_model
