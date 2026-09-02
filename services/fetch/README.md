@@ -119,6 +119,23 @@ check-lock.sh comfy.yaml comfy-lock.yaml       # offline; what CI runs
 Paths in the lock begin `models/`, so the fetcher's second argument is the
 **ComfyUI root**, not the models directory.
 
+### Pinning it
+
+Every push to `main` publishes the image and prints its digest to the workflow
+run summary:
+
+```
+ghcr.io/pixeloven/comfyui/fetch:<commit-sha>
+ghcr.io/pixeloven/comfyui/fetch:latest
+```
+
+**Pin by digest, not by tag.** `latest` moves, and a fetcher that changes under a
+deployment is the opposite of what a lock is for:
+
+```
+ghcr.io/pixeloven/comfyui/fetch@sha256:...
+```
+
 Docker:
 
 ```sh
