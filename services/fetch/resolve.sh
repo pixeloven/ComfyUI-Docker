@@ -112,8 +112,12 @@ if [ -n "$FROM_LOCK" ]; then
 
   want="$(mktemp)"; trap 'rm -f "$want"' EXIT
   for cap in $selected; do
+    # Same expression check-lock.sh derives install paths with. `install`
+    # already begins `models/`, so nothing needs prefixing -- an earlier version
+    # prepended and then sliced, which yq 4.47 rejects outright while 4.53
+    # accepts it.
     NAME="$cap" yq -r '.models[] | select(.name == strenv(NAME)) | .files[] |
-      "models/" + .install[7:] + (.as // (.file // "" | sub(".*/"; "")))' "$MANIFEST" >> "$want"
+      .install + (.as // (.file // "" | sub(".*/"; "")))' "$MANIFEST" >> "$want"
   done
   sort -u -o "$want" "$want"
 
