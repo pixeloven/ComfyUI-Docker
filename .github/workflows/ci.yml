@@ -13,7 +13,49 @@ on:
         type: boolean
         default: false
 
+# A new push to a PR makes the previous run obsolete, so cancel it. NEVER on
+# main: a rapid second merge would cancel the first one's image publish, leaving
+# no image for a commit consumers may already pin by sha.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Which parts of the repo a change touches. The expensive image builds are
+  # ~60 of the ~62 minutes a full run costs, and most changes cannot affect
+  # them: every one of the fetch-tooling PRs built the CUDA and XPU stacks for
+  # nothing.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.filter.outputs.images }}
+      fetch: ${{ steps.filter.outputs.fetch }}
+      examples: ${{ steps.filter.outputs.examples }}
+    steps:
+    - uses: actions/checkout@v7
+    # Pinned by SHA, like every other third-party action here. It is used rather
+    # than a hand-rolled `git diff` because the awkward cases -- PR merge-base,
+    # first push to a branch, force-push -- are exactly where a hand-rolled
+    # version silently matches nothing and SKIPS a build that should have run.
+    - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+      id: filter
+      with:
+        filters: |
+          images:
+            - 'services/comfy/**'
+            - 'services/runtime/**'
+            - 'services/mcp/**'
+            - 'docker-bake.hcl'
+            - '.github/workflows/ci.yml'
+          fetch:
+            - 'services/fetch/**'
+            - 'comfy.yaml'
+            - 'comfy-lock.yaml'
+            - 'locks/**'
+            - 'schemas/**'
+          examples:
+            - 'examples/**'
+
   validate-examples:
     runs-on: ubuntu-latest
     steps:
@@ -207,6 +249,7 @@ jobs:
   publish-fetch:
     name: publish the fetch image
     runs-on: ubuntu-latest
+    # Keeps the full gate: it publishes an artifact consumers pin by digest.
     needs: [validate-examples, test-bake-targets, validate-models, end-to-end]
     env:
       REGISTRY: ghcr.io
@@ -271,7 +314,8 @@ jobs:
 
   build-cuda:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets, validate-models, end-to-end]
+    needs: [changes, test-bake-targets]
+    if: github.event_name == 'push' || needs.changes.outputs.images == 'true'
     env:
       REGISTRY: ghcr.io
     steps:
@@ -406,7 +450,8 @@ jobs:
 
   build-cpu:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets, validate-models, end-to-end]
+    needs: [changes, test-bake-targets]
+    if: github.event_name == 'push' || needs.changes.outputs.images == 'true'
     env:
       REGISTRY: ghcr.io
     steps:
@@ -473,7 +518,8 @@ jobs:
 
   build-linux-accelerators:
     runs-on: ubuntu-latest
-    needs: [validate-examples, test-bake-targets, validate-models, end-to-end]
+    needs: [changes, test-bake-targets]
+    if: github.event_name == 'push' || needs.changes.outputs.images == 'true'
     strategy:
       fail-fast: false
       matrix:
