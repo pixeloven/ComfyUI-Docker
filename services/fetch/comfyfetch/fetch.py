@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import pathlib
 import shutil
 import sys
@@ -26,6 +27,44 @@ from . import http, lockfile
 from .auth import AuthMap
 
 CHUNK = 1 << 20
+
+# How much may sit in the page cache before it is handed back to the kernel.
+# Streaming tens of gigabytes to NFS produces dirty pages faster than they are
+# written back, and in cgroup v2 page cache counts toward memory.max -- so a
+# container with a modest limit is OOM-killed while the process itself holds
+# almost nothing. The first real in-cluster run died at exit 137 against a 2 GiB
+# limit with a peak RSS of 35 MB.
+FLUSH_EVERY = 64 << 20
+
+
+def _release_cache(fh, upto: int) -> None:
+    """Tell the kernel we will not re-read what we have written.
+
+    Without this the pages stay cached and count against the cgroup; with it a
+    streaming write stays flat regardless of file size. Best-effort: not every
+    platform or filesystem implements it, and failing to hint is harmless.
+    """
+    try:
+        os.fsync(fh.fileno())
+        os.posix_fadvise(fh.fileno(), 0, upto, os.POSIX_FADV_DONTNEED)
+    except (OSError, AttributeError):
+        pass
+
+
+def _stream(src, dst) -> None:
+    """Copy, releasing page cache as we go rather than at the end."""
+    written = since_flush = 0
+    while True:
+        block = src.read(CHUNK)
+        if not block:
+            break
+        dst.write(block)
+        written += len(block)
+        since_flush += len(block)
+        if since_flush >= FLUSH_EVERY:
+            _release_cache(dst, written)
+            since_flush = 0
+    _release_cache(dst, written)
 
 
 def sha256_file(path: pathlib.Path) -> str:
@@ -112,7 +151,7 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     try:
         with http.request(url, token=auth.token_for(url), timeout=300) as resp, \
                 open(tmp, "wb") as out:
-            shutil.copyfileobj(resp, out, CHUNK)
+            _stream(resp, out)
     except Exception as exc:
         tmp.unlink(missing_ok=True)
         report.lines.append(f"  FAILED  {name}: transfer failed: {type(exc).__name__}{hint}")
