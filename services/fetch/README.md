@@ -1,16 +1,50 @@
 # fetch — manifest, lock, and verified materialisation
 
-Three small shell tools and an image, following npm's shape:
+Three small tools and an image, following npm's shape:
 
 | | | |
 |---|---|---|
 | **`comfy.yaml`** | manifest | Hand-authored. Declares *intent*. |
-| **`resolve.sh`** | resolver | Manifest → lock. Talks to the network. Run when you change the manifest or want to move a ref. |
+| **`comfyfetch resolve`** | resolver | Manifest → lock. Talks to the network. Run when you change the manifest or want to move a ref. |
 | **`comfy-lock.yaml`** | lock | **Generated.** Exact commits, exact URLs, exact hashes. |
-| **`fetch-lock.sh`** | fetcher | Lock → disk, verifying every file. Never reads the manifest. |
-| **`check-lock.sh`** | gate | Manifest and lock still agree. Offline. |
+| **`comfyfetch fetch`** | fetcher | Lock → disk, verifying every file. Never reads the manifest. |
+| **`comfyfetch check`** | gate | Manifest and lock still agree. Offline. |
 
-Dependencies: `curl`, `sha256sum`, `yq`. No language runtime, ~48 MB image.
+Python 3.13 on Alpine — PyYAML and Typer — as a ~102 MB image **or** a CLI you
+install directly:
+
+```sh
+uvx --from git+https://github.com/pixeloven/ComfyUI-Docker#subdirectory=services/fetch comfyfetch --help
+```
+
+The image is for automated deployment; the CLI is for managing your own
+configuration, and for agents. They are the same code and the same behaviour.
+
+Typer, matching comfy-cli and Harmony's `hmy` rather than inventing a third
+convention. Deliberately **not** named `comfy`/`comfy-cli`/`comfycli` — comfy-cli
+owns those.
+
+### Why not shell
+
+It was, and the trade is deliberate. The shell version accumulated seven
+distinct classes of silent bug — the worst being a `yq` whose escape handling
+differs between *patch* releases, which once made the record parser match
+nothing, process zero files and exit 0. The property given up, "no language
+runtime", costs 39 MB and was always weak: a consumer runs an image, they do not
+install an interpreter. The finished image is 102 MB against 48.5 MB.
+
+### Output and exit codes
+
+`--output auto` colours at a terminal and goes plain when piped, which is every
+CI job and every container. `--output json` gives automation and agents stable
+keys. Human output goes to **stderr**; stdout carries the artifact, so
+`comfyfetch resolve … > lock.yaml` stays correct.
+
+| exit | meaning |
+|---|---|
+| `0` | did what was asked |
+| `1` | a real failure — a source did not resolve, a hash did not match, a lock and its manifest disagree |
+| `2` | the request was wrong — missing file, unknown profile, incompatible flags |
 
 ## Why a lock at all
 
@@ -31,7 +65,7 @@ the sha256 of the bytes that commit serves:
 ```
 
 ```yaml
-# comfy-lock.yaml — resolve.sh writes this
+# comfy-lock.yaml — comfyfetch resolve writes this
   - model: qwen_image_vae.safetensors
     url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/7beb7b64…/split_files/vae/qwen_image_vae.safetensors
     paths:
@@ -69,12 +103,12 @@ profiles:
 
 ```sh
 # Resolve the full set ONCE, then derive each profile from it.
-resolve.sh comfy.yaml                                       > locks/everything.yaml
-resolve.sh comfy.yaml --profile image --from-lock locks/everything.yaml > locks/image.yaml
-resolve.sh comfy.yaml --profile video --from-lock locks/everything.yaml > locks/video.yaml
+comfyfetch resolve comfy.yaml                                       > locks/everything.yaml
+comfyfetch resolve comfy.yaml --profile image --from-lock locks/everything.yaml > locks/image.yaml
+comfyfetch resolve comfy.yaml --profile video --from-lock locks/everything.yaml > locks/video.yaml
 
-fetch-lock.sh locks/image.yaml /workspace --apply
-fetch-lock.sh locks/video.yaml /workspace --apply   # shared files already correct, skipped
+comfyfetch fetch locks/image.yaml /workspace --apply
+comfyfetch fetch locks/video.yaml /workspace --apply   # shared files already correct, skipped
 ```
 
 `--from-lock` selects from an existing lock instead of resolving. Producing N
@@ -92,7 +126,7 @@ overrides, no diamonds. A model shared between two profiles is defined once and
 appears in both locks; materialising both installs it once, because the fetch is
 content-addressed and the second pass sees a matching hash.
 
-`check-lock.sh` validates profiles offline: every member must be a known model
+`comfyfetch check` validates profiles offline: every member must be a known model
 or another profile, and expansion must terminate. Cycle detection is by bounded
 expansion rather than a self-reference check, because `a → b → a` is the same
 defect one step further out.
@@ -119,13 +153,13 @@ and drops privileges via gosu.
 ## Usage
 
 ```sh
-resolve.sh comfy.yaml > /tmp/m.yaml            # then splice into comfy-lock.yaml
+comfyfetch resolve comfy.yaml > /tmp/m.yaml            # then splice into comfy-lock.yaml
 yq -i '.models = load("/tmp/m.yaml").models' comfy-lock.yaml
 
-fetch-lock.sh comfy-lock.yaml /workspace       # dry run
-fetch-lock.sh comfy-lock.yaml /workspace --apply
+comfyfetch fetch comfy-lock.yaml /workspace       # dry run
+comfyfetch fetch comfy-lock.yaml /workspace --apply
 
-check-lock.sh comfy.yaml comfy-lock.yaml       # offline; what CI runs
+comfyfetch check comfy.yaml comfy-lock.yaml       # offline; what CI runs
 ```
 
 Paths in the lock begin `models/`, so the fetcher's second argument is the
@@ -194,37 +228,29 @@ Civitai's `model-versions` endpoint is public, and GitHub's release API is too
 | `https://…` | nothing — **you must supply `sha256:`** |
 
 `civitai:` sources require `as:`, because the filename comes from the API and
-would otherwise be unknowable offline — which `check-lock.sh` depends on.
+would otherwise be unknowable offline — which `comfyfetch check` depends on.
 
 ## Why CI does not re-resolve
 
-`check-lock.sh` compares manifest against lock **offline** and never re-resolves.
+`comfyfetch check` compares manifest against lock **offline** and never re-resolves.
 A moving `revision:` is *supposed* to yield a new commit once upstream advances —
 so a re-resolve gate would fail for the one reason that is not a mistake, and
 would need network access to do it. Hash changes arrive through a deliberate
-`resolve.sh` run and are reviewed like any other diff.
+`comfyfetch resolve` run and are reviewed like any other diff.
 
 ## Things that will bite you
 
-- **`yq` version matters.** 4.47 emits `"\t"` inside an expression literally;
-  4.53 interprets it as a tab. Every record format here is therefore
-  escape-free — one field per line — and each script asserts that the number of
-  records it read equals the number the file declares. Without that, a parser
-  matching nothing reports `0 failed` and exits 0.
-- **`$(...)` strips trailing newlines**, so a record whose last fields are empty
-  loses them and `read` desynchronises or hits EOF — under `set -e`, silently,
-  mid-loop. Absent values are emitted as `-`, never as an empty line. A sentinel
-  line appended *after* the substitution does not help; the stripping happens
-  first.
-- **`[ cond ] && cmd` as the last statement of a loop body** makes the body
-  return non-zero when the test fails, and `set -e` then kills the loop. Use
-  `if`.
+- **`urllib` forwards `Authorization` across redirects**, stripping only
+  content-length and content-type. curl does not. HuggingFace answers
+  `/resolve/` with a 302 to `*.cdn.hf.co` — a different host — so a naive port
+  sends the account token to the CDN on every gated download. Credentials are
+  stripped when scheme, host *or port* changes; host alone is not enough.
 - **`x-linked-etag` is the sha256 — but only on the first hop.** Following the
   redirect gives the CDN's Xet content-address instead: a different, equally
   plausible-looking value. Resolve with `curl -sI`, never `-sIL`.
 - **GitHub only computes asset digests for newer uploads.** Much of the ComfyUI
   ecosystem's models sit on releases from 2021 — `xinntao/Real-ESRGAN@v0.1.0`
-  has none. `resolve.sh` falls back to downloading and hashing, which is correct
+  has none. `comfyfetch resolve` falls back to downloading and hashing, which is correct
   but slow; state `sha256:` in the manifest to skip it.
 - **Bind mounts and DinD.** Where CI's filesystem is not the Docker host's,
   `-v "$(mktemp -d):/w"` silently mounts an empty directory. `verify.sh` is

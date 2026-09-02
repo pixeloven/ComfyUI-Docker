@@ -1,42 +1,54 @@
-# comfy-fetch — materialise a model package onto a volume, verifying every file.
+# comfy-fetch — resolve, verify and materialise ComfyUI model locks.
 #
-# Its whole dependency list is curl, sha256sum and yq. No Python, no language
-# runtime: this image is meant to be dropped into an initContainer, a compose
-# service, or a Helm chart's pre-install hook without imposing anything on the
-# consumer.
+# Python rather than shell. The shell version accumulated seven distinct classes
+# of silent bug -- the worst being a yq whose escape handling differs between
+# PATCH releases, which once made the record parser match nothing, process zero
+# files and exit 0.
 #
-# Consumers should pin by digest.
-
-ARG CURL_VERSION=8.11.1
-ARG YQ_VERSION=4.47.1
-
-# Both tools come from their own published images rather than `apk add`. Alpine
-# moves package versions without notice, so `apk add curl` pins nothing -- and a
-# YAML parser whose version drifts under a content-addressed fetcher is exactly
-# the wrong thing to leave floating: yq 4.47 and 4.53 do not agree on whether
-# "\t" inside an expression is an escape or two literal characters.
+# The "no language runtime" property it traded away is worth 31 MB, and it was
+# always a weak claim: a consumer runs an image, they do not install an
+# interpreter. PyYAML removes the yq class entirely, hashlib removes the shell
+# out to sha256sum, and urllib makes redirect and credential handling explicit
+# rather than curl's implicit behaviour.
 #
-# Starting FROM the curl image rather than adding curl to alpine also means
-# there is no package-manager step at all, and no layer written as root.
-FROM mikefarah/yq:${YQ_VERSION} AS yq
+# Consumers pin by digest.
 
-FROM curlimages/curl:${CURL_VERSION}
+ARG PYTHON_VERSION=3.13
 
-COPY --from=yq --chmod=0555 /usr/bin/yq /usr/local/bin/yq
-COPY --chmod=0555 fetch-lock.sh resolve.sh check-lock.sh lib-profiles.sh lib-auth.sh /usr/local/bin/
+FROM python:${PYTHON_VERSION}-alpine
 
-# Prove the three tools the scripts depend on are present and usable at BUILD
-# time. The image is useless without any one of them, and discovering that from
-# a half-fetched model volume is expensive.
-RUN yq --version \
- && curl --version > /dev/null \
- && sha256sum /usr/local/bin/yq > /dev/null
+# PyYAML and Typer. Typer costs 3.7 MB and buys the same CLI convention as
+# comfy-cli and Harmony's `hmy`, plus --output json for automation and agents.
+# --no-compile keeps the layer small; not caching bytecode is irrelevant next to
+# downloading gigabytes.
+COPY pyproject.toml /src/
+COPY comfyfetch/ /src/comfyfetch/
+# pip, setuptools and the build machinery are removed after install: nothing at
+# runtime installs anything, and leaving them is both weight and attack surface.
+RUN pip install --no-cache-dir --no-compile /src \
+ && rm -rf /src \
+ && pip uninstall -y pip setuptools wheel 2>/dev/null || true \
+ && rm -rf /usr/local/lib/python*/ensurepip \
+           /usr/local/lib/python*/idlelib \
+           /usr/local/lib/python*/lib2to3 \
+           /usr/local/lib/python*/tkinter \
+           /usr/local/lib/python*/turtledemo \
+           /usr/local/lib/python*/test \
+ && find /usr/local -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+
+# Prove the binary and all three verbs resolve at BUILD time. A missing console
+# script is a green build that fails on the next scale-up.
+RUN comfyfetch --help > /dev/null \
+ && comfyfetch resolve --help > /dev/null \
+ && comfyfetch fetch --help > /dev/null \
+ && comfyfetch check --help > /dev/null
 
 LABEL org.opencontainers.image.source="https://github.com/pixeloven/ComfyUI-Docker" \
-      org.opencontainers.image.description="Fetch a ComfyUI model package: content-addressed, hash-verified, no Python"
+      org.opencontainers.image.description="Resolve, verify and materialise ComfyUI model locks"
 
 # Writes to a mounted model volume, so it must run as a non-root uid whose
-# ownership the consuming pod or compose file can arrange (fsGroup, or a
-# matching --user). The uid itself is the consumer's to choose.
+# ownership the consuming pod or compose file can arrange. NFS writes in
+# Harmony's cluster need fsGroup 3000; the uid itself is the consumer's to
+# choose.
 USER 1000
-ENTRYPOINT ["/usr/local/bin/fetch-lock.sh"]
+ENTRYPOINT ["comfyfetch", "fetch"]
