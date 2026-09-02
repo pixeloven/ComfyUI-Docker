@@ -63,3 +63,27 @@ def test_json_mode_keeps_stdout_parseable(fixtures, tmp_path):
     r = runner.invoke(app, ["fetch", str(fixtures / "lock-good.yaml"), str(tmp_path),
                             "-o", "json"])
     json.loads(r.stdout)  # raises if anything else was written there
+
+
+def test_result_goes_to_stdout_not_stderr(fixtures, tmp_path):
+    """Progress belongs on stderr; the RESULT belongs on stdout.
+
+    Regression: both went to stderr, so `comfyfetch fetch ... | grep present`
+    saw an empty stream and matched nothing -- a pipeline that looks like it
+    passes because there is nothing to fail against.
+    """
+    runner_split = CliRunner()
+    r = runner_split.invoke(app, ["fetch", str(fixtures / "lock-good.yaml"),
+                                  str(tmp_path)])
+    assert r.exit_code == 0
+    assert "present:" in r.stdout, "the summary is not on stdout"
+
+
+def test_resolve_puts_only_the_lock_on_stdout(fixtures):
+    """`resolve > lock.yaml` must capture the lock and none of the chatter."""
+    r = runner.invoke(app, ["resolve", str(fixtures / "manifest-two-profiles.yaml"),
+                            "--profile", "just-a",
+                            "--from-lock", str(fixtures / "lock-two-entries.yaml")])
+    assert r.exit_code == 0
+    import yaml
+    assert yaml.safe_load(r.stdout)["models"], "stdout is not a parseable lock"
