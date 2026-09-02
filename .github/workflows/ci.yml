@@ -73,7 +73,7 @@ jobs:
       working-directory: services/fetch
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: uv run --with pyyaml --with typer --with pytest pytest -q
+      run: uv run --with pytest pytest -q
 
     - name: Validate the manifest and the locks against their schemas
       run: |
@@ -90,8 +90,8 @@ jobs:
     - name: Manifest and locks agree
       working-directory: services/fetch
       run: |
-        uv run --with pyyaml --with typer --from . comfyfetch check ../../comfy.yaml ../../comfy-lock.yaml
-        uv run --with pyyaml --with typer --from . comfyfetch check ../../comfy.yaml ../../locks/preview.yaml --profile preview
+        uv run comfyfetch check ../../comfy.yaml ../../comfy-lock.yaml
+        uv run comfyfetch check ../../comfy.yaml ../../locks/preview.yaml --profile preview
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4

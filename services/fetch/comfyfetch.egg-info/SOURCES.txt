@@ -17,5 +17,6 @@ comfyfetch.egg-info/entry_points.txt
 comfyfetch.egg-info/requires.txt
 comfyfetch.egg-info/top_level.txt
 tests/test_auth.py
+tests/test_cli_contract.py
 tests/test_profiles_and_check.py
 tests/test_resolve_and_fetch.py
