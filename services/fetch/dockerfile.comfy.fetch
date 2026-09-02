@@ -17,8 +17,10 @@ ARG PYTHON_VERSION=3.13
 
 FROM python:${PYTHON_VERSION}-alpine
 
-# PyYAML is the only dependency. --no-compile keeps the layer small; the startup
-# cost of not caching bytecode is irrelevant next to downloading gigabytes.
+# PyYAML and Typer. Typer costs 3.7 MB and buys the same CLI convention as
+# comfy-cli and Harmony's `hmy`, plus --output json for automation and agents.
+# --no-compile keeps the layer small; not caching bytecode is irrelevant next to
+# downloading gigabytes.
 COPY pyproject.toml /src/
 COPY comfyfetch/ /src/comfyfetch/
 # pip, setuptools and the build machinery are removed after install: nothing at
@@ -34,11 +36,12 @@ RUN pip install --no-cache-dir --no-compile /src \
            /usr/local/lib/python*/test \
  && find /usr/local -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 
-# Prove all three entry points resolve at BUILD time. A missing console script
-# is a green build that fails on the next scale-up.
-RUN comfy-fetch --help > /dev/null \
- && comfy-resolve --help > /dev/null \
- && comfy-check-lock --help > /dev/null
+# Prove the binary and all three verbs resolve at BUILD time. A missing console
+# script is a green build that fails on the next scale-up.
+RUN comfyfetch --help > /dev/null \
+ && comfyfetch resolve --help > /dev/null \
+ && comfyfetch fetch --help > /dev/null \
+ && comfyfetch check --help > /dev/null
 
 LABEL org.opencontainers.image.source="https://github.com/pixeloven/ComfyUI-Docker" \
       org.opencontainers.image.description="Resolve, verify and materialise ComfyUI model locks"
@@ -48,4 +51,4 @@ LABEL org.opencontainers.image.source="https://github.com/pixeloven/ComfyUI-Dock
 # Harmony's cluster need fsGroup 3000; the uid itself is the consumer's to
 # choose.
 USER 1000
-ENTRYPOINT ["comfy-fetch"]
+ENTRYPOINT ["comfyfetch", "fetch"]

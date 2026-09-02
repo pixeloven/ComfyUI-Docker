@@ -3,15 +3,12 @@ name = "comfyfetch"
 version = "0.1.0"
 description = "Resolve, verify and materialise ComfyUI model locks"
 requires-python = ">=3.11"
-dependencies = ["PyYAML>=6.0"]
+dependencies = ["PyYAML>=6.0", "typer>=0.12.5"]
 
-# The names consumers already invoke. Harmony's Jobs and the compose examples
-# pass arguments positionally against the image ENTRYPOINT, so keeping these
-# exact means the port changes nothing for them but the digest.
+# One binary, three verbs. NOT `comfy`/`comfy-cli`/`comfycli` -- comfy-cli owns
+# those and shadowing them on a user's PATH would be hostile.
 [project.scripts]
-comfy-fetch = "comfyfetch.fetch:main"
-comfy-resolve = "comfyfetch.resolve:main"
-comfy-check-lock = "comfyfetch.check:main"
+comfyfetch = "comfyfetch.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

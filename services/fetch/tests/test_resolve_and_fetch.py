@@ -9,7 +9,11 @@ import pathlib
 
 import pytest
 import yaml
-from comfyfetch import fetch, lockfile, resolve
+from comfyfetch import fetch, lockfile
+from comfyfetch.cli import app
+from typer.testing import CliRunner
+
+runner = CliRunner()
 
 GATED = "f6315581b7cddd450b9aba72b4e9ccf8b6580dc1a6b9538aff43ee26a1a3b6c2"
 UPSCALER = "f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da"
@@ -38,26 +42,26 @@ def _write(tmp_path, doc, name="l.yaml") -> pathlib.Path:
 # --- resolve -----------------------------------------------------------------
 
 @pytest.mark.network
-def test_every_bad_source_is_reported_and_no_lock_written(fixtures, capsys):
-    rc = resolve.main([str(fixtures / "manifest-broken-sources.yaml")])
-    out, err = capsys.readouterr()
-    assert rc == 1
-    assert out == "", "a partial lock was written"
+def test_every_bad_source_is_reported_and_no_lock_written(fixtures):
+    r = runner.invoke(app, ["resolve", str(fixtures / "manifest-broken-sources.yaml")])
+    assert r.exit_code == 1
+    assert "models:" not in r.stdout, "a partial lock was written"
     for want in ("civitai:2068000", "does-not-exist-xyz", "needs `sha256`"):
-        assert want in err, f"{want!r} missing from the report"
+        assert want in r.output, f"{want!r} missing from the report"
 
 
 @pytest.mark.network
-def test_filename_with_spaces_resolves(fixtures, capsys):
+def test_filename_with_spaces_resolves(fixtures):
     """An unencoded space produces a request that reads as a missing file."""
-    assert resolve.main([str(fixtures / "manifest-awkward-filename.yaml")]) == 0
-    assert "- model:" in capsys.readouterr().out
+    r = runner.invoke(app, ["resolve", str(fixtures / "manifest-awkward-filename.yaml")])
+    assert r.exit_code == 0
+    assert "- model:" in r.stdout
 
 
 @pytest.mark.network
 @needs_token
 @pytest.mark.parametrize("args", [[], ["--profile", "only"]])
-def test_gated_repo_resolves_with_a_token(tmp_path, capsys, args):
+def test_gated_repo_resolves_with_a_token(tmp_path, args):
     """Regression: auth once loaded only on the no-profile path, so every real
     call went unauthenticated while the no-profile test passed."""
     m = _write(tmp_path, {
@@ -66,17 +70,19 @@ def test_gated_repo_resolves_with_a_token(tmp_path, capsys, args):
             "source": "hf:black-forest-labs/FLUX.1-Krea-dev",
             "file": "flux1-krea-dev.safetensors", "install": "models/unet/"}]}],
         "profiles": {"only": ["gated"]}}, "m.yaml")
-    assert resolve.main([str(m), *args]) == 0
-    assert GATED in capsys.readouterr().out
+    r = runner.invoke(app, ["resolve", str(m), *args])
+    assert r.exit_code == 0, r.output
+    assert GATED in r.stdout
 
 
 # --- resolve --from-lock ------------------------------------------------------
 
-def test_from_lock_copies_entries_verbatim(fixtures, capsys):
-    rc = resolve.main([str(fixtures / "manifest-two-profiles.yaml"), "--profile", "just-a",
-                       "--from-lock", str(fixtures / "lock-two-entries.yaml")])
-    assert rc == 0
-    derived = yaml.safe_load(capsys.readouterr().out)
+def test_from_lock_copies_entries_verbatim(fixtures):
+    r = runner.invoke(app, ["resolve", str(fixtures / "manifest-two-profiles.yaml"),
+                            "--profile", "just-a",
+                            "--from-lock", str(fixtures / "lock-two-entries.yaml")])
+    assert r.exit_code == 0, r.output
+    derived = yaml.safe_load(r.stdout)
     parent = lockfile.load(fixtures / "lock-two-entries.yaml")
     by_path = {lockfile.lock_path(m): m for m in parent["models"]}
     assert len(derived["models"]) == 1
@@ -84,18 +90,19 @@ def test_from_lock_copies_entries_verbatim(fixtures, capsys):
     assert entry == by_path[lockfile.lock_path(entry)], "not a verbatim copy"
 
 
-def test_from_lock_refuses_a_stale_parent(fixtures, capsys):
-    rc = resolve.main([str(fixtures / "manifest-two-profiles.yaml"), "--profile", "both",
-                       "--from-lock", str(fixtures / "lock-stale-parent.yaml")])
-    out, err = capsys.readouterr()
-    assert rc == 1
-    assert out == "", "a partial lock was written"
-    assert "stale" in err
+def test_from_lock_refuses_a_stale_parent(fixtures):
+    r = runner.invoke(app, ["resolve", str(fixtures / "manifest-two-profiles.yaml"),
+                            "--profile", "both",
+                            "--from-lock", str(fixtures / "lock-stale-parent.yaml")])
+    assert r.exit_code == 1
+    assert "models:" not in r.stdout, "a partial lock was written"
+    assert "stale" in r.output
 
 
 def test_from_lock_requires_a_profile(fixtures):
-    assert resolve.main([str(fixtures / "manifest-two-profiles.yaml"),
-                         "--from-lock", str(fixtures / "lock-two-entries.yaml")]) == 2
+    r = runner.invoke(app, ["resolve", str(fixtures / "manifest-two-profiles.yaml"),
+                            "--from-lock", str(fixtures / "lock-two-entries.yaml")])
+    assert r.exit_code == 2
 
 
 # --- fetch -------------------------------------------------------------------
