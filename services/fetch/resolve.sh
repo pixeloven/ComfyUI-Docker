@@ -80,6 +80,12 @@ in_selection() {
   case " $selected " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
 
+# Unconditionally, and before any request. Placed inside the else branch below
+# it would load credentials only when NO --profile was given -- which is the
+# path nobody uses, and the failure is silent: gated repos simply report as
+# "not found".
+auth_load "$MANIFEST"
+
 if [ -n "$PROFILE" ]; then
   declared=0
   for m in $selected; do
