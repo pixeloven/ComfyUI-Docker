@@ -80,6 +80,38 @@ YAML
   fi
 }
 
+# --- resolve: the same, but through --profile ---------------------------------
+# Regression. `auth_load` was placed in the branch taken only when no --profile
+# is given, so credentials loaded for the path nobody uses. The case above
+# passed while every real invocation went unauthenticated, and the failure is
+# silent: a gated repo just reports as "not found".
+t_resolve_authenticates_with_profile() {
+  name="resolve authenticates for a gated repo THROUGH --profile"
+  if [ -z "${HF_TOKEN:-}" ]; then printf '  skip %s (HF_TOKEN unset)\n' "$name"; return; fi
+  cat > "$WORK/gatedp.yaml" <<YAML
+name: gated-profile
+auth:
+  huggingface.co: \${HF_TOKEN}
+models:
+  - name: gated
+    files:
+      - source: hf:black-forest-labs/FLUX.1-Krea-dev
+        file: flux1-krea-dev.safetensors
+        install: models/unet/
+profiles:
+  only: [gated]
+YAML
+  if sh "$BIN/resolve.sh" "$WORK/gatedp.yaml" --profile only > "$WORK/o8" 2> "$WORK/e8"; then
+    if grep -q 'f6315581b7cddd450b9aba72b4e9ccf8b6580dc1a6b9538aff43ee26a1a3b6c2' "$WORK/o8"; then
+      ok "$name"
+    else
+      bad "$name (resolved, but not to the expected hash)" "$WORK/o8"
+    fi
+  else
+    bad "$name" "$WORK/e8"
+  fi
+}
+
 # --- check-lock: profiles ------------------------------------------------------
 t_check_rejects_unknown_member() {
   name="check-lock rejects a profile naming an unknown capability"
@@ -121,6 +153,7 @@ echo "fetch tooling tests"
 t_resolve_reports_all
 t_resolve_encodes_paths
 t_resolve_authenticates
+t_resolve_authenticates_with_profile
 t_check_rejects_unknown_member
 t_check_rejects_cycle
 t_check_rejects_unhashed_entry
