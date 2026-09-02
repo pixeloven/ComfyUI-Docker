@@ -29,6 +29,16 @@ variable "COMFYUI_VERSION" {
     default = "v0.33.1"
 }
 
+variable "IMAGE_VERSION" {
+    // OUR packaging version for the ComfyUI image family, from the VERSION file.
+    // Distinct from COMFYUI_VERSION, which is what is INSIDE the image -- the
+    // Helm `version` vs `appVersion` split. Changing a Dockerfile without
+    // changing ComfyUI otherwise overwrites `cuda-v0.33.1` with different bytes,
+    // which is the mutable-tag problem the whole lockfile effort exists to
+    // avoid. Empty on ordinary pushes; set by a release tag.
+    default = ""
+}
+
 variable "FETCH_VERSION" {
     // Semver for the fetch image, set only by a release tag. Empty on ordinary
     // pushes, which publish the commit-sha and :latest tags alone.
@@ -54,7 +64,8 @@ target "runtime-cuda" {
     tags = [
         "${REGISTRY_URL}runtime:cuda-${IMAGE_LABEL}",
         "${REGISTRY_URL}runtime:cuda-cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:cuda-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:cuda-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}runtime:cuda-${IMAGE_VERSION}" : ""
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cuda-cache,optional=true"]
     cache-to   = ["type=inline"]
@@ -67,7 +78,8 @@ target "runtime-cpu" {
     tags = [
         "${REGISTRY_URL}runtime:cpu-${IMAGE_LABEL}",
         "${REGISTRY_URL}runtime:cpu-cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:cpu-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:cpu-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}runtime:cpu-${IMAGE_VERSION}" : ""
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:cpu-cache,optional=true"]
     cache-to   = ["type=inline"]
@@ -80,7 +92,8 @@ target "runtime-rocm" {
     tags = [
         "${REGISTRY_URL}runtime:rocm-${IMAGE_LABEL}",
         "${REGISTRY_URL}runtime:rocm-cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:rocm-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:rocm-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}runtime:rocm-${IMAGE_VERSION}" : ""
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:rocm-cache,optional=true"]
     cache-to   = ["type=inline"]
@@ -93,7 +106,8 @@ target "runtime-xpu" {
     tags = [
         "${REGISTRY_URL}runtime:xpu-${IMAGE_LABEL}",
         "${REGISTRY_URL}runtime:xpu-cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:xpu-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}runtime:xpu-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}runtime:xpu-${IMAGE_VERSION}" : ""
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}runtime:xpu-cache,optional=true"]
     cache-to   = ["type=inline"]
@@ -110,7 +124,8 @@ target "core-cuda" {
         "${REGISTRY_URL}core:cuda-${IMAGE_LABEL}",
         "${REGISTRY_URL}core:cuda-${COMFYUI_VERSION}",
         "${REGISTRY_URL}core:cuda-cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}core:cuda-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}core:cuda-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}core:cuda-${IMAGE_VERSION}" : ""
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime:cuda-cache,optional=true",
@@ -136,7 +151,8 @@ target "core-cpu" {
         "${REGISTRY_URL}core:cpu-${IMAGE_LABEL}",
         "${REGISTRY_URL}core:cpu-${COMFYUI_VERSION}",
         "${REGISTRY_URL}core:cpu-cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}core:cpu-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}core:cpu-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}core:cpu-${IMAGE_VERSION}" : ""
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime:cpu-cache,optional=true",
@@ -162,7 +178,8 @@ target "core-rocm" {
         "${REGISTRY_URL}core:rocm-${IMAGE_LABEL}",
         "${REGISTRY_URL}core:rocm-${COMFYUI_VERSION}",
         "${REGISTRY_URL}core:rocm-cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}core:rocm-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}core:rocm-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}core:rocm-${IMAGE_VERSION}" : ""
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime:rocm-cache,optional=true",
@@ -188,7 +205,8 @@ target "core-xpu" {
         "${REGISTRY_URL}core:xpu-${IMAGE_LABEL}",
         "${REGISTRY_URL}core:xpu-${COMFYUI_VERSION}",
         "${REGISTRY_URL}core:xpu-cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}core:xpu-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}core:xpu-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}core:xpu-${IMAGE_VERSION}" : ""
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime:xpu-cache,optional=true",
@@ -214,7 +232,8 @@ target "complete-cuda" {
         "${REGISTRY_URL}complete:cuda-${IMAGE_LABEL}",
         "${REGISTRY_URL}complete:cuda-${COMFYUI_VERSION}",
         "${REGISTRY_URL}complete:cuda-cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-${IMAGE_VERSION}" : ""
     ]
     cache-from = [
         "type=registry,ref=${REGISTRY_URL}runtime:cuda-cache,optional=true",
@@ -233,7 +252,8 @@ target "complete-cuda-sm80" {
     tags = [
         "${REGISTRY_URL}complete:cuda-sm80-${IMAGE_LABEL}",
         "${REGISTRY_URL}complete:cuda-sm80-${COMFYUI_VERSION}",
-        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm80-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm80-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-sm80-${IMAGE_VERSION}" : ""
     ]
     args = {
         SAGEATTENTION_ARCH = "sm80"
@@ -247,7 +267,8 @@ target "complete-cuda-sm86" {
     tags = [
         "${REGISTRY_URL}complete:cuda-sm86-${IMAGE_LABEL}",
         "${REGISTRY_URL}complete:cuda-sm86-${COMFYUI_VERSION}",
-        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm86-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm86-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-sm86-${IMAGE_VERSION}" : ""
     ]
     args = {
         SAGEATTENTION_ARCH = "sm86"
@@ -261,7 +282,8 @@ target "complete-cuda-sm89" {
     tags = [
         "${REGISTRY_URL}complete:cuda-sm89-${IMAGE_LABEL}",
         "${REGISTRY_URL}complete:cuda-sm89-${COMFYUI_VERSION}",
-        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm89-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm89-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-sm89-${IMAGE_VERSION}" : ""
     ]
     args = {
         SAGEATTENTION_ARCH = "sm89"
@@ -275,7 +297,8 @@ target "complete-cuda-sm90" {
     tags = [
         "${REGISTRY_URL}complete:cuda-sm90-${IMAGE_LABEL}",
         "${REGISTRY_URL}complete:cuda-sm90-${COMFYUI_VERSION}",
-        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm90-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm90-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-sm90-${IMAGE_VERSION}" : ""
     ]
     args = {
         SAGEATTENTION_ARCH = "sm90"
@@ -289,7 +312,8 @@ target "complete-cuda-sm120" {
     tags = [
         "${REGISTRY_URL}complete:cuda-sm120-${IMAGE_LABEL}",
         "${REGISTRY_URL}complete:cuda-sm120-${COMFYUI_VERSION}",
-        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm120-latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm120-latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-sm120-${IMAGE_VERSION}" : ""
     ]
     args = {
         SAGEATTENTION_ARCH = "sm120"
@@ -305,7 +329,8 @@ target "mcp" {
     tags = [
         "${REGISTRY_URL}mcp:${IMAGE_LABEL}",
         "${REGISTRY_URL}mcp:cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}mcp:latest" : ""
+        PUBLISH_LATEST ? "${REGISTRY_URL}mcp:latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}mcp:${IMAGE_VERSION}" : ""
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}mcp:cache,optional=true"]
     cache-to   = ["type=inline"]

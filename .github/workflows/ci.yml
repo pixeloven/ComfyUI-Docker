@@ -7,6 +7,10 @@ on:
       # Semver releases. `comfyfetch/v1.2.3` publishes :1.2.3 and :1.2 alongside
       # the commit-sha and :latest tags an ordinary push produces.
       - 'comfyfetch/v*.*.*'
+      # The ComfyUI image family (complete / core / runtime / mcp). Its version
+      # is OUR packaging version, from the VERSION file -- distinct from
+      # COMFYUI_VERSION, which is what is inside the image.
+      - 'v*.*.*'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -394,6 +398,17 @@ jobs:
         echo "branch=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
         echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
         echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> $GITHUB_OUTPUT
+        # Our packaging version, set only by a bare vX.Y.Z release tag.
+        image_version=""
+        if [[ "${GITHUB_REF}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          image_version="${GITHUB_REF#refs/tags/v}"
+          declared="$(tr -d '[:space:]' < VERSION)"
+          if [ "$image_version" != "$declared" ]; then
+            echo "tag v$image_version does not match the VERSION file ($declared)"
+            exit 1
+          fi
+        fi
+        echo "image_version=$image_version" >> $GITHUB_OUTPUT
       env:
         GH_TOKEN: ${{ github.token }}
 
@@ -402,7 +417,7 @@ jobs:
       with:
         files: docker-bake.hcl
         targets: cuda
-        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        push: ${{ github.event_name == 'push' }}
         no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
@@ -414,6 +429,7 @@ jobs:
         REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
         IMAGE_LABEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.meta.outputs.commit_sha || 'latest' }}
         COMFYUI_VERSION: ${{ steps.meta.outputs.comfyui_version }}
+        IMAGE_VERSION: ${{ steps.meta.outputs.image_version }}
         PUBLISH_LATEST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
   build-cuda-arch:
@@ -453,6 +469,17 @@ jobs:
         echo "commit_sha=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
         echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
         echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> $GITHUB_OUTPUT
+        # Our packaging version, set only by a bare vX.Y.Z release tag.
+        image_version=""
+        if [[ "${GITHUB_REF}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          image_version="${GITHUB_REF#refs/tags/v}"
+          declared="$(tr -d '[:space:]' < VERSION)"
+          if [ "$image_version" != "$declared" ]; then
+            echo "tag v$image_version does not match the VERSION file ($declared)"
+            exit 1
+          fi
+        fi
+        echo "image_version=$image_version" >> $GITHUB_OUTPUT
       env:
         GH_TOKEN: ${{ github.token }}
 
@@ -461,7 +488,7 @@ jobs:
       with:
         files: docker-bake.hcl
         targets: cuda-arch
-        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        push: ${{ github.event_name == 'push' }}
         no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
@@ -473,6 +500,7 @@ jobs:
         REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
         IMAGE_LABEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.meta.outputs.commit_sha || 'latest' }}
         COMFYUI_VERSION: ${{ steps.meta.outputs.comfyui_version }}
+        IMAGE_VERSION: ${{ steps.meta.outputs.image_version }}
         PUBLISH_LATEST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
   build-cpu:
@@ -521,6 +549,17 @@ jobs:
         echo "branch=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
         echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
         echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> $GITHUB_OUTPUT
+        # Our packaging version, set only by a bare vX.Y.Z release tag.
+        image_version=""
+        if [[ "${GITHUB_REF}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          image_version="${GITHUB_REF#refs/tags/v}"
+          declared="$(tr -d '[:space:]' < VERSION)"
+          if [ "$image_version" != "$declared" ]; then
+            echo "tag v$image_version does not match the VERSION file ($declared)"
+            exit 1
+          fi
+        fi
+        echo "image_version=$image_version" >> $GITHUB_OUTPUT
       env:
         GH_TOKEN: ${{ github.token }}
 
@@ -529,7 +568,7 @@ jobs:
       with:
         files: docker-bake.hcl
         targets: cpu
-        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        push: ${{ github.event_name == 'push' }}
         no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
@@ -541,6 +580,7 @@ jobs:
         REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
         IMAGE_LABEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.meta.outputs.commit_sha || 'latest' }}
         COMFYUI_VERSION: ${{ steps.meta.outputs.comfyui_version }}
+        IMAGE_VERSION: ${{ steps.meta.outputs.image_version }}
         PUBLISH_LATEST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
   build-linux-accelerators:
@@ -583,6 +623,17 @@ jobs:
         echo "commit_sha=${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
         echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
         echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> $GITHUB_OUTPUT
+        # Our packaging version, set only by a bare vX.Y.Z release tag.
+        image_version=""
+        if [[ "${GITHUB_REF}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          image_version="${GITHUB_REF#refs/tags/v}"
+          declared="$(tr -d '[:space:]' < VERSION)"
+          if [ "$image_version" != "$declared" ]; then
+            echo "tag v$image_version does not match the VERSION file ($declared)"
+            exit 1
+          fi
+        fi
+        echo "image_version=$image_version" >> $GITHUB_OUTPUT
       env:
         GH_TOKEN: ${{ github.token }}
 
@@ -591,7 +642,7 @@ jobs:
       with:
         files: docker-bake.hcl
         targets: ${{ matrix.target }}
-        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        push: ${{ github.event_name == 'push' }}
         no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
@@ -603,4 +654,5 @@ jobs:
         REGISTRY_URL: ghcr.io/${{ steps.meta.outputs.repository_lower }}/
         IMAGE_LABEL: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.meta.outputs.commit_sha || 'latest' }}
         COMFYUI_VERSION: ${{ steps.meta.outputs.comfyui_version }}
+        IMAGE_VERSION: ${{ steps.meta.outputs.image_version }}
         PUBLISH_LATEST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
