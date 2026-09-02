@@ -87,3 +87,11 @@ def test_resolve_puts_only_the_lock_on_stdout(fixtures):
     assert r.exit_code == 0
     import yaml
     assert yaml.safe_load(r.stdout)["models"], "stdout is not a parseable lock"
+
+
+def test_version_is_reportable():
+    """A consumer in the wild has no other way to know what they have."""
+    import importlib.metadata
+    r = runner.invoke(app, ["--version"])
+    assert r.exit_code == 0
+    assert r.stdout.strip() == importlib.metadata.version("comfyfetch")
