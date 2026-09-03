@@ -149,6 +149,24 @@ break; they are not themselves a safe pin, because a tag can move.
 `comfyfetch --version` reports what an installed copy is. See
 [CHANGELOG.md](CHANGELOG.md).
 
+## Validating before a deployment starts
+
+The image carries `check`, so a deployment can gate itself on its own mounted
+config rather than trusting CI:
+
+```yaml
+initContainers:
+  - name: check
+    image: ghcr.io/pixeloven/comfyui/fetch@sha256:...
+    command: ["comfyfetch"]
+    args: ["check", "/config/comfy.yaml", "/config/locks/common.yaml", "--profile", "common"]
+```
+
+A non-zero exit blocks the pod. This catches what CI cannot: CI validates the
+*repository*, this validates the *deployment* — the actual mounted files, at the
+moment they are about to be used. A repo can be green while a cluster runs a
+stale ConfigMap.
+
 ## Trying it
 
 ```sh
