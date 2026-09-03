@@ -21,11 +21,18 @@ on:
         type: boolean
         default: false
 
-# A new push to a PR makes the previous run obsolete, so cancel it. NEVER on
-# main: a rapid second merge would cancel the first one's image publish, leaving
-# no image for a commit consumers may already pin by sha.
+# A new push to a PR makes the previous run obsolete, so cancel it. Never on
+# main or a tag -- those publish artifacts consumers pin by sha.
+#
+# `cancel-in-progress: false` is NOT enough to say that, and the comment that
+# used to sit here claimed it was. It protects a run that is already executing,
+# but GitHub keeps only ONE pending run per group and cancels older pending
+# ones. Merging #69 then #70 half an hour apart did exactly that: 0ce4ab48's
+# publish sat queued for 31 minutes and died the moment the next merge arrived,
+# so `core:cuda-0ce4ab48` does not exist. Giving every non-PR ref its own group
+# is what actually makes the guarantee -- nothing ever queues behind anything.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -41,7 +48,10 @@ jobs:
       examples: ${{ steps.filter.outputs.examples }}
     steps:
     - uses: actions/checkout@v7
-    # Pinned by SHA, like every other third-party action here. It is used rather
+    # Pinned by SHA: an unverified third-party action running on every PR is a
+    # supply-chain seam, and a tag can move under it. (Verified publishers --
+    # actions/*, docker/*, astral-sh/* -- stay on major tags; dependabot keeps
+    # both kinds current.) It is used rather
     # than a hand-rolled `git diff` because the awkward cases -- PR merge-base,
     # first push to a branch, force-push -- are exactly where a hand-rolled
     # version silently matches nothing and SKIPS a build that should have run.
@@ -142,6 +152,17 @@ jobs:
             ;;
         esac
 
+        # VERSIONING.md says the skills plugin ships on the image line and
+        # carries the same version. Nothing enforced that, so the third
+        # published artifact had none of the protection the other two get --
+        # and drift would only surface at release time, on the tag.
+        plugin="$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['version'])")"
+        declared="$(tr -d '[:space:]' < VERSION)"
+        if [ "${plugin}" != "${declared}" ]; then
+          echo "::error::.claude-plugin/plugin.json is ${plugin} but VERSION is ${declared}; they ship as one release"
+          exit 1
+        fi
+
         # A label is a name a consumer can pin, so `latest` is never a fallback
         # here. Anything without a release version gets the commit sha, which is
         # always a true statement about what was built.
@@ -189,6 +210,17 @@ jobs:
         } >> "${GITHUB_OUTPUT}"
 
         echo "images=${build_images} (label ${image_label}) fetch=${build_fetch} (label ${fetch_label})"
+
+  # The workflows themselves. This repo's expensive bugs have been shell bugs --
+  # a yq escape change that processed 0 files and exited 0, an `A && B || C`
+  # that is not if-then-else -- and every one of them lived in a `run:` block
+  # nothing linted. actionlint runs shellcheck over those blocks.
+  lint-workflows:
+    name: workflows lint clean
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
 
   validate-examples:
     runs-on: ubuntu-latest
@@ -452,7 +484,7 @@ jobs:
     - uses: actions/checkout@v7
     
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
       with:
         tool-cache: true
         android: true
@@ -518,7 +550,7 @@ jobs:
     - uses: actions/checkout@v7
 
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
       with:
         tool-cache: true
         android: true
@@ -570,7 +602,7 @@ jobs:
     - uses: actions/checkout@v7
     
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
       with:
         tool-cache: true
         android: true
@@ -632,7 +664,7 @@ jobs:
     - uses: actions/checkout@v7
 
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
       with:
         tool-cache: true
         android: true
@@ -671,3 +703,167 @@ jobs:
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
         IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
+
+  # The GitHub Release. Until this job existed the repo had semver, publish
+  # paths and an agreement gate but zero tags and zero releases -- so a version
+  # was a string in a file that no consumer could obtain.
+  #
+  # Both lines land here with different payloads:
+  #   v1.2.3             notes + the digests of every image the run published
+  #   comfyfetch/v1.2.3  notes + the wheel, its checksum, and its provenance
+  release:
+    name: cut the release
+    runs-on: ubuntu-latest
+    needs: [context, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-linux-accelerators]
+    # A release tag builds one line, so the other line's jobs are `skipped`, not
+    # `success` -- hence the explicit failure test rather than the default
+    # all-of-needs-succeeded.
+    if: >-
+      !cancelled()
+      && !contains(needs.*.result, 'failure')
+      && (needs.context.outputs.image_version != '' || needs.context.outputs.fetch_version != '')
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
+      FETCH_VERSION: ${{ needs.context.outputs.fetch_version }}
+      REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Releases are immutable
+      run: |
+        set -euo pipefail
+        tag="${GITHUB_REF#refs/tags/}"
+        if gh release view "$tag" >/dev/null 2>&1; then
+          echo "::error::release ${tag} already exists. Releases are immutable -- cut a new version rather than replacing this one."
+          exit 1
+        fi
+        echo "tag=${tag}" >> "$GITHUB_ENV"
+
+    # Notes come from the changelog, so the release says what changed rather
+    # than listing commits. A version with no dated section fails the release:
+    # publishing notes headed `unreleased` is how a changelog stops being read.
+    - name: Release notes, from the changelog
+      run: |
+        set -euo pipefail
+        if [ -n "${FETCH_VERSION}" ]; then
+          file=services/fetch/CHANGELOG.md; version="${FETCH_VERSION}"; title="comfyfetch ${FETCH_VERSION}"
+        else
+          file=CHANGELOG.md; version="${IMAGE_VERSION}"; title="ComfyUI images ${IMAGE_VERSION}"
+        fi
+
+        heading="$(grep -m1 -F "## ${version} " "${file}" || true)"
+        if [ -z "${heading}" ]; then
+          echo "::error::${file} has no '## ${version}' section. Add one before tagging."
+          exit 1
+        fi
+        case "${heading}" in
+          *unreleased*|*"never published"*)
+            echo "::error::${file} still marks ${version} as '${heading#*— }'."
+            exit 1 ;;
+        esac
+
+        awk -v want="## ${version} " 'index($0, want)==1 {g=1; next} g && /^## / {exit} g {print}' \
+          "${file}" > notes.md
+        if [ ! -s notes.md ]; then
+          echo "::error::the ${version} section of ${file} is empty"
+          exit 1
+        fi
+        echo "title=${title}" >> "$GITHUB_ENV"
+        echo "--- notes ---"; cat notes.md
+
+    # -- the comfyfetch line: a wheel, so the CLI is usable without Docker -----
+
+    - uses: astral-sh/setup-uv@v5
+      if: needs.context.outputs.fetch_version != ''
+
+    - name: Build the wheel
+      if: needs.context.outputs.fetch_version != ''
+      working-directory: services/fetch
+      run: |
+        set -euo pipefail
+        uv build --wheel -o "${GITHUB_WORKSPACE}/dist"
+        cd "${GITHUB_WORKSPACE}/dist"
+        # A URL pin is only as good as a checksum next to it -- this is what the
+        # SageAttention wheels already publish, and what consumers verify.
+        sha256sum ./*.whl | tee SHA256SUMS
+
+    - name: The wheel installs and runs
+      if: needs.context.outputs.fetch_version != ''
+      run: |
+        set -euo pipefail
+        got="$(uvx --from ./dist/*.whl comfyfetch --version)"
+        if [ "${got}" != "${FETCH_VERSION}" ]; then
+          echo "::error::the wheel reports ${got}, the tag says ${FETCH_VERSION}"
+          exit 1
+        fi
+        echo "wheel ok: reports ${got}"
+
+    - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+      if: needs.context.outputs.fetch_version != ''
+      with:
+        subject-path: dist/*.whl
+
+    # An attestation nobody verifies is decoration. This is the selftest: if the
+    # step above ever silently produced nothing, this fails the release.
+    - name: The attestation verifies
+      if: needs.context.outputs.fetch_version != ''
+      run: gh attestation verify ./dist/*.whl --repo "${GITHUB_REPOSITORY}"
+
+    # -- the image line: the digests, which are what consumers actually pin ----
+
+    - name: Log in to GHCR
+      if: needs.context.outputs.image_version != ''
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Record the published image digests
+      if: needs.context.outputs.image_version != ''
+      run: |
+        set -euo pipefail
+        # bake is the source of truth for which tags this version publishes --
+        # a hand-kept list here would drift the first time a target is added.
+        docker buildx bake -f docker-bake.hcl --print all 2>/dev/null \
+          | jq -r '.target[].tags[]?' \
+          | grep -E -- "-${IMAGE_VERSION}\$|:${IMAGE_VERSION}\$" \
+          | sort -u > tags.txt
+
+        if [ ! -s tags.txt ]; then
+          echo "::error::no tag carries ${IMAGE_VERSION}; bake and the release disagree"
+          exit 1
+        fi
+
+        while read -r tag; do
+          digest="$(docker buildx imagetools inspect "${tag}" --format '{{.Manifest.Digest}}')"
+          printf '%s@%s\n' "${tag%%:*}" "${digest}"
+        done < tags.txt | tee IMAGE-DIGESTS.txt
+
+        n=$(wc -l < IMAGE-DIGESTS.txt); declared=$(wc -l < tags.txt)
+        if [ "${n}" != "${declared}" ]; then
+          echo "::error::resolved ${n} digests for ${declared} tags"
+          exit 1
+        fi
+        {
+          echo ""
+          echo "Pin by digest:"
+          echo '```'
+          cat IMAGE-DIGESTS.txt
+          echo '```'
+        } >> notes.md
+
+    - name: Create the release
+      run: |
+        set -euo pipefail
+        assets=""
+        if [ -d dist ]; then assets="dist/comfyfetch-${FETCH_VERSION}-py3-none-any.whl dist/SHA256SUMS"; fi
+        if [ -f IMAGE-DIGESTS.txt ]; then assets="${assets} IMAGE-DIGESTS.txt"; fi
+        # shellcheck disable=SC2086
+        gh release create "${tag}" ${assets} --title "${title}" --notes-file notes.md --verify-tag
+        gh release view "${tag}" --json assets --jq '.assets[].name' | sed 's/^/published asset: /'

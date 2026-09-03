@@ -7,17 +7,20 @@ the diff looks.
 Consumers pin the image by **digest**; these versions say whether a digest
 change was a patch or a break, which a commit-sha tag cannot.
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-09-03
 
 - `fetch` reports per-file progress on stderr. A 25 GB fetch that printed
   nothing until it finished was indistinguishable from a hung job, which is
   exactly how the first real in-cluster run looked. Progress stays on stderr so
   `fetch | grep` and `--output json` are unaffected.
 
-## 0.1.0 — unreleased
+## 0.1.0 — never published
 
-First versioned release. The tooling itself is in use: Harmony resolves and
-verifies 161 model files with it.
+Superseded by 0.2.0 before any tag was cut, so no `comfyfetch/v0.1.0` exists and
+none will. The entry stays because the work below is what 0.2.0 first shipped.
+
+The tooling itself was already in use: Harmony resolves and verifies 161 model
+files with it.
 
 - `comfyfetch resolve` — manifest to lock, pinning moving refs to commits.
   Sources: `hf:`, `gh:`, `civitai:` and direct URLs. `--from-lock` derives a
