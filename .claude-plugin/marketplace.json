@@ -1,0 +1,12 @@
+{
+  "name": "comfyui-docker",
+  "owner": { "name": "PixelOven" },
+  "description": "Docker and Kubernetes ready ComfyUI images, with reproducible model locks.",
+  "plugins": [
+    {
+      "name": "comfyui-docker",
+      "source": "./",
+      "description": "Author comfy.yaml and generate locks: source forms, when `as:` and `sha256:` are required, how profiles compose, and the mistakes that fail silently."
+    }
+  ]
+}

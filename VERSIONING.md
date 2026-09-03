@@ -10,6 +10,10 @@ depends on and how we say what changed; a commit-sha tag says neither.
 | `v1.2.3` | the ComfyUI images — `complete`, `core`, `runtime`, `mcp` | `VERSION` |
 | `comfyfetch/v1.2.3` | the `comfyfetch` CLI and its image | `services/fetch/pyproject.toml` |
 
+The `v1.2.3` line also releases the **skills plugin** — `.claude-plugin/plugin.json`
+carries the same version, and consumers pin `@v1.2.3`. It deliberately does not
+get its own line: a third version to keep in step is a third one to forget.
+
 They move independently on purpose: the fetch tooling changes far more often
 than the ComfyUI images, and a consumer pinning one should not be forced to
 re-evaluate the other.
