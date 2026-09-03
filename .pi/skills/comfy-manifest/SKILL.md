@@ -1,1 +1,0 @@
-../../../.claude/skills/comfy-manifest.md
