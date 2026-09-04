@@ -1,8 +1,10 @@
 {
   "name": "comfyui-docker",
-  "description": "Consumer skills for ComfyUI-Docker — authoring comfy.yaml, generating locks, and deploying the images.",
-  "version": "0.1.0",
-  "author": { "name": "PixelOven" },
+  "description": "Consumer skills for ComfyUI-Docker \u2014 authoring comfy.yaml, generating locks, and deploying the images.",
+  "version": "1.0.0",
+  "author": {
+    "name": "PixelOven"
+  },
   "repository": "https://github.com/pixeloven/ComfyUI-Docker",
   "license": "MIT"
 }

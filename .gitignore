@@ -19,3 +19,7 @@
 /notes.md
 /tags.txt
 /IMAGE-DIGESTS.txt
+
+# setuptools build detritus. It was tracked, so every `uv build` produced a
+# spurious diff and could commit a stale version string back into the repo.
+*.egg-info/
