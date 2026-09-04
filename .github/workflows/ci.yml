@@ -47,15 +47,14 @@ jobs:
       fetch: ${{ steps.filter.outputs.fetch }}
       examples: ${{ steps.filter.outputs.examples }}
     steps:
-    - uses: actions/checkout@v7
-    # Pinned by SHA: an unverified third-party action running on every PR is a
-    # supply-chain seam, and a tag can move under it. (Verified publishers --
-    # actions/*, docker/*, astral-sh/* -- stay on major tags; dependabot keeps
-    # both kinds current.) It is used rather
+    - uses: actions/checkout@v7.0.1
+    # Pinned to an exact semver tag, like every other action here -- a version
+    # is something a human can read, compare and reason about upgrading; a
+    # commit sha is not. Dependabot proposes the bumps. It is used rather
     # than a hand-rolled `git diff` because the awkward cases -- PR merge-base,
     # first push to a branch, force-push -- are exactly where a hand-rolled
     # version silently matches nothing and SKIPS a build that should have run.
-    - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+    - uses: dorny/paths-filter@v4.0.3
       id: filter
       with:
         filters: |
@@ -102,7 +101,7 @@ jobs:
       registry_url: ${{ steps.classify.outputs.registry_url }}
       commit_sha: ${{ steps.classify.outputs.commit_sha }}
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - id: classify
       env:
@@ -219,13 +218,13 @@ jobs:
     name: workflows lint clean
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
     - run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
 
   validate-examples:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
     
     - name: Validate Example Configurations
       run: |
@@ -241,7 +240,7 @@ jobs:
   test-bake-targets:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - name: Test Docker Bake targets
       run: |
@@ -264,10 +263,10 @@ jobs:
   validate-models:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v5
+      uses: astral-sh/setup-uv@v5.4.2
       with:
         enable-cache: true
 
@@ -302,10 +301,10 @@ jobs:
         uv run comfyfetch check ../../comfy.yaml ../../locks/preview.yaml --profile preview
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
 
     - name: Build the fetch image
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: fetch
@@ -339,13 +338,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate-models
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
 
     - name: Build the fetch image
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: fetch
@@ -421,15 +420,15 @@ jobs:
     env:
       REGISTRY: ghcr.io
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     # No free-disk-space or prune step: this image is ~48 MB, not a CUDA stack.
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
 
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v4
+      uses: docker/login-action@v4.6.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -437,7 +436,7 @@ jobs:
 
     - name: Build and push
       id: build
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: fetch
@@ -481,10 +480,10 @@ jobs:
     env:
       REGISTRY: ghcr.io
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
     
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
+      uses: jlumbroso/free-disk-space@v1.3.1
       with:
         tool-cache: true
         android: true
@@ -501,12 +500,12 @@ jobs:
         echo "✅ Docker system cleaned"
         
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
       with:
         buildkitd-flags: --debug
   
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v4
+      uses: docker/login-action@v4.6.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -522,7 +521,7 @@ jobs:
         GH_TOKEN: ${{ github.token }}
 
     - name: Build CUDA images
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: cuda
@@ -547,10 +546,10 @@ jobs:
     env:
       REGISTRY: ghcr.io
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
+      uses: jlumbroso/free-disk-space@v1.3.1
       with:
         tool-cache: true
         android: true
@@ -561,19 +560,19 @@ jobs:
         swap-storage: true
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
       with:
         buildkitd-flags: --debug
 
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v4
+      uses: docker/login-action@v4.6.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build architecture-specific CUDA images
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: cuda-arch
@@ -599,10 +598,10 @@ jobs:
     env:
       REGISTRY: ghcr.io
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
     
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
+      uses: jlumbroso/free-disk-space@v1.3.1
       with:
         tool-cache: true
         android: true
@@ -619,19 +618,19 @@ jobs:
         echo "✅ Docker system cleaned"
         
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
       with:
         buildkitd-flags: --debug
   
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v4
+      uses: docker/login-action@v4.6.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build CPU images
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: cpu
@@ -661,10 +660,10 @@ jobs:
     env:
       REGISTRY: ghcr.io
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
+      uses: jlumbroso/free-disk-space@v1.3.1
       with:
         tool-cache: true
         android: true
@@ -675,17 +674,17 @@ jobs:
         swap-storage: true
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
 
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v4
+      uses: docker/login-action@v4.6.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build ${{ matrix.target }} images
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: ${{ matrix.target }}
@@ -732,7 +731,7 @@ jobs:
       FETCH_VERSION: ${{ needs.context.outputs.fetch_version }}
       REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - name: Releases are immutable
       run: |
@@ -778,7 +777,7 @@ jobs:
 
     # -- the comfyfetch line: a wheel, so the CLI is usable without Docker -----
 
-    - uses: astral-sh/setup-uv@v5
+    - uses: astral-sh/setup-uv@v5.4.2
       if: needs.context.outputs.fetch_version != ''
 
     - name: Build the wheel
@@ -803,7 +802,7 @@ jobs:
         fi
         echo "wheel ok: reports ${got}"
 
-    - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+    - uses: actions/attest-build-provenance@v4.2.2
       if: needs.context.outputs.fetch_version != ''
       with:
         subject-path: dist/*.whl
@@ -818,7 +817,7 @@ jobs:
 
     - name: Log in to GHCR
       if: needs.context.outputs.image_version != ''
-      uses: docker/login-action@v4
+      uses: docker/login-action@v4.6.0
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
