@@ -556,9 +556,18 @@ jobs:
         push: ${{ github.event_name == 'push' }}
         no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        set: |
-          *.cache-from=type=gha
-          *.cache-to=type=gha,mode=max
+        # No gha cache override here. docker-bake.hcl already declares a
+        # REGISTRY cache for these targets, and the override replaced it with
+        # the Actions cache -- which is capped at 10 GB per repo, while
+        # `mode=max` pushes every intermediate layer of five multi-GB CUDA
+        # images into it. It thrashes, evicts mid-build, and the next blob
+        # fetch fails:
+        #
+        #   ERROR: target complete-cuda-sm90: failed to solve: failed to copy:
+        #   GET https://productionresultssa10.blob.core.windows.net/actions-cache/...
+        #
+        # which is what killed the v1.0.0 release (sm86) and its retry (sm90).
+        # The registry cache is unlimited and shared across runs.
         provenance: false
         sbom: false
       env:
@@ -587,6 +596,12 @@ jobs:
         docker-images: true
         swap-storage: true
 
+    - name: Clean Docker Images
+      run: |
+        echo "🧹 Removing Docker system..."
+        sudo docker system prune -af --volumes || true
+        echo "✅ Docker system cleaned"
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
       with:
@@ -607,9 +622,18 @@ jobs:
         push: ${{ github.event_name == 'push' }}
         no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        set: |
-          *.cache-from=type=gha
-          *.cache-to=type=gha,mode=max
+        # No gha cache override here. docker-bake.hcl already declares a
+        # REGISTRY cache for these targets, and the override replaced it with
+        # the Actions cache -- which is capped at 10 GB per repo, while
+        # `mode=max` pushes every intermediate layer of five multi-GB CUDA
+        # images into it. It thrashes, evicts mid-build, and the next blob
+        # fetch fails:
+        #
+        #   ERROR: target complete-cuda-sm90: failed to solve: failed to copy:
+        #   GET https://productionresultssa10.blob.core.windows.net/actions-cache/...
+        #
+        # which is what killed the v1.0.0 release (sm86) and its retry (sm90).
+        # The registry cache is unlimited and shared across runs.
         provenance: false
         sbom: false
       env:
@@ -710,9 +734,18 @@ jobs:
         push: ${{ github.event_name == 'push' }}
         no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        set: |
-          *.cache-from=type=gha
-          *.cache-to=type=gha,mode=max
+        # No gha cache override here. docker-bake.hcl already declares a
+        # REGISTRY cache for these targets, and the override replaced it with
+        # the Actions cache -- which is capped at 10 GB per repo, while
+        # `mode=max` pushes every intermediate layer of five multi-GB CUDA
+        # images into it. It thrashes, evicts mid-build, and the next blob
+        # fetch fails:
+        #
+        #   ERROR: target complete-cuda-sm90: failed to solve: failed to copy:
+        #   GET https://productionresultssa10.blob.core.windows.net/actions-cache/...
+        #
+        # which is what killed the v1.0.0 release (sm86) and its retry (sm90).
+        # The registry cache is unlimited and shared across runs.
         provenance: false
         sbom: false
       env:
@@ -746,6 +779,12 @@ jobs:
         docker-images: true
         swap-storage: true
 
+    - name: Clean Docker Images
+      run: |
+        echo "🧹 Removing Docker system..."
+        sudo docker system prune -af --volumes || true
+        echo "✅ Docker system cleaned"
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
 
@@ -764,9 +803,8 @@ jobs:
         push: ${{ github.event_name == 'push' }}
         no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        set: |
-          *.cache-from=type=gha,scope=${{ matrix.target }}
-          *.cache-to=type=gha,mode=max,scope=${{ matrix.target }}
+        # No gha override: bake declares a REGISTRY cache for these, and the
+        # Actions cache is capped at 10 GB per repo. See build-cuda-arch.
         provenance: false
         sbom: false
       env:
