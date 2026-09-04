@@ -587,6 +587,12 @@ jobs:
         docker-images: true
         swap-storage: true
 
+    - name: Clean Docker Images
+      run: |
+        echo "🧹 Removing Docker system..."
+        sudo docker system prune -af --volumes || true
+        echo "✅ Docker system cleaned"
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
       with:
@@ -745,6 +751,12 @@ jobs:
         large-packages: true
         docker-images: true
         swap-storage: true
+
+    - name: Clean Docker Images
+      run: |
+        echo "🧹 Removing Docker system..."
+        sudo docker system prune -af --volumes || true
+        echo "✅ Docker system cleaned"
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
