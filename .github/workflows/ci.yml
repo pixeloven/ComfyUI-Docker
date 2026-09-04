@@ -4,12 +4,15 @@ on:
   push:
     branches: [ main ]
     tags:
-      # Semver releases. `comfyfetch/v1.2.3` publishes :1.2.3 and :1.2 alongside
-      # the commit-sha and :latest tags an ordinary push produces.
-      - 'comfyfetch/v*.*.*'
-      # The ComfyUI image family (complete / core / runtime / mcp). Its version
-      # is OUR packaging version, from the VERSION file -- distinct from
-      # COMFYUI_VERSION, which is what is inside the image.
+      # ONE release line. `v1.2.3` publishes everything this repo produces --
+      # the ComfyUI images, the mcp image, the comfyfetch image AND wheel, and
+      # the skills plugin -- from one commit, in one GitHub Release.
+      #
+      # There used to be two lines, and a `comfyfetch/v*` tag published only the
+      # CLI. The result was a releases page where neither entry described the
+      # repo and GitHub labelled whichever shipped last as "Latest" -- so the
+      # fetch CLI's 0.2.0 appeared to supersede the images' 0.1.0. Consumers
+      # cannot be expected to reverse-engineer that.
       - 'v*.*.*'
   pull_request:
     branches: [ main ]
@@ -110,6 +113,7 @@ jobs:
       run: |
         set -euo pipefail
 
+        release_version=""
         image_version=""
         fetch_version=""
 
@@ -134,32 +138,39 @@ jobs:
         }
 
         case "${GITHUB_REF}" in
-          refs/tags/comfyfetch/v*)
-            fetch_version="${GITHUB_REF#refs/tags/comfyfetch/v}"
-            agree "${fetch_version}" \
-              "$(python3 -c "import tomllib;print(tomllib.load(open('services/fetch/pyproject.toml','rb'))['project']['version'])")" \
-              services/fetch/pyproject.toml comfyfetch/v
-            ;;
           refs/tags/v*)
-            image_version="${GITHUB_REF#refs/tags/v}"
-            agree "${image_version}" "$(tr -d '[:space:]' < VERSION)" VERSION v
+            release_version="${GITHUB_REF#refs/tags/v}"
+            # Every artifact carries the same number, so every manifest that
+            # states it has to agree. A wheel published as 1.2.0 out of a 1.3.0
+            # release is indistinguishable downstream from the real thing.
+            agree "${release_version}" "$(tr -d '[:space:]' < VERSION)" VERSION v
+            agree "${release_version}" \
+              "$(python3 -c "import tomllib;print(tomllib.load(open('services/fetch/pyproject.toml','rb'))['project']['version'])")" \
+              services/fetch/pyproject.toml v
+            agree "${release_version}" \
+              "$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['version'])")" \
+              .claude-plugin/plugin.json v
+            image_version="${release_version}"
+            fetch_version="${release_version}"
             ;;
           refs/tags/*)
-            echo "::error::tag ${GITHUB_REF#refs/tags/} belongs to no release line (expected vX.Y.Z or comfyfetch/vX.Y.Z)"
+            echo "::error::tag ${GITHUB_REF#refs/tags/} is not a release (expected vX.Y.Z)"
             exit 1
             ;;
         esac
 
-        # VERSIONING.md says the skills plugin ships on the image line and
-        # carries the same version. Nothing enforced that, so the third
-        # published artifact had none of the protection the other two get --
-        # and drift would only surface at release time, on the tag.
-        plugin="$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['version'])")"
+        # Every push, not just releases: drift found on the tag is drift found
+        # too late. One repo, one number -- these three files all state it.
         declared="$(tr -d '[:space:]' < VERSION)"
-        if [ "${plugin}" != "${declared}" ]; then
-          echo "::error::.claude-plugin/plugin.json is ${plugin} but VERSION is ${declared}; they ship as one release"
-          exit 1
-        fi
+        for pair in \
+          ".claude-plugin/plugin.json:$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['version'])")" \
+          "services/fetch/pyproject.toml:$(python3 -c "import tomllib;print(tomllib.load(open('services/fetch/pyproject.toml','rb'))['project']['version'])")"
+        do
+          if [ "${pair#*:}" != "${declared}" ]; then
+            echo "::error::${pair%%:*} is ${pair#*:} but VERSION is ${declared}; every artifact ships one version"
+            exit 1
+          fi
+        done
 
         # A label is a name a consumer can pin, so `latest` is never a fallback
         # here. Anything without a release version gets the commit sha, which is
@@ -173,13 +184,14 @@ jobs:
           main=true
         fi
 
-        # A release tag builds ONLY its own line. main builds both, because it
-        # publishes the commit-sha and :latest tags consumers may already pin.
+        # A release builds EVERYTHING, from one commit. It is ~60 minutes and
+        # it happens rarely; the alternative is a release whose images were
+        # built from a different commit than its wheel, which is exactly the
+        # kind of thing nobody can debug six months later.
         build_images=false
         build_fetch=false
-        if [ -n "${image_version}" ]; then
+        if [ -n "${release_version}" ]; then
           build_images=true
-        elif [ -n "${fetch_version}" ]; then
           build_fetch=true
         elif [ "${main}" = true ]; then
           build_images=true
@@ -768,16 +780,16 @@ jobs:
   # paths and an agreement gate but zero tags and zero releases -- so a version
   # was a string in a file that no consumer could obtain.
   #
-  # Both lines land here with different payloads:
-  #   v1.2.3             notes + the digests of every image the run published
-  #   comfyfetch/v1.2.3  notes + the wheel, its checksum, and its provenance
+  # One release, everything in it: the digests of every image the run published,
+  # the comfyfetch wheel with its checksum and build provenance, and notes from
+  # the changelog. A consumer should not have to assemble a release from parts.
   release:
     name: cut the release
     runs-on: ubuntu-latest
     needs: [context, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, build-linux-accelerators]
-    # A release tag builds one line, so the other line's jobs are `skipped`, not
-    # `success` -- hence the explicit failure test rather than the default
-    # all-of-needs-succeeded.
+    # `!contains(failure)` rather than the default all-succeeded: on a non-release
+    # push some build jobs are legitimately `skipped` by the path filter, and
+    # `skipped` is not `success`.
     if: >-
       !cancelled()
       && !contains(needs.*.result, 'failure')
@@ -811,11 +823,7 @@ jobs:
     - name: Release notes, from the changelog
       run: |
         set -euo pipefail
-        if [ -n "${FETCH_VERSION}" ]; then
-          file=services/fetch/CHANGELOG.md; version="${FETCH_VERSION}"; title="comfyfetch ${FETCH_VERSION}"
-        else
-          file=CHANGELOG.md; version="${IMAGE_VERSION}"; title="ComfyUI images ${IMAGE_VERSION}"
-        fi
+        file=CHANGELOG.md; version="${IMAGE_VERSION}"; title="v${IMAGE_VERSION}"
 
         heading="$(grep -m1 -F "## ${version} " "${file}" || true)"
         if [ -z "${heading}" ]; then
@@ -840,10 +848,8 @@ jobs:
     # -- the comfyfetch line: a wheel, so the CLI is usable without Docker -----
 
     - uses: astral-sh/setup-uv@v5.4.2
-      if: needs.context.outputs.fetch_version != ''
 
     - name: Build the wheel
-      if: needs.context.outputs.fetch_version != ''
       working-directory: services/fetch
       run: |
         set -euo pipefail
@@ -854,7 +860,6 @@ jobs:
         sha256sum ./*.whl | tee SHA256SUMS
 
     - name: The wheel installs and runs
-      if: needs.context.outputs.fetch_version != ''
       run: |
         set -euo pipefail
         got="$(uvx --from ./dist/*.whl comfyfetch --version)"
@@ -865,20 +870,17 @@ jobs:
         echo "wheel ok: reports ${got}"
 
     - uses: actions/attest-build-provenance@v4.2.2
-      if: needs.context.outputs.fetch_version != ''
       with:
         subject-path: dist/*.whl
 
     # An attestation nobody verifies is decoration. This is the selftest: if the
     # step above ever silently produced nothing, this fails the release.
     - name: The attestation verifies
-      if: needs.context.outputs.fetch_version != ''
       run: gh attestation verify ./dist/*.whl --repo "${GITHUB_REPOSITORY}"
 
     # -- the image line: the digests, which are what consumers actually pin ----
 
     - name: Log in to GHCR
-      if: needs.context.outputs.image_version != ''
       uses: docker/login-action@v4.6.0
       with:
         registry: ghcr.io
@@ -886,7 +888,6 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Record the published image digests
-      if: needs.context.outputs.image_version != ''
       run: |
         set -euo pipefail
         # bake is the source of truth for which tags this version publishes --
