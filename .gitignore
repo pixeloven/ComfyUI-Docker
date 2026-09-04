@@ -12,3 +12,10 @@
 
 # Python
 ./.venv
+
+# Scratch the release job writes into the workspace. Ignored so a stray
+# `git add -A` in CI can never commit a build artifact back into the repo.
+/dist/
+/notes.md
+/tags.txt
+/IMAGE-DIGESTS.txt

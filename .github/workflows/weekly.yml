@@ -13,10 +13,10 @@ jobs:
     env:
       REGISTRY: ghcr.io
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@v1.3.1
       with:
         tool-cache: true
         android: true
@@ -41,12 +41,12 @@ jobs:
         GH_TOKEN: ${{ github.token }}
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
       with:
         buildkitd-flags: --debug
 
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v4
+      uses: docker/login-action@v4.6.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -55,13 +55,13 @@ jobs:
     - name: Extract metadata
       id: meta
       run: |
-        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
-        echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> $GITHUB_OUTPUT
+        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> "$GITHUB_OUTPUT"
+        echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
       env:
         GH_TOKEN: ${{ github.token }}
 
     - name: Build CUDA images without cache
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: cuda
@@ -83,10 +83,10 @@ jobs:
     env:
       REGISTRY: ghcr.io
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@v1.3.1
       with:
         tool-cache: true
         android: true
@@ -97,12 +97,12 @@ jobs:
         swap-storage: true
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
       with:
         buildkitd-flags: --debug
 
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v4
+      uses: docker/login-action@v4.6.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -111,13 +111,13 @@ jobs:
     - name: Extract metadata
       id: meta
       run: |
-        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
-        echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> $GITHUB_OUTPUT
+        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> "$GITHUB_OUTPUT"
+        echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
       env:
         GH_TOKEN: ${{ github.token }}
 
     - name: Build architecture-specific CUDA images
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: cuda-arch
@@ -138,10 +138,10 @@ jobs:
     env:
       REGISTRY: ghcr.io
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@v1.3.1
       with:
         tool-cache: true
         android: true
@@ -158,12 +158,12 @@ jobs:
         echo "✅ Docker system cleaned"
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
       with:
         buildkitd-flags: --debug
 
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v4
+      uses: docker/login-action@v4.6.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -172,13 +172,13 @@ jobs:
     - name: Extract metadata
       id: meta
       run: |
-        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
-        echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> $GITHUB_OUTPUT
+        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> "$GITHUB_OUTPUT"
+        echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
       env:
         GH_TOKEN: ${{ github.token }}
 
     - name: Build CPU images without cache
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: cpu
@@ -203,10 +203,10 @@ jobs:
     env:
       REGISTRY: ghcr.io
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@v7.0.1
 
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@v1.3.1
       with:
         tool-cache: true
         android: true
@@ -217,10 +217,10 @@ jobs:
         swap-storage: true
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@v4.3.0
 
     - name: Login to GitHub Container Registry
-      uses: docker/login-action@v4
+      uses: docker/login-action@v4.6.0
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -229,13 +229,13 @@ jobs:
     - name: Extract metadata
       id: meta
       run: |
-        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> $GITHUB_OUTPUT
-        echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> $GITHUB_OUTPUT
+        echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')" >> "$GITHUB_OUTPUT"
+        echo "comfyui_version=$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
       env:
         GH_TOKEN: ${{ github.token }}
 
     - name: Build ${{ matrix.target }} images without cache
-      uses: docker/bake-action@v7
+      uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
         targets: ${{ matrix.target }}
@@ -258,9 +258,11 @@ jobs:
     steps:
     - name: Rebuild Summary
       run: |
-        echo "## 🔄 Fresh Rebuild Complete" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "All images have been rebuilt from scratch with the latest dependencies." >> $GITHUB_STEP_SUMMARY
+        {
+          echo "## 🔄 Fresh Rebuild Complete"
+          echo ""
+          echo "**Trigger:** ${{ github.event_name }}"
+          echo "**Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "All images have been rebuilt from scratch with the latest dependencies."
+        } >> "$GITHUB_STEP_SUMMARY"

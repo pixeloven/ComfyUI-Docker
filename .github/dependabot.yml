@@ -1,0 +1,21 @@
+# SHA-pinned actions do not update themselves, and an unattended pin is a stale
+# pin. This is what makes pinning sustainable rather than a one-time gesture.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # comfyfetch is published as a wheel and an image consumers pin by digest, so
+  # its dependency updates are release-relevant, not housekeeping.
+  - package-ecosystem: pip
+    directory: /services/fetch
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
