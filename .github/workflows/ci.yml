@@ -105,7 +105,6 @@ jobs:
 
     - id: classify
       env:
-        GH_TOKEN: ${{ github.token }}
         IMAGES_CHANGED: ${{ needs.changes.outputs.images }}
         FETCH_CHANGED: ${{ needs.changes.outputs.fetch }}
       run: |
@@ -190,9 +189,26 @@ jobs:
           if [ "${FETCH_CHANGED}" = true ]; then build_fetch=true; fi
         fi
 
-        # One upstream lookup for the whole run. Four independent calls could
-        # straddle a ComfyUI release and label one image family differently.
-        comfyui_version="$(gh api repos/Comfy-Org/ComfyUI/releases/latest --jq .tag_name)"
+        # What ComfyUI goes INSIDE. Read back out of docker-bake.hcl rather
+        # than grepped, so this and the build cannot disagree about the pin.
+        #
+        # This used to be `gh api .../releases/latest`, which made a release
+        # non-reproducible -- see the COMFYUI_VERSION comment in docker-bake.hcl.
+        comfyui_version="$(docker buildx bake -f docker-bake.hcl --print core-cuda 2>/dev/null \
+          | jq -r '.target["core-cuda"].args.COMFYUI_VERSION')"
+        if [ -z "${comfyui_version}" ] || [ "${comfyui_version}" = null ]; then
+          echo "::error::could not read COMFYUI_VERSION out of docker-bake.hcl"
+          exit 1
+        fi
+
+        # A release has to name a concrete upstream release. `master` is a
+        # moving ref: it would make the release mean something different a week
+        # later, which is the whole failure this pin exists to stop.
+        if [ -n "${image_version}" ] && \
+           ! printf '%s' "${comfyui_version}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "::error::COMFYUI_VERSION is '${comfyui_version}'; a release must pin a concrete upstream version"
+          exit 1
+        fi
         repository_lower="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')"
 
         {
@@ -775,6 +791,7 @@ jobs:
       IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
       FETCH_VERSION: ${{ needs.context.outputs.fetch_version }}
       REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
+      COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
     steps:
     - uses: actions/checkout@v7.0.1
 
@@ -884,17 +901,28 @@ jobs:
           exit 1
         fi
 
+        # What is inside, stated on the artifact itself. Reading a digest list
+        # and not being able to tell which ComfyUI it carries is how "0.1.0"
+        # becomes a number nobody can interpret.
+        {
+          echo "# ComfyUI ${COMFYUI_VERSION}, packaged as ${IMAGE_VERSION}"
+          echo "#"
+        } > IMAGE-DIGESTS.txt
+
         while read -r tag; do
           digest="$(docker buildx imagetools inspect "${tag}" --format '{{.Manifest.Digest}}')"
           printf '%s@%s\n' "${tag%%:*}" "${digest}"
-        done < tags.txt | tee IMAGE-DIGESTS.txt
+        done < tags.txt | tee -a IMAGE-DIGESTS.txt
 
-        n=$(wc -l < IMAGE-DIGESTS.txt); declared=$(wc -l < tags.txt)
+        n=$(grep -c '@sha256:' IMAGE-DIGESTS.txt); declared=$(wc -l < tags.txt)
         if [ "${n}" != "${declared}" ]; then
           echo "::error::resolved ${n} digests for ${declared} tags"
           exit 1
         fi
         {
+          echo ""
+          echo "Contains **ComfyUI ${COMFYUI_VERSION}**. That is what is inside;"
+          echo "\`${IMAGE_VERSION}\` is our packaging version. See VERSIONING.md."
           echo ""
           echo "Pin by digest:"
           echo '```'
