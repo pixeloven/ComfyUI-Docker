@@ -23,10 +23,19 @@ variable "PLATFORMS" {
 }
 
 variable "COMFYUI_VERSION" {
-    // Repository builds pin a stable upstream source tag by default. Scheduled
-    // publishing resolves the latest upstream release and overrides this.
-    // Set to "master" explicitly for a nightly build.
-    default = "v0.33.1"
+    // THE PIN: which ComfyUI goes inside the images. This file is the single
+    // source of truth, and bumping it is a deliberate, reviewable commit --
+    // the images change, so our own VERSION should move with it.
+    //
+    // CI used to resolve this from Comfy-Org/ComfyUI releases/latest at build
+    // time, which meant a release was not reproducible: v0.1.0 baked whatever
+    // upstream happened to have shipped by the minute the tag ran, a rebuild
+    // would bake something else, and a local build used the default here --
+    // three different meanings for one tag.
+    //
+    // Tracking upstream is what the weekly rebuild is for; it still resolves
+    // latest, on purpose, and publishes under its own labels.
+    default = "v0.34.0"
 }
 
 variable "IMAGE_VERSION" {
@@ -52,8 +61,10 @@ variable "PUBLISH_LATEST" {
 }
 
 variable "SAGEATTENTION_RELEASE_URL" {
-    // Immutable release produced from thu-ml/SageAttention v2.2.0 for the
-    // Python, PyTorch, and CUDA ABI used by the current CUDA image.
+    // Release produced from thu-ml/SageAttention v2.2.0 for the Python,
+    // PyTorch, and CUDA ABI used by the current CUDA image. NOT immutable --
+    // that release can be re-uploaded in place, which is why every wheel below
+    // is pinned by URL *and* checked against a recorded sha256.
     default = "https://github.com/pixeloven/SageAttention-Wheels/releases/download/sageattention-v2.2.0-cu130-torch2.13.0"
 }
 
