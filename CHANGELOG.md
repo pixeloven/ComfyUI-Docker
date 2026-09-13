@@ -9,6 +9,51 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 1.2.0 — 2026-09-13
+
+**httpx replaces the hand-rolled urllib transport**, and the test dependencies
+this project needs are now declared.
+
+`comfyfetch/http.py` was 86 lines of `urllib` whose centrepiece was a custom
+redirect handler. That handler existed to strip `Authorization` on a cross-host
+redirect — because HuggingFace answers `/resolve/` with a 302 to `*.cdn.hf.co`
+and urllib forwards every header across a redirect, including that one.
+**httpx does it natively.**
+
+A third problem stops being possible. Civitai returns **403 for the literal
+`Python-urllib/3.12`** and 200 for every other User-Agent tried, including a
+lowercased one. That block silently failed 38 of 106 lookups in a downstream
+audit and was misdiagnosed as "needs a bearer token" — a wrong explanation of
+a real symptom, which is worse than none. A client that does not send the
+stdlib default cannot reproduce it. Verified live after the change: Civitai
+returns 200 with no token and an explicit `comfyfetch/<version>` UA.
+
+**Both behaviours this module is correct about are now tested**, and neither
+was before — `respx` makes them testable without a network:
+
+- `Authorization` is stripped on a cross-origin redirect and **survives** a
+  same-origin one
+- `head_headers` reads the **first hop only**. `x-linked-etag` is the file's
+  sha256 there and nowhere else; following the redirect returns the CDN's Xet
+  content-address, a different and equally plausible-looking 64-hex value.
+  Four wrong hashes were produced that way before someone downloaded a file
+  and hashed it.
+
+### Also
+
+- `pytest` and `respx` are declared in a `dev` dependency group. A project with
+  73 tests required `uv run --with pytest --with respx` to run them, which is a
+  step that gets typed wrong or skipped. **`uv run pytest` now works.**
+- Two `except urllib.error.HTTPError` sites became `httpx.HTTPStatusError`.
+  This was caught by the existing suite, not by reading — a resolve failure
+  must be *reported* per-source, and an unhandled exception aborts the run
+  instead.
+
+No behaviour change for callers: `request()` still returns a streaming,
+context-managed file-like object supporting `read(n)` and `json.load()`.
+Verified byte-identical `build` output against a real 68-group manifest, and
+the HF first-hop etag against the live endpoint.
+
 ## 1.1.1 — 2026-09-13
 
 **A group and a profile may no longer share a name.**
