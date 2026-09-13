@@ -193,9 +193,50 @@ so without it the first run fails with `destination not writable`. The comfyui
 service survives the same situation only because its entrypoint starts as root
 and drops privileges via gosu.
 
+## Authoring a manifest from per-lineage sources
+
+A single `comfy.yaml` does not scale. Past a few hundred lines every model
+family conflicts with every other on edit, and there is no way to ship one
+family without the rest. `build` assembles the manifest from **one file per
+lineage**:
+
+```
+models/
+  _meta.yaml          name, description, auth
+  profiles.yaml       copied through
+  capabilities.yaml   copied through
+  shared/flux.yaml    family + lineage + summary + groups
+  shared/qwen.yaml
+  custom/sdxl.yaml
+```
+
+```sh
+comfyfetch build models/ -O comfy.yaml
+comfyfetch build models/ -O comfy.yaml --check    # offline; what CI runs
+```
+
+Each source file may carry a **`summary:`** — the judgement a reader needs and
+a file list cannot express ("two generations, NOT interchangeable"; "we ship
+fp8 where the tutorial ships bf16, measured, identical adherence at half the
+size"). `build` re-attaches it as a comment above that lineage's first group,
+so it survives into the artifact rather than staying in a file nobody reads.
+That is the whole reason `build` is not `cat`.
+
+The generated manifest stays **committed**. A build step between `git clone`
+and `comfyfetch check` is a step that gets skipped, and `--check` catches the
+staleness that results — a stale manifest resolves the *wrong models* while
+every other gate stays green.
+
+Directory layout is yours. `build` walks the tree and does not care how it is
+split; a `shared/` vs `custom/` seam (reproducible-from-public-docs vs personal
+taste) is a convention worth having precisely because it is a directory
+boundary, so separating the halves later is `git mv` rather than a re-sort.
+
 ## Usage
 
 ```sh
+comfyfetch build models/ -O comfy.yaml                 # offline; manifest from sources
+
 comfyfetch resolve comfy.yaml > /tmp/m.yaml            # then splice into comfy-lock.yaml
 yq -i '.models = load("/tmp/m.yaml").models' comfy-lock.yaml
 
@@ -203,6 +244,7 @@ comfyfetch fetch comfy-lock.yaml /workspace       # dry run
 comfyfetch fetch comfy-lock.yaml /workspace --apply
 
 comfyfetch check comfy.yaml comfy-lock.yaml       # offline; what CI runs
+comfyfetch build models/ -O comfy.yaml --check     # offline; what CI runs
 ```
 
 Paths in the lock begin `models/`, so the fetcher's second argument is the
