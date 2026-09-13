@@ -36,6 +36,8 @@ import pathlib
 
 import yaml
 
+from . import profiles as profiles_mod
+
 RESERVED = ("profiles.yaml", "capabilities.yaml", "_meta.yaml")
 
 
@@ -114,6 +116,19 @@ def render(root: pathlib.Path, *, header: str = "") -> tuple[str, dict]:
         path = root / fname
         if path.is_file():
             doc[key] = yaml.safe_load(path.read_text()) or {}
+
+    # REFUSE A COLLISION BEFORE THE MANIFEST EXISTS, which is why this check is
+    # here as well as in expand(). `resolve` WITHOUT --profile never calls
+    # expand() at all, so an expand()-only refusal still lets a full resolve
+    # accept a colliding manifest. Refusing at assembly time means one never
+    # reaches disk.
+    clash = profiles_mod.collisions(doc)
+    if clash:
+        names = ", ".join(repr(c) for c in clash)
+        raise BuildError(
+            f"{names} is both a model group and a profile -- the group wins, so "
+            f"the profile would silently resolve the wrong file set"
+        )
 
     body = dump(doc)
 

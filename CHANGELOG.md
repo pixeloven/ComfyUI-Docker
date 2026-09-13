@@ -9,6 +9,39 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 1.1.1 — 2026-09-13
+
+**A group and a profile may no longer share a name.**
+
+comfyfetch resolves both out of one namespace, and `expand()` tests
+`member in known` before `member in profiles` — so the group always wins. A
+profile named after a group silently resolved the **group**, at every level,
+and the resulting lock was self-consistent, correctly hashed and passed
+`check`, because all of `resolve`, `--from-lock` and `check --profile` go
+through that same function.
+
+Observed downstream before this refusal existed: one profile resolved **2 files
+instead of 13**, another **3 instead of 15**. No error either time; the only
+symptom was a file count nobody was watching.
+
+Refused in three places, because one is not enough:
+
+- `expand()` — covers `resolve --profile`, `--from-lock` and `check --profile`
+- `validate_all()` — as a **pre-check**, so one defect is reported once rather
+  than once per profile
+- `build.render()` — load-bearing rather than belt-and-braces: **`resolve`
+  without `--profile` never calls `expand()` at all**, so refusing at assembly
+  time is what stops a colliding manifest reaching disk
+
+**This tightens previously-accepted input**, which `VERSIONING.md` would
+normally make a MAJOR change. Shipped as a patch deliberately: the schema never
+defined what a name meaning two things should do, so no documented behaviour
+changes — only silently-wrong behaviour becomes an error. Exit code **2**, the
+existing "the request itself was wrong" code.
+
+Verified against a real 68-group manifest: byte-identical output, and 0
+collisions there, in this repo's own manifest, and across all test fixtures.
+
 ## 1.1.0 — 2026-09-13
 
 **`comfyfetch build`** — assemble a manifest from per-lineage source files.
