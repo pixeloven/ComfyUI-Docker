@@ -9,6 +9,42 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 1.1.0 — 2026-09-13
+
+**`comfyfetch build`** — assemble a manifest from per-lineage source files.
+
+A single `comfy.yaml` does not scale. Past a few hundred lines every model
+family conflicts with every other on edit, and there is no way to ship one
+family without the rest. `build` assembles it from one file per lineage under a
+directory the caller lays out:
+
+```sh
+comfyfetch build models/ -O comfy.yaml
+comfyfetch build models/ -O comfy.yaml --check     # offline; what CI runs
+```
+
+`--check` exists because the manifest stays **committed**: a build step between
+`git clone` and `comfyfetch check` is a step that gets skipped, and a stale
+manifest resolves the *wrong models* while every other gate stays green.
+
+Each source file may carry a **`summary:`** — the judgement a reader needs and
+a file list cannot express ("two generations, NOT interchangeable"; "we ship
+fp8 where the tutorial ships bf16, measured, identical adherence at half the
+size"). `build` re-attaches it above that lineage's first group so it reaches
+the artifact rather than staying in a file nobody reads. That is the whole
+reason `build` is not `cat`.
+
+Extracted from a real store of 68 groups across 13 lineages and verified
+against it: the verb reproduces that store's committed manifest
+byte-identically. Duplicate group names are fatal rather than last-wins — two
+lineages declaring one group is an editing accident, and silently keeping one
+drops models nobody asked to drop.
+
+The extraction found a defect in the original implementation: the summary match
+looked for `- name: ` at column 0 while the yamllint indent fix emits
+`  - name: `, so it fired on nothing and every summary was dropped, silently,
+with no error in either direction.
+
 ## 1.0.0 — 2026-09-04
 
 **One release for everything.** Previously the repo published two independent
