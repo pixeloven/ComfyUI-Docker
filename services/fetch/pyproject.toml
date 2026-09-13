@@ -1,11 +1,11 @@
 [project]
 name = "comfyfetch"
-version = "1.0.0"
+version = "1.1.0"
 description = "Resolve, verify and materialise ComfyUI model locks"
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0", "typer>=0.12.5"]
 
-# One binary, three verbs. NOT `comfy`/`comfy-cli`/`comfycli` -- comfy-cli owns
+# One binary, four verbs. NOT `comfy`/`comfy-cli`/`comfycli` -- comfy-cli owns
 # those and shadowing them on a user's PATH would be hostile.
 [project.scripts]
 comfyfetch = "comfyfetch.cli:main"

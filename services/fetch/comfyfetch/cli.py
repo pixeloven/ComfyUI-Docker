@@ -4,9 +4,10 @@ Typer, matching comfy-cli and Harmony's `hmy` rather than inventing a third
 convention. Deliberately NOT named `comfy`, `comfy-cli` or `comfycli`: comfy-cli
 owns those and shadowing them on a user's PATH would be hostile.
 
-One tool, three verbs, and the same behaviour whether it is driven by a person,
+One tool, four verbs, and the same behaviour whether it is driven by a person,
 a Kubernetes Job, or an agent:
 
+    comfyfetch build models/ -o comfy.yaml
     comfyfetch resolve comfy.yaml > comfy-lock.yaml
     comfyfetch fetch comfy-lock.yaml /workspace --apply
     comfyfetch check comfy.yaml comfy-lock.yaml
@@ -31,6 +32,7 @@ from typing import Annotated
 
 import typer
 
+from . import build as build_mod
 from . import check as check_mod
 from . import fetch as fetch_mod
 from . import lockfile
@@ -216,3 +218,73 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+@app.command()
+def build(
+    sources: Annotated[pathlib.Path, typer.Argument(
+        help="Directory of per-lineage source files.")],
+    out: Annotated[pathlib.Path, typer.Option(
+        "--out", "-O", help="Where to write the manifest. Default: stdout.")] = None,
+    header: Annotated[pathlib.Path | None, typer.Option(
+        help="File whose contents are prepended to the manifest, verbatim.")] = None,
+    check: Annotated[bool, typer.Option(
+        "--check", help="Exit 1 if --out is stale instead of writing it.")] = False,
+    output: OutputOpt = Mode.auto,
+) -> None:
+    """Per-lineage sources → manifest. Offline.
+
+    One file per lineage, because a single manifest does not scale: every
+    family conflicts with every other on edit, and there is no way to ship one
+    family without the rest.
+
+    `--check` is the CI form. The manifest is committed, so it can go stale
+    against its sources, and a stale manifest resolves the WRONG MODELS while
+    every other gate stays green -- which is why this is a check rather than a
+    build step nobody runs.
+    """
+    o = Out(output)
+    if not sources.is_dir():
+        typer.echo(f"no such directory: {sources}", err=True)
+        raise typer.Exit(2)
+    if check and out is None:
+        typer.echo("--check needs --out: there is nothing to compare stdout against",
+                   err=True)
+        raise typer.Exit(2)
+
+    head = ""
+    if header is not None:
+        if not header.is_file():
+            typer.echo(f"no such header file: {header}", err=True)
+            raise typer.Exit(2)
+        head = header.read_text()
+
+    try:
+        rendered, counts = build_mod.render(sources, header=head)
+    except build_mod.BuildError as exc:
+        o.problem(str(exc))
+        raise typer.Exit(1) from exc
+
+    summary = (f"{counts['groups']} groups, {counts['profiles']} profiles, "
+               f"{counts['capabilities']} capabilities")
+
+    if check:
+        if not out.is_file():
+            o.problem(f"{out} does not exist")
+            raise typer.Exit(1)
+        if out.read_text() != rendered:
+            o.problem(f"{out} is STALE against {sources} -- re-run without --check")
+            raise typer.Exit(1)
+        o.note(f"{out} up to date ({summary})")
+        if o.is_json:
+            o.result("", {"stale": False, **counts})
+        return
+
+    if out is None:
+        typer.echo(rendered, nl=False)
+        o.note(summary)
+        return
+    out.write_text(rendered)
+    o.note(f"wrote {out}: {summary}")
+    if o.is_json:
+        o.result("", {"path": str(out), **counts})
