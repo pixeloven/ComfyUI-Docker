@@ -9,8 +9,22 @@ description: Author comfy.yaml and generate locks — source forms, when `as:` i
 the **resolution** and is generated — never hand-edit a lock.
 
 ```
-comfy.yaml  --comfyfetch resolve-->  comfy-lock.yaml  --comfyfetch fetch-->  disk
+models/  --comfyfetch build-->  comfy.yaml  --comfyfetch resolve-->  comfy-lock.yaml  --comfyfetch fetch-->  disk
 ```
+
+`comfy.yaml` may itself be generated. Past a few hundred lines a single manifest
+stops working — every family conflicts with every other on edit — so `build`
+assembles it from one file per lineage under a directory you lay out:
+
+```sh
+comfyfetch build models/ -O comfy.yaml
+comfyfetch build models/ -O comfy.yaml --check     # CI; the manifest is committed
+```
+
+A source file may carry **`summary:`** — the judgement a file list cannot
+express ("two generations, NOT interchangeable"). `build` re-attaches it above
+that lineage's groups so it reaches the artifact, which is where the manifest is
+actually read.
 
 ## A file entry
 
@@ -105,6 +119,18 @@ A host listed here whose variable is unset does **not** block public files.
   your new model is simply never fetched and nothing says so.
 - **Assuming a gated repo is missing.** `black-forest-labs` publishes as
   `gated: auto`; without a token it answers 401, which reads as "not found".
+- **A stale generated manifest.** If `comfy.yaml` is built from `models/`, an
+  edit to a source file that is never rebuilt resolves the OLD models. Nothing
+  errors — `resolve` is perfectly happy with a manifest that is merely out of
+  date. `comfyfetch build --check` is the only thing that says so.
+- **An unprefixed custom key.** File and group entries reject unknown keys, so
+  your own metadata needs an `x-` prefix (`x-triggers:`, `x-generation:`). That
+  rejection is deliberate — it is what makes `instal:` an error instead of a
+  silent no-op.
+- **Deriving locks independently.** `comfyfetch check --parent` asserts a
+  profile lock is a verbatim subset of the full lock. Without it, locks made
+  minutes apart can pin different upstream commits and every one of them passes
+  `check` on its own.
 - **Trusting a filename.** The same name routinely carries different bytes.
   `flux1-krea-dev` had a Civitai source that now 404s and an identical-byte copy
   on HuggingFace — only the hash proved they were the same file.

@@ -13,6 +13,20 @@
 # Python
 ./.venv
 
+# Compiled bytecode and setuptools output. These were TRACKED -- 36 files, 19
+# under comfyfetch/__pycache__, 7 under tests/__pycache__, 10 under
+# services/fetch/build/lib -- which is why a routine `git add -A` swept bytecode
+# into two pull requests and had to be unpicked by hand both times. The
+# `./.venv` line above is anchored to the repo root and never matched them.
+#
+# Note the leading-slash style used elsewhere in this file is deliberate for
+# root-only paths; these are unanchored on purpose, because bytecode appears
+# beside whatever it compiles.
+__pycache__/
+*.py[cod]
+*$py.class
+build/
+
 # Scratch the release job writes into the workspace. Ignored so a stray
 # `git add -A` in CI can never commit a build artifact back into the repo.
 /dist/
@@ -23,3 +37,4 @@
 # setuptools build detritus. It was tracked, so every `uv build` produced a
 # spurious diff and could commit a stale version string back into the repo.
 *.egg-info/
+.coverage

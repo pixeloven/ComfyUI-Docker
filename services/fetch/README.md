@@ -193,9 +193,50 @@ so without it the first run fails with `destination not writable`. The comfyui
 service survives the same situation only because its entrypoint starts as root
 and drops privileges via gosu.
 
+## Authoring a manifest from per-lineage sources
+
+A single `comfy.yaml` does not scale. Past a few hundred lines every model
+family conflicts with every other on edit, and there is no way to ship one
+family without the rest. `build` assembles the manifest from **one file per
+lineage**:
+
+```
+models/
+  _meta.yaml          name, description, auth
+  profiles.yaml       copied through
+  capabilities.yaml   copied through
+  shared/flux.yaml    family + lineage + summary + groups
+  shared/qwen.yaml
+  custom/sdxl.yaml
+```
+
+```sh
+comfyfetch build models/ -O comfy.yaml
+comfyfetch build models/ -O comfy.yaml --check    # offline; what CI runs
+```
+
+Each source file may carry a **`summary:`** — the judgement a reader needs and
+a file list cannot express ("two generations, NOT interchangeable"; "we ship
+fp8 where the tutorial ships bf16, measured, identical adherence at half the
+size"). `build` re-attaches it as a comment above that lineage's first group,
+so it survives into the artifact rather than staying in a file nobody reads.
+That is the whole reason `build` is not `cat`.
+
+The generated manifest stays **committed**. A build step between `git clone`
+and `comfyfetch check` is a step that gets skipped, and `--check` catches the
+staleness that results — a stale manifest resolves the *wrong models* while
+every other gate stays green.
+
+Directory layout is yours. `build` walks the tree and does not care how it is
+split; a `shared/` vs `custom/` seam (reproducible-from-public-docs vs personal
+taste) is a convention worth having precisely because it is a directory
+boundary, so separating the halves later is `git mv` rather than a re-sort.
+
 ## Usage
 
 ```sh
+comfyfetch build models/ -O comfy.yaml                 # offline; manifest from sources
+
 comfyfetch resolve comfy.yaml > /tmp/m.yaml            # then splice into comfy-lock.yaml
 yq -i '.models = load("/tmp/m.yaml").models' comfy-lock.yaml
 
@@ -203,6 +244,7 @@ comfyfetch fetch comfy-lock.yaml /workspace       # dry run
 comfyfetch fetch comfy-lock.yaml /workspace --apply
 
 comfyfetch check comfy.yaml comfy-lock.yaml       # offline; what CI runs
+comfyfetch build models/ -O comfy.yaml --check     # offline; what CI runs
 ```
 
 Paths in the lock begin `models/`, so the fetcher's second argument is the
@@ -231,6 +273,62 @@ Docker:
 docker run --rm -v comfyui:/workspace -v "$PWD/comfy-lock.yaml:/lock.yaml:ro" \
   ghcr.io/pixeloven/comfyui/fetch:latest /lock.yaml /workspace --apply
 ```
+
+## Carrying your own metadata
+
+File and group entries reject unknown keys — `instal:` for `install:` installs
+nothing and reports success, so that check is worth keeping. Extensions are
+therefore **named** rather than allowed: any key starting `x-` is yours.
+
+```yaml
+models:
+  - name: sdxl-illustrious
+    x-lineage: illustrious            # group level
+    files:
+      - source: civitai:1234
+        install: models/loras/
+        as: my-style-lora.safetensors  # civitai URLs carry no filename
+        x-triggers: [score_9]          # file level
+        x-generation: "2511"
+```
+
+comfyfetch ignores their content entirely. They exist so the file you already
+maintain can carry what your deployment needs.
+
+## Validating
+
+```sh
+comfyfetch check comfy.yaml comfy-lock.yaml
+comfyfetch check comfy.yaml locks/sdxl.yaml --profile sdxl --parent comfy-lock.yaml
+```
+
+The schemas ship **with the package**, so this needs no checkout of this repo.
+Format is checked before consistency: a typo'd key is perfectly consistent with
+a lock that therefore contains nothing, and reporting the disagreement first
+describes a symptom rather than the cause.
+
+`--parent` asserts a derived lock is a **verbatim subset** of the lock it came
+from. `--from-lock` selects rather than re-resolves, so a difference means
+something was re-resolved — and that is how two locks generated minutes apart
+come to pin different upstream commits with nothing noticing.
+
+## Capabilities
+
+A capability names the profiles that provide it and the model `type:` values a
+graph needs to actually render:
+
+```yaml
+capabilities:
+  image-generation-flux2:
+    profiles: [flux2]
+    requires: [diffusion_models, text_encoders, vae]
+```
+
+`profiles` is plural and load-bearing: an add-on profile resolves no checkpoint
+by design, so the contract is checked against the **union** of the profiles a
+capability names. `check` verifies those profiles exist and that each required
+type is resolved by one of them — a capability requiring `vae` that resolves
+zero is a graph that loads and cannot render.
 
 ## Credentials
 

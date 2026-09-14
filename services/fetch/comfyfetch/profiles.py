@@ -14,12 +14,40 @@ class ProfileError(Exception):
     pass
 
 
+
+def collisions(manifest: dict) -> list[str]:
+    """Names that are BOTH a model group and a profile.
+
+    comfyfetch resolves both out of one namespace and `expand()` tests
+    `member in known` before `member in profiles`, so the group always wins. A
+    profile named after a group therefore resolves the GROUP, at every level --
+    and the resulting lock is self-consistent, correctly hashed and passes
+    `check`, because every one of those paths goes through this same function.
+
+    Observed downstream before this refusal existed: a profile resolved 2 files
+    instead of 13, and another 3 instead of 15. No error either time; the only
+    symptom was a file count nobody was watching.
+    """
+    groups = {m["name"] for m in manifest.get("models") or [] if isinstance(m, dict) and "name" in m}
+    return sorted(groups & set(manifest.get("profiles") or {}))
+
+
+def _refuse_collisions(manifest: dict) -> None:
+    clash = collisions(manifest)
+    if clash:
+        names = ", ".join(repr(c) for c in clash)
+        raise ProfileError(
+            f"{names} is both a model group and a profile -- the group wins, so "
+            f"the profile silently resolves the wrong file set"
+        )
+
 def expand(manifest: dict, name: str) -> list[str]:
     """Capability names a profile selects, expanded transitively.
 
     Bounded, not merely self-reference-checked: `a -> b -> a` is the same defect
     one step further out, and a self-reference check would miss it.
     """
+    _refuse_collisions(manifest)
     profiles = manifest.get("profiles") or {}
     if name not in profiles:
         raise ProfileError(f"no such profile: {name}")
@@ -53,6 +81,13 @@ def validate_all(manifest: dict) -> list[str]:
     never.
     """
     problems: list[str] = []
+    # A collision is a property of the MANIFEST, so it is computed once here.
+    # Letting expand() raise inside the loop would turn one defect into N
+    # identical problems, one per profile.
+    try:
+        _refuse_collisions(manifest)
+    except ProfileError as exc:
+        return [str(exc)]
     for name in (manifest.get("profiles") or {}):
         try:
             expand(manifest, name)

@@ -13,18 +13,16 @@ Resolution needs no credentials for public sources: HuggingFace returns hashes
 in headers, Civitai's model-versions endpoint is public, and GitHub's release
 API is too. Tokens are needed to FETCH, and to read a gated repo.
 
-Usage: comfy-resolve <comfy.yaml> [--profile NAME] [--from-lock LOCK]
+Driven by `comfyfetch resolve`; see cli.py for the interface.
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import pathlib
-import sys
 import tempfile
-import urllib.error
+import httpx
 import urllib.parse
 
 from . import http, lockfile, profiles
@@ -68,8 +66,10 @@ def _github(repo: str, tag: str, asset: str, auth: AuthMap) -> tuple[str, str | 
     try:
         with http.request(api, token=auth.token_for("https://github.com/")) as resp:
             release = json.load(resp)
-    except urllib.error.HTTPError as exc:
-        raise Unresolved(f"gh:{repo}@{tag}: release not found (HTTP {exc.code})") from exc
+    except httpx.HTTPStatusError as exc:
+        raise Unresolved(
+            f"gh:{repo}@{tag}: release not found (HTTP {exc.response.status_code})"
+        ) from exc
     for a in release.get("assets") or []:
         if a.get("name") == asset:
             digest = a.get("digest") or ""
@@ -83,10 +83,10 @@ def _civitai(version_id: str) -> tuple[str, str]:
     try:
         with http.request(api) as resp:
             data = json.load(resp)
-    except urllib.error.HTTPError as exc:
+    except httpx.HTTPStatusError as exc:
         raise Unresolved(
             f"civitai:{version_id}: not found (deleted upstream, or the version "
-            f"id is wrong) — HTTP {exc.code}") from exc
+            f"id is wrong) — HTTP {exc.response.status_code}") from exc
     files = data.get("files") or []
     if not files:
         raise Unresolved(f"civitai:{version_id}: the version has no files")

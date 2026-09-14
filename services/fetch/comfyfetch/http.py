@@ -1,86 +1,123 @@
-"""HTTP with the redirect behaviour this tool needs.
+"""HTTP, with the two behaviours this tool is actually correct about.
 
-`urllib` forwards every header except content-length and content-type across a
-redirect, INCLUDING `Authorization`, and including a redirect to a different
-host. curl strips credentials on a cross-host redirect and offers
-`--location-trusted` to opt back in; this restores that behaviour.
+Both are httpx defaults or one argument away, which is the point: this module
+was 86 lines of urllib implementing a custom redirect handler, and the handler's
+entire job is something httpx does natively.
 
-It is not academic. HuggingFace answers `/resolve/` with a 302 to
-`*.cdn.hf.co` — a different host — so a gated download would otherwise send the
-account token to the CDN on every request. The CDN URL is already signed and
-needs no credential.
+1. CREDENTIALS ARE STRIPPED ON A CROSS-ORIGIN REDIRECT. HuggingFace answers
+   `/resolve/` with a 302 to `*.cdn.hf.co` -- a different host -- so forwarding
+   `Authorization` would send the account token to a CDN on every gated
+   download. The CDN URL is already signed and needs no credential. urllib
+   forwards every header across a redirect including that one; httpx does not.
+
+2. `head_headers` READS THE FIRST HOP ONLY. `x-linked-etag` is the file's
+   sha256 -- but only there. Following the redirect returns the CDN's Xet
+   content-address, a different and equally plausible-looking 64-hex value.
+   Four wrong hashes were produced that way before someone downloaded a file
+   and hashed it.
+
+A THIRD THING THAT STOPS BEING POSSIBLE. Civitai returns 403 for the literal
+`Python-urllib/3.12` and 200 for every other User-Agent tried, including a
+lowercased one. That block silently failed 38 of 106 lookups in a downstream
+audit and was misdiagnosed as "needs a bearer token" -- a wrong explanation of
+a real symptom, which is worse than no explanation. A client that does not send
+the stdlib's default UA cannot reproduce it.
 """
 
 from __future__ import annotations
 
-import urllib.error
-import urllib.parse
-import urllib.request
+import importlib.metadata
 
-USER_AGENT = "comfyfetch/1.0 (+https://github.com/pixeloven/ComfyUI-Docker)"
+import httpx
 
+try:
+    _VERSION = importlib.metadata.version("comfyfetch")
+except importlib.metadata.PackageNotFoundError:  # running from a source tree
+    _VERSION = "0"
 
-def _origin(url: str) -> tuple[str, str, int | None]:
-    """Scheme, host and port — what curl compares before forwarding a credential.
-
-    Host alone is not enough: a redirect to a different PORT on the same host is
-    a different origin, and treating it as the same is how a token reaches a
-    service that should not see it.
-    """
-    parts = urllib.parse.urlsplit(url)
-    default = {"http": 80, "https": 443}.get(parts.scheme)
-    return (parts.scheme, (parts.hostname or "").lower(), parts.port or default)
+USER_AGENT = f"comfyfetch/{_VERSION} (+https://github.com/pixeloven/ComfyUI-Docker)"
 
 
-class _StripAuthOnCrossHostRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
-        new = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if new is None:
-            return None
-        if _origin(req.full_url) != _origin(newurl):
-            new.headers = {
-                k: v for k, v in new.headers.items() if k.lower() != "authorization"
-            }
-            new.unredirected_hdrs.pop("Authorization", None)
-        return new
-
-
-_opener = urllib.request.build_opener(_StripAuthOnCrossHostRedirect)
-
-
-def request(url: str, *, token: str | None = None, method: str = "GET",
-            timeout: int = 60):
-    """Open a URL, optionally authenticated. Caller closes the response."""
+def _headers(token: str | None) -> dict[str, str]:
     headers = {"User-Agent": USER_AGENT}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    return _opener.open(
-        urllib.request.Request(url, headers=headers, method=method), timeout=timeout
-    )
+    return headers
+
+
+class _Body:
+    """A file-like view over a streaming httpx response.
+
+    Callers do `json.load(resp)` and `resp.read(CHUNK)` in a loop, and httpx
+    offers `iter_bytes()` rather than an incremental `read(n)`. Adapting here
+    keeps every call site unchanged, which is what lets the existing suite prove
+    the transport swap changed no behaviour.
+
+    Buffered rather than accumulating: a multi-GiB model must stream to disk,
+    so the whole body is never held.
+    """
+
+    def __init__(self, response: httpx.Response, client: httpx.Client) -> None:
+        self._response = response
+        self._client = client
+        self._chunks = response.iter_bytes()
+        self._buf = b""
+        self.headers = {k.lower(): v for k, v in response.headers.items()}
+
+    def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            rest = self._buf + b"".join(self._chunks)
+            self._buf = b""
+            return rest
+        while len(self._buf) < size:
+            try:
+                self._buf += next(self._chunks)
+            except StopIteration:
+                break
+        out, self._buf = self._buf[:size], self._buf[size:]
+        return out
+
+    def close(self) -> None:
+        self._response.close()
+        self._client.close()
+
+    def __enter__(self) -> _Body:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+
+def request(
+    url: str, *, token: str | None = None, method: str = "GET", timeout: int = 60
+) -> _Body:
+    """Open a URL, optionally authenticated. The caller closes it.
+
+    Returned OPEN and streaming so a multi-GiB body never materialises in
+    memory. `follow_redirects=True` is where httpx's cross-origin credential
+    strip applies -- see `Client._redirect_headers`.
+    """
+    client = httpx.Client(follow_redirects=True, timeout=timeout)
+    try:
+        response = client.send(
+            client.build_request(method, url, headers=_headers(token)), stream=True
+        )
+        response.raise_for_status()
+    except BaseException:
+        client.close()
+        raise
+    return _Body(response, client)
 
 
 def head_headers(url: str, *, token: str | None = None, timeout: int = 30) -> dict[str, str]:
     """Headers from the FIRST hop only, never following the redirect.
 
-    `x-linked-etag` is the file's sha256 — but only here. Following the redirect
-    returns the CDN's Xet content-address, a different and equally
-    plausible-looking 64-hex value. Four wrong hashes were produced that way
-    before it was caught by downloading a file and hashing it.
+    `follow_redirects=False` is the whole implementation. A 3xx is a normal
+    response here, not an error, so unlike the urllib version there is no
+    except-branch reaching into an exception object for its headers.
+
+    Lowercased because callers should not have to guess the case a server used.
     """
-    headers = {"User-Agent": USER_AGENT}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, headers=headers, method="HEAD")
-    # A bare opener: no redirect handler at all, so a 3xx surfaces as an error
-    # carrying the headers we want rather than being followed.
-    opener = urllib.request.build_opener(_NoRedirect)
-    try:
-        with opener.open(req, timeout=timeout) as resp:
-            return {k.lower(): v for k, v in resp.headers.items()}
-    except urllib.error.HTTPError as exc:
-        return {k.lower(): v for k, v in exc.headers.items()}
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
-        return None
+    with httpx.Client(follow_redirects=False, timeout=timeout) as client:
+        response = client.head(url, headers=_headers(token))
+    return {k.lower(): v for k, v in response.headers.items()}

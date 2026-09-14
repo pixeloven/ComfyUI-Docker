@@ -72,7 +72,7 @@ jobs:
             - 'comfy.yaml'
             - 'comfy-lock.yaml'
             - 'locks/**'
-            - 'schemas/**'
+            - 'services/fetch/comfyfetch/schemas/**'
           examples:
             - 'examples/**'
 
@@ -310,13 +310,17 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: uv run --with pytest pytest -q
 
-    - name: Validate the manifest and the locks against their schemas
+    - name: Validate the manifest and the locks
       run: |
-        pipx install check-jsonschema
-        check-jsonschema --schemafile schemas/comfy.schema.json      comfy.yaml
-        check-jsonschema --schemafile schemas/comfy-lock.schema.json comfy-lock.yaml
+        # `comfyfetch check` validates the format now -- it bundles the
+        # schemas, so there is exactly ONE definition of a valid manifest and
+        # it is the one consumers get. The root schemas/ copy was deleted with
+        # this change: two files with the same $id, and CI checking the stale
+        # one, is worse than no schema check.
+        uvx --from ./services/fetch comfyfetch check comfy.yaml comfy-lock.yaml
         for lock in locks/*.yaml; do
-          check-jsonschema --schemafile schemas/comfy-lock.schema.json "$lock"
+          uvx --from ./services/fetch comfyfetch check comfy.yaml "$lock" \
+            --profile "$(basename "${lock%.yaml}")" --parent comfy-lock.yaml
         done
 
     # OFFLINE, deliberately. Re-resolving would hit the network and would fail
