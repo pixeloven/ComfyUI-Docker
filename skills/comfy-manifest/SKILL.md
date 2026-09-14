@@ -123,6 +123,14 @@ A host listed here whose variable is unset does **not** block public files.
   edit to a source file that is never rebuilt resolves the OLD models. Nothing
   errors — `resolve` is perfectly happy with a manifest that is merely out of
   date. `comfyfetch build --check` is the only thing that says so.
+- **An unprefixed custom key.** File and group entries reject unknown keys, so
+  your own metadata needs an `x-` prefix (`x-triggers:`, `x-generation:`). That
+  rejection is deliberate — it is what makes `instal:` an error instead of a
+  silent no-op.
+- **Deriving locks independently.** `comfyfetch check --parent` asserts a
+  profile lock is a verbatim subset of the full lock. Without it, locks made
+  minutes apart can pin different upstream commits and every one of them passes
+  `check` on its own.
 - **Trusting a filename.** The same name routinely carries different bytes.
   `flux1-krea-dev` had a Civitai source that now 404s and an identical-byte copy
   on HuggingFace — only the hash proved they were the same file.

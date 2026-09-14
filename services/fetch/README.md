@@ -274,6 +274,62 @@ docker run --rm -v comfyui:/workspace -v "$PWD/comfy-lock.yaml:/lock.yaml:ro" \
   ghcr.io/pixeloven/comfyui/fetch:latest /lock.yaml /workspace --apply
 ```
 
+## Carrying your own metadata
+
+File and group entries reject unknown keys — `instal:` for `install:` installs
+nothing and reports success, so that check is worth keeping. Extensions are
+therefore **named** rather than allowed: any key starting `x-` is yours.
+
+```yaml
+models:
+  - name: sdxl-illustrious
+    x-lineage: illustrious            # group level
+    files:
+      - source: civitai:1234
+        install: models/loras/
+        as: my-style-lora.safetensors  # civitai URLs carry no filename
+        x-triggers: [score_9]          # file level
+        x-generation: "2511"
+```
+
+comfyfetch ignores their content entirely. They exist so the file you already
+maintain can carry what your deployment needs.
+
+## Validating
+
+```sh
+comfyfetch check comfy.yaml comfy-lock.yaml
+comfyfetch check comfy.yaml locks/sdxl.yaml --profile sdxl --parent comfy-lock.yaml
+```
+
+The schemas ship **with the package**, so this needs no checkout of this repo.
+Format is checked before consistency: a typo'd key is perfectly consistent with
+a lock that therefore contains nothing, and reporting the disagreement first
+describes a symptom rather than the cause.
+
+`--parent` asserts a derived lock is a **verbatim subset** of the lock it came
+from. `--from-lock` selects rather than re-resolves, so a difference means
+something was re-resolved — and that is how two locks generated minutes apart
+come to pin different upstream commits with nothing noticing.
+
+## Capabilities
+
+A capability names the profiles that provide it and the model `type:` values a
+graph needs to actually render:
+
+```yaml
+capabilities:
+  image-generation-flux2:
+    profiles: [flux2]
+    requires: [diffusion_models, text_encoders, vae]
+```
+
+`profiles` is plural and load-bearing: an add-on profile resolves no checkpoint
+by design, so the contract is checked against the **union** of the profiles a
+capability names. `check` verifies those profiles exist and that each required
+type is resolved by one of them — a capability requiring `vae` that resolves
+zero is a graph that loads and cannot render.
+
 ## Credentials
 
 A host-keyed map, declared once in the manifest and copied through to the lock:

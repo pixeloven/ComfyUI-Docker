@@ -95,8 +95,18 @@
                     "$comment": "A civitai source's filename comes from the API, so it is not knowable offline. `as` makes the install path derivable from the manifest alone, which is what lets check-lock.sh run without network."
                   }
                 }
-              ]
+              ],
+              "patternProperties": {
+                "^x-": {
+                  "description": "Consumer extension. `additionalProperties: false` is what makes `instal:` an error instead of a silent no-op, so extensions have to be NAMED rather than allowed by relaxing it -- the convention OpenAPI settled on. comfyfetch ignores these; they exist so a consumer can carry its own metadata (trigger words, family generation, packaging) in the file it already maintains."
+                }
+              }
             }
+          }
+        },
+        "patternProperties": {
+          "^x-": {
+            "description": "Consumer extension. `additionalProperties: false` is what makes `instal:` an error instead of a silent no-op, so extensions have to be NAMED rather than allowed by relaxing it -- the convention OpenAPI settled on. comfyfetch ignores these; they exist so a consumer can carry its own metadata (trigger words, family generation, packaging) in the file it already maintains."
           }
         }
       }
@@ -126,6 +136,37 @@
       "propertyNames": {
         "pattern": "^[a-z0-9][a-z0-9-]*$"
       }
+    },
+    "capabilities": {
+      "description": "Named capabilities: which profiles provide them, and which model TYPES a graph needs to actually render. Absent from this schema until now, which meant it passed by accident rather than by validation -- the top level simply was not closed.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profiles",
+          "requires"
+        ],
+        "properties": {
+          "profiles": {
+            "description": "PLURAL and load-bearing: an add-on profile resolves no checkpoint by design, so a capability's contract is checked against the UNION of the profiles it names.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "description": "Model `type:` values a graph needs. A capability requiring `vae` that resolves zero is a graph that loads and cannot render.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
-  }
+  },
+  "additionalProperties": false
 }

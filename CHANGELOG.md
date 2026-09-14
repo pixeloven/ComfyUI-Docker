@@ -9,6 +9,79 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 2.0.0 — 2026-09-14
+
+**MAJOR: `check` now validates the manifest format, and a manifest that passed
+on 1.4.0 can fail on 2.0.0.** `VERSIONING.md` is explicit — *"a break in the
+lock or manifest format … is not a patch however small the diff looks"* — and
+this is exactly that. A real consumer's manifest goes from passing to 43 errors
+until three key names gain an `x-` prefix.
+
+Closes #67.
+
+### `check` owns the definition of a valid manifest
+
+The schemas ship as **package data**. Until now a consumer wanting schema
+validation ran `check-jsonschema` against a path inside a checkout of this repo
+— the only reason some of them kept one. **The root `schemas/` directory is
+deleted**: two files with the same `$id` and CI validating the stale one is
+worse than no schema check.
+
+Format is validated **before** consistency. A manifest with `instal:` for
+`install:` is perfectly consistent with a lock that therefore contains nothing,
+so checking agreement first reports a confusing symptom of a plain typo.
+
+### Extensions are named, not allowed
+
+`additionalProperties: false` is what makes a typo an error, so it stays, and
+`^x-` keys are permitted alongside it at file and group level — the convention
+OpenAPI settled on. **This is the breaking part**: a consumer carrying its own
+keys must prefix them.
+
+### `capabilities:` is part of the format
+
+It was absent from the schema entirely, so it passed *by accident* — the top
+level simply wasn't closed. Both are fixed. Two offline semantic checks come
+with it:
+
+- a capability naming a profile that doesn't exist
+- a capability requiring a `type:` **none of its own profiles resolve**
+
+The second is scoped per-capability, not manifest-wide. Collecting every type
+in the manifest makes the check nearly vacuous: a capability whose profiles
+resolve only upscalers would satisfy `requires: [diffusion_models]` because
+some unrelated lineage declares one.
+
+### `check --parent`
+
+Asserts a derived lock is a **verbatim subset** of its source. `--from-lock`
+selects rather than re-resolves, so no hash in a profile lock can legitimately
+differ. Resolving each profile independently lets locks made minutes apart pin
+different upstream commits, and nothing downstream notices — each lock is
+internally consistent and each passes `check`.
+
+Subset is tested by **membership**, not by keying on the `model` filename: lock
+identity is the install path, and the same basename legitimately appears more
+than once. One real lock already carries two `qwen_3_4b.safetensors` from
+different repos — one file shared by two lineages, declared by each so either
+resolves alone.
+
+### `fetch` validates its lock too
+
+Asked for in #67 and sharper there than in `check`: **fetch writes.** A
+malformed lock puts files in the wrong place, or none at all, after the network
+has already been used.
+
+### Machine output carries the reason
+
+`Out.problem` is a deliberate no-op under `--output json`, so the new failure
+paths initially exited 1 with **zero bytes on either stream** — a machine
+consumer got a failure with no reason attached. Every failure path now emits
+the same `{"ok": false, "problems": [...]}` shape as the success path.
+
+**PyPI is deliberately absent.** #67 proposed it; the issue's own resolution
+says skip it, and `VERSIONING.md` codifies the release-attached wheel.
+
 ## 1.4.0 — 2026-09-14
 
 **`comfyfetch facts --headers`** — supply safetensors headers as JSON instead of

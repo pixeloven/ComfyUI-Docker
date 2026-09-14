@@ -41,6 +41,7 @@ from . import facts as facts_mod
 from . import fetch as fetch_mod
 from . import lockfile
 from . import profiles as profiles_mod
+from . import schema as schema_mod
 from . import resolve as resolve_mod
 from .output import Mode, Out
 
@@ -166,6 +167,15 @@ def fetch(
     if not lock.is_file():
         typer.echo(f"no such lock: {lock}", err=True)
         raise typer.Exit(2)
+
+    # #67 asked for this in `fetch` as well as `check`, and the reason is
+    # sharper here: fetch WRITES. A malformed lock puts files in the wrong
+    # place, or none at all, after the network has already been used.
+    lock_problems = schema_mod.validate(lockfile.load(lock), "comfy-lock")
+    if lock_problems:
+        out.result("\n".join(f"  {p}" for p in lock_problems),
+                   {"problems": lock_problems, "ok": False})
+        raise typer.Exit(1)
     # Per-file progress on STDERR. A 25 GB fetch that prints nothing until it
     # finishes is indistinguishable from a hung one -- which is exactly how the
     # first real in-cluster run looked for its first several minutes.
@@ -189,6 +199,9 @@ def check(
     lock: Annotated[pathlib.Path, typer.Argument(help="comfy-lock.yaml")],
     profile: Annotated[str | None, typer.Option(
         help="Check a profile's lock against only that profile's capabilities.")] = None,
+    parent: Annotated[pathlib.Path | None, typer.Option(
+        help="Assert this lock is a verbatim subset of the lock it was derived "
+             "from with --from-lock.")] = None,
     output: OutputOpt = Mode.auto,
 ) -> None:
     """Manifest and lock agree. Offline.
@@ -199,6 +212,42 @@ def check(
     """
     out = Out(output)
     doc, lock_doc = _load(manifest, "manifest"), _load(lock, "lock")
+
+    # FORMAT BEFORE CONSISTENCY. A manifest with `instal:` for `install:` is
+    # perfectly consistent with a lock that therefore contains nothing -- so
+    # checking agreement first reports a confusing symptom of a plain typo.
+    #
+    # EVERY failure path goes through _fail, which emits the SAME shape as the
+    # success path. Out.problem is a deliberate no-op under --output json, so
+    # raising here directly produced exit 1 with zero bytes on either stream:
+    # a machine consumer got a failure with no reason attached.
+    def _fail(problems: list[str], headline: str) -> None:
+        human = headline + "\n" + "".join(f"  {p}\n" for p in problems)
+        out.result(human, {"declared": None, "locked": None,
+                           "problems": problems, "ok": False})
+        raise typer.Exit(1)
+
+    problems = schema_mod.validate(doc, "comfy")
+    # Semantics only once the STRUCTURE holds. `models: "oops"` otherwise
+    # reaches .get() on a string and shows a traceback instead of the schema
+    # message -- the opposite of what "format before consistency" is for.
+    if not problems:
+        problems = schema_mod.validate_semantics(doc)
+    problems += [f"lock: {p}" for p in schema_mod.validate(lock_doc, "comfy-lock")]
+    if problems:
+        _fail(problems, f"{len(problems)} schema problem(s):")
+
+    if parent is not None:
+        parent_doc = _load(parent, "parent lock")
+        bad_parent = schema_mod.validate(parent_doc, "comfy-lock")
+        if bad_parent:
+            _fail([f"parent: {p}" for p in bad_parent],
+                  f"{len(bad_parent)} problem(s) in the parent lock:")
+        drift = schema_mod.subset_problems(lock_doc, parent_doc)
+        if drift:
+            _fail(drift, f"{len(drift)} entr(ies) differ from {parent}:")
+        out.note(f"verbatim subset of {parent}")
+
     try:
         problems, declared, locked = check_mod.check(doc, lock_doc, profile)
     except profiles_mod.ProfileError as exc:
