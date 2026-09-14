@@ -82,6 +82,22 @@ the same `{"ok": false, "problems": [...]}` shape as the success path.
 **PyPI is deliberately absent.** #67 proposed it; the issue's own resolution
 says skip it, and `VERSIONING.md` codifies the release-attached wheel.
 
+### The verification core is tested offline, and three dead CLIs are gone
+
+Almost every `fetch` test was `@pytest.mark.network`, which CI deselects — so
+the code deciding whether bytes on disk are trustworthy ran in one executed
+test. Deleting the present-file hash comparison, the `.fetch-tmp` cleanup on
+mismatch, or the extra-install-paths copy each left the suite green. 15 offline
+tests via respx now kill all three, and `check --profile` — previously untested
+outright — is covered. Offline coverage 72% → 80%; `fetch.py` 43% → 85%.
+
+Also removes `fetch.main`, `check.main` and resolve's leftover imports: three
+orphaned `comfy-fetch` / `comfy-check-lock` / `comfy-resolve` argparse CLIs with
+no `console_scripts` entry and no caller, left behind by the Typer port. **No
+user-visible change** — nothing could invoke them — but they were a second,
+divergent definition of the same interface, `check`'s copy using different exit
+codes. That is the shape every recent defect here has had.
+
 ## 1.4.0 — 2026-09-14
 
 **`comfyfetch facts --headers`** — supply safetensors headers as JSON instead of
