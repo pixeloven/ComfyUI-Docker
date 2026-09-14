@@ -41,6 +41,7 @@ from . import facts as facts_mod
 from . import fetch as fetch_mod
 from . import lockfile
 from . import profiles as profiles_mod
+from . import schema as schema_mod
 from . import resolve as resolve_mod
 from .output import Mode, Out
 
@@ -189,6 +190,9 @@ def check(
     lock: Annotated[pathlib.Path, typer.Argument(help="comfy-lock.yaml")],
     profile: Annotated[str | None, typer.Option(
         help="Check a profile's lock against only that profile's capabilities.")] = None,
+    parent: Annotated[pathlib.Path | None, typer.Option(
+        help="Assert this lock is a verbatim subset of the lock it was derived "
+             "from with --from-lock.")] = None,
     output: OutputOpt = Mode.auto,
 ) -> None:
     """Manifest and lock agree. Offline.
@@ -199,6 +203,27 @@ def check(
     """
     out = Out(output)
     doc, lock_doc = _load(manifest, "manifest"), _load(lock, "lock")
+
+    # FORMAT BEFORE CONSISTENCY. A manifest with `instal:` for `install:` is
+    # perfectly consistent with a lock that therefore contains nothing -- so
+    # checking agreement first reports a confusing symptom of a plain typo.
+    problems = schema_mod.validate(doc, "comfy") + schema_mod.validate_semantics(doc)
+    problems += [f"lock: {p}" for p in schema_mod.validate(lock_doc, "comfy-lock")]
+    if problems:
+        out.problem(f"{len(problems)} schema problem(s):")
+        for p in problems:
+            out.problem(f"  {p}")
+        raise typer.Exit(1)
+
+    if parent is not None:
+        drift = schema_mod.subset_problems(lock_doc, _load(parent, "parent lock"))
+        if drift:
+            out.problem(f"{len(drift)} entr(ies) differ from {parent}:")
+            for d in drift:
+                out.problem(f"  {d}")
+            raise typer.Exit(1)
+        out.note(f"verbatim subset of {parent}")
+
     try:
         problems, declared, locked = check_mod.check(doc, lock_doc, profile)
     except profiles_mod.ProfileError as exc:

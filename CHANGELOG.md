@@ -9,6 +9,49 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 1.5.0 — 2026-09-14
+
+**`check` now owns the definition of a valid manifest.** Closes #67.
+
+Until now a consumer wanting schema validation had to run `check-jsonschema`
+against a path **inside a checkout of this repo** — which was the only reason
+some of them kept a checkout. The schemas now ship as package data, and `check`
+validates format *before* consistency: a manifest with `instal:` for `install:`
+is perfectly consistent with a lock that therefore contains nothing, so
+checking agreement first reports a confusing symptom of a plain typo.
+
+### Extensions are named, not allowed
+
+`additionalProperties: false` is what makes a typo an error, so it stays — and
+`^x-` keys are permitted alongside it, the convention OpenAPI settled on. A
+real consumer carries 43 such keys: trigger words a LoRA needs to fire, which
+generation of a family a file belongs to, whether a checkpoint is all-in-one or
+split. None of that is comfyfetch's business, and all of it would have been lost
+if the only options were "schema rejects it" or "schema stops checking".
+
+### `capabilities:` is part of the format now
+
+It was **absent from the schema entirely**, so it passed by accident rather than
+by validation — the top level simply wasn't closed. Anything built on it was
+built on sand. Two semantic checks come with it, both offline:
+
+- a capability naming a profile that doesn't exist
+- a capability requiring a `type:` no file in the manifest declares — a graph
+  that loads and cannot render
+
+### `check --parent`
+
+Asserts a derived lock is a **verbatim subset** of the lock it came from.
+`--from-lock` selects rather than re-resolves, so no hash in a profile lock can
+legitimately differ from its parent. Resolving each profile independently lets
+locks made minutes apart pin different upstream commits — and nothing
+downstream would notice, because each lock is internally consistent and each
+passes `check`.
+
+**PyPI is deliberately not part of this.** #67 proposed it; the issue's own
+resolution says skip it, and `VERSIONING.md` codifies the release-attached
+wheel instead.
+
 ## 1.4.0 — 2026-09-14
 
 **`comfyfetch facts --headers`** — supply safetensors headers as JSON instead of
