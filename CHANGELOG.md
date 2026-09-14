@@ -9,6 +9,27 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 1.4.0 — 2026-09-14
+
+**`comfyfetch facts --headers`** — supply safetensors headers as JSON instead of
+reading them from a store.
+
+`facts` needs two inputs that are not always on the same machine. In a
+Kubernetes deployment the model store lives inside the cluster, on a
+node-pinned volume, while the lineage sources live in a git checkout outside
+it — so `--store` alone makes the verb unusable in exactly the deployment it
+was written for. Extracting headers is a separable step, so it is now separate:
+
+```sh
+# inside the cluster
+kubectl exec <pod> -- python3 -c '...' > headers.json
+# outside it, where the sources are
+comfyfetch facts models/ comfy-lock.yaml --headers headers.json
+```
+
+`--store` and `--headers` are mutually exclusive: two sources for one input is
+a wrong request (exit 2), not something to merge.
+
 ## 1.3.0 — 2026-09-14
 
 **`comfyfetch facts`** — measure what a model IS, versus what its filename
