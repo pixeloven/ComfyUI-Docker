@@ -1,0 +1,26 @@
+{
+ "1684946": {
+  "model": {
+   "name": "Illustrious-XL-v2.0-stable"
+  },
+  "name": "v2.0-stable"
+ },
+ "1761560": {
+  "model": {
+   "name": "WAI-illustrious-SDXL"
+  },
+  "name": "v14.0"
+ },
+ "290640": {
+  "model": {
+   "name": "Pony Diffusion V6 XL"
+  },
+  "name": "V6 (start with this one)"
+ },
+ "889818": {
+  "model": {
+   "name": "Illustrious-XL"
+  },
+  "name": "v0.1"
+ }
+}

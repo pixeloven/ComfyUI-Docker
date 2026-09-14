@@ -9,6 +9,58 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 1.3.0 — 2026-09-14
+
+**`comfyfetch facts`** — measure what a model IS, versus what its filename
+claims.
+
+Reads the trainer's metadata out of safetensors headers and resolves each file
+against Civitai **by content hash**, writing a `<lineage>.facts.yaml` sidecar.
+Auditing a real 124-file SDXL store this way found 2 mislabelled models, 3 LoRAs
+trained on bases that were not present, and 33 trigger words that existed
+nowhere — without which a style LoRA loads, consumes VRAM and does nothing.
+
+Three sources, in decreasing authority: `ss_sd_model_hash` / `ss_sd_model_name`
+from the file itself → Civitai by content hash → Civitai by declared source id.
+
+### Two traps the code exists to avoid
+
+- **Never use `ss_base_model_version` for lineage.** It reports
+  `sdxl_base_v1-0` for essentially every SDXL file — the *architecture*, not
+  the finetune. Taking it for lineage mislabels a whole store at once.
+- **Never infer lineage from the install path.** It records where a file was
+  *filed* — wrong for 2 of 48 LoRAs and 1 of 16 checkpoints. `describe()` takes
+  no path parameter, so the mistake cannot be made here, and a test asserts
+  that signature.
+
+### A correction to earlier documentation
+
+Previous notes on this tooling claimed Civitai needs a bearer token **and** a
+non-default User-Agent. It does **not** need the token for public by-hash
+lookups: the 403 is a block on the literal `Python-urllib/3.12`, and every
+other UA tried — including a lowercased one — returns 200 without credentials.
+That block silently failed 38 of 106 lookups and was misdiagnosed as auth,
+which is worse than leaving it unexplained. `--token` is optional. Whether a
+token unlocks gated versions is **untested and not asserted**.
+
+### Reproducibility is a property of the interface
+
+`generated` and the attribution line are **parameters**, not ambient facts, so
+a sidecar can be diffed against its committed form. A generator rename must not
+read as the facts having changed.
+
+### Verification
+
+Byte-identical against a committed sidecar from a real store, with every
+network response replayed from a recorded corpus — so the suite is offline and
+deterministic, which matters here because the sidecars carry live Civitai
+fields that uploaders edit.
+
+The diff also **surfaced a real gap**: the original took a hand-built
+name→sha map, and whatever was omitted from it was silently never looked up.
+One file was. Taking the hashes from the lock instead is why the interface is
+`(sources, lock)`, and a test asserts the file that was missed is now found.
+
 ## 1.2.0 — 2026-09-13
 
 **httpx replaces the hand-rolled urllib transport**, and the test dependencies

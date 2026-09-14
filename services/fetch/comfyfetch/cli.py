@@ -4,10 +4,11 @@ Typer, matching comfy-cli and Harmony's `hmy` rather than inventing a third
 convention. Deliberately NOT named `comfy`, `comfy-cli` or `comfycli`: comfy-cli
 owns those and shadowing them on a user's PATH would be hostile.
 
-One tool, four verbs, and the same behaviour whether it is driven by a person,
+One tool, five verbs, and the same behaviour whether it is driven by a person,
 a Kubernetes Job, or an agent:
 
     comfyfetch build models/ -o comfy.yaml
+    comfyfetch facts models/ comfy-lock.yaml --store /workspace/models
     comfyfetch resolve comfy.yaml > comfy-lock.yaml
     comfyfetch fetch comfy-lock.yaml /workspace --apply
     comfyfetch check comfy.yaml comfy-lock.yaml
@@ -31,9 +32,11 @@ import pathlib
 from typing import Annotated
 
 import typer
+import yaml
 
 from . import build as build_mod
 from . import check as check_mod
+from . import facts as facts_mod
 from . import fetch as fetch_mod
 from . import lockfile
 from . import profiles as profiles_mod
@@ -288,3 +291,68 @@ def build(
     o.note(f"wrote {out}: {summary}")
     if o.is_json:
         o.result("", {"path": str(out), **counts})
+
+
+@app.command()
+def facts(
+    sources: Annotated[pathlib.Path, typer.Argument(
+        help="Directory of per-lineage source files -- the same root `build` takes.")],
+    lock: Annotated[pathlib.Path, typer.Argument(help="comfy-lock.yaml, for content hashes.")],
+    store: Annotated[pathlib.Path, typer.Option(
+        help="ComfyUI root. Safetensors headers are read from here.")] = pathlib.Path("."),
+    token: Annotated[str | None, typer.Option(
+        envvar="CIVITAI_TOKEN",
+        help="Optional. Public by-hash lookups do NOT need one.")] = None,
+    generated: Annotated[str | None, typer.Option(
+        help="Date stamped into each sidecar. Defaults to today; pass a fixed "
+             "value to make output reproducible.")] = None,
+    output: OutputOpt = Mode.auto,
+) -> None:
+    """Measure what each model IS, and write a sidecar per lineage. NETWORK.
+
+    Writes `<lineage>.facts.yaml` beside each source file, recording what the
+    trainer put in the safetensors header and what the publisher claims for the
+    file's CONTENT HASH. Where those disagree, the disagreement is the point.
+
+    Needs the store on disk AND network, so it cannot run in CI -- the same
+    contract as `resolve`. Enforce freshness offline instead, by comparing each
+    sidecar's key set against its sibling lineage.
+    """
+    import time as _time
+
+    out = Out(output)
+    if not sources.is_dir():
+        typer.echo(f"no such directory: {sources}", err=True)
+        raise typer.Exit(2)
+    if not store.is_dir():
+        typer.echo(f"store not readable: {store}", err=True)
+        raise typer.Exit(2)
+    doc = _load(lock, "lock")
+
+    shas = {
+        m["model"]: h["hash"]
+        for m in doc.get("models") or []
+        for h in m.get("hashes") or []
+        if h.get("type") == "SHA256"
+    }
+    headers = {
+        p.name: facts_mod.safetensors_header(p)
+        for p in store.rglob("*.safetensors")
+    }
+    out.note(f"{len(shas)} hashes from the lock, {len(headers)} safetensors headers read")
+
+    stamp = generated or _time.strftime("%Y-%m-%d")
+    written = 0
+    for path in sorted(sources.rglob("*.yaml")):
+        if path.name in facts_mod.RESERVED or path.name.endswith(".facts.yaml"):
+            continue
+        lineage = yaml.safe_load(path.read_text()) or {}
+        rendered = facts_mod.render(
+            lineage, headers=headers, shas=shas, token=token, generated=stamp)
+        if rendered:
+            path.with_suffix(".facts.yaml").write_text(rendered)
+            written += 1
+            out.note(f"  {path.with_suffix('.facts.yaml').name}")
+    out.note(f"wrote {written} facts sidecars")
+    if out.is_json:
+        out.result("", {"sidecars": written})
