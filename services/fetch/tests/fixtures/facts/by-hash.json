@@ -1,0 +1,635 @@
+{
+ "033c44dfb8c93c50c2bb36cb4b98066371ca2408e2d8544296b8725e83be5a2c": {
+  "_status": 404
+ },
+ "078ba770d85eecbc5fc96bebe74570581e13ea2da58f7fd301d84f20ee7c50e2": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "mad-cbrpnksplshrt"
+  ]
+ },
+ "099225ba7ebf49db21a479b938e697bbebff96582d3a2d233e77d37f97c05d40": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "mythp0rt"
+  ]
+ },
+ "0a0f3fdbb4c7d138848a2cb101e711a582196eb7000f8d5948d2b4c0023773a6": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "gr4ph1t3v3",
+   "sketch"
+  ]
+ },
+ "0c2b2fc17cf168ea114bdd6593cfe731934e2c365910015bebbafbdeac22be35": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "detailed"
+  ]
+ },
+ "0d9bd1b873a7863e128b4672e3e245838858f71469a3cec58123c16c06f83bd7": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "13d59804266ceb4fdece3a7bb0c7799c41b355e2b53aa52d5e1cd5bddc4b2d0c": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "D4rkL1nes"
+  ]
+ },
+ "13f2a1c566d6fbe44251d1b3444d8069113f3f6005dac70f42c3e2000d2e55d7": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "g0th1c, glowing, neon lights, glowing eyes,"
+  ]
+ },
+ "14081712a6ec4e03ba47b381621880fdb8c7d730c1b1ff13637619bc2b964909": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "PocahontasXL,,",
+   "long hair, black hair, black eyes, makeup, dark skin,,",
+   "yellow dress, bare shoulders, arm tattoo, necklace, jewelry,,makeup, parted lips, short dress,,"
+  ]
+ },
+ "1ddbfb3d598b73a4e36ff5423692638d082fd77d433cd06d9b52396d989f902c": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "1df519349f3f2b6a3c6ff23127dd9b98a78e1f50628cf4037a5a9527c08b767c": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "24e0803a8f88377f5ec0ef1582b942266e8451bae559b6d91e3660fdd5729816": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "2b5db674aa8f3864a696dccd1d07d7cc0500fbf220f35044cd30eee9a7f971a7": {
+  "_status": 404
+ },
+ "30866692653cb0063484dec240bc7971adc5767753b0cbbe072e2ddd7ff16b81": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "lazypos"
+  ]
+ },
+ "33c29e4842c7eb6f82a06983e19b01fa2a1fb05ad21f60268f828c99bb64f45f": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "MythAn1m3"
+  ]
+ },
+ "3605105d76552b3bd636c5a99c6fb84e8dc4184a7db037ddf42858a23ebdbce3": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "Semi-realism"
+  ]
+ },
+ "361505e210ec03c406d2685588732dc9ffb902d510bf46f3cecaa54637ce0722": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "3c3925402851728fd9fd126a160595e392ec08567b12737113a0d10d45499656": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "+ PROMPT example:",
+   "masterpiece, best quality,",
+   "- PROMPT example:",
+   "worst quality, bad quality, young"
+  ]
+ },
+ "3ce92da10acdd28862baa4e0bc0c4efdde31ca4d6e94e6aab61f3de8e164294f": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "cryos2"
+  ]
+ },
+ "3e15ba00387db678ab4a099f75771c4f5ac67fda9e7100a01d263eaf30145aa9": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "416daecfbef167dc59ffce19bc79987ba0e8b0de8e79f79ed215c196d893479d": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "429f6ada8c3b6ceab38bae4b813b06a2490e0fdc330c812eedffcddbbc7563aa": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "SnowWhiteXLP",
+   "puffy sleeves, dress, yellow skirt, corset"
+  ]
+ },
+ "4496b36d48bfd7cfe4e5dbce3485db567bcefa2bef7238d290dbd45612125083": {
+  "_status": 404
+ },
+ "4b07d042e21a41ad9421ff79916ec215705d0a36c47273247f56a61504d2b8f2": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "43stl1ght1ng, low light, dramatic lighting, darkness, ",
+   "eye lighting, ",
+   "smoke,",
+   "water,",
+   "neon,",
+   "spotlight,",
+   "red light,",
+   "window lighting,",
+   "glasses,",
+   "reflection, "
+  ]
+ },
+ "4f4c9ee2862f91130214bf7bd80e374889a47db2f5084e372dcb6b13c0e33013": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "+ PROMPT:",
+   "masterpiece, best quality, ultra-detailed, 8k resolution, high dynamic range, absurdres, stunningly beautiful, intricate details, sharp focus, detailed eyes, cinematic color grading, high-resolution texture,",
+   "- PROMPT:",
+   "(worst quality:2), (low quality:2), (normal quality:2), bad anatomy, bad proportions, poorly drawn face, poorly drawn hands, missing fingers, extra limbs, blurry, pixelated, distorted, lowres, jpeg artifacts, watermark, signature, text, (deformed:1.5), (bad hands:1.3), overexposed, underexposed, censored, mutated, extra fingers, cloned face, bad eyes",
+   "+ PROMPT alternative addition:",
+   "photorealistic portrait, nails,"
+  ]
+ },
+ "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1": {
+  "baseModel": "Upscaler",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "528277aedc0e3bd8a350b66e4f5af0488a10e0eba99c9974db0b43d17145ce01": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "Jeddtl02"
+  ]
+ },
+ "52a6682d1589575c6deffa5baa5103607509773571e2d978beb3ab4346ad028b": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": true
+  },
+  "trainedWords": [
+   "BSSHRGKS, flat color,"
+  ]
+ },
+ "54a2afb1bd21349e475566e5428884bc937a4caecf863b29dea08acc40612fa4": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "552ec37a98fb114d0e6e2cf2d83aa2950222b0b4e44b658287675d0a51c7b80c": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "1dk",
+   "painting (medium)"
+  ]
+ },
+ "55b1634b476aea2dbe2955ed751f9ffd126048f748f410c20381e70c3bda21ff": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "570bcb313ede3bdb6ad9ed4e0f02f047c320cdd837359384d2ef42ce65a482f9": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": true
+  },
+  "trainedWords": [
+   "artist:moriimee"
+  ]
+ },
+ "59cf730c94d38e818b25d8861d21ecc2f1caee5f1ec5a4878fb9e8cc523eec50": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "g4n1m3, retro artstyle, anime coloring,"
+  ]
+ },
+ "59fd819ae5ad8976ca6df0ef6d561a5cd9c51733dd0b77f058188e9345e86d21": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "5a39036209f575759c2a570c5116dd314e636f6b6eace6039473627344f456bc": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "5a8b4c2eecc138ae594a6ca16309b1bf888d8a1fbc2fe4788d56bfdf915926b0": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "concept art, digital art, realistic,"
+  ]
+ },
+ "65edcfa4ef7136c40dae557f7161bb457149f1cc81d1b350dd2e109951d11fea": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "G0thicL1nes"
+  ]
+ },
+ "67ab2fd8ec439a89b3fedb15cc65f54336af163c7eb5e4f2acc98f090a29b0b3": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "67ab5f590c58565a1d3be15b7ce60f918ea225ab10e88ab9546d4e47af07d07f": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "MythAn1m3"
+  ]
+ },
+ "7af279fbb6240427bb7fcb29ebb506b3c614122822421b523eb7bcc43059c6ac": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "7b53da0391712dbe9412d5aa5fd074659413058773f72f41bd7a37e886031d43": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": true
+  },
+  "trainedWords": [
+   "Expressiveh"
+  ]
+ },
+ "7c97ecf786a50a54835a22277c35703787b840e98c04c318a4e3fef9d3b463f7": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "80aa67913aebc89a01be1907e62122f339fdfee70c171ab7ba967c5e5fcf27ea": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "865f72e2ed19882d0fcb8ef3ff31965f7bc622cddc00a804d536d6081b9cb184": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "8b9d0b5df5cedcec3fea64214ac5a25487b42e391c5d2cf89336ac7a60b3bf26": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "91c53ac3ae3b5c8ecb4b89ae240dae0ca7dcd08c5ff6143e9fe6766e241cd28c": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "9f23ba7be22bf8796c12565e00ea4b287acac982cdf384d368a8b18b6990e011": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "a5812231fc936b42af08a5edba784195495d303d5b3248c24489ef0c4021fe01": {
+  "baseModel": "Upscaler",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "a7e4486f5aa4c25637df540b0b3486c8ac13313575c25275b628f73133db8c19": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "1g0r"
+  ]
+ },
+ "a9e13fd61f3193887791c8a0dd07a07202174dc47d5ddaea94ea1344f07c7467": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "af6820bbf7c9f00b4ed3eaa40a95c064e1aa0f822b3796c7946d7025dbf8ffb1": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "concept art, digital art, realistic,"
+  ]
+ },
+ "b0bf3c163b6f578b3a73e9cf61c3e4219ae9c2a06903663205d1251cf2498925": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "b2bebdbd774b408e2308cbb96482c956edb9c55e39cc59d04e37188cd7271534": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "b3e4ac47bc814019d50dc842f579301440deb6d8f09ee1b91a30f527ace1b852": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "b4d6dee26ff8ca183983e42e174eac919b047c0a26b3490da67ccc3b708782f2": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "b8524e557a7df60d081f5d4a0eb109967d107df217943bf88c2d99b9ebcc06c5": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "ba21023c7054d4488f77dcacf0cd8e0bb3f4f64e9a7810b3287d4f99c06cb16a": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "lazyneg"
+  ]
+ },
+ "ba7a040786872ece73b59406ce60239109fcb9661ed8769a08c8d7e595b64e74": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "MythAn1m3"
+  ]
+ },
+ "c015896a2c77ac64e6abba0f0b39bbbbdb6deb1e98b56f14d8ce2238cb364252": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "Smo0thL1nes"
+  ]
+ },
+ "c041c5fbbd5cc3538d8510122ae00080c5b99075bb766b50d7cf88e847972a75": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "monochrome",
+   "greyscale"
+  ]
+ },
+ "c2a1a3eaa13d4c107dc7e00c3fe830cab427aa026362740ea094745b3422a331": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "c4d5911d89f45ae9af6eca3065859de4840c3b12e1effeea8a26d264dc136349": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "D4rC0m"
+  ]
+ },
+ "c502b406ef9bf74c924637d50d606a13d9bfe2362c00e8b4ba00440ef64acf22": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "cad8e9106645a7b5f68dd88acd13658c0cd74de5c1c22751941c444b6a3670ad": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "cb24921af84f2cd5724fd8abd9b813a742c1807a4cb0e1a52c750570bdbacaad": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "Sinozick_illu,gradient,spot color"
+  ]
+ },
+ "cc253b190c9b5e657f62dac216429a6939787546b6aa937343a92efac3fe6d58": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "M4gicalL1nes"
+  ]
+ },
+ "cf741a672fc3f753956260cb16101250f16c3c5bb3690a3d736bef66eafa7515": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "d9ddea3f3511890d03b41eb639aa0ce06ac856a0b7c6c630facd2bb84e2e61e8": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "mad-cbrpnksplshrt"
+  ]
+ },
+ "da04b1767deae28f7bf74f437eb8fe9e40b04774c5922859f3da4318da3411a6": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": true
+  },
+  "trainedWords": [
+   "IllusP0s"
+  ]
+ },
+ "daf5e14dd343ff73dfed74a487a0aaa377188c04a6a468c5beda3b25d1c4c153": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "dbecff3f6065a838a18d14ed982e975afce5a3ae1b17db944b9e58333b747694": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": true
+  },
+  "trainedWords": [
+   "IllusN3g"
+  ]
+ },
+ "dd08fa32f98d05a2443ca1419e46df1575a0811f6e3b246d9dd47ff20f5eb66a": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "de0cf168878f8e185e7c81a74c9e500e3f8e8ec47109ffad5604501ce22e384e": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": [
+   "D4rkL1nes"
+  ]
+ },
+ "dfce508dd987773190428cc032ae8dc792034ea91eb6003c31b82b571084f70b": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "ea3770af4c33ea8ba8dccc0106ec5d5c5c6e504eb382119a3ccac3c9d973d344": {
+  "baseModel": "SDXL 1.0",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "f872d837d3c90ed2e05227bed711af5671a6fd1c9f7d7e91c911a61f155e99da": {
+  "baseModel": "Upscaler",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ },
+ "f8dbfcc1a62078adef6908918aeeab787f3349398fc0c4853daef1078305e5ab": {
+  "baseModel": "Illustrious",
+  "model": {
+   "nsfw": true
+  },
+  "trainedWords": [
+   "incoth, (incase:0.6)"
+  ]
+ },
+ "f92fb15c19e585061af1055926c4fc149b957b7261002bc6502962e30edbcae1": {
+  "baseModel": "Pony",
+  "model": {
+   "nsfw": false
+  },
+  "trainedWords": []
+ }
+}

@@ -1,0 +1,25 @@
+# UltraSharp V1 is RESTORED: 138 workflow references. Dropped in #1594 as
+# 'superseded by V2 and a .pt pickle'; V2 has no such usage record, and the
+# comment naming 138 refs says `4xUltrasharp`, which is V1's actual name.
+family: common
+lineage: upscalers
+groups:
+  - name: upscalers-upscale-models
+    files:
+      - install: models/upscale_models/
+        source: hf:Kim2091/UltraSharpV2
+        file: 4x-UltraSharpV2.safetensors
+        type: upscale_models
+      - install: models/upscale_models/
+        source: hf:Kim2091/UltraSharp
+        file: 4x-UltraSharp.pth
+        as: 4xUltrasharp_4xUltrasharpV10.pt
+        type: upscale_models
+      - install: models/upscale_models/
+        source: hf:lllyasviel/Annotators
+        file: RealESRGAN_x4plus.pth
+        type: upscale_models
+      - install: models/upscale_models/
+        source: hf:ximso/RealESRGAN_x4plus_anime_6B
+        file: RealESRGAN_x4plus_anime_6B.pth
+        type: upscale_models
