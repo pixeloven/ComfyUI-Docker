@@ -8,7 +8,7 @@
   and are renamed only after the hash matches, so an interrupted run leaves the
   workspace exactly as it found it.
 
-Usage: comfy-fetch <comfy-lock.yaml> <comfyui-root> [--apply]
+Driven by `comfyfetch fetch`; see cli.py for the interface.
 
 Paths in the lock are relative to the ComfyUI ROOT (they begin `models/`), so
 the second argument is the workspace root, not the models directory.
@@ -16,12 +16,10 @@ the second argument is the workspace root, not the models directory.
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import os
 import pathlib
 import shutil
-import sys
 
 from . import http, lockfile
 from .auth import AuthMap
@@ -199,22 +197,3 @@ def run(lock_path: pathlib.Path, root: pathlib.Path, *, dry_run: bool,
         raise SystemExit(
             f"accounted for {seen} entries but the lock declares {len(models)}")
     return report
-
-
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="comfy-fetch", description=__doc__)
-    ap.add_argument("lock", type=pathlib.Path)
-    ap.add_argument("root", type=pathlib.Path)
-    ap.add_argument("--apply", action="store_true",
-                    help="actually download; without it nothing is written")
-    args = ap.parse_args(argv)
-    if not args.lock.is_file():
-        print(f"no such lock: {args.lock}", file=sys.stderr)
-        return 2
-    report = run(args.lock, args.root, dry_run=not args.apply)
-    print(report.render(dry_run=not args.apply))
-    return 1 if report.failed else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

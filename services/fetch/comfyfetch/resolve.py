@@ -13,16 +13,14 @@ Resolution needs no credentials for public sources: HuggingFace returns hashes
 in headers, Civitai's model-versions endpoint is public, and GitHub's release
 API is too. Tokens are needed to FETCH, and to read a gated repo.
 
-Usage: comfy-resolve <comfy.yaml> [--profile NAME] [--from-lock LOCK]
+Driven by `comfyfetch resolve`; see cli.py for the interface.
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import pathlib
-import sys
 import tempfile
 import httpx
 import urllib.parse
