@@ -258,7 +258,10 @@ def test_a_structurally_broken_manifest_reports_the_schema_error_not_a_traceback
     """validate_semantics calls .get() on whatever it is handed. Running it on
     a manifest that failed STRUCTURE shows a Python traceback instead of the
     message that explains the problem."""
-    m = write(tmp_path / "comfy.yaml", {"models": "oops"})
+    # `capabilities: oops` rather than `models: oops` -- the latter is
+    # independently guarded by an isinstance check, so it passes with the gate
+    # REMOVED and proves nothing.
+    m = write(tmp_path / "comfy.yaml", dict(MINIMAL, capabilities="oops"))
     lock = write(tmp_path / "lock.yaml", {"models": []})
     result = runner.invoke(app, ["check", str(m), str(lock)])
     assert result.exit_code == 1
@@ -308,3 +311,44 @@ def test_a_capability_whose_profiles_DO_resolve_its_types_passes(tmp_path):
         "capabilities": {"g": {"profiles": ["gen"], "requires": ["diffusion_models"]}},
     }
     assert schema.validate_semantics(doc) == []
+
+
+def test_a_profile_fault_is_reported_AS_ITSELF_not_as_a_missing_type(tmp_path):
+    """The regression this PR nearly shipped.
+
+    Everything in validate_semantics walks profiles to find types, so a profile
+    that cannot expand contributes none and makes every `requires` look unmet.
+    Swallowing the expansion error reported "requires type 'diffusion_models',
+    which none of its profiles resolve" -- sending the reader after a phantom
+    type problem while a group/profile name collision went unmentioned.
+    """
+    doc = {
+        "models": [{"name": "flux", "files": [{"source": "hf:a/b",
+                                               "install": "models/diffusion_models/",
+                                               "type": "diffusion_models"}]}],
+        "profiles": {"flux": ["flux"]},          # collides with the group
+        "capabilities": {"gen": {"profiles": ["flux"], "requires": ["diffusion_models"]}},
+    }
+    problems = schema.validate_semantics(doc)
+    assert any("both a model group and a profile" in p for p in problems), problems
+    assert not any("none of its profiles resolve" in p for p in problems), problems
+
+
+def test_fetch_refuses_a_malformed_lock_before_touching_the_network(tmp_path):
+    """fetch WRITES. A malformed lock puts files in the wrong place, or none at
+    all, after the network has already been used."""
+    lock = write(tmp_path / "lock.yaml", {"models": [{"model": "a", "nonsense": 1}]})
+    result = runner.invoke(app, ["fetch", str(lock), str(tmp_path / "ws")])
+    assert result.exit_code == 1
+    assert "nonsense" in result.output, result.output
+
+
+def test_a_malformed_PARENT_lock_is_reported_as_the_parents_problem(tmp_path):
+    """Otherwise it fails deep inside the subset comparison on a missing key."""
+    m = write(tmp_path / "comfy.yaml", MINIMAL)
+    child = write(tmp_path / "child.yaml", {"models": [PARENT["models"][0]]})
+    parent = write(tmp_path / "parent.yaml",
+                   {"models": [dict(PARENT["models"][0], nonsense=1)]})
+    result = runner.invoke(app, ["check", str(m), str(child), "--parent", str(parent)])
+    assert result.exit_code == 1
+    assert "parent:" in result.output, result.output

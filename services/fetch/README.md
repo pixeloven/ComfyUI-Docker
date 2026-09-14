@@ -281,12 +281,13 @@ nothing and reports success, so that check is worth keeping. Extensions are
 therefore **named** rather than allowed: any key starting `x-` is yours.
 
 ```yaml
-groups:
+models:
   - name: sdxl-illustrious
     x-lineage: illustrious            # group level
     files:
       - source: civitai:1234
         install: models/loras/
+        as: my-style-lora.safetensors  # civitai URLs carry no filename
         x-triggers: [score_9]          # file level
         x-generation: "2511"
 ```

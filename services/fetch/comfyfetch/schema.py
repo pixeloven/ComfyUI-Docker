@@ -57,6 +57,17 @@ def validate_semantics(doc: dict) -> list[str]:
     groups = {g["name"]: g for g in doc.get("models") or []
               if isinstance(g, dict) and "name" in g}
 
+    # PROFILE FAULTS FIRST, AND AS THEMSELVES. Everything below walks profiles
+    # to find types, so a profile that cannot expand -- a name that is both a
+    # group and a profile, a member that does not exist -- contributes zero
+    # types and makes every `requires` look unmet. Reporting that instead of
+    # the expansion failure sends the reader after a phantom type problem while
+    # the real defect goes unmentioned: the exact "symptom instead of cause"
+    # this module exists to avoid.
+    profile_faults = profiles_mod.validate_all(doc)
+    if profile_faults:
+        return profile_faults
+
     def types_in(names: list[str]) -> set[str]:
         """Types reachable from a capability's profiles, as a UNION.
 
@@ -69,10 +80,9 @@ def validate_semantics(doc: dict) -> list[str]:
         """
         found: set[str] = set()
         for name in names:
-            try:
-                members = profiles_mod.expand(doc, name) if name in profiles else [name]
-            except profiles_mod.ProfileError:
-                continue
+            # Cannot raise: validate_all above returned clean, so every
+            # profile in this manifest expands.
+            members = profiles_mod.expand(doc, name) if name in profiles else [name]
             for member in members:
                 for f in (groups.get(member) or {}).get("files") or []:
                     if isinstance(f, dict) and f.get("type"):
