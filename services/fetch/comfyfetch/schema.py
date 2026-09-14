@@ -50,20 +50,40 @@ def validate_semantics(doc: dict) -> list[str]:
     Structural only -- it never asks whether a file EXISTS, which needs the
     network. That separation is what lets this run in CI.
     """
+    from . import profiles as profiles_mod
+
     out: list[str] = []
     profiles = doc.get("profiles") or {}
-    groups = {g["name"] for g in doc.get("models") or [] if isinstance(g, dict) and "name" in g}
-    declared_types = {
-        f.get("type")
-        for g in doc.get("models") or []
-        for f in (g.get("files") or [])
-        if f.get("type")
-    }
+    groups = {g["name"]: g for g in doc.get("models") or []
+              if isinstance(g, dict) and "name" in g}
+
+    def types_in(names: list[str]) -> set[str]:
+        """Types reachable from a capability's profiles, as a UNION.
+
+        PER-PROFILE, not manifest-wide. Collecting every type in the manifest
+        makes the check nearly vacuous: a capability whose profiles resolve
+        only upscalers would satisfy `requires: [diffusion_models]` because
+        some unrelated lineage declares one. The union is also why `profiles`
+        is plural -- an add-on profile resolves no checkpoint by design, so the
+        contract holds over the set, not each member.
+        """
+        found: set[str] = set()
+        for name in names:
+            try:
+                members = profiles_mod.expand(doc, name) if name in profiles else [name]
+            except profiles_mod.ProfileError:
+                continue
+            for member in members:
+                for f in (groups.get(member) or {}).get("files") or []:
+                    if isinstance(f, dict) and f.get("type"):
+                        found.add(f["type"])
+        return found
 
     for cap, spec in (doc.get("capabilities") or {}).items():
         if not isinstance(spec, dict):
             continue
-        for profile in spec.get("profiles") or []:
+        named = spec.get("profiles") or []
+        for profile in named:
             if profile not in profiles and profile not in groups:
                 out.append(
                     f"capability {cap!r}: names profile {profile!r}, which is "
@@ -72,11 +92,12 @@ def validate_semantics(doc: dict) -> list[str]:
         if not required:
             out.append(f"capability {cap!r}: declares no `requires` -- a capability "
                        f"with no contract cannot be checked")
+        reachable = types_in([p for p in named if p in profiles or p in groups])
         for want in required:
-            if want not in declared_types:
+            if want not in reachable:
                 out.append(
-                    f"capability {cap!r}: requires type {want!r}, which no file in "
-                    f"this manifest declares -- the graph would load and not render")
+                    f"capability {cap!r}: requires type {want!r}, which none of its "
+                    f"profiles resolve -- the graph would load and not render")
     return out
 
 
@@ -92,16 +113,30 @@ def subset_problems(child: dict, parent: dict) -> list[str]:
     This is a format invariant, which is why it lives here rather than being
     reimplemented by every consumer that derives locks.
     """
-    by_name = {m["model"]: m for m in parent.get("models") or []}
+    # MEMBERSHIP, not lookup-by-name. Keying the parent by `model` (the
+    # filename) is wrong twice: identity in a lock is the install PATH, which is
+    # what --from-lock selects on, and the same basename legitimately appears
+    # more than once -- `diffusion_pytorch_model.safetensors` is the norm on
+    # HuggingFace, and one real consumer already carries two entries called
+    # `qwen_3_4b.safetensors` from different repos. A last-wins dict silently
+    # compares a child entry against the wrong parent entry and reports drift
+    # that does not exist.
+    #
+    # "Verbatim subset" is exactly `entry in parent_models`, so say that.
+    parent_models = parent.get("models") or []
     out: list[str] = []
     for entry in child.get("models") or []:
-        name = entry.get("model")
-        origin = by_name.get(name)
-        if origin is None:
-            out.append(f"{name}: not present in the parent lock -- a derived lock "
-                       f"selects from its parent, it does not add to it")
+        if entry in parent_models:
             continue
-        if entry != origin:
-            out.append(f"{name}: differs from the parent lock -- --from-lock selects "
-                       f"verbatim, so a difference means it was re-resolved")
+        where = (entry.get("paths") or [{}])[0].get("path") or entry.get("model") or "?"
+        if any(
+            (p.get("paths") or [{}])[0].get("path") == where for p in parent_models
+        ):
+            out.append(
+                f"{where}: differs from the parent lock -- --from-lock selects "
+                f"verbatim, so a difference means it was re-resolved")
+        else:
+            out.append(
+                f"{where}: not present in the parent lock -- a derived lock "
+                f"selects from its parent, it does not add to it")
     return out

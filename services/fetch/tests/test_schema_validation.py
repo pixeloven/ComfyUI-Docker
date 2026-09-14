@@ -156,7 +156,8 @@ def test_check_parent_passes_on_a_clean_subset(tmp_path):
     m = write(tmp_path / "comfy.yaml", {"models": [{"name": "g", "files": [
         {"source": "hf:a/b", "install": "models/loras/", "as": "a.safetensors"}]}]})
     result = runner.invoke(app, ["check", str(m), str(child), "--parent", str(parent)])
-    assert "differ from" not in result.output, result.output
+    assert result.exit_code == 0, result.output
+    assert "verbatim subset of" in result.output, result.output
 
 
 def test_check_parent_exits_1_on_drift(tmp_path):
@@ -168,3 +169,142 @@ def test_check_parent_exits_1_on_drift(tmp_path):
     result = runner.invoke(app, ["check", str(m), str(child), "--parent", str(parent)])
     assert result.exit_code == 1
     assert "differs from the parent lock" in result.output, result.output
+
+
+# ---- assertions that FAIL if the feature is removed -------------------------
+#
+# Every test below was written after a mutation pass found eight features with
+# no test that would notice their absence. A test that passes with the code
+# deleted is documentation, not a test.
+
+def test_the_top_level_is_closed():
+    """The PR's headline claim was "capabilities passed because the top level
+    was not closed". If that closure regresses, every unknown top-level key is
+    silently accepted again."""
+    assert schema.load("comfy")["additionalProperties"] is False
+    assert schema.validate({"models": [], "nonsense": 1}, "comfy")
+
+
+def test_an_x_key_is_allowed_at_GROUP_level_too():
+    """Only the file level was covered. A consumer annotating a lineage rather
+    than a file hits the group level first."""
+    doc = {"models": [{"name": "g", "x-lineage": "flux2", "files": [
+        {"source": "hf:a/b", "install": "models/loras/"}]}]}
+    assert schema.validate(doc, "comfy") == []
+
+
+def test_a_MALFORMED_capability_is_rejected():
+    """`capabilities: {type: object}` would accept any garbage. The shape has to
+    be checked, not merely the key's presence."""
+    assert schema.validate(dict(MINIMAL, capabilities={"c": {"profiles": "notalist"}}), "comfy")
+    assert schema.validate(dict(MINIMAL, capabilities={"c": {"profiles": []}}), "comfy")
+    assert schema.validate(dict(MINIMAL, capabilities={"c": {"profiles": ["p"]}}), "comfy")
+    assert schema.validate(dict(MINIMAL, capabilities={"c": {"profiles": ["p"],
+                                                             "requires": ["vae"],
+                                                             "typo": 1}}), "comfy")
+
+
+def test_a_lock_entry_with_an_unknown_key_is_rejected():
+    assert schema.validate({"models": [{"model": "a", "url": "https://h/a",
+                                        "paths": [{"path": "models/loras/a"}],
+                                        "nonsense": 1}]}, "comfy-lock")
+
+
+def test_the_CLI_runs_the_semantic_checks_not_just_the_schema(tmp_path):
+    """Wired, not merely written. The --parent wiring silently did not apply
+    once already."""
+    m = write(tmp_path / "comfy.yaml",
+              dict(MINIMAL, profiles={"p": ["g"]},
+                   capabilities={"gen": {"profiles": ["p"], "requires": ["vae"]}}))
+    lock = write(tmp_path / "lock.yaml", {"models": []})
+    result = runner.invoke(app, ["check", str(m), str(lock)])
+    assert result.exit_code == 1
+    assert "requires type 'vae'" in result.output, result.output
+
+
+def test_the_CLI_validates_the_LOCK_schema_too(tmp_path):
+    m = write(tmp_path / "comfy.yaml", MINIMAL)
+    lock = write(tmp_path / "lock.yaml", {"models": [{"model": "a", "nonsense": 1}]})
+    result = runner.invoke(app, ["check", str(m), str(lock)])
+    assert result.exit_code == 1
+    assert "lock:" in result.output, result.output
+
+
+def test_a_schema_problem_STOPS_the_run_rather_than_being_mentioned(tmp_path):
+    """Reported-but-not-fatal would let a typo through while looking checked.
+    The consistency report must not appear at all."""
+    m = write(tmp_path / "comfy.yaml", {"models": [{"name": "g", "files": [
+        {"source": "hf:a/b", "install": "models/loras/", "instal": "typo"}]}]})
+    lock = write(tmp_path / "lock.yaml", {"models": []})
+    result = runner.invoke(app, ["check", str(m), str(lock)])
+    assert result.exit_code == 1
+    assert "declared:" not in result.output, result.output
+
+
+def test_json_output_carries_the_reason_on_every_failure_path(tmp_path):
+    """`Out.problem` is a no-op under --output json, so a bare `raise Exit(1)`
+    gave a machine consumer exit 1 with ZERO bytes on either stream."""
+    m = write(tmp_path / "comfy.yaml", {"models": [{"name": "g", "files": [
+        {"source": "hf:a/b", "install": "models/loras/", "instal": "typo"}]}]})
+    lock = write(tmp_path / "lock.yaml", {"models": []})
+    result = runner.invoke(app, ["check", str(m), str(lock), "--output", "json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert any("instal" in p for p in payload["problems"]), payload
+
+
+def test_a_structurally_broken_manifest_reports_the_schema_error_not_a_traceback(tmp_path):
+    """validate_semantics calls .get() on whatever it is handed. Running it on
+    a manifest that failed STRUCTURE shows a Python traceback instead of the
+    message that explains the problem."""
+    m = write(tmp_path / "comfy.yaml", {"models": "oops"})
+    lock = write(tmp_path / "lock.yaml", {"models": []})
+    result = runner.invoke(app, ["check", str(m), str(lock)])
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output, result.output
+    assert "is not of type" in result.output, result.output
+
+
+def test_two_entries_sharing_a_basename_are_not_confused(tmp_path):
+    """A real lock carries two `qwen_3_4b.safetensors` from different repos --
+    one file shared by two lineages, declared by each so either resolves alone.
+    Keying the parent by filename compares a child against the wrong entry and
+    invents drift."""
+    parent = {"models": [
+        {"model": "dup.safetensors", "url": "https://h/one",
+         "paths": [{"path": "models/text_encoders/a.safetensors"}], "hashes": []},
+        {"model": "dup.safetensors", "url": "https://h/two",
+         "paths": [{"path": "models/text_encoders/b.safetensors"}], "hashes": []},
+    ]}
+    child = {"models": [parent["models"][0]]}
+    assert schema.subset_problems(child, parent) == []
+
+
+def test_requires_is_checked_against_the_capabilitys_OWN_profiles(tmp_path):
+    """Manifest-wide collection makes this nearly vacuous: a capability whose
+    profiles resolve only upscalers would satisfy `requires: [diffusion_models]`
+    because some unrelated lineage declares one."""
+    doc = {
+        "models": [
+            {"name": "up", "files": [{"source": "hf:a/b", "install": "models/upscale_models/",
+                                      "type": "upscale_models"}]},
+            {"name": "dm", "files": [{"source": "hf:c/d", "install": "models/diffusion_models/",
+                                      "type": "diffusion_models"}]},
+        ],
+        "profiles": {"common": ["up"], "gen": ["dm"]},
+        "capabilities": {"upscale": {"profiles": ["common"], "requires": ["diffusion_models"]}},
+    }
+    problems = schema.validate_semantics(doc)
+    assert any("diffusion_models" in p for p in problems), problems
+
+
+def test_a_capability_whose_profiles_DO_resolve_its_types_passes(tmp_path):
+    doc = {
+        "models": [{"name": "dm", "files": [{"source": "hf:c/d",
+                                             "install": "models/diffusion_models/",
+                                             "type": "diffusion_models"}]}],
+        "profiles": {"gen": ["dm"]},
+        "capabilities": {"g": {"profiles": ["gen"], "requires": ["diffusion_models"]}},
+    }
+    assert schema.validate_semantics(doc) == []
