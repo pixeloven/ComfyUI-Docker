@@ -28,6 +28,7 @@ a lock file stays correct.
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import pathlib
 from typing import Annotated
 
@@ -298,8 +299,14 @@ def facts(
     sources: Annotated[pathlib.Path, typer.Argument(
         help="Directory of per-lineage source files -- the same root `build` takes.")],
     lock: Annotated[pathlib.Path, typer.Argument(help="comfy-lock.yaml, for content hashes.")],
-    store: Annotated[pathlib.Path, typer.Option(
-        help="ComfyUI root. Safetensors headers are read from here.")] = pathlib.Path("."),
+    store: Annotated[pathlib.Path | None, typer.Option(
+        help="ComfyUI root. Safetensors headers are read from here.")] = None,
+    headers_file: Annotated[pathlib.Path | None, typer.Option(
+        "--headers",
+        help="Pre-extracted headers as JSON ({filename: __metadata__}). Use "
+             "when the store is not reachable from here -- a Kubernetes store "
+             "lives inside the cluster while the sources are in a checkout "
+             "outside it.")] = None,
     token: Annotated[str | None, typer.Option(
         envvar="CIVITAI_TOKEN",
         help="Optional. Public by-hash lookups do NOT need one.")] = None,
@@ -324,8 +331,14 @@ def facts(
     if not sources.is_dir():
         typer.echo(f"no such directory: {sources}", err=True)
         raise typer.Exit(2)
-    if not store.is_dir():
+    if (store is None) == (headers_file is None):
+        typer.echo("pass exactly one of --store or --headers", err=True)
+        raise typer.Exit(2)
+    if store is not None and not store.is_dir():
         typer.echo(f"store not readable: {store}", err=True)
+        raise typer.Exit(2)
+    if headers_file is not None and not headers_file.is_file():
+        typer.echo(f"no such headers file: {headers_file}", err=True)
         raise typer.Exit(2)
     doc = _load(lock, "lock")
 
@@ -335,10 +348,13 @@ def facts(
         for h in m.get("hashes") or []
         if h.get("type") == "SHA256"
     }
-    headers = {
-        p.name: facts_mod.safetensors_header(p)
-        for p in store.rglob("*.safetensors")
-    }
+    if headers_file is not None:
+        headers = json.loads(headers_file.read_text())
+    else:
+        headers = {
+            p.name: facts_mod.safetensors_header(p)
+            for p in store.rglob("*.safetensors")
+        }
     out.note(f"{len(shas)} hashes from the lock, {len(headers)} safetensors headers read")
 
     stamp = generated or _time.strftime("%Y-%m-%d")

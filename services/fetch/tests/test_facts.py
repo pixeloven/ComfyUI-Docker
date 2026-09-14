@@ -167,3 +167,60 @@ def test_the_attribution_line_is_a_parameter_not_a_content_change(civitai, heade
                      generated="2026-09-12", generator="two")
     assert a != b
     assert a.split("\n", 1)[1] == b.split("\n", 1)[1]
+
+
+# ---- the store and the repo are not always on the same machine -------------
+
+def test_headers_can_be_supplied_instead_of_read_from_a_store(civitai, tmp_path):
+    """`facts` needs safetensors headers AND the lineage sources, and those are
+    not always reachable from one place: a Kubernetes store is inside the
+    cluster while the sources are in a git checkout outside it.
+
+    Reading headers is a separate step from resolving them, so the CLI accepts
+    them pre-extracted. Without this the verb is unusable in exactly the
+    deployment it was written for.
+    """
+    from typer.testing import CliRunner
+
+    from comfyfetch.cli import app
+
+    sources = tmp_path / "models"
+    sources.mkdir()
+    (sources / "_meta.yaml").write_text("name: s\n")
+    (FIX / "upscalers.yaml").read_bytes()
+    (sources / "up.yaml").write_bytes((FIX / "upscalers.yaml").read_bytes())
+
+    lock = tmp_path / "lock.yaml"
+    shas = json.loads((FIX / "shas.json").read_text())
+    lock.write_text(yaml.safe_dump({
+        "models": [{"model": n, "hashes": [{"type": "SHA256", "hash": h}]}
+                   for n, h in shas.items()]}))
+
+    headers_file = tmp_path / "headers.json"
+    headers_file.write_bytes((FIX / "headers.json").read_bytes())
+
+    result = CliRunner().invoke(app, [
+        "facts", str(sources), str(lock),
+        "--headers", str(headers_file), "--generated", "2026-09-12",
+    ])
+    assert result.exit_code == 0, result.output
+    written = (sources / "up.facts.yaml").read_text()
+    assert "declared_base: Upscaler" in written
+
+
+def test_headers_and_store_are_mutually_exclusive(tmp_path):
+    """Two sources for one input is a wrong request, not a merge."""
+    from typer.testing import CliRunner
+
+    from comfyfetch.cli import app
+
+    (tmp_path / "m").mkdir()
+    lock = tmp_path / "l.yaml"
+    lock.write_text("models: []\n")
+    h = tmp_path / "h.json"
+    h.write_text("{}")
+    result = CliRunner().invoke(app, [
+        "facts", str(tmp_path / "m"), str(lock),
+        "--headers", str(h), "--store", str(tmp_path),
+    ])
+    assert result.exit_code == 2
