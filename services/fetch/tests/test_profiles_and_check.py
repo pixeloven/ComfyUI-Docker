@@ -78,3 +78,60 @@ def test_install_path_is_derivable_offline():
         {"install": "models/loras/", "file": "a/b/c.safetensors"}) == "models/loras/c.safetensors"
     assert lockfile.install_path(
         {"install": "models/loras/", "as": "x.safetensors"}) == "models/loras/x.safetensors"
+
+
+# --- check --profile ---------------------------------------------------------
+#
+# The profile filter had no test at all: deleting the two lines that apply it
+# left the whole suite green, which meant `check --profile X` could have been
+# checking the ENTIRE manifest against one profile's lock and reporting the
+# other profiles' files as NOT LOCKED. That is the shape of failure that makes
+# a gate useless -- it fails for a reason that is not a mistake, so people stop
+# reading it.
+
+def _two_group_manifest() -> dict:
+    return {
+        "models": [
+            {"name": "a", "files": [{"source": "hf:x/y", "file": "a.safetensors",
+                                     "install": "models/loras/"}]},
+            {"name": "b", "files": [{"source": "hf:x/y", "file": "b.safetensors",
+                                     "install": "models/loras/"}]},
+        ],
+        "profiles": {"just-a": ["a"], "both": ["a", "b"]},
+    }
+
+
+def _lock_for(*names: str) -> dict:
+    return {"models": [{"model": f"{n}.safetensors",
+                        "paths": [{"path": f"models/loras/{n}.safetensors"}],
+                        "hashes": [{"hash": "0" * 64, "type": "SHA256"}]}
+                       for n in names]}
+
+
+def test_a_profile_lock_is_checked_against_only_that_profile():
+    problems, declared, locked = C.check(_two_group_manifest(), _lock_for("a"), "just-a")
+    assert problems == []
+    assert (declared, locked) == (1, 1)
+
+
+def test_the_same_pair_fails_WITHOUT_the_profile():
+    """The control. Without it the test above passes on a `check` that ignores
+    --profile entirely, because a manifest-wide check of a full lock also
+    passes -- the filter only shows up when the lock is a strict subset."""
+    problems, declared, _ = C.check(_two_group_manifest(), _lock_for("a"))
+    assert declared == 2
+    assert any("NOT LOCKED" in p and "b.safetensors" in p for p in problems)
+
+
+def test_a_profile_lock_carrying_a_foreign_entry_is_rejected():
+    """Scoping must not become a way to ignore extras: an entry no profile
+    declared is still NOT DECLARED."""
+    problems, *_ = C.check(_two_group_manifest(), _lock_for("a", "b"), "just-a")
+    assert any("NOT DECLARED" in p and "b.safetensors" in p for p in problems)
+
+
+def test_an_unknown_profile_raises_rather_than_checking_everything():
+    """Silently falling back to the whole manifest would make a typo in a CI
+    invocation look like a passing narrower check."""
+    with pytest.raises(profiles.ProfileError, match="no such profile"):
+        C.check(_two_group_manifest(), _lock_for("a"), "nope")

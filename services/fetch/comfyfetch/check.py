@@ -8,14 +8,10 @@ resolve to a new commit once upstream moves, so a re-resolve gate would fail for
 the one reason that is not a mistake -- and would need network access in CI to
 do it. Hash changes come from a deliberate resolve run, reviewed like any diff.
 
-Usage: comfy-check-lock <comfy.yaml> <comfy-lock.yaml> [--profile NAME]
+Driven by `comfyfetch check`; see cli.py for the interface.
 """
 
 from __future__ import annotations
-
-import argparse
-import pathlib
-import sys
 
 from . import lockfile, profiles
 
@@ -45,34 +41,3 @@ def check(manifest: dict, lock: dict, profile: str | None = None) -> tuple[list[
     problems += [f"NO SHA256    {m.get('model')}" for m in (lock.get("models") or [])
                  if not lockfile.sha256_of(m)]
     return problems, len(declared), len(locked)
-
-
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="comfy-check-lock", description=__doc__)
-    ap.add_argument("manifest", type=pathlib.Path)
-    ap.add_argument("lock", type=pathlib.Path)
-    ap.add_argument("--profile")
-    args = ap.parse_args(argv)
-    for p in (args.manifest, args.lock):
-        if not p.is_file():
-            print(f"no such file: {p}", file=sys.stderr)
-            return 2
-    try:
-        problems, declared, locked = check(
-            lockfile.load(args.manifest), lockfile.load(args.lock), args.profile)
-    except profiles.ProfileError as exc:
-        print(exc, file=sys.stderr)
-        return 2
-    print(f"declared: {declared}")
-    print(f"locked:   {locked}")
-    for p in problems:
-        print(f"  {p}")
-    if problems:
-        return 1
-    n = len(manifest_profiles := (lockfile.load(args.manifest).get("profiles") or {}))
-    print(f"manifest and lock agree; {n} profiles valid")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
