@@ -9,6 +9,37 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 2.0.1 — 2026-09-20
+
+### `resolve` trusted a git sha1 as a sha256 for every non-LFS file
+
+HuggingFace serves LFS objects and plain git objects from the same URL, and
+only the LFS ones carry a content sha256 in `x-linked-etag`. A file under the
+LFS threshold — `config.json`, `tokenizer.json` — answers with the **git blob
+sha1** instead: `sha1(b"blob <len>\\0" + content)`, 40 hex wide, and not a hash
+of the content alone. `_hf` recorded it under `type: SHA256` regardless.
+
+Nothing caught it because the consumer store was pure-LFS. It surfaced the
+first time a manifest needed a model DIRECTORY rather than a single weights
+file (a Florence-2 captioning model: safetensors + tokenizer + config). The
+lock resolved clean, `check` passed, and then `fetch` refused four of six
+files with `sha256 mismatch` — correctly, since it hashes what it downloaded
+and a sha1 cannot match.
+
+The failure shape is worse than a plain error: the weights verify and land, so
+the directory EXISTS but is incomplete. Custom nodes that guard their own
+download with `if not os.path.exists(model_path)` then skip it and fail at load
+on the missing tokenizer.
+
+`resolve` now checks the etag's width and falls back to downloading and hashing
+when it is not 64 hex. The LFS path stays a single HEAD — re-hashing those would
+turn a resolve into a full fetch of the store — and the files this fires for are
+the small ones by definition.
+
+Locks resolved before this contain sha1s for their non-LFS entries and must be
+re-resolved; `fetch` was already refusing them, so nothing was materialised
+against a wrong hash.
+
 ## 2.0.0 — 2026-09-14
 
 **MAJOR: `check` now validates the manifest format, and a manifest that passed

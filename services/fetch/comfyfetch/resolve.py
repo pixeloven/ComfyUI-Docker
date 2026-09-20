@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
+import re
 import tempfile
 import httpx
 import urllib.parse
@@ -45,6 +46,10 @@ def _quote(path: str) -> str:
     return urllib.parse.quote(path, safe="/")
 
 
+#: A real sha256, as opposed to the git blob sha1 HF returns for non-LFS files.
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
 def _hf(repo: str, revision: str, file: str, auth: AuthMap) -> tuple[str, str]:
     """(url pinned to a commit, sha256) for a HuggingFace file."""
     url = f"{HF}/{repo}/resolve/{revision}/{_quote(file)}"
@@ -57,7 +62,23 @@ def _hf(repo: str, revision: str, file: str, auth: AuthMap) -> tuple[str, str]:
               "not found, or you lack access to a gated repo"
         raise Unresolved(f"hf:{repo}@{revision}/{file}: {why}")
     # The lock pins the COMMIT, never the moving ref it resolved from.
-    return f"{HF}/{repo}/resolve/{commit}/{_quote(file)}", etag.lower()
+    pinned = f"{HF}/{repo}/resolve/{commit}/{_quote(file)}"
+    etag = etag.lower()
+    # ...but the etag is only a sha256 for an LFS file. HuggingFace serves LFS
+    # and plain git objects from the same URL, and a small non-LFS file --
+    # config.json, tokenizer.json, anything under the LFS threshold -- answers
+    # with the GIT BLOB SHA-1: sha1(b"blob <len>\0" + content), 40 hex wide and
+    # not a hash of the content alone. Storing it under `type: SHA256` produced
+    # locks whose every JSON entry failed `fetch` with "sha256 mismatch", since
+    # fetch hashes what it downloaded and a sha1 can never match.
+    #
+    # Width is the whole test: 40 vs 64. Falling back to a download keeps the
+    # LFS path a single HEAD -- re-hashing those would turn `resolve` into a
+    # full fetch of the store -- while the files this fires for are the small
+    # ones by definition.
+    if not _SHA256.fullmatch(etag):
+        return pinned, _download_and_hash(pinned, auth)
+    return pinned, etag
 
 
 def _github(repo: str, tag: str, asset: str, auth: AuthMap) -> tuple[str, str | None]:
