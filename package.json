@@ -1,0 +1,30 @@
+{
+  "name": "@pixeloven/comfyui-docker",
+  "version": "2.1.0",
+  "description": "Consumer skills for ComfyUI-Docker \u2014 authoring comfy.yaml, generating locks, and deploying the images.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "claude-plugin",
+    "codex-plugin",
+    "skills",
+    "comfyui"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pixeloven/ComfyUI-Docker.git"
+  },
+  "files": [
+    ".claude-plugin",
+    "skills",
+    "LICENSE",
+    "README.md"
+  ],
+  "private": true,
+  "pi": {
+    "skills": [
+      "./skills"
+    ]
+  }
+}
