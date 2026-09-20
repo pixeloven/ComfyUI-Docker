@@ -29,7 +29,7 @@ A complete containerized deployment of ComfyUI with GPU acceleration, flexible d
 - **🐳 Production Ready**: Multi-stage builds, layer caching, and pre-built GHCR images
 - **⚡ Performance Optimized**: Dynamic VRAM, async offload, CUDA graphs, Comfy Kitchen, and architecture-specific SageAttention images
 - **🔧 Extensible**: Custom node support via volume mounts
-- **🔄 CI/CD Ready**: Automated builds, weekly dependency updates
+- **🔄 CI/CD Ready**: Automated builds, nightly upstream tracking
 - **🔒 Security**: Runs as non-root by default, supports Docker Compose PUID/PGID and Kubernetes securityContext
 
 ---

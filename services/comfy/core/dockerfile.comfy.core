@@ -28,10 +28,21 @@ ARG COMFYUI_VERSION=v0.33.1
 # override this through docker-bake.hcl.
 ARG TORCH_INDEX=cu130
 
+# COMFYUI_VERSION is a TAG, A BRANCH, OR A COMMIT SHA. `--branch` accepts the
+# first two and silently cannot express the third, which is where day-zero model
+# support lives: ComfyUI merges it to master and tags a release up to a week
+# later (Qwen-Image-2.1 landed in 6bfaacc6 on 2026-09-19, after v0.36.0 was
+# cut). A channel that can only name tags cannot follow upstream at all.
+#
+# So: fetch the ref explicitly. Still --depth 1, still one round trip, and a
+# commit is the most reproducible pin available -- a nightly built this way can
+# be rebuilt byte-for-byte later, which "clone master" cannot.
 RUN --mount=type=cache,target=/app/.cache/pip \
   umask 022 && \
-  git clone --depth 1 --branch "$COMFYUI_VERSION" \
-    https://github.com/Comfy-Org/ComfyUI.git /app/ComfyUI && \
+  git init --quiet /app/ComfyUI && \
+  git -C /app/ComfyUI remote add origin https://github.com/Comfy-Org/ComfyUI.git && \
+  git -C /app/ComfyUI fetch --depth 1 --quiet origin "$COMFYUI_VERSION" && \
+  git -C /app/ComfyUI checkout --quiet FETCH_HEAD && \
   # Install torch family from the wheel index ONLY (not --extra-index-url).
   # --extra-index-url is additive, so pip picks the highest version across
   # PyPI + the index. When PyPI ships a newer torch than the cu* index

@@ -33,8 +33,15 @@ variable "COMFYUI_VERSION" {
     // would bake something else, and a local build used the default here --
     // three different meanings for one tag.
     //
-    // Tracking upstream is what the weekly rebuild is for; it still resolves
-    // latest, on purpose, and publishes under its own labels.
+    // Tracking upstream is what the NIGHTLY is for: it resolves master, passes
+    // the resolved COMMIT here, and publishes under `*-nightly` alone.
+    //
+    // This value is no longer a TAG on the published image. It was, and that
+    // made an unreviewed cron the author of the `cuda-v0.36.0` line while a
+    // reviewed release published `cuda-2.0.0` containing v0.34.0 -- two
+    // identities for one artifact, disagreeing. What is inside an image is now
+    // stated once, by org.opencontainers.image.version, which the Dockerfile
+    // sets from this and which is true for a commit as well as a tag.
     default = "v0.34.0"
 }
 
@@ -133,7 +140,6 @@ target "core-cuda" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:cuda-${IMAGE_LABEL}",
-        "${REGISTRY_URL}core:cuda-${COMFYUI_VERSION}",
         "${REGISTRY_URL}core:cuda-cache",
         PUBLISH_LATEST ? "${REGISTRY_URL}core:cuda-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}core:cuda-${IMAGE_VERSION}" : ""
@@ -160,7 +166,6 @@ target "core-cpu" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:cpu-${IMAGE_LABEL}",
-        "${REGISTRY_URL}core:cpu-${COMFYUI_VERSION}",
         "${REGISTRY_URL}core:cpu-cache",
         PUBLISH_LATEST ? "${REGISTRY_URL}core:cpu-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}core:cpu-${IMAGE_VERSION}" : ""
@@ -187,7 +192,6 @@ target "core-rocm" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:rocm-${IMAGE_LABEL}",
-        "${REGISTRY_URL}core:rocm-${COMFYUI_VERSION}",
         "${REGISTRY_URL}core:rocm-cache",
         PUBLISH_LATEST ? "${REGISTRY_URL}core:rocm-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}core:rocm-${IMAGE_VERSION}" : ""
@@ -214,7 +218,6 @@ target "core-xpu" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:xpu-${IMAGE_LABEL}",
-        "${REGISTRY_URL}core:xpu-${COMFYUI_VERSION}",
         "${REGISTRY_URL}core:xpu-cache",
         PUBLISH_LATEST ? "${REGISTRY_URL}core:xpu-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}core:xpu-${IMAGE_VERSION}" : ""
@@ -241,7 +244,6 @@ target "complete-cuda" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}complete:cuda-${IMAGE_LABEL}",
-        "${REGISTRY_URL}complete:cuda-${COMFYUI_VERSION}",
         "${REGISTRY_URL}complete:cuda-cache",
         PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-${IMAGE_VERSION}" : ""
@@ -262,7 +264,6 @@ target "complete-cuda-sm80" {
     inherits = ["complete-cuda"]
     tags = [
         "${REGISTRY_URL}complete:cuda-sm80-${IMAGE_LABEL}",
-        "${REGISTRY_URL}complete:cuda-sm80-${COMFYUI_VERSION}",
         PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm80-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-sm80-${IMAGE_VERSION}" : ""
     ]
@@ -277,7 +278,6 @@ target "complete-cuda-sm86" {
     inherits = ["complete-cuda"]
     tags = [
         "${REGISTRY_URL}complete:cuda-sm86-${IMAGE_LABEL}",
-        "${REGISTRY_URL}complete:cuda-sm86-${COMFYUI_VERSION}",
         PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm86-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-sm86-${IMAGE_VERSION}" : ""
     ]
@@ -292,7 +292,6 @@ target "complete-cuda-sm89" {
     inherits = ["complete-cuda"]
     tags = [
         "${REGISTRY_URL}complete:cuda-sm89-${IMAGE_LABEL}",
-        "${REGISTRY_URL}complete:cuda-sm89-${COMFYUI_VERSION}",
         PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm89-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-sm89-${IMAGE_VERSION}" : ""
     ]
@@ -307,7 +306,6 @@ target "complete-cuda-sm90" {
     inherits = ["complete-cuda"]
     tags = [
         "${REGISTRY_URL}complete:cuda-sm90-${IMAGE_LABEL}",
-        "${REGISTRY_URL}complete:cuda-sm90-${COMFYUI_VERSION}",
         PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm90-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-sm90-${IMAGE_VERSION}" : ""
     ]
@@ -322,7 +320,6 @@ target "complete-cuda-sm120" {
     inherits = ["complete-cuda"]
     tags = [
         "${REGISTRY_URL}complete:cuda-sm120-${IMAGE_LABEL}",
-        "${REGISTRY_URL}complete:cuda-sm120-${COMFYUI_VERSION}",
         PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-sm120-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-sm120-${IMAGE_VERSION}" : ""
     ]
