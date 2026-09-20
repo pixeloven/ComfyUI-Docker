@@ -5,11 +5,13 @@ here before the transport changes underneath them. They are not stylistic:
 each one has already cost something real.
 """
 
+import hashlib
+
 import pytest
 import respx
 from httpx import Response
 
-from comfyfetch import http
+from comfyfetch import auth, http, resolve
 
 
 @respx.mock
@@ -109,3 +111,62 @@ def test_the_user_agent_is_ours_and_not_the_stdlib_default():
     ua = route.calls[0].request.headers["user-agent"]
     assert ua.startswith("comfyfetch/")
     assert "urllib" not in ua.lower()
+
+
+@respx.mock
+def test_non_lfs_file_is_hashed_not_trusted():
+    """A small non-LFS file's `x-linked-etag` is the GIT BLOB SHA-1, not a sha256.
+
+    HuggingFace serves LFS files and plain git files through the same URL, and
+    only the LFS ones carry a content sha256 in the etag. A `config.json` or
+    `tokenizer.json` comes back with 40 hex characters -- git's
+    `sha1("blob <len>\\0" + content)`, which is not a hash of the content alone
+    and is not 64 wide. Recording it as the sha256 produced locks whose every
+    JSON entry failed `fetch` with "sha256 mismatch": fetch hashes what it
+    downloaded, and rightly refused to match a sha1 against it.
+
+    Every model in the store was pure-LFS, so this stayed invisible until a
+    manifest needed a model directory rather than a single weights file.
+    """
+    body = b'{"model_type": "florence2"}'
+    blob = hashlib.sha1(b"blob %d\x00" % len(body) + body).hexdigest()
+    assert len(blob) == 40
+
+    respx.head("https://huggingface.co/o/r/resolve/main/config.json").mock(
+        return_value=Response(200, headers={
+            "x-repo-commit": "c" * 40,
+            "x-linked-etag": f'"{blob}"',
+        })
+    )
+    pinned = respx.get(f"https://huggingface.co/o/r/resolve/{'c' * 40}/config.json").mock(
+        return_value=Response(200, content=body)
+    )
+
+    url, sha = resolve._hf("o/r", "main", "config.json", auth.AuthMap({}))
+
+    assert sha == hashlib.sha256(body).hexdigest(), "trusted the git sha1 as a sha256"
+    assert url == f"https://huggingface.co/o/r/resolve/{'c' * 40}/config.json"
+    assert pinned.called, "hashed something other than the commit-pinned URL"
+
+
+@respx.mock
+def test_lfs_file_still_trusts_the_etag_and_downloads_nothing():
+    """The 64-hex case must stay a HEAD. Hashing every LFS file to re-derive a
+    sha256 the server already gave us would turn a resolve into a full download
+    of the store.
+    """
+    sha256 = "d" * 64
+    respx.head("https://huggingface.co/o/r/resolve/main/m.safetensors").mock(
+        return_value=Response(200, headers={
+            "x-repo-commit": "e" * 40,
+            "x-linked-etag": f'"{sha256}"',
+        })
+    )
+    body = respx.get(f"https://huggingface.co/o/r/resolve/{'e' * 64}/m.safetensors").mock(
+        return_value=Response(200, content=b"never read")
+    )
+
+    _, sha = resolve._hf("o/r", "main", "m.safetensors", auth.AuthMap({}))
+
+    assert sha == sha256
+    assert not body.called, "downloaded an LFS file whose sha256 the etag already carried"
