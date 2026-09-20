@@ -2,7 +2,7 @@
   "name": "comfyui-docker",
   "description": "Consumer skills for ComfyUI-Docker \u2014 authoring comfy.yaml, generating locks, and deploying the images.",
   "skills": "./skills",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "author": {
     "name": "PixelOven"
   },

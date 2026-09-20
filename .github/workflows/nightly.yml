@@ -1,0 +1,316 @@
+# The UPSTREAM-FOLLOWING channel, and the only one that builds a ComfyUI this
+# repository has not pinned.
+#
+# WHY IT EXISTS. ComfyUI merges day-zero model support to master and tags a
+# release up to a week later -- Qwen-Image-2.1 landed in 6bfaacc6 on 2026-09-19,
+# after v0.36.0 was cut on 09-15. A channel that follows upstream RELEASES can
+# never be day-zero; following master is the only definition of "latest" that
+# delivers it.
+#
+# WHAT IT PUBLISHES: `*-nightly`, and nothing else. It never moves `*-latest`
+# (that is our main) and never writes a release tag (that is a `v*` tag). The
+# commit it built is recorded in org.opencontainers.image.version, so "what was
+# in last night's nightly" is answerable from the image rather than from here.
+#
+# It REPLACES the weekly fresh rebuild, which resolved upstream's latest RELEASE
+# and published it as both `cuda-v<upstream>` and `cuda-latest` -- making an
+# unreviewed cron the author of the release-image line. The weekly's OTHER job,
+# a cache-free rebuild so base-image fixes land, survives as a cache policy
+# inside this one (see `weekly` below) rather than as a second workflow.
+#
+# Every runtime is built, as the weekly did: cuda, cuda-arch, cpu, and the
+# linux accelerators. Following upstream is mostly a CUDA concern, but the
+# other runtimes have no other scheduled rebuild.
+name: Nightly Upstream Build
+
+on:
+  schedule:
+    # 02:00 UTC daily. Upstream's US-daytime merges have landed by then.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'ComfyUI ref to build — branch, tag, or commit SHA'
+        required: false
+        default: 'master'
+      weekly:
+        description: 'Weekly fresh rebuild — bypass cache so base-image fixes land'
+        type: boolean
+        required: false
+        default: false
+
+# One nightly at a time. Two concurrent runs would race for the same
+# `*-nightly` tag and the winner would be decided by build duration.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  context:
+    name: Resolve the upstream commit
+    runs-on: ubuntu-latest
+    outputs:
+      comfyui_sha: ${{ steps.meta.outputs.comfyui_sha }}
+      repository_lower: ${{ steps.meta.outputs.repository_lower }}
+      weekly: ${{ steps.meta.outputs.weekly }}
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Resolve the upstream commit
+      id: meta
+      run: |
+        set -euo pipefail
+        ref="${{ inputs.ref || 'master' }}"
+
+        # Resolve to a COMMIT before building. A build that clones a moving ref
+        # cannot say what it contains, and two targets in the same run could
+        # clone different commits if upstream merges between them.
+        sha="$(gh api "repos/Comfy-Org/ComfyUI/commits/${ref}" --jq .sha)"
+        if [ -z "${sha}" ]; then
+          echo "::error::could not resolve ComfyUI ref '${ref}' to a commit"
+          exit 1
+        fi
+
+        # THE WEEKLY FRESH REBUILD, folded into the nightly rather than living
+        # as a second workflow. On Sundays (and on request) the build bypasses
+        # cache entirely.
+        #
+        # It is not a second channel -- same ref, same tags, same job. It is a
+        # cache policy, and it exists because the base image, apt and the torch
+        # install all sit BELOW the ComfyUI clone in the Dockerfile: a nightly
+        # busts the clone layer and reuses everything beneath it, so a
+        # base-image CVE fix would otherwise never land however many nightlies
+        # ran.
+        weekly=false
+        if [ "${{ inputs.weekly }}" = "true" ] || [ "$(date -u +%u)" = "7" ]; then
+          weekly=true
+        fi
+
+        {
+          echo "repository_lower=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]' | sed 's/-docker//')"
+          echo "comfyui_sha=${sha}"
+          echo "weekly=${weekly}"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### Nightly — ComfyUI \`${sha:0:8}\`"
+          echo
+          echo "Ref \`${ref}\` → [\`${sha}\`](https://github.com/Comfy-Org/ComfyUI/commit/${sha})"
+          echo
+          echo "Cache: $([ "${weekly}" = true ] && echo 'bypassed — weekly fresh rebuild' || echo 'reused')"
+        } >> "$GITHUB_STEP_SUMMARY"
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+  cuda:
+    name: CUDA images
+    needs: [context]
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@v1.3.1
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.3.0
+      with:
+        buildkitd-flags: --debug
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v4.6.0
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build CUDA images
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: cuda
+        push: true
+        no-cache: ${{ needs.context.outputs.weekly == 'true' }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-to=type=gha,mode=max
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ghcr.io/${{ needs.context.outputs.repository_lower }}/
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_sha }}
+        IMAGE_LABEL: nightly
+        # NEVER true here. `*-latest` is our main; a nightly that moved it would
+        # hand every consumer an unreviewed upstream commit without them asking.
+        PUBLISH_LATEST: false
+
+  cuda-arch:
+    name: architecture-specific CUDA images
+    needs: [context, cuda]
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@v1.3.1
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.3.0
+      with:
+        buildkitd-flags: --debug
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v4.6.0
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build architecture-specific CUDA images
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: cuda-arch
+        push: true
+        no-cache: ${{ needs.context.outputs.weekly == 'true' }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-from=type=gha
+          *.cache-to=type=gha,mode=max
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ghcr.io/${{ needs.context.outputs.repository_lower }}/
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_sha }}
+        IMAGE_LABEL: nightly
+        # NEVER true here. `*-latest` is our main; a nightly that moved it would
+        # hand every consumer an unreviewed upstream commit without them asking.
+        PUBLISH_LATEST: false
+
+  cpu:
+    name: CPU images
+    needs: [context]
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@v1.3.1
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.3.0
+      with:
+        buildkitd-flags: --debug
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v4.6.0
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build CPU images
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: cpu
+        push: true
+        no-cache: ${{ needs.context.outputs.weekly == 'true' }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-to=type=gha,mode=max
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ghcr.io/${{ needs.context.outputs.repository_lower }}/
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_sha }}
+        IMAGE_LABEL: nightly
+        # NEVER true here. `*-latest` is our main; a nightly that moved it would
+        # hand every consumer an unreviewed upstream commit without them asking.
+        PUBLISH_LATEST: false
+
+  accelerators:
+    name: ${{ matrix.target }} images
+    needs: [context]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [rocm, xpu]
+    env:
+      REGISTRY: ghcr.io
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Free Disk Space
+      uses: jlumbroso/free-disk-space@v1.3.1
+      with:
+        tool-cache: true
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: true
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.3.0
+      with:
+        buildkitd-flags: --debug
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v4.6.0
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build ${{ matrix.target }} images
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: ${{ matrix.target }}
+        push: true
+        no-cache: ${{ needs.context.outputs.weekly == 'true' }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-to=type=gha,mode=max
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ghcr.io/${{ needs.context.outputs.repository_lower }}/
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_sha }}
+        IMAGE_LABEL: nightly
+        # NEVER true here. `*-latest` is our main; a nightly that moved it would
+        # hand every consumer an unreviewed upstream commit without them asking.
+        PUBLISH_LATEST: false

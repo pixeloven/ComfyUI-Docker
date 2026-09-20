@@ -27,17 +27,25 @@ docker compose pull
 ### Image Updates
 
 Images are rebuilt automatically:
-- **Weekly**: Every Sunday at 2:00 AM UTC, resolving the newest stable upstream release
-- **On project changes**: CI resolves the newest stable upstream release
-- **Manual**: Via GitHub Actions workflow
+- **Nightly**: 02:00 UTC daily, from upstream ComfyUI **master** → `*-nightly`,
+  every runtime. This is the channel that carries day-zero model support, which
+  upstream merges to master up to a week before it tags a release. Sundays
+  rebuild without cache — the weekly fresh rebuild, folded in as a cache policy
+  rather than a second workflow.
+- **On project changes**: a push to `main` builds and moves `*-latest`.
+- **Manual**: the nightly workflow takes a `ref` input — a branch, tag or commit
+  SHA — so a specific upstream commit can be built on demand.
 
 ### Use Specific Version
 
 Override the image version:
 
 ```bash
-# Mirror the upstream ComfyUI release tag
-COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-v0.33.1
+# Our released packaging version
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-2.1.0
+
+# Or follow upstream master
+COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-nightly
 
 # Or inline
 COMFY_IMAGE=ghcr.io/pixeloven/comfyui/core:cuda-abc1234 docker compose up -d

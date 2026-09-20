@@ -37,24 +37,37 @@ The cost of consolidating is that `comfyfetch`'s version no longer means "what
 changed in the CLI". The changelog means that. In exchange there is one number
 to reason about, and one page that describes the whole repo.
 
-## `version` is not `appVersion`
+## Three publishing paths, and only three
 
-The image tags already carried `cuda-v0.34.0` — that is **`COMFYUI_VERSION`,
-what is inside**. It is not a version of our packaging, and treating it as one
-is a trap: change a Dockerfile without changing ComfyUI and `cuda-v0.34.0` is
-overwritten with different bytes.
+A tag on our images answers one of three questions, and never two:
 
-So both are published:
+| Tag | Means | Written by |
+|---|---|---|
+| `complete:cuda-<sha8>` | a build of our main | push to `main` (also moves `cuda-latest`) |
+| `complete:cuda-1.2.3` | our packaging, released | a `v1.2.3` tag |
+| `complete:cuda-nightly` | upstream **master**, followed | the nightly (never moves `cuda-latest`) |
 
+**What is inside an image is not a tag.** It used to be: every target also
+published `cuda-v<COMFYUI_VERSION>`. That made an unreviewed cron the author of
+the release-image line — it resolved upstream's latest release and published
+`cuda-v0.36.0`, while a reviewed release published `cuda-2.0.0` containing
+`v0.34.0`. Two identities for one artifact, disagreeing, and a consumer pinning
+our version got an OLDER ComfyUI than one pinning `latest`.
+
+The ComfyUI inside is now stated once, by `org.opencontainers.image.version`:
+
+```sh
+docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' <image>
 ```
-complete:cuda-v0.34.0   the ComfyUI release inside   (moves)
-complete:cuda-1.2.3     our packaging of it          (cut once)
-```
+
+That is true for a commit as well as a release tag, which matters because the
+nightly builds commits.
 
 `COMFYUI_VERSION` is **pinned in `docker-bake.hcl`** and bumping it is a
 deliberate commit. It used to be resolved from upstream at build time, which
 made a release non-reproducible — the same tag rebuilt tomorrow baked a
-different ComfyUI. Tracking upstream is the weekly rebuild's job.
+different ComfyUI. Following upstream is the NIGHTLY's job, and it passes a
+resolved commit rather than a moving ref, so any nightly can be rebuilt.
 
 ## The tag does not define the version
 

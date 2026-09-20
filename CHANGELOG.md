@@ -9,6 +9,53 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 2.2.0 — 2026-09-20
+
+### A nightly channel, because day-zero support never lives in a release
+
+ComfyUI merges day-zero model support to master and tags a release up to a week
+later. Qwen-Image-2.1 was open-weighted on 2026-09-20; its support landed in
+`6bfaacc6` on 09-19, after v0.36.0 was cut on 09-15. Nothing here could build
+it: the weekly rebuild resolved upstream's latest **release**, so a
+release-following channel is structurally incapable of being day-zero.
+
+**`*-nightly` is new** — built 02:00 UTC daily from upstream master, and never
+moving `*-latest`. `workflow_dispatch` takes a `ref` (branch, tag or commit), so
+a specific upstream commit can be built on demand. Every runtime is covered, as
+the weekly was: cuda, cuda-arch, cpu, rocm, xpu.
+
+**The weekly survives as a cache policy, not a workflow.** Sundays (and
+`-f weekly=true`) bypass cache entirely, because the base image, apt and the
+torch install sit BELOW the ComfyUI clone: a nightly busts the clone layer and
+reuses everything under it, so a base-image fix would otherwise never land
+however many nightlies ran. Same ref, same tags, same jobs — one channel.
+
+One `context` job resolves the upstream commit and every build job consumes it,
+so a run cannot build two runtimes from different commits. The weekly resolved
+independently per job, which could.
+
+**`COMFYUI_VERSION` now accepts a commit SHA.** The clone was
+`git clone --depth 1 --branch "$COMFYUI_VERSION"`, and `--branch` cannot express
+a commit — so the pin could not name the thing worth building. It is now an
+explicit `fetch --depth 1` of the ref, still one round trip, and the nightly
+passes a RESOLVED commit rather than a moving ref: any nightly can be rebuilt.
+
+**The `cuda-v<upstream>` tag family is deleted.** It was a second identity for
+an artifact that already has one, and the weekly cron was its author — so an
+unreviewed job owned the release-image line, publishing `cuda-v0.36.0` while a
+reviewed release published `cuda-2.0.0` containing v0.34.0. A consumer pinning
+our version got an older ComfyUI than one pinning `latest`. What is inside is
+stated once now, by `org.opencontainers.image.version`, which is equally true
+for a commit.
+
+Three publishing paths remain, each answering one question: `cuda-<sha8>` (a
+build of our main, moves `cuda-latest`), `cuda-<semver>` (released), and
+`cuda-nightly` (upstream master).
+
+**Consumers pinning `cuda-v0.36.0` or similar must repin.** Existing tags are
+not deleted, but no new ones appear. Pin `cuda-<semver>` for stability or
+`cuda-nightly` to follow upstream — and pin by digest either way.
+
 ## 2.1.0 — 2026-09-20
 
 ### The skills reached Claude Code only, and said otherwise
