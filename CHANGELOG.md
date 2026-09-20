@@ -9,6 +9,32 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 2.1.0 — 2026-09-20
+
+### The skills reached Claude Code only, and said otherwise
+
+`skills/` shipped as a plugin whose manifest Claude Code alone could read.
+`skills/README.md` documented a pi install that has never worked, and Codex was
+not addressed at all. Every failure was silent: the install succeeds, the skill
+is absent, and only the harness the author develops on stays green.
+
+Three keys, one per harness, all now present:
+
+* `.claude-plugin/plugin.json` gains `"skills": "./skills"`. Claude Code infers
+  `skills/` by convention and so was unaffected; Codex's manifest path does not
+  infer it and installed **zero** skills.
+* `package.json` is new, carrying `"pi": { "skills": ["./skills"] }`. pi reads no
+  other manifest, so the documented `packages: ["git:github.com/…"]` entry cloned
+  the repo and loaded nothing. The README also pinned `v0.1.0`, eight releases
+  stale.
+* `skills/README.md` now states which file each harness reads, what breaks
+  without it, and the per-harness command that shows what a RUNNING harness
+  actually loaded — the tree looked correct throughout.
+
+Still outstanding, in `pixeloven/marketplace`: this repo has no catalogue entry,
+so `codex plugin add comfyui-docker@pixeloven` cannot resolve until one is added.
+That is a change to a different repository.
+
 ## 2.0.1 — 2026-09-20
 
 ### `resolve` trusted a git sha1 as a sha256 for every non-LFS file
