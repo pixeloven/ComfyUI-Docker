@@ -27,10 +27,11 @@ docker compose pull
 ### Image Updates
 
 Images are rebuilt automatically:
-- **Nightly**: 02:00 UTC daily, from upstream ComfyUI **master** → `*-nightly`.
-  This is the channel that carries day-zero model support, which upstream merges
-  to master up to a week before it tags a release. Sundays rebuild without cache
-  so base-image fixes land.
+- **Nightly**: 02:00 UTC daily, from upstream ComfyUI **master** → `*-nightly`,
+  every runtime. This is the channel that carries day-zero model support, which
+  upstream merges to master up to a week before it tags a release. Sundays
+  rebuild without cache — the weekly fresh rebuild, folded in as a cache policy
+  rather than a second workflow.
 - **On project changes**: a push to `main` builds and moves `*-latest`.
 - **Manual**: the nightly workflow takes a `ref` input — a branch, tag or commit
   SHA — so a specific upstream commit can be built on demand.

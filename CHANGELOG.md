@@ -21,8 +21,18 @@ release-following channel is structurally incapable of being day-zero.
 
 **`*-nightly` is new** — built 02:00 UTC daily from upstream master, and never
 moving `*-latest`. `workflow_dispatch` takes a `ref` (branch, tag or commit), so
-a specific upstream commit can be built on demand. Sundays rebuild without
-cache, which is the freshness guarantee the weekly used to carry.
+a specific upstream commit can be built on demand. Every runtime is covered, as
+the weekly was: cuda, cuda-arch, cpu, rocm, xpu.
+
+**The weekly survives as a cache policy, not a workflow.** Sundays (and
+`-f weekly=true`) bypass cache entirely, because the base image, apt and the
+torch install sit BELOW the ComfyUI clone: a nightly busts the clone layer and
+reuses everything under it, so a base-image fix would otherwise never land
+however many nightlies ran. Same ref, same tags, same jobs — one channel.
+
+One `context` job resolves the upstream commit and every build job consumes it,
+so a run cannot build two runtimes from different commits. The weekly resolved
+independently per job, which could.
 
 **`COMFYUI_VERSION` now accepts a commit SHA.** The clone was
 `git clone --depth 1 --branch "$COMFYUI_VERSION"`, and `--branch` cannot express
