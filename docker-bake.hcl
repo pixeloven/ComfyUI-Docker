@@ -42,7 +42,7 @@ variable "COMFYUI_VERSION" {
     // identities for one artifact, disagreeing. What is inside an image is now
     // stated once, by org.opencontainers.image.version, which the Dockerfile
     // sets from this and which is true for a commit as well as a tag.
-    default = "v0.34.0"
+    default = "v0.37.0"
 }
 
 variable "IMAGE_VERSION" {

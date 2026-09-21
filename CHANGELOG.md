@@ -9,6 +9,25 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 2.3.0 — 2026-09-21
+
+### `COMFYUI_VERSION` → v0.37.0, three releases in one step
+
+The pin had been at v0.34.0 (2026-08-26) while upstream shipped v0.35.0,
+v0.36.0 and v0.37.0. Nothing was wrong with the pin — it is deliberate and
+reviewable by design — but nothing had reviewed it, so the release images were
+five weeks behind what the nightly was proving daily.
+
+**v0.37.0 is the first tagged release containing Qwen-Image-2.1.** Support
+merged as `6bfaacc6` on 2026-09-19, four days after v0.36.0 was cut; the tag
+is 8 commits past it. A consumer on a release image could not run that model
+at all, which is why `*-nightly` existed — and this bump is what lets them
+stop using it.
+
+Everything else follows from the upstream jump and is theirs, not ours: the
+0.34→0.37 asset-catalog migration rebuilds `comfyui.db` from scratch and keeps
+the old one as `comfyui.db.bkp`. Expected on a ComfyUI upgrade of this size.
+
 ## 2.2.0 — 2026-09-20
 
 ### A nightly channel, because day-zero support never lives in a release
