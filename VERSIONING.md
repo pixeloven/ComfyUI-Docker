@@ -113,3 +113,21 @@ git tag v1.2.3 && git push --tags
 A release rebuilds every image rather than reusing digests. It is ~60 minutes
 and it happens rarely; the alternative is a release whose images came from a
 different commit than its wheel.
+
+**Push the tag. Never create the GitHub Release by hand.** The tag is the
+trigger; CI does the rest — it checks the three files agree with the tag,
+builds every image from that one commit, builds and *attests* the wheel, and
+creates the Release with `comfyfetch-<ver>-py3-none-any.whl`, `SHA256SUMS` and
+`IMAGE-DIGESTS.txt` attached.
+
+`gh release create` looks equivalent and is not. CI refuses to write into a
+Release that already exists — *"releases are immutable"* — so creating one by
+hand makes the release job **fail after the images have already published**.
+The version is then correct everywhere and the Release page is empty. That is
+what happened to v2.1.0, v2.2.0 and v2.3.0; compare them with v2.0.0, which has
+all three assets.
+
+The assets cannot be backfilled faithfully. The wheel carries a build
+provenance attestation tied to the workflow run (`attest-build-provenance`,
+verified in the same job), and a hand-uploaded wheel would look official while
+carrying none. A missing asset is honest; an unattested one is not.

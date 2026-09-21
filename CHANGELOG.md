@@ -9,6 +9,29 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 2.4.0 — 2026-09-21
+
+### The release procedure, written down where it is followed
+
+`VERSIONING.md` said `git tag && git push --tags` and stopped there, which
+reads as though the Release object is incidental. It is not: the tag is the
+trigger and **CI creates the Release**, attaching the attested wheel,
+`SHA256SUMS` and `IMAGE-DIGESTS.txt`.
+
+Creating the Release by hand with `gh release create` looks equivalent and
+isn't. CI refuses to write into one that already exists — *"releases are
+immutable"* — so the release job fails *after* every image has published. The
+version ends up correct everywhere and the Release page empty. v2.1.0, v2.2.0
+and v2.3.0 all have this shape; v2.0.0 and v1.4.0 show what it should look
+like.
+
+Those three are not backfilled on purpose. The wheel carries a provenance
+attestation bound to the workflow run, so a hand-uploaded wheel would look
+official and carry none. A missing asset is honest; an unattested one is not.
+
+This release exists to cut one correctly, and to leave the reason in the file
+someone reads before releasing.
+
 ## 2.3.0 — 2026-09-21
 
 ### `COMFYUI_VERSION` → v0.37.0, three releases in one step
