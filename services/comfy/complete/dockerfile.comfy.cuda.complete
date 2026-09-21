@@ -30,6 +30,59 @@ RUN if [[ -n "$SAGEATTENTION_WHEEL_URL" ]]; then \
         rm -f "$wheel"; \
     fi
 
+# llama-cpp-python WITH VISION, for the GGUF half of ComfyUI-QwenVL.
+#
+# WHY A THIRD-PARTY FORK, and why bake it. The node imports
+# `llama_cpp.llama_chat_format.Qwen3VLChatHandler`; upstream
+# abetlen/llama-cpp-python does not define it -- grep its
+# llama_chat_format.py and Qwen3 returns nothing, it carries
+# Qwen25VLChatHandler alone. So upstream satisfies the node's FALLBACK import
+# and silently gives you Qwen2.5-VL where you asked for Qwen3-VL. The node
+# ships no dependency for this on purpose and points at JamePeng's fork; with
+# ComfyUI-Manager's pip installs disabled (correctly), the image is the only
+# place it can come from.
+#
+# Upstream is otherwise tempting -- it publishes a real cu130 Linux wheel --
+# but its CUDA 13 build lists 75/80/86/89/90-real + 90-virtual and NO
+# 120-real, so Blackwell would JIT from sm_90 PTX on every cold start.
+#
+# WHY cu131 ON A CUDA 13.0 BASE. The fork stopped building cu130 for Linux at
+# v0.3.38 (2026-05-04); Linux moved to cu131 and cu130 survives on Windows
+# only. cu131 is the same CUDA MAJOR, and that is what matters here:
+#   * the wheel vendors no CUDA runtime -- libggml-cuda.so links
+#     libcudart.so.13 / libcublas.so.13, major-only SONAMEs our 13.0.2 base
+#     satisfies;
+#   * of its 73 undefined CUDA symbols, 62 resolve against CUDA 13.0.2's
+#     cudart+cublas and the remaining 11 are Driver API, injected by the
+#     container toolkit;
+#   * it references zero VERSIONED symbols, so there is no @CUDA_13.1 trap;
+#   * its cubins include sm_120 -- native Blackwell, no JIT.
+# A CUDA 12.x wheel would NOT work: those link libcudart.so.12, which a
+# CUDA-13-only image does not have. That is a hard SONAME break, not a
+# compatibility question.
+#
+# --no-deps IS LOAD-BEARING. The fork pins numpy>=1.21.6,<=2.3.2 and this
+# image carries 2.5.2; a plain install DOWNGRADES numpy underneath torch and
+# ComfyUI. Only diskcache is genuinely missing, so it is named explicitly --
+# jinja2, typing_extensions, numpy and Pillow are already present.
+#
+# The import check is the acceptance test, and it is the node's exact
+# contract: both handler classes, by the names the node imports.
+ARG LLAMA_CPP_WHEEL_URL=""
+ARG LLAMA_CPP_WHEEL_SHA256=""
+RUN if [[ -n "$LLAMA_CPP_WHEEL_URL" ]]; then \
+        [[ -n "$LLAMA_CPP_WHEEL_SHA256" ]] || \
+            { echo "llama-cpp-python URL and checksum must be set together" >&2; exit 1; }; \
+        wheel="/tmp/${LLAMA_CPP_WHEEL_URL##*/}" && \
+        curl -fsSL --retry 5 --retry-all-errors "$LLAMA_CPP_WHEEL_URL" -o "$wheel" && \
+        echo "$LLAMA_CPP_WHEEL_SHA256  $wheel" | sha256sum --check --strict && \
+        source "$VENV_PATH/bin/activate" && \
+        pip install --no-deps "$wheel" && \
+        pip install "diskcache>=5.6.1" && \
+        python -c "from llama_cpp.llama_chat_format import Qwen3VLChatHandler, Qwen25VLChatHandler; import llama_cpp; print('llama_cpp', llama_cpp.__version__, 'handlers OK')" && \
+        rm -f "$wheel"; \
+    fi
+
 # Re-apply writable directory permissions after installing extra packages.
 RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')") && \
     find /app/.venv/lib/${PYTHON_VERSION}/site-packages -type d -exec chmod a+w {} + && \

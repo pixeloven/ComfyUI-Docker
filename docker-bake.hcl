@@ -67,6 +67,27 @@ variable "PUBLISH_LATEST" {
     default = false
 }
 
+variable "LLAMA_CPP_WHEEL_URL" {
+    // llama-cpp-python WITH VISION, from JamePeng's fork -- upstream has no
+    // Qwen3VLChatHandler, which is the class ComfyUI-QwenVL's GGUF nodes
+    // import. Arch-agnostic: ONE wheel whose cubins cover sm_75..sm_121, so it
+    // belongs on complete-cuda and every architecture variant inherits it,
+    // unlike SageAttention below.
+    //
+    // cu131 on a CUDA 13.0 base is deliberate -- the fork stopped building
+    // cu130 for Linux at v0.3.38. Same CUDA major, major-only SONAMEs, no
+    // versioned symbols, sm_120 cubin present. The dockerfile carries the
+    // full argument.
+    default = "https://github.com/JamePeng/llama-cpp-python/releases/download/v0.4.0-cu131-linux-20260919/llama_cpp_python-0.4.0%2Bcu131-cp312-cp312-linux_x86_64.whl"
+}
+
+variable "LLAMA_CPP_WHEEL_SHA256" {
+    // From the GitHub release asset's own `digest` field. A release asset can
+    // be re-uploaded in place, which is why every wheel here is pinned by URL
+    // *and* checked -- the same reasoning as SAGEATTENTION_RELEASE_URL.
+    default = "c31ced51b0de0b9534df4f6ec2cfcc2e3f23f310cbbeea8ed5b5b4f3c4e4cf58"
+}
+
 variable "SAGEATTENTION_RELEASE_URL" {
     // Release produced from thu-ml/SageAttention v2.2.0 for the Python,
     // PyTorch, and CUDA ABI used by the current CUDA image. NOT immutable --
@@ -242,6 +263,10 @@ target "complete-cuda" {
     }
     dockerfile = "dockerfile.comfy.cuda.complete"
     platforms = PLATFORMS
+    args = {
+        LLAMA_CPP_WHEEL_URL = LLAMA_CPP_WHEEL_URL
+        LLAMA_CPP_WHEEL_SHA256 = LLAMA_CPP_WHEEL_SHA256
+    }
     tags = [
         "${REGISTRY_URL}complete:cuda-${IMAGE_LABEL}",
         "${REGISTRY_URL}complete:cuda-cache",

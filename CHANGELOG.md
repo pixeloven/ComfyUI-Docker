@@ -9,6 +9,47 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 2.4.0 — 2026-09-21
+
+### llama-cpp-python with vision, baked and pinned
+
+ComfyUI-QwenVL's GGUF nodes failed at import with `No module named
+'llama_cpp'`, and the node ships no dependency for it on purpose. With
+ComfyUI-Manager's pip installs disabled — correctly — the image is the only
+place it can come from.
+
+**The fork is required, and that is a measured claim.** The node imports
+`llama_cpp.llama_chat_format.Qwen3VLChatHandler`; upstream
+abetlen/llama-cpp-python does not define it, carrying `Qwen25VLChatHandler`
+alone. Upstream therefore satisfies the node's *fallback* import and silently
+gives Qwen2.5-VL where Qwen3-VL was asked for. Upstream's CUDA 13 build also
+lists no `120-real`, so Blackwell would JIT from sm_90 PTX on every cold start.
+
+**cu131 on a CUDA 13.0 base is deliberate.** The fork stopped building cu130
+for Linux at v0.3.38; Linux moved to cu131. Same CUDA major, and the wheel
+vendors no CUDA runtime — it links `libcudart.so.13` / `libcublas.so.13`, both
+major-only SONAMEs our base satisfies. Of its 73 undefined CUDA symbols, 62
+resolve against 13.0.2's cudart+cublas and the other 11 are Driver API from the
+container toolkit; it references zero versioned symbols, so there is no
+`@CUDA_13.1` trap; and its cubins include `sm_120`. A CUDA 12.x wheel would NOT
+work — those link `libcudart.so.12`, which a CUDA-13-only image does not have.
+
+**`--no-deps` is load-bearing.** The fork pins `numpy<=2.3.2` and this image
+carries 2.5.2, so a plain install downgrades numpy underneath torch and
+ComfyUI. Only `diskcache` was genuinely missing and is named explicitly.
+
+Pinned by URL *and* sha256 and verified at build time by importing both handler
+classes — the node's exact contract — following the SageAttention pattern,
+because a GitHub release asset can be re-uploaded in place.
+
+Arch-agnostic: one wheel covering sm_75..sm_121, declared on `complete-cuda` so
+every architecture variant inherits it. The `complete` images grow by roughly
+350 MB.
+
+**Bus factor:** single-maintainer fork (546 stars, MIT, tracking llama.cpp
+master, releases every 7–14 days). Pinned to an exact release asset; it does
+not float.
+
 ## 2.2.0 — 2026-09-20
 
 ### A nightly channel, because day-zero support never lives in a release
