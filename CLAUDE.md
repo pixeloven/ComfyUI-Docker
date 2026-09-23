@@ -1,32 +1,11 @@
-# ComfyUI-Docker Development Guidelines
+# CLAUDE.md
 
-Auto-generated from all feature plans. Last updated: 2026-01-30
+Guidance for Claude Code in this repo. **Behavior, delegation, planning, memory, tripwires and the platform↔local skill map live in [AGENTS.md](AGENTS.md)** (imported below), which pi and Codex read directly. This file adds only Claude-specific harness detail. Repository facts live in the local skills `comfyui-docker-conventions` and `comfyui-docker-protected-seams`.
 
-## Active Technologies
-- Python 3.12, Dockerfile syntax, Bash scripts + PyTorch 2.8+, CUDA 12.9.1, sageattention 2.2.0, sageattn3 3.0.0 (002-sage-attention-update)
-- N/A (package installation only) (002-sage-attention-update)
+@AGENTS.md
 
-- Bash (entrypoint scripts), Dockerfile syntax + gosu (privilege dropping), standard Linux utilities (groupadd, useradd, getent, chown) (001-runtime-uid-gid)
+## Claude Code specifics
 
-## Project Structure
-
-```text
-src/
-tests/
-```
-
-## Commands
-
-# Add commands for Bash (entrypoint scripts), Dockerfile syntax
-
-## Code Style
-
-Bash (entrypoint scripts), Dockerfile syntax: Follow standard conventions
-
-## Recent Changes
-- 002-sage-attention-update: Added Python 3.12, Dockerfile syntax, Bash scripts + PyTorch 2.8+, CUDA 12.9.1, sageattention 2.2.0, sageattn3 3.0.0
-
-- 001-runtime-uid-gid: Added Bash (entrypoint scripts), Dockerfile syntax + gosu (privilege dropping), standard Linux utilities (groupadd, useradd, getent, chown)
-
-<!-- MANUAL ADDITIONS START -->
-<!-- MANUAL ADDITIONS END -->
+- **Permissions** come from your user settings (`~/.claude/settings.json`). This repo ships no project `.claude/settings.json`.
+- **Local skills** are symlinks: `.claude/skills/<name>` → `../../.agents/skills/<name>`. Edit the file under `.agents/skills/`. A new skill needs both the directory and the symlink, or Claude Code will not see it.
+- **This checkout does not load the published skill.** `skills/comfy-manifest/` is the product, and consumers install it through `.claude-plugin/`. A session sees it only if the `comfyui-docker@pixeloven` plugin is installed, and then at the installed version, not your working copy. Read it by path when a change touches `comfyfetch` or the manifest format.

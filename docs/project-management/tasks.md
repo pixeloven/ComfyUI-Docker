@@ -53,7 +53,7 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 
 ### Platform Evolution
 - [x] **Drop A111 Support**: Remove Automatic1111 Docker support, focus on ComfyUI with preset workflows
-- [ ] **Project Restructure**: Move under PixelOven and either merge into harmony project or keep separate as comfy-docker
+- [ ] **Project Restructure**: Decide whether this stays a standalone repository
 - [ ] **Multi-Modal Support**: Consider expanding beyond image generation (audio, text, etc.)
 
 ### Alternative Platforms
@@ -85,7 +85,7 @@ Current issues, technical debt, and roadmap items for the ComfyUI Docker project
 
 ### Phase 4: Platform Evolution (Long-term)
 1. Explore Trellis/OpenUI/Ollama integration
-2. Make repository structure decision (harmony project)
+2. Make repository structure decision
 3. Evaluate multi-modal AI workflow support
 
 ## 🆕 New Priorities Based on Comparative Analysis
