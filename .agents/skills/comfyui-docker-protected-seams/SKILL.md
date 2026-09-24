@@ -70,8 +70,9 @@ registry is what they check against.
 
 - **Pattern:** `SAGEATTENTION_RELEASE_URL` and each `SAGEATTENTION_WHEEL_SHA256`,
   `MCP_VERSION`, the `sam2` commit in `extra-requirements.txt`, the base-image tags in
-  `services/*/dockerfile.*`, action versions in workflows, and the `sed` patch to
-  upstream `server.py` in `dockerfile.comfy.mcp`.
+  `services/*/dockerfile.*`, action versions in workflows, and the two patches to
+  upstream in `services/mcp/`: the `sed` to `server.py` in `dockerfile.comfy.mcp`,
+  and the MCP SDK bound in `constraints.txt` (`mcp<2`, joenorton/comfyui-mcp-server#18).
 - **Risk:** executing unreviewed third-party code, or a silent ABI or behavior change.
 - **Response:** flag any change that removes a hash or moves a pin to a moving ref.
   A routine Dependabot action bump is expected.

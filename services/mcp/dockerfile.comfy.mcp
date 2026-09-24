@@ -24,11 +24,21 @@ RUN groupadd -g "$APP_GID" comfy && \
 WORKDIR /app
 
 # Fetch pinned upstream source
+# Upstream's requirements.txt says only mcp>=0.9.0, so pip takes the newest SDK;
+# mcp 2.x removed mcp.server.fastmcp, which upstream imports, and the container
+# crashes on start (joenorton/comfyui-mcp-server#18). constraints.txt holds the
+# SDK to 1.x. The floor is 1.8.0, the first with the streamable-http transport
+# and the stateless_http setting that upstream's server.py uses.
 ARG MCP_VERSION
+COPY constraints.txt /tmp/constraints.txt
 RUN git clone --depth 1 --branch "$MCP_VERSION" \
       https://github.com/joenorton/comfyui-mcp-server.git . && \
-    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -c /tmp/constraints.txt -r requirements.txt && \
     rm -rf .git
+
+# Prove the SDK import upstream depends on resolves at BUILD time, so SDK drift
+# fails the build rather than the container.
+RUN python -c "from mcp.server.fastmcp import FastMCP"
 
 # Upstream FastMCP() defaults host="127.0.0.1" via its __init__ kwarg default,
 # which explicit-kwarg initialization makes impossible to override via env var.

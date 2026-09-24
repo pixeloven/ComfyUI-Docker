@@ -122,7 +122,7 @@ There is no date tag.
   `comfy.yaml` covers **models only** today. `comfy-lock.yaml` has a `custom_nodes`
   section in comfy-cli's shape, but `comfyfetch` does not act on it.
 - Pins that move only on purpose: `COMFYUI_VERSION`, the SageAttention URL and sha256 values,
-  `MCP_VERSION`, the `sam2` commit in `extra-requirements.txt`, and GitHub Action versions
+  `MCP_VERSION` and the MCP SDK bound in `services/mcp/constraints.txt`, the `sam2` commit in `extra-requirements.txt`, and GitHub Action versions
   (exact semver tags, bumped by Dependabot).
 
 ## Project invariants
