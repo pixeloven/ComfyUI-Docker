@@ -21,7 +21,10 @@ RUN umask 022 && \
 # We clone into a temporary directory and move to /app/ComfyUI to prevent
 # permission issues if we were to mount /app entirely in dev modes
 ARG RUNTIME=cuda
-ARG COMFYUI_VERSION=v0.33.1
+# No default: docker-bake.hcl is the only source of the pin. A build that skips
+# bake fails here rather than quietly shipping a stale ComfyUI.
+ARG COMFYUI_VERSION
+RUN test -n "$COMFYUI_VERSION" || { echo "COMFYUI_VERSION is required; build with docker buildx bake" >&2; exit 1; }
 
 # CUDA wheel index for the torch family (torch / torchaudio / torchvision).
 # Defaults to the current stable NVIDIA channel. CPU, ROCm, and XPU targets
@@ -63,7 +66,7 @@ RUN --mount=type=cache,target=/app/.cache/pip \
 # ==================================================================
 FROM runtime AS core
 
-ARG COMFYUI_VERSION=v0.33.1
+ARG COMFYUI_VERSION
 ARG RUNTIME=cuda
 
 LABEL org.opencontainers.image.source="https://github.com/Comfy-Org/ComfyUI" \

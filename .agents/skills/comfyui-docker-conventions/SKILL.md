@@ -166,7 +166,7 @@ docker buildx bake <target|group> --load         # or make cuda / cpu / rocm / x
 docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
 ```
 
-`uv run` creates `services/fetch/.venv`, which `.gitignore` does not match, so
-stage files by name. No Python or shell linter or formatter is configured. The one
+`uv run` creates `services/fetch/.venv`, which `.gitignore` covers (`.venv/`), but
+stage files by name anyway. No Python or shell linter or formatter is configured. The one
 exception is actionlint, which runs shellcheck over the workflow `run:` blocks;
 `entrypoint.sh` and `startup.sh` are not linted.

@@ -150,6 +150,12 @@ jobs:
             agree "${release_version}" \
               "$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['version'])")" \
               .claude-plugin/plugin.json v
+            agree "${release_version}" \
+              "$(python3 -c "import json;print(json.load(open('package.json'))['version'])")" \
+              package.json v
+            agree "${release_version}" \
+              "$(python3 -c "import tomllib;print(next(p['version'] for p in tomllib.load(open('services/fetch/uv.lock','rb'))['package'] if p['name']=='comfyfetch'))")" \
+              services/fetch/uv.lock v
             image_version="${release_version}"
             fetch_version="${release_version}"
             ;;
@@ -160,11 +166,13 @@ jobs:
         esac
 
         # Every push, not just releases: drift found on the tag is drift found
-        # too late. One repo, one number -- these three files all state it.
+        # too late. One repo, one number -- these five files all state it.
         declared="$(tr -d '[:space:]' < VERSION)"
         for pair in \
           ".claude-plugin/plugin.json:$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['version'])")" \
-          "services/fetch/pyproject.toml:$(python3 -c "import tomllib;print(tomllib.load(open('services/fetch/pyproject.toml','rb'))['project']['version'])")"
+          "services/fetch/pyproject.toml:$(python3 -c "import tomllib;print(tomllib.load(open('services/fetch/pyproject.toml','rb'))['project']['version'])")" \
+          "package.json:$(python3 -c "import json;print(json.load(open('package.json'))['version'])")" \
+          "services/fetch/uv.lock:$(python3 -c "import tomllib;print(next(p['version'] for p in tomllib.load(open('services/fetch/uv.lock','rb'))['package'] if p['name']=='comfyfetch'))")"
         do
           if [ "${pair#*:}" != "${declared}" ]; then
             echo "::error::${pair%%:*} is ${pair#*:} but VERSION is ${declared}; every artifact ships one version"

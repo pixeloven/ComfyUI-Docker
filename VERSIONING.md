@@ -17,8 +17,9 @@ GitHub Release:
 | `comfyfetch` **wheel** | release asset | URL + the published `SHA256SUMS` |
 | skills plugin | the git tag | `@v1.2.3` |
 
-The version lives in `VERSION`. `services/fetch/pyproject.toml` and
-`.claude-plugin/plugin.json` must state the same number — checked on **every
+The version lives in `VERSION`. `services/fetch/pyproject.toml`,
+`.claude-plugin/plugin.json`, `package.json` and the `comfyfetch` entry in
+`services/fetch/uv.lock` must state the same number — checked on **every
 push**, not at release time, because drift found on the tag is drift found too
 late.
 
@@ -114,7 +115,8 @@ Adding is never major: a new env var, volume, profile, or image is a minor.
 
 ```sh
 echo 1.2.3 > VERSION
-# match it in services/fetch/pyproject.toml and .claude-plugin/plugin.json
+# match it in services/fetch/pyproject.toml, .claude-plugin/plugin.json, package.json
+# and services/fetch/uv.lock (`cd services/fetch && uv lock`)
 # add a dated `## 1.2.3 — YYYY-MM-DD` section to CHANGELOG.md
 git commit -am "release 1.2.3"
 git tag v1.2.3 && git push --tags
