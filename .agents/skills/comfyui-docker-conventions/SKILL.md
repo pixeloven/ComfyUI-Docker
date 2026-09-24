@@ -16,7 +16,7 @@ this skill disagree, the file is right, so fix the skill in the same change.
 | `services/runtime/` | Base images: `dockerfile.cuda.runtime` (`nvidia/cuda:13.0.2-base-ubuntu24.04`) and `dockerfile.cpu.runtime` (`ubuntu:24.04`, used for cpu, **rocm and xpu**) |
 | `services/comfy/core/` | `dockerfile.comfy.core` (a builder stage, then the `core` stage), `entrypoint.sh`, `startup.sh` |
 | `services/comfy/complete/` | `dockerfile.comfy.cuda.complete`, built `FROM core`, and `extra-requirements.txt` |
-| `services/mcp/` | `dockerfile.comfy.mcp`, which packages upstream `joenorton/comfyui-mcp-server` (`MCP_VERSION` is set in bake). It is standalone on `python:3.12-slim` and has no README. |
+| `services/mcp/` | `dockerfile.comfy.mcp`, which packages upstream `joenorton/comfyui-mcp-server` (`MCP_VERSION` is set in bake). It is standalone on `python:3.12-slim`; see its README. |
 | `services/fetch/` | `comfyfetch` (Python, Typer, uv project; verbs `resolve`, `fetch`, `check`, `build`, `facts`), its bundled JSON schemas, its tests, and its image (`python:3.13-alpine`) |
 | `comfy.yaml`, `comfy-lock.yaml`, `locks/` | The model manifest (intent), the generated lock (resolution), and the derived profile locks (`locks/preview.yaml`) |
 | `examples/{core-gpu,complete-gpu,core-cpu,core-amd,core-intel}/` | One standalone Compose deployment per profile, each with `.env.example` and `extra_model_paths.yaml` |

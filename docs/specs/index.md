@@ -4,7 +4,7 @@ Specification-driven design docs for key parts of the ComfyUI Docker project.
 
 ## Current Specs
 
-- **[Custom Nodes Snapshot Spec](custom-nodes-snapshot-spec.md)** – specification for how the Complete image manages and installs its bundled custom nodes using ComfyUI’s CLI and snapshot support.
+None yet.
 
 ## Candidate Future Specs
 

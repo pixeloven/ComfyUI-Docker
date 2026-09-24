@@ -51,8 +51,9 @@ registry is what they check against.
 - **Risk:** a deployment that worked breaks on `docker compose pull`, or only under
   a UID nobody tested. That includes Kubernetes `runAsUser` deployments, which
   this repo cannot see.
-- **Response:** flag it. Keep existing volume mounts working. For a break, the owner
-  decides between a major version and a distinct tag.
+- **Response:** flag it. Keep existing volume mounts working. A break is a **major**
+  version (`VERSIONING.md` → *What counts as major*); the owner confirms the
+  classification.
 
 ### 5. Secrets and credentials
 

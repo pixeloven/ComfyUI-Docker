@@ -97,8 +97,18 @@ accidental.
 
 ## What counts as major
 
-A break in the **lock or manifest format**. Consumers pin those formats, so a
-format change is not a patch however small the diff looks.
+Anything that breaks a consumer who changes nothing but the version they pull:
+
+- **The lock or manifest format.** Consumers pin those formats, so a format
+  change is not a patch however small the diff looks.
+- **The runtime contract.** An env var renamed, removed, or given a new meaning
+  (`PUID`, `PGID`, `COMFY_*`, `CLI_ARGS`); a volume path under `/app`; the port;
+  how the entrypoint handles the UID. A compose file or Kubernetes manifest that
+  worked on `1.4` must still work on `1.5`, and this repo cannot see most of
+  them.
+- **A removed image, profile, or example.** Someone's `image:` line points at it.
+
+Adding is never major: a new env var, volume, profile, or image is a minor.
 
 ## Releasing
 
