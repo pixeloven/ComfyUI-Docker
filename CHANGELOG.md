@@ -9,6 +9,22 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 2.4.1 — 2026-09-24
+
+### `mcp` starts again: the MCP SDK is held below 2
+
+`ghcr.io/pixeloven/comfyui/mcp` crashed on start with `ModuleNotFoundError: No
+module named 'mcp.server.fastmcp'`. Upstream `joenorton/comfyui-mcp-server`
+v1.1.1 asks only for `mcp>=0.9.0`, so every build took the newest SDK. mcp 2.x
+removed `mcp.server.fastmcp`, which upstream imports. The pin on upstream
+(`MCP_VERSION`) held, but its dependency drifted underneath it
+([joenorton/comfyui-mcp-server#18](https://github.com/joenorton/comfyui-mcp-server/issues/18)).
+
+`services/mcp/constraints.txt` now holds the SDK to `mcp>=1.8.0,<2`. 1.8.0 is
+the first release with the `streamable-http` transport that upstream serves. The
+image also imports `FastMCP` at build time, so the next drift fails the build
+rather than the container. Nothing else in the release changed.
+
 ## 2.4.0 — 2026-09-21
 
 ### The release procedure, written down where it is followed

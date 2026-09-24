@@ -1,0 +1,3 @@
+# Caps upstream's requirements; installs nothing on its own. See README.md →
+# "The two patches" and joenorton/comfyui-mcp-server#18.
+mcp>=1.8.0,<2
