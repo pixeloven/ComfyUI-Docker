@@ -265,6 +265,11 @@ jobs:
           cd ../..
         done
 
+    # The Kubernetes example has no compose file. The same kubeconform image
+    # and flags as `make validate`, so a local run and CI agree.
+    - name: Validate the Kubernetes example
+      run: docker run --rm -v "$PWD":/repo -w /repo ghcr.io/yannh/kubeconform:v0.8.0 -strict -summary examples/kubernetes
+
   test-bake-targets:
     runs-on: ubuntu-latest
     steps:

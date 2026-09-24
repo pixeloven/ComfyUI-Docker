@@ -24,6 +24,9 @@ Optimize ComfyUI for your hardware with CLI arguments and resource configuration
 ### [Current Feature Support](features.md)
 See what the modern ComfyUI ecosystem provides and how this image exposes it.
 
+### [Runtime Contract](runtime-contract.md)
+The env vars, volume paths, port, readiness probe and startup-user behaviour that every deployment relies on, including Kubernetes.
+
 ---
 
 **[⬆ Back to Documentation](../index.md)**

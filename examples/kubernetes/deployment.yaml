@@ -1,0 +1,117 @@
+# ComfyUI on Kubernetes -- the non-root path of the runtime contract.
+# See README.md here and docs/user-guides/runtime-contract.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: comfyui
+  labels:
+    app.kubernetes.io/name: comfyui
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the ReadWriteOnce volumes and the SQLite
+  # database on /app/user cannot be shared by an old and a new pod at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: comfyui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: comfyui
+    spec:
+      securityContext:
+        # A non-root runAsUser makes the entrypoint skip PUID/PGID, useradd,
+        # chown and gosu, and exec ComfyUI directly as this UID.
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        # Nothing chowns the volumes on the non-root path. fsGroup is what
+        # makes each PVC group-owned by 1000 and group-writable.
+        fsGroup: 1000
+        # Check only the volume root, so a large model store is not relabelled
+        # file by file on every start.
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: comfyui
+          # A placeholder that moves. Pin a release and a digest instead:
+          #   ghcr.io/pixeloven/comfyui/core:cpu-X.Y.Z@sha256:<digest>
+          # For NVIDIA, use a cuda image and add nvidia.com/gpu to the limits.
+          image: ghcr.io/pixeloven/comfyui/core:cpu-latest
+          env:
+            - name: COMFY_PORT
+              value: "8188"
+            - name: COMFY_ENABLE_MANAGER
+              value: "true"
+            - name: COMFY_ENABLE_ASSETS
+              value: "true"
+            - name: CLI_ARGS
+              value: ""
+          ports:
+            - name: http
+              containerPort: 8188
+          # The port opens only after custom nodes have loaded, so a 200 here
+          # means ready. There is no liveness probe: /system_stats cannot tell
+          # a wedged ComfyUI from a busy one.
+          readinessProbe:
+            httpGet:
+              path: /system_stats
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 16Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            # The root filesystem stays writable: the entrypoint may append to
+            # /etc/passwd for an unknown UID, and the Manager installs
+            # custom-node dependencies into the venv.
+            readOnlyRootFilesystem: false
+          volumeMounts:
+            - name: models
+              mountPath: /app/models
+            - name: custom-nodes
+              mountPath: /app/custom_nodes
+            - name: datasets
+              mountPath: /app/datasets
+            - name: input
+              mountPath: /app/input
+            - name: output
+              mountPath: /app/output
+            - name: temp
+              mountPath: /app/temp
+            - name: user
+              mountPath: /app/user
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: comfyui-models
+        - name: custom-nodes
+          persistentVolumeClaim:
+            claimName: comfyui-custom-nodes
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: comfyui-datasets
+        - name: input
+          persistentVolumeClaim:
+            claimName: comfyui-input
+        - name: output
+          persistentVolumeClaim:
+            claimName: comfyui-output
+        - name: temp
+          persistentVolumeClaim:
+            claimName: comfyui-temp
+        - name: user
+          persistentVolumeClaim:
+            claimName: comfyui-user

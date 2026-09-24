@@ -225,6 +225,7 @@ The Python virtual environment's package and entry-point directories are world-w
 - **[Running Containers](docs/user-guides/running.md)** - Docker Compose operations and `.env` configuration
 - **[Data Management](docs/user-guides/data.md)** - Models, workflows, and persistent storage
 - **[Performance Tuning](docs/user-guides/performance.md)** - CLI arguments and resource optimization
+- **[Runtime Contract](docs/user-guides/runtime-contract.md)** - Env vars, volumes, port, readiness and startup user that deployments rely on
 
 **Advanced:**
 
