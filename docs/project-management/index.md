@@ -9,7 +9,7 @@ Detailed analysis of existing ComfyUI Docker repositories and comparison with ou
 
 ## 🧩 Legacy Planning Docs
 
-These documents are retained for historical context. Day-to-day work should be guided by SPEC documents and GitHub issues rather than these plans.
+These documents are kept for historical context and are no longer maintained. Current work is tracked in [GitHub issues](https://github.com/pixeloven/ComfyUI-Docker/issues). For a multi-step change, the plan of record is its issue (see *Planning model* in [AGENTS.md](../../AGENTS.md)).
 
 ### [Tasks](tasks.md)
 Archived roadmap and technical debt list for the ComfyUI Docker project.

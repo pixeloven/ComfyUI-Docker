@@ -14,7 +14,7 @@ all: ## Build all images (runtime + core + complete) and load to Docker
 	docker buildx bake all --load
 
 # Runtime images
-runtime: ## Build both runtime images (CUDA + CPU) and load to Docker
+runtime: ## Build all runtime images (CUDA, CPU, ROCm, XPU) and load to Docker
 	docker buildx bake runtime --load
 
 runtime-cuda: ## Build CUDA runtime image and load to Docker
@@ -24,7 +24,7 @@ runtime-cpu: ## Build CPU runtime image and load to Docker
 	docker buildx bake runtime-cpu --load
 
 # Core images 
-core: ## Build core images (runtime + core layers for both CUDA/CPU) and load to Docker
+core: ## Build core images (runtime + core layers for CUDA, CPU, ROCm, XPU) and load to Docker
 	docker buildx bake core --load
 
 core-cuda: ## Build CUDA core image and load to Docker

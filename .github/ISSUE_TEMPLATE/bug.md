@@ -15,10 +15,12 @@ assignees: ""
 
 **Deployment Profile**
 
-Which Docker Compose profile are you using?
-- [ ] Core (core-cuda)
-- [ ] Core CPU (core-cpu)
-- [ ] Complete (complete-cuda)
+Which example are you running?
+- [ ] core-gpu (NVIDIA)
+- [ ] complete-gpu (NVIDIA)
+- [ ] core-cpu
+- [ ] core-amd (ROCm)
+- [ ] core-intel (XPU)
 - [ ] Other/Custom: _______
 
 **Hardware / Software**
@@ -65,7 +67,7 @@ Which custom environment variables are you using (if any)?
 
 **Logs**
 
-<!--  Run: `docker compose logs core-cuda` (or your profile) and paste relevant output -->
+<!--  Run: `docker compose logs comfyui` from your example directory and paste relevant output -->
 ```
 paste logs here
 ```

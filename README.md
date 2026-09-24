@@ -227,7 +227,6 @@ The Python virtual environment's package and entry-point directories are world-w
 - **[Performance Tuning](docs/user-guides/performance.md)** - CLI arguments and resource optimization
 
 **Advanced:**
-- **[Custom Nodes Snapshot Spec](docs/specs/custom-nodes-snapshot-spec.md)** - How the Complete image manages bundled dependencies
 
 ### 🛠️ Development
 
