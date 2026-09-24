@@ -132,7 +132,7 @@ Configure builds using environment variables:
 REGISTRY_URL=ghcr.io/myuser/comfyui/
 IMAGE_LABEL=custom
 PLATFORMS=linux/amd64
-COMFYUI_VERSION=v0.33.1                # Stable source tag (the default)
+COMFYUI_VERSION=vX.Y.Z                 # Overrides the pin in docker-bake.hcl (bake is required; the Dockerfile has no default)
 
 # Explicit nightly build
 COMFYUI_VERSION=master IMAGE_LABEL=nightly docker buildx bake cuda --load

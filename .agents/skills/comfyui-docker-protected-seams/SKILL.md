@@ -20,8 +20,9 @@ registry is what they check against.
   `tags = [...]` in `docker-bake.hcl`; anything in `nightly.yml` that sets tags.
 - **Risk:** a tag starts meaning two things. The nightly moving `*-latest` hands every
   consumer an unreviewed upstream commit. A hand-made Release makes the release job
-  fail after images publish. A version bump that skips `package.json` or `uv.lock`
-  passes CI.
+  fail after images publish. The `context` job fails any push where the five
+  version files disagree; a change that drops a file from that check lets a
+  partial bump ship.
 - **Response:** flag it. Check against `VERSIONING.md`: one version line, three
   publishing paths, CI creates the Release.
 
