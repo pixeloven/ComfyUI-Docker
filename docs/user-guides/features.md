@@ -1,8 +1,10 @@
 # Current ComfyUI Feature Support
 
 Audit date: 2026-08-14. The latest stable ComfyUI release at audit time was
-v0.33.1. Repository builds pin that stable source release by default. Scheduled
-image publishing resolves the newest upstream stable tag and also publishes mirrored
+v0.33.1. The stable source pin now lives only in `docker-bake.hcl`, and images
+must be built with `docker buildx bake`: the Dockerfile has no default and fails
+without `COMFYUI_VERSION`. Scheduled image publishing resolves the newest
+upstream stable tag and also publishes mirrored
 tags such as `core:cuda-v0.33.1`. Set `COMFYUI_VERSION=master` explicitly when
 building a nightly image.
 
