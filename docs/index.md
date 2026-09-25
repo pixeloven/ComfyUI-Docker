@@ -15,6 +15,7 @@ Essential guides for users:
 - **[Data Management](user-guides/data.md)** - Models, workflows, and persistent storage
 - **[Performance Tuning](user-guides/performance.md)** - CLI arguments and resource optimization
 - **[Current Feature Support](user-guides/features.md)** - Ecosystem audit and container support matrix
+- **[Runtime Contract](user-guides/runtime-contract.md)** - Env vars, volumes, port, readiness and startup user that deployments rely on
 
 **[View all User Guides →](user-guides/index.md)**
 

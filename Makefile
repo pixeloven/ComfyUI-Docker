@@ -59,13 +59,16 @@ clean: ## Clean build cache and rebuild from scratch
 	docker buildx bake all --no-cache --load
 
 # Utility targets
-validate: ## Validate Bake and example Compose configurations
+KUBECONFORM ?= docker run --rm -v "$(CURDIR)":/repo -w /repo ghcr.io/yannh/kubeconform:v0.8.0
+
+validate: ## Validate Bake, example Compose configurations and the Kubernetes example
 	docker buildx bake --print all > /dev/null
 	cd examples/core-gpu && docker compose config --quiet
 	cd examples/complete-gpu && docker compose config --quiet
 	cd examples/core-cpu && docker compose config --quiet
 	cd examples/core-amd && docker compose config --quiet
 	cd examples/core-intel && docker compose config --quiet
+	$(KUBECONFORM) -strict -summary examples/kubernetes
 
 push: ## Build and push all images to registry (don't load locally)
 	docker buildx bake all --push
