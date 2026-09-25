@@ -9,6 +9,78 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 3.0.0 — 2026-09-25
+
+### Breaking: the `mcp` image is now a hardened artokun/comfyui-mcp
+
+`ghcr.io/pixeloven/comfyui/mcp` keeps its name, its port (`9000`), its path
+(`/mcp`) and `COMFYUI_URL`, but the server inside is new, and it **requires a
+token**. It packages [artokun/comfyui-mcp](https://github.com/artokun/comfyui-mcp)
+`0.52.203` from npm, pinned by `ARTOKUN_VERSION` in `docker-bake.hcl`, on
+`node:22-slim`. It replaces joenorton/comfyui-mcp-server, which couldn't run an
+arbitrary workflow, inspect nodes or install anything, and served an
+unauthenticated endpoint.
+
+It was the only server that passed all four tasks of the Phase 1 evaluation
+(build and run a workflow, install a pinned node pack and use it, answer
+questions about the live node set, report a real validation error) against a
+containerized ComfyUI ([#102](https://github.com/pixeloven/ComfyUI-Docker/issues/102)).
+It's the interim default until
+[#103](https://github.com/pixeloven/ComfyUI-Docker/issues/103) decides the long
+term.
+
+**To upgrade:**
+
+1. **Set `COMFYUI_MCP_HTTP_TOKEN`** to a long random secret, such as
+   `openssl rand -hex 32`, from your secret store. Without it the container exits
+   1 at start with `Refusing to start: HTTP MCP transport bound on non-loopback
+   host 0.0.0.0 WITHOUT an auth token`.
+2. **Send the token from every client**, as `Authorization: Bearer <token>` or
+   `X-API-Key: <token>`. For Claude Code: `claude mcp add --transport http comfyui
+   http://<host>:9000/mcp --header "Authorization: Bearer <token>"`. A request
+   without it gets `401`.
+3. **Update anything that names a tool.** The tool names are all different, for
+   example `get_system_stats`, `create_workflow`, `enqueue_workflow`,
+   `install_custom_node` and `restart_comfyui`. Prompts, allow lists and scripts
+   written for the old server's tools won't find them.
+4. **Keep ComfyUI-Manager on** (`COMFY_ENABLE_MANAGER=true`, the default) if agents
+   should restart ComfyUI: the server restarts it through Manager's reboot
+   endpoint.
+
+What the image sets, so a deployment can't forget it (the
+[README](services/mcp/README.md) explains each):
+
+- A token is required. The server binds `0.0.0.0` and refuses to start without one.
+- Self-update is off (`COMFYUI_MCP_AUTO_UPDATE_DISABLE=1`). Upstream otherwise
+  installs `comfyui-mcp@latest` over itself at startup.
+- Panel auto-install is off (`COMFYUI_MCP_PANEL_AUTOINSTALL=0`). Upstream otherwise
+  installs its own custom node into ComfyUI.
+- `runpod*`, `train_*`, `report_issue` and `apps` are denied
+  (`COMFYUI_MCP_TOOL_DENY`). Those spend money, need Docker, or publish to the
+  author's services. The other 34 tools stay.
+- ComfyUI is always treated as remote (`COMFYUI_MCP_FORCE_REMOTE=1`), so
+  `restart_comfyui` goes through Manager's reboot endpoint with no shell command.
+- The build fails unless `ARTOKUN_VERSION` is an exact version, and a build-time
+  probe checks that the server refuses to start without a token and answers an
+  MCP `initialize` with one.
+
+Two limits to know about:
+
+- **Node installs need Manager to accept them.** Manager refuses installs over HTTP
+  when ComfyUI listens on all interfaces, which is how our images start it. Until
+  [#125](https://github.com/pixeloven/ComfyUI-Docker/issues/125) decides the image
+  side, `install_custom_node` works only when ComfyUI listens on loopback and shares
+  the MCP container's network, or when Manager's security config allows it.
+- **ComfyUI still has no authentication.** The token protects the MCP server, not
+  ComfyUI's port.
+
+Run the container with an init process (`init: true` in Compose, `docker run
+--init`), or every stop waits out the timeout: the server doesn't handle `SIGTERM`
+as PID 1.
+
+`services/mcp/constraints.txt` and the `sed` patch to upstream's `server.py` are
+gone, with the Python server they existed for.
+
 ## 2.4.2 — 2026-09-25
 
 ### Any `PUID` and `PGID` work when the container starts as root
