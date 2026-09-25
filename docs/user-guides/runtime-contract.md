@@ -60,7 +60,7 @@ what depends on it.
 |----------|-------|
 | `COMFYUI_VERSION` | The ComfyUI ref built into the image. `org.opencontainers.image.version` carries the same value |
 | `COMFY_RUNTIME` | `cuda`, `cpu`, `rocm` or `xpu` (see above) |
-| `HOME` | `/app` |
+| `HOME` | `/app`. A root start with an existing system user's `PUID` replaces it (see [What Startup Promises](#what-startup-promises)) |
 | `XDG_CACHE_HOME` | `/app/.cache` |
 | `VENV_PATH` | `/app/.venv` (the entrypoint activates `/app/.venv` directly, not through this variable) |
 | `PATH` | Starts with `/app/.venv/bin` |
@@ -202,8 +202,13 @@ These outcomes are the contract:
 
 - **Any UID and GID from 0 to 65534 runs.** Started as root, ComfyUI runs as
   `PUID:PGID`. Started as non-root, it runs as the UID and GID it was given.
-- **The runtime UID and GID have a passwd and group entry, and `HOME` is `/app`**,
-  including a UID the image has never heard of. Python and PyTorch look these up.
+- **The runtime UID and GID have a passwd and group entry**, including a UID the
+  image has never heard of. Python and PyTorch look these up.
+- **`HOME` is `/app` on the non-root path, and for any entry the entrypoint
+  creates on the root path.** A root start with a `PUID` that already belongs to a
+  system user keeps that user's home directory from its passwd entry instead. For
+  example, `PUID=33` gets `/var/www` and `PUID=65534` gets `/nonexistent`. That
+  behaviour is long-standing and intended, not a defect.
 - **Started as root, the volume roots are writable by the runtime UID** when
   ComfyUI starts. Started as non-root, making them writable is up to the deployer
   (see below).
@@ -293,10 +298,9 @@ We recommend turning off privilege escalation for the ComfyUI container:
 `allowPrivilegeEscalation: false` in the Kubernetes container `securityContext`.
 Both startup paths work with it.
 
-When you open a shell in a running container, open it as the runtime user rather
-than as root, for example `docker exec -u "$PUID:$PGID" …`, or `kubectl exec` into
-a pod that already runs as `runAsUser`. A root session inside the container inherits
-an environment that the runtime user can modify.
+Run `docker exec` and `kubectl exec` sessions as the runtime user, not as root: for
+example `docker exec -u "$PUID:$PGID" …`, or `kubectl exec` into a pod that already
+runs as `runAsUser`.
 
 ## What Counts as a Breaking Change
 
@@ -310,8 +314,8 @@ is the rule. On this page, that covers:
 - Changing the default port, or how `COMFY_PORT` sets it.
 - Breaking a promise in [What Startup Promises](#what-startup-promises): a UID or
   GID in range that used to run no longer does, `PUID`/`PGID` stop being honoured
-  on a root start, or the runtime UID loses its passwd entry, its `HOME`, or write
-  access to the volume roots.
+  on a root start, or the runtime UID loses its passwd entry, the promised `HOME`,
+  or write access to the volume roots.
 
 The mechanisms behind those promises are not frozen. The validation code, the
 `chown`, `gosu`, and how an arbitrary UID gets its entry can all change, as long as
