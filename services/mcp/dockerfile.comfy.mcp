@@ -1,57 +1,79 @@
-# MCP server for ComfyUI — joenorton/comfyui-mcp-server
-# Standalone Python image; does NOT depend on the ComfyUI runtime image.
-# Communicates with ComfyUI over HTTP (COMFYUI_URL env var).
+# MCP server for ComfyUI — artokun/comfyui-mcp, from npm, hardened.
+# Standalone Node image; does NOT depend on the ComfyUI runtime image.
+# Talks to ComfyUI over HTTP (COMFYUI_URL), and restarts it through
+# ComfyUI-Manager's HTTP API. See README.md for every default set below.
 #
 # Published as: ghcr.io/pixeloven/comfyui/mcp:<IMAGE_LABEL>
 
-ARG MCP_VERSION=v1.1.1
+ARG ARTOKUN_VERSION=0.52.203
 
-FROM python:3.12-slim
+# comfyui-mcp declares engines.node >=22.0.0.
+FROM node:22-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends git && \
-    rm -rf /var/lib/apt/lists/*
-
-# Create non-root user
+# Non-root user, as before: comfy, UID/GID 1000. The Node image already has
+# `node` at 1000:1000, so that user and its group go first.
 ARG APP_UID=1000
 ARG APP_GID=1000
-RUN groupadd -g "$APP_GID" comfy && \
+RUN userdel -r node && \
+    if getent group node >/dev/null; then groupdel node; fi && \
+    groupadd -g "$APP_GID" comfy && \
     useradd -u "$APP_UID" -g "$APP_GID" -d /app -s /bin/bash -M comfy && \
-    mkdir -p /app
+    mkdir -p /app && \
+    chown comfy:comfy /app
 
 WORKDIR /app
 
-# Fetch pinned upstream source
-# Upstream's requirements.txt says only mcp>=0.9.0, so pip takes the newest SDK;
-# mcp 2.x removed mcp.server.fastmcp, which upstream imports, and the container
-# crashes on start (joenorton/comfyui-mcp-server#18). constraints.txt holds the
-# SDK to 1.x. The floor is 1.8.0, the first with the streamable-http transport
-# and the stateless_http setting that upstream's server.py uses.
-ARG MCP_VERSION
-COPY constraints.txt /tmp/constraints.txt
-RUN git clone --depth 1 --branch "$MCP_VERSION" \
-      https://github.com/joenorton/comfyui-mcp-server.git . && \
-    pip install --no-cache-dir -c /tmp/constraints.txt -r requirements.txt && \
-    rm -rf .git
+# An exact version only: no tag, range or `latest`. The global install is owned
+# by root, so the server (running as comfy) can't rewrite itself even if
+# self-update were switched back on.
+ARG ARTOKUN_VERSION
+RUN [[ "$ARTOKUN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+      { echo "ARTOKUN_VERSION must be an exact x.y.z version, got '$ARTOKUN_VERSION'" >&2; exit 1; } && \
+    npm install -g --omit=dev --no-audit --no-fund "comfyui-mcp@$ARTOKUN_VERSION" && \
+    npm cache clean --force
 
-# Prove the SDK import upstream depends on resolves at BUILD time, so SDK drift
-# fails the build rather than the container.
-RUN python -c "from mcp.server.fastmcp import FastMCP"
-
-# Upstream FastMCP() defaults host="127.0.0.1" via its __init__ kwarg default,
-# which explicit-kwarg initialization makes impossible to override via env var.
-# Patch the constructor call directly so the server binds all interfaces.
-RUN sed -i 's/port=9000,/port=9000, host="0.0.0.0",/' server.py
-
-RUN chown -R comfy:comfy /app
+# Hardening defaults. Each one is explained in README.md.
+ENV NODE_ENV=production \
+    MCP_TRANSPORT=http \
+    MCP_HOST=0.0.0.0 \
+    MCP_PORT=9000 \
+    COMFYUI_URL=http://localhost:8188 \
+    COMFYUI_MCP_AUTO_UPDATE_DISABLE=1 \
+    COMFYUI_MCP_PANEL_AUTOINSTALL=0 \
+    COMFYUI_MCP_FORCE_REMOTE=1 \
+    COMFYUI_MCP_TOOL_DENY="runpod*,train_*,report_issue,apps"
 
 USER comfy
 
-# COMFYUI_URL is required at runtime — point to the ComfyUI service
-ENV COMFYUI_URL=http://localhost:8188
+# Prove the server starts at BUILD time, with the defaults above: it must
+# refuse to start without a token, then answer an MCP `initialize` with one.
+# The image has no curl, so Node makes the request. Scratch HOME, so nothing
+# the probe writes stays in the image.
+RUN export HOME="$(mktemp -d)"; \
+    if timeout 60 comfyui-mcp > "$HOME/refused.log" 2>&1; then \
+      echo "comfyui-mcp started without COMFYUI_MCP_HTTP_TOKEN" >&2; exit 1; \
+    fi; \
+    grep -q "Refusing to start" "$HOME/refused.log" || { cat "$HOME/refused.log" >&2; exit 1; }; \
+    COMFYUI_MCP_HTTP_TOKEN=build-probe comfyui-mcp > "$HOME/server.log" 2>&1 & \
+    pid=$!; \
+    node -e ' \
+      const init = {jsonrpc: "2.0", id: 1, method: "initialize", params: {protocolVersion: "2025-06-18", capabilities: {}, clientInfo: {name: "build-probe", version: "0"}}}; \
+      (async () => { \
+        for (let i = 0; i < 60; i++) { \
+          try { \
+            const r = await fetch("http://127.0.0.1:9000/mcp", {method: "POST", body: JSON.stringify(init), headers: {authorization: "Bearer build-probe", "content-type": "application/json", accept: "application/json, text/event-stream"}}); \
+            if (r.ok && (await r.text()).includes("serverInfo")) process.exit(0); \
+          } catch {} \
+          await new Promise((res) => setTimeout(res, 1000)); \
+        } \
+        process.exit(1); \
+      })()' \
+      || { kill "$pid"; cat "$HOME/server.log" >&2; exit 1; }; \
+    kill "$pid"; \
+    rm -rf "$HOME"
 
 EXPOSE 9000
 
-CMD ["python", "server.py"]
+CMD ["comfyui-mcp"]

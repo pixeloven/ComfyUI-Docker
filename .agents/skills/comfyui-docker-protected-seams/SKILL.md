@@ -69,11 +69,19 @@ registry is what they check against.
 ### 6. Supply-chain pins
 
 - **Pattern:** `SAGEATTENTION_RELEASE_URL` and each `SAGEATTENTION_WHEEL_SHA256`,
-  `MCP_VERSION`, the `sam2` commit in `extra-requirements.txt`, the base-image tags in
-  `services/*/dockerfile.*`, action versions in workflows, and the two patches to
-  upstream in `services/mcp/`: the `sed` to `server.py` in `dockerfile.comfy.mcp`,
-  and the MCP SDK bound in `constraints.txt` (`mcp<2`, joenorton/comfyui-mcp-server#18).
+  `ARTOKUN_VERSION` (the exact npm version of `comfyui-mcp` in the `mcp` image), the
+  `sam2` commit in `extra-requirements.txt`, the base-image tags in
+  `services/*/dockerfile.*`, action versions in workflows, and the hardening `ENV` in
+  `services/mcp/dockerfile.comfy.mcp`: `COMFYUI_MCP_AUTO_UPDATE_DISABLE`,
+  `COMFYUI_MCP_PANEL_AUTOINSTALL`, `COMFYUI_MCP_FORCE_REMOTE`, `COMFYUI_MCP_TOOL_DENY`
+  and `MCP_HOST`, which with no token makes the server refuse to start.
 - **Risk:** executing unreviewed third-party code, or a silent ABI or behavior change.
+  `comfyui-mcp` has one maintainer and ships several releases a week, and by default
+  it updates itself from npm and installs its own custom node into ComfyUI. An
+  `ARTOKUN_VERSION` bump can rename a tool or an env var: re-check the deny list
+  against that version's `tool-surface-filter.ts` and `tools/list`. Its npm
+  dependencies are caret ranges with no lockfile, so a rebuild at the same pin can
+  still resolve newer transitive packages.
 - **Response:** flag any change that removes a hash or moves a pin to a moving ref.
   A routine Dependabot action bump is expected.
 

@@ -343,7 +343,7 @@ target "mcp" {
     cache-from = ["type=registry,ref=${REGISTRY_URL}mcp:cache,optional=true"]
     cache-to   = ["type=inline"]
     args = {
-        MCP_VERSION = "v1.1.1"
+        ARTOKUN_VERSION = "0.52.203"
     }
 }
 

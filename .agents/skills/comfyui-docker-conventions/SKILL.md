@@ -16,7 +16,7 @@ this skill disagree, the file is right, so fix the skill in the same change.
 | `services/runtime/` | Base images: `dockerfile.cuda.runtime` (`nvidia/cuda:13.0.2-base-ubuntu24.04`) and `dockerfile.cpu.runtime` (`ubuntu:24.04`, used for cpu, **rocm and xpu**) |
 | `services/comfy/core/` | `dockerfile.comfy.core` (a builder stage, then the `core` stage), `entrypoint.sh`, `startup.sh` |
 | `services/comfy/complete/` | `dockerfile.comfy.cuda.complete`, built `FROM core`, and `extra-requirements.txt` |
-| `services/mcp/` | `dockerfile.comfy.mcp`, which packages upstream `joenorton/comfyui-mcp-server` (`MCP_VERSION` is set in bake). It is standalone on `python:3.12-slim`; see its README. |
+| `services/mcp/` | `dockerfile.comfy.mcp`, which installs upstream `artokun/comfyui-mcp` from npm at an exact version (`ARTOKUN_VERSION` is set in bake) and sets its hardening defaults in `ENV`: token required, deny list, force-remote restart, self-update and panel auto-install off. It is standalone on `node:22-slim`, serves `:9000/mcp`, and runs as `comfy` (1000:1000); see its README. |
 | `services/fetch/` | `comfyfetch` (Python, Typer, uv project; verbs `resolve`, `fetch`, `check`, `build`, `facts`), its bundled JSON schemas, its tests, and its image (`python:3.13-alpine`) |
 | `comfy.yaml`, `comfy-lock.yaml`, `locks/` | The model manifest (intent), the generated lock (resolution), and the derived profile locks (`locks/preview.yaml`) |
 | `examples/{core-gpu,complete-gpu,core-cpu,core-amd,core-intel}/` | One standalone Compose deployment per profile, each with `.env.example` and `extra_model_paths.yaml` |
@@ -116,7 +116,7 @@ There is no date tag.
 
 - **Base images:** official `nvidia/cuda` for CUDA. `ubuntu:24.04` for cpu, rocm and xpu,
   with the accelerator coming from PyTorch's official wheel index (not an official
-  Python image). `python:*-slim` / `-alpine` for `mcp` and `fetch`.
+  Python image). `node:22-slim` for `mcp`, and `python:*-alpine` for `fetch`.
 - **Multi-stage:** the venv, ComfyUI and torch are built in `builder` and copied into
   `core`. The runtime base keeps `build-essential` and `python3-dev`.
 - **Layer order:** base, then apt, then torch, then the ComfyUI clone. Nightly busts only the
@@ -136,7 +136,7 @@ There is no date tag.
   `comfy.yaml` covers **models only** today. `comfy-lock.yaml` has a `custom_nodes`
   section in comfy-cli's shape, but `comfyfetch` does not act on it.
 - Pins that move only on purpose: `COMFYUI_VERSION`, the SageAttention URL and sha256 values,
-  `MCP_VERSION` and the MCP SDK bound in `services/mcp/constraints.txt`, the `sam2` commit in `extra-requirements.txt`, and GitHub Action versions
+  `ARTOKUN_VERSION` (an exact npm version; the Dockerfile refuses anything else), the `sam2` commit in `extra-requirements.txt`, and GitHub Action versions
   (exact semver tags, bumped by Dependabot).
 
 ## Project invariants

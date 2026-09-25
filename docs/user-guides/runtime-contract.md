@@ -4,6 +4,9 @@ What a deployment of the `core` and `complete` images can rely on: the environme
 variables, the volume paths, the port, the readiness endpoint, and how the container
 behaves depending on the user it starts as.
 
+The separate `mcp` image has a shorter contract of its own, in
+[The `mcp` Image](#the-mcp-image).
+
 A deployment that works on one release must keep working on the next. Changing
 anything on this page in a way that breaks one is a **major** version (see
 [What counts as a breaking change](#what-counts-as-a-breaking-change)).
@@ -301,6 +304,26 @@ Both startup paths work with it.
 Run `docker exec` and `kubectl exec` sessions as the runtime user, not as root: for
 example `docker exec -u "$PUID:$PGID" …`, or `kubectl exec` into a pod that already
 runs as `runAsUser`.
+
+## The `mcp` Image
+
+`ghcr.io/pixeloven/comfyui/mcp` is an MCP server for agents, separate from the
+ComfyUI images and talking to ComfyUI over HTTP. Since 3.0.0 it packages
+[artokun/comfyui-mcp](https://github.com/artokun/comfyui-mcp). Its
+[README](../../services/mcp/README.md) explains every default.
+
+| Contract | Value |
+|----------|-------|
+| Endpoint | Streamable HTTP at `/mcp` on port `9000` (`MCP_PORT`), on all interfaces |
+| Token | `COMFYUI_MCP_HTTP_TOKEN` is **required**. Without it, the container exits 1 at start. Clients send `Authorization: Bearer <token>` or `X-API-Key: <token>`, and anything else gets `401` |
+| ComfyUI | `COMFYUI_URL`, default `http://localhost:8188`, as reachable from the `mcp` container |
+| Restart | Through ComfyUI-Manager's reboot endpoint, so ComfyUI needs Manager enabled (`COMFY_ENABLE_MANAGER=true`, the default) |
+| User | `comfy`, UID and GID `1000`. The image sets `USER`, and has no entrypoint that changes it |
+| Tools | Upstream's full set, minus `runpod*`, `train_*`, `report_issue` and `apps`. The tool names are upstream's, and change with its version |
+
+Breaking any row except *Tools* is a major version, by the same rule as the rest of
+this page. The tool list follows the pinned upstream version, which can rename or
+add tools in any release, so this page doesn't freeze it.
 
 ## What Counts as a Breaking Change
 
