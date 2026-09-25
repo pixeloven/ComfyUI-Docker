@@ -9,6 +9,42 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 2.4.2 — 2026-09-25
+
+### Any `PUID` and `PGID` work when the container starts as root
+
+The image has a user and group named `comfy` as 1000:1000. When `PUID` or
+`PGID` named an ID the image did not have, the entrypoint tried to create a
+second `comfy`, which failed, and the container exited at start. That broke the
+`PUID=3000 PGID=3000` example in the running guide, and NAS IDs such as
+1026:100, where the group exists and the user doesn't.
+
+A user or group that has to be created is now named for its ID, such as
+`comfy-3000`, with home `/app`. An ID the image already has is reused as before,
+including that user's home directory.
+
+### Hardening
+
+Defense in depth. Nothing about how the images are configured changes:
+
+- The entrypoint moved from `/app/entrypoint.sh` to `/usr/local/bin/entrypoint.sh`,
+  owned by root. It is still the image's `ENTRYPOINT`, so only a deployment that
+  names the old path explicitly (an `--entrypoint` or a Kubernetes `command:`)
+  needs to change.
+- The core image drops setuid and setgid bits, which nothing in the image needs,
+  and the `core` and `complete` builds fail if one comes back.
+- The entrypoint runs its setup steps with a fixed system `PATH`, and its
+  ownership changes on `/app` and the volume roots no longer follow symlinks. A
+  volume root that is a symlink is skipped.
+- Every example runs `comfyui` and `fetch` with `no-new-privileges:true`.
+
+### Note: building `dockerfile.comfy.core` needs `COMFYUI_VERSION`
+
+Not new in this release, but missing from the 2.4.1 notes: since #109 the
+Dockerfile has no default `COMFYUI_VERSION`, and a build without one stops with
+`COMFYUI_VERSION is required`. Build through `docker buildx bake`, which sets
+the pin, or pass `--build-arg COMFYUI_VERSION=<ref>`.
+
 ## 2.4.1 — 2026-09-24
 
 ### `mcp` starts again: the MCP SDK is held below 2

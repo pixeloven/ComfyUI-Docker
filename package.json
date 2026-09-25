@@ -1,6 +1,6 @@
 {
   "name": "@pixeloven/comfyui-docker",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "description": "Consumer skills for ComfyUI-Docker \u2014 authoring comfy.yaml, generating locks, and deploying the images.",
   "keywords": [
     "pi-package",
