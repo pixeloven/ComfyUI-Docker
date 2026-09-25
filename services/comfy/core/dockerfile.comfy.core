@@ -106,8 +106,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV COMFYUI_VERSION=$COMFYUI_VERSION
 ENV COMFY_RUNTIME=$RUNTIME
 
-# Copy startup scripts. The entrypoint starts as root, so it lives outside /app,
-# owned by root; startup.sh runs as the runtime user and stays in the app root.
+# Copy startup scripts. The entrypoint is installed root-owned in
+# /usr/local/bin; startup.sh stays in the app root.
 COPY --chown=comfy:comfy startup.sh /app/
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
@@ -169,6 +169,24 @@ EXPOSE $COMFY_PORT
 # SIGPIPE and the negation would then pass.)
 RUN found="$(find / -xdev -perm /6000 -type f)" && \
   if [ -n "$found" ]; then echo "setuid/setgid files present:" >&2; echo "$found" >&2; exit 1; fi
+
+# Likewise, no regular file may carry file capabilities (a security.capability
+# xattr). Walks / on the root filesystem only, like find -xdev.
+RUN python3 -c "$(printf '%s\n' \
+  'import os, stat, sys' \
+  'dev, bad = os.lstat("/").st_dev, []' \
+  'for root, dirs, files in os.walk("/"):' \
+  '    dirs[:] = [d for d in dirs if os.lstat(os.path.join(root, d)).st_dev == dev]' \
+  '    for name in files:' \
+  '        path = os.path.join(root, name)' \
+  '        try:' \
+  '            if stat.S_ISREG(os.lstat(path).st_mode) and os.getxattr(path, "security.capability", follow_symlinks=False):' \
+  '                bad.append(path)' \
+  '        except OSError:' \
+  '            pass' \
+  'if bad:' \
+  '    print("files with capabilities present:", *bad, sep="\n", file=sys.stderr)' \
+  '    sys.exit(1)')"
 
 # Entrypoint runs as root by default for Docker Compose PUID/PGID support.
 # K8s users override with securityContext.runAsUser — the entrypoint detects

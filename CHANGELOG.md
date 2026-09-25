@@ -25,17 +25,19 @@ including that user's home directory.
 
 ### Hardening
 
-Defense in depth. Nothing about how the images are configured changes:
+Defense in depth. Nothing you configure changes, except:
 
 - The entrypoint moved from `/app/entrypoint.sh` to `/usr/local/bin/entrypoint.sh`,
   owned by root. It is still the image's `ENTRYPOINT`, so only a deployment that
   names the old path explicitly (an `--entrypoint` or a Kubernetes `command:`)
   needs to change.
+
+Also in this release:
+
 - The core image drops setuid and setgid bits, which nothing in the image needs,
-  and the `core` and `complete` builds fail if one comes back.
-- The entrypoint runs its setup steps with a fixed system `PATH`, and its
-  ownership changes on `/app` and the volume roots no longer follow symlinks. A
-  volume root that is a symlink is skipped.
+  and the `core` and `complete` builds fail if one comes back or if any file
+  carries capabilities.
+- The entrypoint's setup steps were hardened.
 - Every example runs `comfyui` and `fetch` with `no-new-privileges:true`.
 
 ### Note: building `dockerfile.comfy.core` needs `COMFYUI_VERSION`

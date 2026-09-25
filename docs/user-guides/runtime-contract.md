@@ -206,7 +206,7 @@ has no `USER`, so it starts as root.
    Otherwise it creates group `comfy-<PGID>` or user `comfy-<PUID>` (home `/app`),
    named for the ID because the image already has `comfy` as `1000:1000`.
 3. It runs `chown PUID:PGID` on `/app`, on `/app/ComfyUI`, and on each of the seven
-   volume roots that exists. This is **not recursive**: only the directory itself
+   volume roots that exists, skipping any volume root that is a symlink. This is **not recursive**: only the directory itself
    changes owner, never what's inside it, because a model store can be terabytes.
 4. It logs `Starting with UID:GID = <PUID>:<PGID>`.
 5. It runs `exec gosu PUID:PGID`, activates the venv, and execs `startup.sh`. No root

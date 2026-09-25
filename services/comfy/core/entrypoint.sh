@@ -1,7 +1,7 @@
 #!/bin/bash
 # A fixed system PATH for the setup steps below. Both paths activate the venv
 # just before starting ComfyUI, which puts /app/.venv/bin first again.
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 set -e
 
 # =============================================================================
@@ -99,7 +99,10 @@ fi
 # Set ownership of application and persistent volume roots. Keep this
 # non-recursive: model stores can contain terabytes of data. -h changes a
 # symlink itself, never its target, and a symlinked volume root is skipped.
-chown -h "$PUID:$PGID" /app /app/ComfyUI
+chown -h "$PUID:$PGID" /app
+if [ -d /app/ComfyUI ] && [ ! -L /app/ComfyUI ]; then
+    chown -h "$PUID:$PGID" /app/ComfyUI
+fi
 for directory in \
     /app/models \
     /app/custom_nodes \
