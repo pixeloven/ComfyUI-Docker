@@ -59,7 +59,10 @@ clean: ## Clean build cache and rebuild from scratch
 	docker buildx bake all --no-cache --load
 
 # Utility targets
-KUBECONFORM ?= docker run --rm -v "$(CURDIR)":/repo -w /repo ghcr.io/yannh/kubeconform:v0.8.0
+# Pinned by tag and digest, like CI's validate-examples step. KUBERNETES_VERSION
+# is the schema version the example is checked against.
+KUBECONFORM ?= docker run --rm -v "$(CURDIR)":/repo:ro -w /repo ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
+KUBERNETES_VERSION ?= 1.36.4
 
 validate: ## Validate Bake, example Compose configurations and the Kubernetes example
 	docker buildx bake --print all > /dev/null
@@ -68,7 +71,7 @@ validate: ## Validate Bake, example Compose configurations and the Kubernetes ex
 	cd examples/core-cpu && docker compose config --quiet
 	cd examples/core-amd && docker compose config --quiet
 	cd examples/core-intel && docker compose config --quiet
-	$(KUBECONFORM) -strict -summary examples/kubernetes
+	$(KUBECONFORM) -strict -summary -kubernetes-version $(KUBERNETES_VERSION) examples/kubernetes
 
 push: ## Build and push all images to registry (don't load locally)
 	docker buildx bake all --push

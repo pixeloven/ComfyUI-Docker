@@ -274,9 +274,10 @@ jobs:
         done
 
     # The Kubernetes example has no compose file. The same kubeconform image
-    # and flags as `make validate`, so a local run and CI agree.
+    # (tag AND digest), flags and schema version as `make validate`, so a local
+    # run and CI agree. Job permissions are tracked separately in #121.
     - name: Validate the Kubernetes example
-      run: docker run --rm -v "$PWD":/repo -w /repo ghcr.io/yannh/kubeconform:v0.8.0 -strict -summary examples/kubernetes
+      run: docker run --rm -v "$PWD":/repo:ro -w /repo ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e -strict -summary -kubernetes-version 1.36.4 examples/kubernetes
 
   test-bake-targets:
     runs-on: ubuntu-latest

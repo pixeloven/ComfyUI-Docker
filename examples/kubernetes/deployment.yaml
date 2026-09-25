@@ -29,8 +29,9 @@ spec:
         # Nothing chowns the volumes on the non-root path. fsGroup is what
         # makes each PVC group-owned by 1000 and group-writable.
         fsGroup: 1000
-        # Check only the volume root, so a large model store is not relabelled
-        # file by file on every start.
+        # Skip the ownership change when the volume root already matches. On a
+        # mismatch (e.g. the first mount) the kubelet still walks the whole
+        # volume, which is slow on a large model store. See README.md.
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
@@ -63,20 +64,24 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          # ephemeral-storage covers the container's writable layer, where the
+          # Manager's pip installs land. They are lost on restart (#115).
           resources:
             requests:
               cpu: "1"
               memory: 4Gi
+              ephemeral-storage: 5Gi
             limits:
               cpu: "4"
               memory: 16Gi
+              ephemeral-storage: 20Gi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: [ALL]
-            # The root filesystem stays writable: the entrypoint may append to
-            # /etc/passwd for an unknown UID, and the Manager installs
-            # custom-node dependencies into the venv.
+            # The root filesystem stays writable: startup relies on it for a
+            # UID the image doesn't know, and the Manager installs custom-node
+            # dependencies into the venv.
             readOnlyRootFilesystem: false
           volumeMounts:
             - name: models
@@ -93,6 +98,10 @@ spec:
               mountPath: /app/temp
             - name: user
               mountPath: /app/user
+            # Rebuildable caches (XDG_CACHE_HOME). An emptyDir survives a
+            # container restart but not a reschedule.
+            - name: cache
+              mountPath: /app/.cache
       volumes:
         - name: models
           persistentVolumeClaim:
@@ -115,3 +124,6 @@ spec:
         - name: user
           persistentVolumeClaim:
             claimName: comfyui-user
+        - name: cache
+          emptyDir:
+            sizeLimit: 10Gi
