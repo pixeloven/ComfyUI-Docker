@@ -22,12 +22,12 @@ page has a bug.
 | Readiness | `GET /system_stats` returns `200` |
 | Data | Seven volume roots under `/app` (see [Volumes](#volumes)) |
 | User, started as root | Drops to `PUID:PGID` (default `1000:1000`) through `gosu` |
-| User, started as non-root | Runs as the UID it was given. `PUID`/`PGID` are ignored and nothing is `chown`ed |
+| User, started as non-root | Runs as the UID it was given. `PUID`/`PGID` are ignored and the volumes are left as they are |
 | Health check | None. The image defines no `HEALTHCHECK` |
 
 ## Environment Variables
 
-The variables fall into three groups. Only the first changes what the container does.
+The variables fall into three groups. Only the first is read by the image's scripts.
 
 ### Read by the Container
 
@@ -70,10 +70,12 @@ what depends on it.
 `CLI_ARGS` and `COMFY_PORT` also have image defaults (empty and `8188`), which are the
 defaults in the table above.
 
-### Read by Docker Compose Only
+### Read by Docker Compose
 
-The examples' `docker-compose.yml` files interpolate these variables. The container
-never sees them. Under Kubernetes or a plain `docker run` they do nothing.
+The examples' `docker-compose.yml` files interpolate these variables. The scripts in
+the image never read them, and under Kubernetes or a plain `docker run` they do
+nothing. All but one stay outside the container: `core-amd` passes
+`HSA_OVERRIDE_GFX_VERSION` through to the ROCm runtime.
 
 | Variable | Default | Used for | Examples |
 |----------|---------|----------|----------|
@@ -118,11 +120,11 @@ sets it.
 ## Volumes
 
 ComfyUI starts with `--base-directory /app`, so each data directory is a fixed path
-under `/app`. The image creates all seven world-writable (`a+rwx`). You change **where
-the data lives** by mounting something at the path; the path inside the container
-itself can't be changed with an environment variable.
+under `/app`. The image creates all seven so that any runtime UID can write to them.
+You change **where the data lives** by mounting something at the path; the path
+inside the container itself can't be changed with an environment variable.
 
-| Container path | Holds | Compose override (host side) | `chown`ed when started as root |
+| Container path | Holds | Compose override (host side) | Made writable when started as root |
 |----------------|-------|------------------------------|:--:|
 | `/app/models` | Checkpoints, LoRAs, VAEs and every other model type | `COMFY_MODEL_PATH` | ✓ |
 | `/app/custom_nodes` | Custom nodes, installed at runtime | `COMFY_CUSTOM_NODE_PATH` | ✓ |
@@ -182,7 +184,7 @@ readinessProbe:
 The route was checked against upstream's `server.py` at the pinned `COMFYUI_VERSION`
 (`v0.37.0`, in `docker-bake.hcl`), by reading the source. CI does not yet start an
 image and call it. That check is planned in
-[#100](https://github.com/pixeloven/ComfyUI-Docker/issues/100), and until it lands, a
+[#105](https://github.com/pixeloven/ComfyUI-Docker/issues/105), and until it lands, a
 `COMFYUI_VERSION` bump is the moment to confirm the route still exists.
 
 The image defines no `HEALTHCHECK`, and this repo doesn't prescribe a liveness probe.
@@ -193,6 +195,25 @@ busy one.
 
 `entrypoint.sh` chooses its path from the UID it is started as, not from any variable.
 The two paths do different things to your volumes, so the difference matters.
+
+### What Startup Promises
+
+These outcomes are the contract:
+
+- **Any UID and GID from 0 to 65534 runs.** Started as root, ComfyUI runs as
+  `PUID:PGID`. Started as non-root, it runs as the UID and GID it was given.
+- **The runtime UID and GID have a passwd and group entry, and `HOME` is `/app`**,
+  including a UID the image has never heard of. Python and PyTorch look these up.
+- **Started as root, the volume roots are writable by the runtime UID** when
+  ComfyUI starts. Started as non-root, making them writable is up to the deployer
+  (see below).
+- **Started as root, no root process remains** once ComfyUI is running, unless you
+  ask for one with `PUID=0`.
+
+How the entrypoint achieves these today is described below. That is
+implementation, not contract: it includes the file permissions, how entries are
+created, and the `chown`. Tightening permissions or changing the mechanism is **not**
+a contract change, as long as these outcomes still hold.
 
 ### Started as Root
 
@@ -223,9 +244,7 @@ This covers Kubernetes `securityContext.runAsUser`, `docker run -u UID:GID`, and
 Compose `user:`.
 
 1. It logs `Starting as non-root UID:GID = <uid>:<gid>`.
-2. If the UID has no `/etc/passwd` entry, it appends `comfyuser` with home `/app`. If
-   the GID has no `/etc/group` entry, it appends `comfygroup`. Python and PyTorch
-   look these up, and the image makes both files world-writable for exactly this.
+2. If the UID or GID has no passwd or group entry, it gets one, with home `/app`.
 3. It activates the venv and execs `startup.sh` directly.
 
 On this path, **`PUID` and `PGID` are ignored, and nothing is `chown`ed**. The volumes
@@ -238,8 +257,8 @@ must already be writable by the UID or GID the container runs as:
 - **`docker run -u`:** bind-mounted host directories must be writable by that UID or
   GID. Prepare them with `chown` or `chmod` on the host.
 
-The root filesystem must stay writable on this path too. The entrypoint may append to
-`/etc/passwd` and `/etc/group`, and the Manager installs custom-node dependencies into
+The root filesystem must stay writable on this path too. Startup relies on it for a
+UID the image doesn't know, and the Manager installs custom-node dependencies into
 the venv. `readOnlyRootFilesystem: true` breaks both.
 
 ### Side by Side
@@ -248,10 +267,36 @@ the venv. `readOnlyRootFilesystem: true` breaks both.
 |---|---|---|
 | Identity comes from | `PUID` / `PGID` | `runAsUser` / `runAsGroup`, `-u`, or `user:` |
 | `PUID` / `PGID` | Validated and used | Ignored |
-| Users and groups | Created with `groupadd`/`useradd` if missing | Appended to `/etc/passwd` and `/etc/group` if missing |
-| Volume ownership | `chown` of each volume root, not recursive | Untouched. The volumes must already be writable |
+| Users and groups | Created with `groupadd`/`useradd` if missing | An entry is provided if missing, with home `/app` |
+| Volume roots | Made writable by `PUID:PGID` (today, a non-recursive `chown`) | Untouched. The volumes must already be writable |
 | Privilege drop | `gosu` | None needed |
 | Log line | `Starting with UID:GID = x:y` | `Starting as non-root UID:GID = x:y` |
+
+### What Does Not Survive a Restart
+
+Anything written outside the volumes lives in the container's writable layer:
+
+- the Python packages the Manager installs with pip into `/app/.venv` for custom nodes
+- the caches under `/app/.cache` (`XDG_CACHE_HOME`)
+
+That layer is lost whenever the container is recreated. In Compose, that happens when
+`docker compose up` replaces the container, for example after a pull. In Kubernetes,
+it happens on every container restart and every time the pod is rescheduled. The
+custom nodes themselves stay on `/app/custom_nodes`, but the dependencies they
+installed do not. This is tracked as a known defect,
+[#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115).
+
+### Hardening
+
+We recommend turning off privilege escalation for the ComfyUI container:
+`no-new-privileges:true` under `security_opt` in Compose, or
+`allowPrivilegeEscalation: false` in the Kubernetes container `securityContext`.
+Both startup paths work with it.
+
+When you open a shell in a running container, open it as the runtime user rather
+than as root, for example `docker exec -u "$PUID:$PGID" …`, or `kubectl exec` into
+a pod that already runs as `runAsUser`. A root session inside the container inherits
+an environment that the runtime user can modify.
 
 ## What Counts as a Breaking Change
 
@@ -263,14 +308,32 @@ is the rule. On this page, that covers:
   `COMFY_*_PATH` or other Compose variable an example documents.
 - Moving or removing a path in [Volumes](#volumes), or the database location.
 - Changing the default port, or how `COMFY_PORT` sets it.
-- Changing either startup path: validation, the `chown`, `gosu`, or how the non-root
-  path handles an arbitrary UID.
+- Breaking a promise in [What Startup Promises](#what-startup-promises): a UID or
+  GID in range that used to run no longer does, `PUID`/`PGID` stop being honoured
+  on a root start, or the runtime UID loses its passwd entry, its `HOME`, or write
+  access to the volume roots.
+
+The mechanisms behind those promises are not frozen. The validation code, the
+`chown`, `gosu`, and how an arbitrary UID gets its entry can all change, as long as
+the outcomes hold.
 
 `/system_stats` is upstream's route. If it ever changed, the change would arrive
 through a `COMFYUI_VERSION` bump, and that bump would then break this contract.
 
 Adding is never major. A new variable, volume, or image is a minor version. The
 repository owner confirms how each change is classified.
+
+## Known Defects (Not Contract)
+
+This is current behaviour that nobody should rely on. Fixing any of these is **not**
+a major change.
+
+- [#113](https://github.com/pixeloven/ComfyUI-Docker/issues/113): a root start exits if a volume root is read-only or on a root-squashed NFS export.
+- [#114](https://github.com/pixeloven/ComfyUI-Docker/issues/114): a root start changes the owner of the host directory behind a bind-mounted volume root.
+- [#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115): dependencies and caches installed at runtime are lost when the container is recreated.
+- [#116](https://github.com/pixeloven/ComfyUI-Docker/issues/116): VRAM flags in `CLI_ARGS` make ComfyUI exit on the CPU image.
+- [#117](https://github.com/pixeloven/ComfyUI-Docker/issues/117): `COMFY_ENABLE_*` accept only the exact string `true`.
+- [#118](https://github.com/pixeloven/ComfyUI-Docker/issues/118): `COMFY_IMAGE` and `COMFY_FETCH_IMAGE` are missing from every `.env.example`.
 
 ---
 
