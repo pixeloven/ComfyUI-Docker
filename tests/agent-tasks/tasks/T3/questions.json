@@ -1,0 +1,22 @@
+[
+  {"id": "q1", "node": "EmptyLatentImage", "input": "width", "kind": "default",
+   "text": "What is the default value of the `width` input of `EmptyLatentImage`?"},
+  {"id": "q2", "node": "VAEDecodeTiled", "input": "tile_size", "kind": "step",
+   "text": "What is the `step` of the `tile_size` input of `VAEDecodeTiled`?"},
+  {"id": "q3", "node": "VAEEncodeTiled", "input": "tile_size", "kind": "step",
+   "text": "What is the `step` of the `tile_size` input of `VAEEncodeTiled`?"},
+  {"id": "q4", "node": "ImageScaleBy", "input": "scale_by", "kind": "default",
+   "text": "What is the default value of the `scale_by` input of `ImageScaleBy`?"},
+  {"id": "q5", "node": "LatentUpscaleBy", "input": "scale_by", "kind": "default",
+   "text": "What is the default value of the `scale_by` input of `LatentUpscaleBy`?"},
+  {"id": "q6", "node": "LatentUpscaleBy", "input": "upscale_method", "kind": "options",
+   "text": "What values does the `upscale_method` input of `LatentUpscaleBy` accept?"},
+  {"id": "q7", "node": "ImagePadForOutpaint", "input": "feathering", "kind": "default",
+   "text": "What is the default value of the `feathering` input of `ImagePadForOutpaint`?"},
+  {"id": "q8", "node": "VAEEncodeForInpaint", "input": "grow_mask_by", "kind": "default",
+   "text": "What is the default value of the `grow_mask_by` input of `VAEEncodeForInpaint`?"},
+  {"id": "q9", "node": "ImagePadForOutpaint", "kind": "output_types",
+   "text": "What are the output types of `ImagePadForOutpaint`, in output-socket order?"},
+  {"id": "q10", "node": "ConditioningSetArea", "input": "width", "kind": "min",
+   "text": "What is the minimum allowed value of the `width` input of `ConditioningSetArea`?"}
+]

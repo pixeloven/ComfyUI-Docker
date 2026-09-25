@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "artokun": {
+      "type": "http",
+      "url": "http://127.0.0.1:9100/mcp",
+      "headers": {
+        "Authorization": "Bearer ${ARTOKUN_MCP_TOKEN}"
+      }
+    }
+  }
+}

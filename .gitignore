@@ -5,6 +5,9 @@
 *.code-workspace
 /.vscode
 
+# Agent worktrees (Claude Code creates them under .claude/worktrees/)
+/.claude/worktrees/
+
 # Service data
 ./data
 ./output
