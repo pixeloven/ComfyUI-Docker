@@ -11,6 +11,8 @@ services:
     container_name: comfyui-fetch-core-amd
     profiles: [models]
     user: "${PUID:-1000}:${PGID:-1000}"
+    security_opt:
+      - no-new-privileges:true
     environment:
       # Credentials are read from the environment by host, never from the lock.
       - CIVITAI_TOKEN=${CIVITAI_TOKEN:-}
@@ -45,6 +47,7 @@ services:
       - "${RENDER_GID:-109}"
     security_opt:
       - seccomp=unconfined
+      - no-new-privileges:true
     volumes:
       - ${COMFY_CUSTOM_NODE_PATH:-./data/custom_nodes}:/app/custom_nodes
       - ${COMFY_DATASET_PATH:-./data/datasets}:/app/datasets

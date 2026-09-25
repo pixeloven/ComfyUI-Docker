@@ -86,7 +86,13 @@ There is no date tag.
 
 - **Started as root** (the Compose default): `PUID`/`PGID` default to 1000:1000.
   Anything non-numeric or above 65534 exits 1 immediately, and `PUID=0` prints a warning.
-  The group and user are created only if missing. `chown` is **non-recursive** and
+  The group and user are created only if missing: an existing entry with that ID is
+  reused, and a new one is named `comfy-<PGID>` / `comfy-<PUID>`, because the image's
+  own `comfy` (1000:1000) already holds the plain name. Nothing downstream uses the
+  names: gosu and `chown` take the numeric IDs, and a created user's home is `/app`,
+  which gosu exports as `HOME`. It then sets
+  `/etc/passwd` and `/etc/group` back to 644 (non-fatal, for when they are mounted
+  read-only). `chown` is **non-recursive** and
   covers only `/app`, `/app/ComfyUI` and each existing volume root, because model
   stores run to terabytes. It logs `Starting with UID:GID = x:y`, then
   `exec gosu "$PUID:$PGID"`.
@@ -97,6 +103,9 @@ There is no date tag.
   `.cache`, the volume roots, `/app`, `/app/ComfyUI`, `/etc/passwd` and `/etc/group`
   are world-writable, and `PYTHONDONTWRITEBYTECODE=1`. `complete` re-applies the
   venv permissions after its own installs, and any new install layer must do the same.
+- `dockerfile.comfy.core` also drops setuid/setgid bits from every file in its final
+  stage, since nothing in the image needs them. A later stage that installs apt packages
+  must repeat that step. The examples run every service with `no-new-privileges:true`.
 
 ## Container standards
 

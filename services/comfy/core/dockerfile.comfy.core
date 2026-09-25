@@ -149,6 +149,11 @@ RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.maj
   chmod a+w /app /app/ComfyUI && \
   chmod a+w /etc/passwd /etc/group
 
+# Defense in depth: drop setuid/setgid bits, which nothing in the image needs.
+# gosu runs as root and only lowers privileges. Keep this after every package
+# install, including any added in a later stage.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} +
+
 # Environment variables
 ARG CLI_ARGS=""
 ARG COMFY_PORT=8188

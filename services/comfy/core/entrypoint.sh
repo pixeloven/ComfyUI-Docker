@@ -70,16 +70,22 @@ fi
 # User/Group Creation
 # =============================================================================
 
-# Create group if GID doesn't exist
+# Create group if GID doesn't exist. The image already has a "comfy" group
+# (GID 1000), so a new entry gets a name unique to its ID.
 if ! getent group "$PGID" > /dev/null 2>&1; then
-    groupadd -g "$PGID" "$USERNAME"
+    groupadd -g "$PGID" "$USERNAME-$PGID"
 fi
 GROUP_NAME=$(getent group "$PGID" | cut -d: -f1)
 
-# Create user if UID doesn't exist
+# Create user if UID doesn't exist, likewise named for its ID
 if ! getent passwd "$PUID" > /dev/null 2>&1; then
-    useradd -u "$PUID" -g "$PGID" -d /app -s /bin/bash -M "$USERNAME"
+    useradd -u "$PUID" -g "$PGID" -d /app -s /bin/bash -M "$USERNAME-$PUID"
 fi
+
+# Only the non-root path needs to append to these files; the root path has
+# finished with them, so return them to their normal mode. Non-fatal: if they
+# are mounted read-only, they cannot be written anyway.
+chmod 644 /etc/passwd /etc/group 2>/dev/null || true
 
 # =============================================================================
 # Directory Ownership
