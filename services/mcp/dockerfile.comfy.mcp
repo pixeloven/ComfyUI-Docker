@@ -4,16 +4,24 @@
 # ComfyUI-Manager's HTTP API. See README.md for every default set below.
 #
 # Published as: ghcr.io/pixeloven/comfyui/mcp:<IMAGE_LABEL>
-
-ARG ARTOKUN_VERSION=0.52.203
+#
+# The pin is package.json (comfyui-mcp at an exact version) plus
+# package-lock.json (every package under it, with integrity hashes).
 
 # comfyui-mcp declares engines.node >=22.0.0.
-FROM node:22-slim
+FROM node:22-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# tini as PID 1: the server installs no SIGTERM handler, and Node as PID 1
+# would ignore the signal, so every stop would wait out the timeout.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tini && \
+    rm -rf /var/lib/apt/lists/*
+
 # Non-root user, as before: comfy, UID/GID 1000. The Node image already has
-# `node` at 1000:1000, so that user and its group go first.
+# `node` at 1000:1000, so that user and its group go first. HOME (/app) is
+# writable by any UID, for Kubernetes runAsUser; the server keeps its state there.
 ARG APP_UID=1000
 ARG APP_GID=1000
 RUN userdel -r node && \
@@ -21,59 +29,87 @@ RUN userdel -r node && \
     groupadd -g "$APP_GID" comfy && \
     useradd -u "$APP_UID" -g "$APP_GID" -d /app -s /bin/bash -M comfy && \
     mkdir -p /app && \
-    chown comfy:comfy /app
+    chown comfy:comfy /app && \
+    chmod a+rwx /app
+
+# Install exactly the locked tree, owned by root, so the server can't rewrite
+# itself. --ignore-scripts is required: the only install script is
+# cloudflared's, which downloads its latest binary from GitHub (it's only for
+# --tunnel), and better-sqlite3 and sharp ship prebuilt binaries.
+# The package.json check keeps the pin exact: no range, tag or `latest`.
+# The last step drops two optional dependencies that only the author's panel
+# orchestrator and train_* use, both unreachable here: the bundled Claude Code
+# and Codex binaries, over 700 MB.
+WORKDIR /opt/comfyui-mcp
+COPY package.json package-lock.json ./
+RUN node -e ' \
+      const v = require("./package.json").dependencies["comfyui-mcp"]; \
+      if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(v)) { console.error(`comfyui-mcp must be pinned to an exact x.y.z version in package.json, got "${v}"`); process.exit(1); }' && \
+    npm ci --omit=dev --ignore-scripts --no-audit --no-fund && \
+    npm cache clean --force && \
+    rm -rf /tmp/node-compile-cache && \
+    rm -rf node_modules/@anthropic-ai/claude-agent-sdk* node_modules/@openai/codex* && \
+    ln -s /opt/comfyui-mcp/node_modules/.bin/comfyui-mcp /usr/local/bin/comfyui-mcp
 
 WORKDIR /app
 
-# An exact version only: no tag, range or `latest`. The global install is owned
-# by root, so the server (running as comfy) can't rewrite itself even if
-# self-update were switched back on.
-ARG ARTOKUN_VERSION
-RUN [[ "$ARTOKUN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
-      { echo "ARTOKUN_VERSION must be an exact x.y.z version, got '$ARTOKUN_VERSION'" >&2; exit 1; } && \
-    npm install -g --omit=dev --no-audit --no-fund "comfyui-mcp@$ARTOKUN_VERSION" && \
-    npm cache clean --force
-
 # Hardening defaults. Each one is explained in README.md.
-ENV NODE_ENV=production \
+ENV HOME=/app \
+    NODE_ENV=production \
     MCP_TRANSPORT=http \
     MCP_HOST=0.0.0.0 \
     MCP_PORT=9000 \
     COMFYUI_URL=http://localhost:8188 \
+    COMFYUI_MCP_ENV_FILE=/dev/null \
     COMFYUI_MCP_AUTO_UPDATE_DISABLE=1 \
     COMFYUI_MCP_PANEL_AUTOINSTALL=0 \
     COMFYUI_MCP_FORCE_REMOTE=1 \
-    COMFYUI_MCP_TOOL_DENY="runpod*,train_*,report_issue,apps"
+    COMFYUI_MCP_TOOL_DENY="runpod*,train_*,report_issue,apps,install_comfyui"
 
 USER comfy
 
-# Prove the server starts at BUILD time, with the defaults above: it must
-# refuse to start without a token, then answer an MCP `initialize` with one.
-# The image has no curl, so Node makes the request. Scratch HOME, so nothing
+# Prove the server works at BUILD time, with the defaults above:
+#   - it refuses to start without a token;
+#   - with one, it answers an MCP `initialize`, and its tools/list has
+#     install_custom_node but none of the denied tools. A renamed tool or env
+#     var in a new pin fails the build instead of reopening the surface.
+# The image has no curl, so Node makes the requests. Scratch HOME, so nothing
 # the probe writes stays in the image.
-RUN export HOME="$(mktemp -d)"; \
-    if timeout 60 comfyui-mcp > "$HOME/refused.log" 2>&1; then \
+RUN probe="$(mktemp -d)"; \
+    export HOME="$probe"; \
+    if timeout 60 comfyui-mcp > "$probe/refused.log" 2>&1; then \
       echo "comfyui-mcp started without COMFYUI_MCP_HTTP_TOKEN" >&2; exit 1; \
     fi; \
-    grep -q "Refusing to start" "$HOME/refused.log" || { cat "$HOME/refused.log" >&2; exit 1; }; \
-    COMFYUI_MCP_HTTP_TOKEN=build-probe comfyui-mcp > "$HOME/server.log" 2>&1 & \
+    grep -q "Refusing to start" "$probe/refused.log" || { cat "$probe/refused.log" >&2; exit 1; }; \
+    COMFYUI_MCP_HTTP_TOKEN=build-probe comfyui-mcp > "$probe/server.log" 2>&1 & \
     pid=$!; \
     node -e ' \
+      const headers = {authorization: "Bearer build-probe", "content-type": "application/json", accept: "application/json, text/event-stream"}; \
+      const post = (body, sid) => fetch("http://127.0.0.1:9000/mcp", {method: "POST", body: JSON.stringify(body), headers: sid ? {...headers, "mcp-session-id": sid} : headers}); \
       const init = {jsonrpc: "2.0", id: 1, method: "initialize", params: {protocolVersion: "2025-06-18", capabilities: {}, clientInfo: {name: "build-probe", version: "0"}}}; \
       (async () => { \
         for (let i = 0; i < 60; i++) { \
           try { \
-            const r = await fetch("http://127.0.0.1:9000/mcp", {method: "POST", body: JSON.stringify(init), headers: {authorization: "Bearer build-probe", "content-type": "application/json", accept: "application/json, text/event-stream"}}); \
-            if (r.ok && (await r.text()).includes("serverInfo")) process.exit(0); \
+            const r = await post(init); \
+            if (r.ok && (await r.text()).includes("serverInfo")) { \
+              const sid = r.headers.get("mcp-session-id"); \
+              await post({jsonrpc: "2.0", method: "notifications/initialized"}, sid); \
+              const list = await (await post({jsonrpc: "2.0", id: 2, method: "tools/list"}, sid)).text(); \
+              const names = [...list.matchAll(/"name":"([a-z_]+)"/g)].map((m) => m[1]); \
+              const denied = names.filter((n) => /^(runpod|train_)/.test(n) || ["report_issue", "apps", "install_comfyui"].includes(n)); \
+              if (!names.includes("install_custom_node") || denied.length) { console.error("tools/list:", names.join(","), "denied present:", denied.join(",")); process.exit(1); } \
+              process.exit(0); \
+            } \
           } catch {} \
           await new Promise((res) => setTimeout(res, 1000)); \
         } \
         process.exit(1); \
       })()' \
-      || { kill "$pid"; cat "$HOME/server.log" >&2; exit 1; }; \
+      || { kill "$pid"; cat "$probe/server.log" >&2; exit 1; }; \
     kill "$pid"; \
-    rm -rf "$HOME"
+    rm -rf "$probe"
 
 EXPOSE 9000
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["comfyui-mcp"]
