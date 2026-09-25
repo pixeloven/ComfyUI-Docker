@@ -6,7 +6,7 @@
         "run", "--isolated", "--no-project", "--python", "3.12",
         "--with", "comfy-mcp==0.10.0",
         "--with", "comfy-cli==1.21.0",
-        "--with", "mcp==${COMFY_MCP_SDK_VERSION:-2.2.0}",
+        "--with", "mcp==${COMFY_MCP_SDK_VERSION:-2.0.0}",
         "--", "comfy-mcp"
       ],
       "env": {

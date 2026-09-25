@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -484,27 +485,34 @@ def check_t4() -> str:
     # The specific error is the per-node one; the top-level message is generic.
     node_id, node_err = next(iter(exp["node_errors"].items()))
     err = node_err["errors"][0]
-    named = [s for s in (err["type"], err["message"]) if norm(s) in text]
-    if not named:
-        # Still a FAIL, but say so when the report diagnoses the same fault in
-        # other words (e.g. a client-side validator that never reached /prompt),
-        # so the scorer can tell that apart from a wrong or empty report.
-        extra = err.get("extra_info") or {}
-        hint = ""
-        if str(rep.get("node_id")) == node_id and all(
-            norm(t) in text
-            for t in (extra.get("received_type"), extra.get("input_config", [""])[0])
-            if t
-        ):
-            hint = f" (it does name node {node_id} and the {extra.get('received_type')}/{extra['input_config'][0]} mismatch in other words)"
+    # The fault may be named in ComfyUI's words (its per-node error type or
+    # message), or in a client's own words for the same fault: both types of
+    # the mismatched link plus a mismatch verb. comfy-cli validates before
+    # /prompt and says "input 'images' expects IMAGE but LoadImage[1] produces
+    # MASK". The generic top-level "Prompt outputs failed validation" names
+    # neither, so it does not count.
+    extra = err.get("extra_info") or {}
+    got_t, want_t = extra.get("received_type"), (extra.get("input_config") or [None])[0]
+    if any(norm(s) in text for s in (err["type"], err["message"])):
+        wording = f"ComfyUI's {err['type']!r}"
+    elif (
+        got_t
+        and want_t
+        and re.search(rf"\b{re.escape(norm(got_t))}\b", text)
+        and re.search(rf"\b{re.escape(norm(want_t))}\b", text)
+        and re.search(r"mismatch|expect|incompatible", text)
+    ):
+        wording = f"the {got_t}->{want_t} type mismatch in other words"
+    else:
         raise CheckFailed(
-            f"report names neither {err['type']!r} nor {err['message']!r}{hint}"
+            f"report names neither {err['type']!r}/{err['message']!r} "
+            f"nor the {got_t}->{want_t} type mismatch"
         )
     if str(rep.get("node_id")) != node_id:
         raise CheckFailed(
             f"report blames node {rep.get('node_id')!r}; ComfyUI rejected node {node_id!r}"
         )
-    return f"succeeded=false, node {node_id}, names {named[0]!r}"
+    return f"succeeded=false, node {node_id}, names {wording}"
 
 
 CHECKS = {"t1": check_t1, "t2": check_t2, "t3": check_t3, "t4": check_t4}

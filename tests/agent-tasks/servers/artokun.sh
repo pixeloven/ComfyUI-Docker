@@ -8,8 +8,8 @@
 # so nothing is installed globally and the operator's own comfyui-mcp config
 # cannot leak in.
 #
-# ARTOKUN_TOOL_PRESET picks the tool surface: `safe` (the default here),
-# `readonly`, or empty for the full surface. `safe` withholds
+# The evaluation scores the full tool surface (the owner's call on #102).
+# ARTOKUN_TOOL_PRESET=safe or =readonly restricts it; `safe` withholds
 # install_custom_node, create_workflow (node_info and validate) and
 # upload_image, so under it T2 cannot pass; see README.
 set -euo pipefail
@@ -24,7 +24,7 @@ case "${1:-}" in
   up)
     "$0" down
     mkdir -p "$HOME_DIR"
-    preset="${ARTOKUN_TOOL_PRESET-safe}"
+    preset="${ARTOKUN_TOOL_PRESET:-}"
     env_args=(
       HOME="$HOME_DIR"
       npm_config_cache="$HOME_DIR/.npm"

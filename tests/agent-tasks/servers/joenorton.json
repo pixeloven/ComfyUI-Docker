@@ -2,7 +2,7 @@
   "mcpServers": {
     "joenorton": {
       "type": "http",
-      "url": "http://127.0.0.1:9000/mcp"
+      "url": "${JOENORTON_MCP_URL:-http://127.0.0.1:9000/mcp}"
     }
   }
 }
