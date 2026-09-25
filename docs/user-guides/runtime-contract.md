@@ -317,13 +317,18 @@ ComfyUI images and talking to ComfyUI over HTTP. Since 3.0.0 it packages
 | Endpoint | Streamable HTTP at `/mcp` on port `9000` (`MCP_PORT`), on all interfaces |
 | Token | `COMFYUI_MCP_HTTP_TOKEN` is **required**. Without it, the container exits 1 at start. Clients send `Authorization: Bearer <token>` or `X-API-Key: <token>`, and anything else gets `401` |
 | ComfyUI | `COMFYUI_URL`, default `http://localhost:8188`, as reachable from the `mcp` container |
-| Restart | Through ComfyUI-Manager's reboot endpoint, so ComfyUI needs Manager enabled (`COMFY_ENABLE_MANAGER=true`, the default) |
-| User | `comfy`, UID and GID `1000`. The image sets `USER`, and has no entrypoint that changes it |
-| Tools | Upstream's full set, minus `runpod*`, `train_*`, `report_issue` and `apps`. The tool names are upstream's, and change with its version |
+| User | Runs under any UID. `HOME` is `/app`, which any UID can write |
+| Stopping | `SIGTERM` stops the server at once. `tini` is PID 1 and passes the signal on |
 
-Breaking any row except *Tools* is a major version, by the same rule as the rest of
-this page. The tool list follows the pinned upstream version, which can rename or
-add tools in any release, so this page doesn't freeze it.
+These are the promises. Breaking one is a major version, by the same rule as the
+rest of this page.
+
+What the server does behind them is not frozen. The tool names follow the pinned
+upstream version, which can rename or add tools in any release. Restarting ComfyUI
+goes through ComfyUI-Manager's reboot endpoint today, so it needs Manager enabled
+(`COMFY_ENABLE_MANAGER=true`, the default). A first-party server, planned in
+[#103](https://github.com/pixeloven/ComfyUI-Docker/issues/103), is meant to replace
+this one in a later major version.
 
 ## What Counts as a Breaking Change
 

@@ -16,7 +16,7 @@ this skill disagree, the file is right, so fix the skill in the same change.
 | `services/runtime/` | Base images: `dockerfile.cuda.runtime` (`nvidia/cuda:13.0.2-base-ubuntu24.04`) and `dockerfile.cpu.runtime` (`ubuntu:24.04`, used for cpu, **rocm and xpu**) |
 | `services/comfy/core/` | `dockerfile.comfy.core` (a builder stage, then the `core` stage), `entrypoint.sh`, `startup.sh` |
 | `services/comfy/complete/` | `dockerfile.comfy.cuda.complete`, built `FROM core`, and `extra-requirements.txt` |
-| `services/mcp/` | `dockerfile.comfy.mcp`, which installs upstream `artokun/comfyui-mcp` from npm at an exact version (`ARTOKUN_VERSION` is set in bake) and sets its hardening defaults in `ENV`: token required, deny list, force-remote restart, self-update and panel auto-install off. It is standalone on `node:22-slim`, serves `:9000/mcp`, and runs as `comfy` (1000:1000); see its README. |
+| `services/mcp/` | `dockerfile.comfy.mcp`, which installs upstream `artokun/comfyui-mcp` from npm with `npm ci --ignore-scripts` from the committed `package.json` and `package-lock.json` (the pin), and sets its hardening defaults in `ENV`: token required, deny list, force-remote restart, dotenv off, self-update and panel auto-install off. It is standalone on a digest-pinned `node:22-slim`, runs under `tini`, serves `:9000/mcp`, and runs as `comfy` (1000:1000) or any UID, with `HOME=/app`; see its README. |
 | `services/fetch/` | `comfyfetch` (Python, Typer, uv project; verbs `resolve`, `fetch`, `check`, `build`, `facts`), its bundled JSON schemas, its tests, and its image (`python:3.13-alpine`) |
 | `comfy.yaml`, `comfy-lock.yaml`, `locks/` | The model manifest (intent), the generated lock (resolution), and the derived profile locks (`locks/preview.yaml`) |
 | `examples/{core-gpu,complete-gpu,core-cpu,core-amd,core-intel}/` | One standalone Compose deployment per profile, each with `.env.example` and `extra_model_paths.yaml` |
@@ -136,7 +136,7 @@ There is no date tag.
   `comfy.yaml` covers **models only** today. `comfy-lock.yaml` has a `custom_nodes`
   section in comfy-cli's shape, but `comfyfetch` does not act on it.
 - Pins that move only on purpose: `COMFYUI_VERSION`, the SageAttention URL and sha256 values,
-  `ARTOKUN_VERSION` (an exact npm version; the Dockerfile refuses anything else), the `sam2` commit in `extra-requirements.txt`, and GitHub Action versions
+  `services/mcp/package-lock.json` with its `package.json` (an exact `comfyui-mcp` version; the Dockerfile refuses anything else), the `sam2` commit in `extra-requirements.txt`, and GitHub Action versions
   (exact semver tags, bumped by Dependabot).
 
 ## Project invariants

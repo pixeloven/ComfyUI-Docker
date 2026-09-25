@@ -207,6 +207,10 @@ securityContext:
 
 The Python virtual environment's package and entry-point directories are world-writable at build time, so ComfyUI Manager can install custom node dependencies regardless of the runtime UID.
 
+### MCP Server for Agents
+
+The separate `ghcr.io/pixeloven/comfyui/mcp` image serves agents over MCP at `http://<host>:9000/mcp`. It **requires a token**: set `COMFYUI_MCP_HTTP_TOKEN`, or the container refuses to start. Point `COMFYUI_URL` at ComfyUI. See [its README](services/mcp/README.md) for the hardening defaults and how to run it next to an example.
+
 **For complete configuration options, see:**
 - [Running Containers Guide](docs/user-guides/running.md) - Environment variables, Docker Compose, and Kubernetes
 - [Performance Tuning Guide](docs/user-guides/performance.md) - CLI arguments and optimization
