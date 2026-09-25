@@ -1,4 +1,7 @@
 #!/bin/bash
+# A fixed system PATH for the setup steps below. Both paths activate the venv
+# just before starting ComfyUI, which puts /app/.venv/bin first again.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 set -e
 
 # =============================================================================
@@ -82,18 +85,21 @@ if ! getent passwd "$PUID" > /dev/null 2>&1; then
     useradd -u "$PUID" -g "$PGID" -d /app -s /bin/bash -M "$USERNAME-$PUID"
 fi
 
-# Only the non-root path needs to append to these files; the root path has
-# finished with them, so return them to their normal mode. Non-fatal: if they
-# are mounted read-only, they cannot be written anyway.
+# User setup is done; give the account files their normal mode. Non-fatal:
+# if they are mounted read-only, they cannot be written anyway.
 chmod 644 /etc/passwd /etc/group 2>/dev/null || true
+if [ -n "$(find /etc/passwd /etc/group -perm -o+w)" ]; then
+    echo "WARNING: could not tighten account file permissions." >&2
+fi
 
 # =============================================================================
 # Directory Ownership
 # =============================================================================
 
 # Set ownership of application and persistent volume roots. Keep this
-# non-recursive: model stores can contain terabytes of data.
-chown "$PUID:$PGID" /app /app/ComfyUI
+# non-recursive: model stores can contain terabytes of data. -h changes a
+# symlink itself, never its target, and a symlinked volume root is skipped.
+chown -h "$PUID:$PGID" /app /app/ComfyUI
 for directory in \
     /app/models \
     /app/custom_nodes \
@@ -102,8 +108,8 @@ for directory in \
     /app/output \
     /app/temp \
     /app/user; do
-    if [ -d "$directory" ]; then
-        chown "$PUID:$PGID" "$directory"
+    if [ -d "$directory" ] && [ ! -L "$directory" ]; then
+        chown -h "$PUID:$PGID" "$directory"
     fi
 done
 

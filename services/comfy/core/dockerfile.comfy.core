@@ -106,11 +106,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV COMFYUI_VERSION=$COMFYUI_VERSION
 ENV COMFY_RUNTIME=$RUNTIME
 
-# Copy startup scripts to app root
-COPY --chown=comfy:comfy startup.sh entrypoint.sh /app/
+# Copy startup scripts. The entrypoint starts as root, so it lives outside /app,
+# owned by root; startup.sh runs as the runtime user and stays in the app root.
+COPY --chown=comfy:comfy startup.sh /app/
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Make scripts executable (fast/cheap operation on single files)
-RUN chmod +x /app/startup.sh /app/entrypoint.sh
+RUN chmod +x /app/startup.sh && chmod 0755 /usr/local/bin/entrypoint.sh
 
 # Make directories writable by any user for arbitrary UID support
 # (Docker Compose PUID/PGID, K8s securityContext.runAsUser, OpenShift, etc.)
@@ -162,8 +164,14 @@ ENV COMFY_PORT=$COMFY_PORT
 
 EXPOSE $COMFY_PORT
 
+# No setuid/setgid files may remain; this fails the build if a later change
+# brings one back. (Not a pipe into grep -q: under pipefail, find can take
+# SIGPIPE and the negation would then pass.)
+RUN found="$(find / -xdev -perm /6000 -type f)" && \
+  if [ -n "$found" ]; then echo "setuid/setgid files present:" >&2; echo "$found" >&2; exit 1; fi
+
 # Entrypoint runs as root by default for Docker Compose PUID/PGID support.
 # K8s users override with securityContext.runAsUser — the entrypoint detects
 # non-root and skips gosu, executing directly as the assigned UID.
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/app/startup.sh"]

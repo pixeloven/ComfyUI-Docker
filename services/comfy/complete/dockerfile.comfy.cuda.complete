@@ -34,3 +34,8 @@ RUN if [[ -n "$SAGEATTENTION_WHEEL_URL" ]]; then \
 RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')") && \
     find /app/.venv/lib/${PYTHON_VERSION}/site-packages -type d -exec chmod a+w {} + && \
     chmod a+w /app/.venv/bin
+
+# No setuid/setgid files may remain (core strips them); this fails the build if
+# a layer above brings one back.
+RUN found="$(find / -xdev -perm /6000 -type f)" && \
+    if [ -n "$found" ]; then echo "setuid/setgid files present:" >&2; echo "$found" >&2; exit 1; fi
