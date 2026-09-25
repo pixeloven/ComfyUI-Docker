@@ -228,11 +228,11 @@ has no `USER`, so it starts as root.
 1. `PUID` and `PGID` default to `1000`. Each must be an integer from 0 to 65534,
    or the entrypoint prints an error and exits 1. `PUID=0` prints a warning and
    runs ComfyUI as root.
-2. If no group has `PGID`, it creates group `comfy` with that GID. If no user has
-   `PUID`, it creates user `comfy` with that UID, home `/app`. (The image already
-   has `comfy` as `1000:1000`.)
+2. If a group already has `PGID`, or a user already has `PUID`, it reuses that entry.
+   Otherwise it creates group `comfy-<PGID>` or user `comfy-<PUID>` (home `/app`),
+   named for the ID because the image already has `comfy` as `1000:1000`.
 3. It runs `chown PUID:PGID` on `/app`, on `/app/ComfyUI`, and on each of the seven
-   volume roots that exists. This is **not recursive**: only the directory itself
+   volume roots that exists, skipping any volume root that is a symlink. This is **not recursive**: only the directory itself
    changes owner, never what's inside it, because a model store can be terabytes.
 4. It logs `Starting with UID:GID = <PUID>:<PGID>`.
 5. It runs `exec gosu PUID:PGID`, activates the venv, and execs `startup.sh`. No root

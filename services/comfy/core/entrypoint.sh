@@ -1,4 +1,7 @@
 #!/bin/bash
+# A fixed system PATH for the setup steps below. Both paths activate the venv
+# just before starting ComfyUI, which puts /app/.venv/bin first again.
+export PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 set -e
 
 # =============================================================================
@@ -70,15 +73,23 @@ fi
 # User/Group Creation
 # =============================================================================
 
-# Create group if GID doesn't exist
+# Create group if GID doesn't exist. The image already has a "comfy" group
+# (GID 1000), so a new entry gets a name unique to its ID.
 if ! getent group "$PGID" > /dev/null 2>&1; then
-    groupadd -g "$PGID" "$USERNAME"
+    groupadd -g "$PGID" "$USERNAME-$PGID"
 fi
 GROUP_NAME=$(getent group "$PGID" | cut -d: -f1)
 
-# Create user if UID doesn't exist
+# Create user if UID doesn't exist, likewise named for its ID
 if ! getent passwd "$PUID" > /dev/null 2>&1; then
-    useradd -u "$PUID" -g "$PGID" -d /app -s /bin/bash -M "$USERNAME"
+    useradd -u "$PUID" -g "$PGID" -d /app -s /bin/bash -M "$USERNAME-$PUID"
+fi
+
+# User setup is done; give the account files their normal mode. Non-fatal:
+# if they are mounted read-only, they cannot be written anyway.
+chmod 644 /etc/passwd /etc/group 2>/dev/null || true
+if [ -n "$(find /etc/passwd /etc/group -perm -o+w)" ]; then
+    echo "WARNING: could not tighten account file permissions." >&2
 fi
 
 # =============================================================================
@@ -86,8 +97,12 @@ fi
 # =============================================================================
 
 # Set ownership of application and persistent volume roots. Keep this
-# non-recursive: model stores can contain terabytes of data.
-chown "$PUID:$PGID" /app /app/ComfyUI
+# non-recursive: model stores can contain terabytes of data. -h changes a
+# symlink itself, never its target, and a symlinked volume root is skipped.
+chown -h "$PUID:$PGID" /app
+if [ -d /app/ComfyUI ] && [ ! -L /app/ComfyUI ]; then
+    chown -h "$PUID:$PGID" /app/ComfyUI
+fi
 for directory in \
     /app/models \
     /app/custom_nodes \
@@ -96,8 +111,8 @@ for directory in \
     /app/output \
     /app/temp \
     /app/user; do
-    if [ -d "$directory" ]; then
-        chown "$PUID:$PGID" "$directory"
+    if [ -d "$directory" ] && [ ! -L "$directory" ]; then
+        chown -h "$PUID:$PGID" "$directory"
     fi
 done
 

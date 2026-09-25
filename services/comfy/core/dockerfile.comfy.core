@@ -106,11 +106,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV COMFYUI_VERSION=$COMFYUI_VERSION
 ENV COMFY_RUNTIME=$RUNTIME
 
-# Copy startup scripts to app root
-COPY --chown=comfy:comfy startup.sh entrypoint.sh /app/
+# Copy startup scripts. The entrypoint is installed root-owned in
+# /usr/local/bin; startup.sh stays in the app root.
+COPY --chown=comfy:comfy startup.sh /app/
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Make scripts executable (fast/cheap operation on single files)
-RUN chmod +x /app/startup.sh /app/entrypoint.sh
+RUN chmod +x /app/startup.sh && chmod 0755 /usr/local/bin/entrypoint.sh
 
 # Make directories writable by any user for arbitrary UID support
 # (Docker Compose PUID/PGID, K8s securityContext.runAsUser, OpenShift, etc.)
@@ -149,6 +151,11 @@ RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.maj
   chmod a+w /app /app/ComfyUI && \
   chmod a+w /etc/passwd /etc/group
 
+# Defense in depth: drop setuid/setgid bits, which nothing in the image needs.
+# gosu runs as root and only lowers privileges. Keep this after every package
+# install, including any added in a later stage.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} +
+
 # Environment variables
 ARG CLI_ARGS=""
 ARG COMFY_PORT=8188
@@ -157,8 +164,32 @@ ENV COMFY_PORT=$COMFY_PORT
 
 EXPOSE $COMFY_PORT
 
+# No setuid/setgid files may remain; this fails the build if a later change
+# brings one back. (Not a pipe into grep -q: under pipefail, find can take
+# SIGPIPE and the negation would then pass.)
+RUN found="$(find / -xdev -perm /6000 -type f)" && \
+  if [ -n "$found" ]; then echo "setuid/setgid files present:" >&2; echo "$found" >&2; exit 1; fi
+
+# Likewise, no regular file may carry file capabilities (a security.capability
+# xattr). Walks / on the root filesystem only, like find -xdev.
+RUN python3 -c "$(printf '%s\n' \
+  'import os, stat, sys' \
+  'dev, bad = os.lstat("/").st_dev, []' \
+  'for root, dirs, files in os.walk("/"):' \
+  '    dirs[:] = [d for d in dirs if os.lstat(os.path.join(root, d)).st_dev == dev]' \
+  '    for name in files:' \
+  '        path = os.path.join(root, name)' \
+  '        try:' \
+  '            if stat.S_ISREG(os.lstat(path).st_mode) and os.getxattr(path, "security.capability", follow_symlinks=False):' \
+  '                bad.append(path)' \
+  '        except OSError:' \
+  '            pass' \
+  'if bad:' \
+  '    print("files with capabilities present:", *bad, sep="\n", file=sys.stderr)' \
+  '    sys.exit(1)')"
+
 # Entrypoint runs as root by default for Docker Compose PUID/PGID support.
 # K8s users override with securityContext.runAsUser — the entrypoint detects
 # non-root and skips gosu, executing directly as the assigned UID.
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["/app/startup.sh"]

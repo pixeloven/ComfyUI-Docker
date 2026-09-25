@@ -34,3 +34,26 @@ RUN if [[ -n "$SAGEATTENTION_WHEEL_URL" ]]; then \
 RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')") && \
     find /app/.venv/lib/${PYTHON_VERSION}/site-packages -type d -exec chmod a+w {} + && \
     chmod a+w /app/.venv/bin
+
+# No setuid/setgid files may remain (core strips them); this fails the build if
+# a layer above brings one back.
+RUN found="$(find / -xdev -perm /6000 -type f)" && \
+    if [ -n "$found" ]; then echo "setuid/setgid files present:" >&2; echo "$found" >&2; exit 1; fi
+
+# Likewise, no regular file may carry file capabilities (a security.capability
+# xattr). Walks / on the root filesystem only, like find -xdev.
+RUN python3 -c "$(printf '%s\n' \
+    'import os, stat, sys' \
+    'dev, bad = os.lstat("/").st_dev, []' \
+    'for root, dirs, files in os.walk("/"):' \
+    '    dirs[:] = [d for d in dirs if os.lstat(os.path.join(root, d)).st_dev == dev]' \
+    '    for name in files:' \
+    '        path = os.path.join(root, name)' \
+    '        try:' \
+    '            if stat.S_ISREG(os.lstat(path).st_mode) and os.getxattr(path, "security.capability", follow_symlinks=False):' \
+    '                bad.append(path)' \
+    '        except OSError:' \
+    '            pass' \
+    'if bad:' \
+    '    print("files with capabilities present:", *bad, sep="\n", file=sys.stderr)' \
+    '    sys.exit(1)')"

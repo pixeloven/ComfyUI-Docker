@@ -164,6 +164,8 @@ PUID=3000 PGID=3000 docker compose up -d
 
 If PUID/PGID are not specified, the container defaults to UID 1000 and GID 1000, which matches the first non-root user on most Linux systems.
 
+PUID and PGID accept any value from 0 to 65534. If the image already has a user or group with that ID (for example GID 100, `users`), the entrypoint reuses it, and a reused user keeps its own home directory: UID 33 is `www-data`, so `HOME` becomes `/var/www` rather than `/app`. Otherwise it creates a user or group named for the ID, such as `comfy-3000`, with home `/app`. Creating an entry needs a writable `/etc/passwd` and `/etc/group`, so if you mount those read-only, pick IDs they already contain, or the container exits at start.
+
 ### Kubernetes: securityContext (Non-Root Entrypoint)
 
 When the container starts as a non-root user (e.g., via Kubernetes `securityContext.runAsUser`), the entrypoint detects this and skips all gosu/PUID/PGID logic. It activates the Python virtual environment and executes directly as the assigned UID.

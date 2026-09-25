@@ -11,6 +11,8 @@ services:
     container_name: comfyui-fetch-complete-gpu
     profiles: [models]
     user: "${PUID:-1000}:${PGID:-1000}"
+    security_opt:
+      - no-new-privileges:true
     environment:
       # Credentials are read from the environment by host, never from the lock.
       - CIVITAI_TOKEN=${CIVITAI_TOKEN:-}
@@ -53,6 +55,8 @@ services:
         condition: service_completed_successfully
         required: false
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         reservations:

@@ -84,11 +84,19 @@ There is no date tag.
 
 ## Entrypoint contract (`services/comfy/core/entrypoint.sh`)
 
+- **Installed** root-owned 0755 at `/usr/local/bin/entrypoint.sh`; must not live under
+  `/app`. Its first line sets a fixed system `PATH`.
 - **Started as root** (the Compose default): `PUID`/`PGID` default to 1000:1000.
   Anything non-numeric or above 65534 exits 1 immediately, and `PUID=0` prints a warning.
-  The group and user are created only if missing. `chown` is **non-recursive** and
-  covers only `/app`, `/app/ComfyUI` and each existing volume root, because model
-  stores run to terabytes. It logs `Starting with UID:GID = x:y`, then
+  The group and user are created only if missing: an existing entry with that ID is
+  reused, and a new one is named `comfy-<PGID>` / `comfy-<PUID>`, because the image's
+  own `comfy` (1000:1000) already holds the plain name. Nothing downstream uses the
+  names: gosu and `chown` take the numeric IDs, and a created user's home is `/app`,
+  which gosu exports as `HOME` (a reused user keeps its own home, e.g. 33 → `/var/www`).
+  Creating an entry needs writable `/etc/passwd` and `/etc/group`. It then tightens
+  their permissions (non-fatal) and warns if it cannot. `chown -h` is **non-recursive** and
+  covers only `/app`, plus `/app/ComfyUI` and each volume root that exists and is not
+  a symlink, because model stores run to terabytes. It logs `Starting with UID:GID = x:y`, then
   `exec gosu "$PUID:$PGID"`.
 - **Started non-root** (Kubernetes `runAsUser`): no gosu. It appends `/etc/passwd` and
   `/etc/group` entries when the UID or GID has none, logs `Starting as non-root
@@ -97,6 +105,12 @@ There is no date tag.
   `.cache`, the volume roots, `/app`, `/app/ComfyUI`, `/etc/passwd` and `/etc/group`
   are world-writable, and `PYTHONDONTWRITEBYTECODE=1`. `complete` re-applies the
   venv permissions after its own installs, and any new install layer must do the same.
+- `dockerfile.comfy.core` also drops setuid/setgid bits from every file in its final
+  stage, since nothing in the image needs them. The last two `RUN`s of `core` and of
+  `complete` assert that no setuid/setgid file and no file with capabilities remain,
+  so a later apt layer fails the build rather than silently undoing the strip; a new
+  stage needs the same assertions. The examples
+  run every service with `no-new-privileges:true`.
 
 ## Container standards
 
