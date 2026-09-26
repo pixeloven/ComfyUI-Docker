@@ -193,15 +193,17 @@ seven volume roots bind-mounted from `root:root 0755` sources. It fails unless:
 - each root ends up owned by 1001:1001 and writable;
 - `comfyui.db` is 1001:1001;
 - no `comfy_extras` module fails to import;
-- on the pinned version, no node class in the snapshot is missing.
+- on the same ComfyUI version as the baseline, no node class is missing.
+
+The baseline is an image main already published, pulled from GHCR, never a repo
+file. `make smoke` uses `core:cpu-latest` (`SMOKE_BASELINE` overrides it). CI uses
+`core:cpu-<sha8>` of the PR's merge-base with main, the previous main tip, or the
+tag's own commit, and falls back to `cpu-latest`. After a pin bump, the added,
+removed and changed classes go to `node-diff.md` and the job summary as a report.
+A baseline that can't be pulled fails the run.
 
 A failed smoke test on a tag withholds the GitHub Release, but not the image pushes.
 Nothing boots the non-root start, the other profiles or any GPU image.
-
-`schemas/comfyui/object_info.json` holds the pinned ComfyUI's `core-cpu` built-in
-nodes. The `snapshot-pin` job fails when its `comfyui_version` differs from the pin,
-so a bump commits the one from `smoke-cpu`'s artifact, or regenerates it with
-`tests/smoke/run.sh --snapshot`.
 
 `uv run` creates `services/.venv`, which `.gitignore` covers (`.venv/`), but
 stage files by name anyway. No Python or shell linter or formatter is configured. The one
