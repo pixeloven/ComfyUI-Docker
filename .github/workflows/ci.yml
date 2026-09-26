@@ -319,26 +319,6 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
         docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
 
-  # The committed node schema describes one ComfyUI: the pinned one, so a pin
-  # bump regenerates it in the same PR and the schema diff is reviewed with
-  # the bump. Its own job, needed only by `release`: a pin-bump PR goes red
-  # here but still runs smoke-cpu, whose artifact carries the regenerated
-  # object_info.json to commit. Locally: `tests/smoke/run.sh --snapshot`.
-  snapshot-pin:
-    name: node-schema snapshot matches the pin
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v7.0.1
-    - run: |
-        set -euo pipefail
-        pin="$(docker buildx bake --file docker-bake.hcl --print core-cpu | jq -r '.target["core-cpu"].args.COMFYUI_VERSION')"
-        snap="$(jq -r '.comfyui_version' schemas/comfyui/object_info.json)"
-        if [ "$snap" != "$pin" ]; then
-          echo "::error file=schemas/comfyui/object_info.json::the snapshot is for ComfyUI ${snap} but docker-bake.hcl pins ${pin}; commit object_info.json from the smoke-cpu artifact, or run tests/smoke/run.sh --snapshot"
-          exit 1
-        fi
-        echo "snapshot and pin agree: ${pin}"
-
   validate-models:
     runs-on: ubuntu-latest
     steps:
@@ -815,8 +795,9 @@ jobs:
   # runs tests/smoke/run.sh on it: root start with PUID/PGID 1001 (the Compose
   # path, the only one that runs the volume chown), /system_stats readiness,
   # UID/GID and ownership of all seven volume roots, and a GET /object_info
-  # dump checked against the committed snapshot. It tests our packaging, not
-  # ComfyUI, so no workflow runs. `make smoke` is the same script locally.
+  # dump whose node classes are compared with the image main already
+  # published. It tests our packaging, not ComfyUI, so no workflow runs.
+  # `make smoke` is the same script locally.
   smoke-cpu:
     name: core-cpu boots
     runs-on: ubuntu-latest
@@ -844,16 +825,47 @@ jobs:
         IMAGE_LABEL: smoke
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
 
-    - name: Boot it
+    # The node baseline is what main already published, never a file in the
+    # repo: `core:cpu-<sha8>` of the commit this build is measured against,
+    # falling back to `cpu-latest`. For a PR that is its merge-base with main;
+    # for a push to main, the previous tip; for a tag, main's build of the
+    # same commit. Same ComfyUI version: a missing node class fails. A pin
+    # bump: the diff is reported (node-diff.md), not enforced. A baseline that
+    # cannot be looked up or pulled fails; one that does not exist yet only
+    # prints a notice.
+    - name: Boot it, and compare node classes with main's image
       env:
+        GH_TOKEN: ${{ github.token }}
         IMAGE: ${{ needs.context.outputs.registry_url }}core:cpu-smoke
-      run: tests/smoke/run.sh "$IMAGE"
+        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        BEFORE: ${{ github.event.before }}
+      run: |
+        set -euo pipefail
+        case "${GITHUB_EVENT_NAME}:${GITHUB_REF}" in
+          pull_request:*)
+            commit="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PR_BASE}...${PR_HEAD}" --jq .merge_base_commit.sha)"
+            why="merge-base with main" ;;
+          push:refs/heads/main)
+            commit="${BEFORE}"; why="main before this push" ;;
+          *)
+            commit="${GITHUB_SHA}"; why="main's build of this commit" ;;
+        esac
+        echo "baseline commit ${commit:0:8} (${why})"
+        tests/smoke/run.sh \
+          --baseline "${REGISTRY_URL}core:cpu-${commit:0:8}" \
+          --baseline "${REGISTRY_URL}core:cpu-latest" \
+          "$IMAGE"
 
-    - name: Record the startup time
+    - name: Record the startup time and node diff
       if: always()
       run: |
         if [ -f tests/smoke/results/summary.json ]; then
           { echo '### core-cpu boot smoke'; echo '```json'; cat tests/smoke/results/summary.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        if [ -f tests/smoke/results/node-diff.md ]; then
+          cat tests/smoke/results/node-diff.md >> "$GITHUB_STEP_SUMMARY"
         fi
 
     - name: Upload the node schema and logs
@@ -934,7 +946,7 @@ jobs:
   release:
     name: cut the release
     runs-on: ubuntu-latest
-    needs: [context, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, build-linux-accelerators, smoke-cpu, snapshot-pin]
+    needs: [context, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, build-linux-accelerators, smoke-cpu]
     # `!contains(failure)` rather than the default all-succeeded: on a non-release
     # push some build jobs are legitimately `skipped` by the path filter, and
     # `skipped` is not `success`.
