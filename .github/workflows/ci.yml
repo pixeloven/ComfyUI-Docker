@@ -49,6 +49,7 @@ jobs:
     outputs:
       images: ${{ steps.filter.outputs.images }}
       fetch: ${{ steps.filter.outputs.fetch }}
+      relay: ${{ steps.filter.outputs.relay }}
       examples: ${{ steps.filter.outputs.examples }}
     steps:
     - uses: actions/checkout@v7.0.1
@@ -77,6 +78,17 @@ jobs:
             - 'comfy-lock.yaml'
             - 'locks/**'
             - 'services/fetch/comfyfetch/schemas/**'
+          # The comfyrelay image installs all three workspace members from the
+          # one lock, so a change to any of them can break it.
+          relay:
+            - 'services/comfyrelay/**'
+            - 'services/comfyctl/**'
+            - 'services/fetch/**'
+            - 'services/pyproject.toml'
+            - 'services/uv.lock'
+            - 'tests/relay/**'
+            - 'docker-bake.hcl'
+            - '.github/workflows/ci.yml'
           examples:
             - 'examples/**'
 
@@ -103,6 +115,7 @@ jobs:
       fetch_label: ${{ steps.classify.outputs.fetch_label }}
       build_images: ${{ steps.classify.outputs.build_images }}
       build_fetch: ${{ steps.classify.outputs.build_fetch }}
+      build_relay: ${{ steps.classify.outputs.build_relay }}
       publish_latest: ${{ steps.classify.outputs.publish_latest }}
       comfyui_version: ${{ steps.classify.outputs.comfyui_version }}
       registry_url: ${{ steps.classify.outputs.registry_url }}
@@ -122,6 +135,7 @@ jobs:
       env:
         IMAGES_CHANGED: ${{ needs.changes.outputs.images }}
         FETCH_CHANGED: ${{ needs.changes.outputs.fetch }}
+        RELAY_CHANGED: ${{ needs.changes.outputs.relay }}
       run: |
         set -euo pipefail
 
@@ -190,6 +204,9 @@ jobs:
             "services/fetch/pyproject.toml": lambda: toml("services/fetch/pyproject.toml")["project"]["version"],
             "services/comfyctl/pyproject.toml": lambda: toml("services/comfyctl/pyproject.toml")["project"]["version"],
             "the comfyfetch pin in services/comfyctl/pyproject.toml": comfyfetch_pin,
+            # Not released yet (#136), but server_info reports it, so it moves
+            # with the one number rather than going stale.
+            "services/comfyrelay/pyproject.toml": lambda: toml("services/comfyrelay/pyproject.toml")["project"]["version"],
             ".claude-plugin/plugin.json": lambda: json.load(open(".claude-plugin/plugin.json"))["version"],
             "package.json": lambda: json.load(open("package.json")).get("version", "<no version key>"),
         }
@@ -224,15 +241,19 @@ jobs:
         # kind of thing nobody can debug six months later.
         build_images=false
         build_fetch=false
+        build_relay=false
         if [ -n "${release_version}" ]; then
           build_images=true
           build_fetch=true
+          # comfyrelay is not a release artifact until #136, so a tag skips it.
         elif [ "${main}" = true ]; then
           build_images=true
           build_fetch=true
+          build_relay=true
         else
           if [ "${IMAGES_CHANGED}" = true ]; then build_images=true; fi
           if [ "${FETCH_CHANGED}" = true ]; then build_fetch=true; fi
+          if [ "${RELAY_CHANGED}" = true ]; then build_relay=true; fi
         fi
 
         # What ComfyUI goes INSIDE. Read back out of docker-bake.hcl rather
@@ -264,13 +285,14 @@ jobs:
           echo "fetch_label=${fetch_label}"
           echo "build_images=${build_images}"
           echo "build_fetch=${build_fetch}"
+          echo "build_relay=${build_relay}"
           echo "publish_latest=${main}"
           echo "comfyui_version=${comfyui_version}"
           echo "registry_url=ghcr.io/${repository_lower}/"
           echo "commit_sha=${commit_sha}"
         } >> "${GITHUB_OUTPUT}"
 
-        echo "images=${build_images} (label ${image_label}) fetch=${build_fetch} (label ${fetch_label})"
+        echo "images=${build_images} (label ${image_label}) fetch=${build_fetch} (label ${fetch_label}) relay=${build_relay} (never pushed)"
 
   # The workflows themselves. This repo's expensive bugs have been shell bugs --
   # a yq escape change that processed 0 files and exited 0, an `A && B || C`
@@ -327,6 +349,12 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-xpu"
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
         docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
+        docker buildx bake --file docker-bake.hcl --print comfyrelay | jq -e '.target | has("comfyrelay")' > /dev/null
+        # Not published until #136: the release reads IMAGE-DIGESTS from `all`.
+        if docker buildx bake --file docker-bake.hcl --print all | jq -e '.target | has("comfyrelay")' > /dev/null; then
+          echo "::error::comfyrelay is in bake's 'all' group, so a release would try to publish its digest"
+          exit 1
+        fi
 
   validate-models:
     runs-on: ubuntu-latest
@@ -887,6 +915,65 @@ jobs:
         if-no-files-found: warn
         retention-days: 14
 
+  # comfyrelay, the first-party MCP sidecar (#131). Built and tested, never
+  # pushed: it is not published until #136 moves it into the mcp image, which
+  # is also why `release` does not need this job. The image's own build already
+  # checks that it refuses to start without a token and passes a probe with no
+  # ComfyUI. This boots the core-cpu main published beside it and probes it for
+  # real, as UID 12345 on a read-only root filesystem, then times its SIGTERM
+  # stop. `tests/relay/run.sh` is the same script locally.
+  relay:
+    name: comfyrelay probes a booted core-cpu
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [context, test-bake-targets]
+    if: needs.context.outputs.build_relay == 'true'
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.3.0
+
+    # Never pushed: `push: false`, and the target's only tag has no registry.
+    - name: Build comfyrelay
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: comfyrelay
+        load: true
+        push: false
+        provenance: false
+        sbom: false
+      env:
+        IMAGE_LABEL: ci
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
+
+    # The ComfyUI main already published, not one built here: this job tests
+    # the sidecar, and smoke-cpu tests core-cpu. After a pin bump the two
+    # versions differ, which the probe reports and does not fail on.
+    - name: Probe it against a booted core-cpu
+      env:
+        COMFYUI_IMAGE: ${{ needs.context.outputs.registry_url }}core:cpu-latest
+      run: |
+        docker pull -q "${COMFYUI_IMAGE}"
+        tests/relay/run.sh --comfyui "${COMFYUI_IMAGE}" comfyrelay:ci
+
+    - name: Record the probe
+      if: always()
+      run: |
+        if [ -f tests/relay/results/summary.json ]; then
+          { echo '### comfyrelay probe'; echo '```json'; cat tests/relay/results/summary.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload the probe report and logs
+      if: always()
+      uses: actions/upload-artifact@v7.0.1
+      with:
+        name: relay
+        path: tests/relay/results/
+        if-no-files-found: warn
+        retention-days: 14
+
   build-linux-accelerators:
     runs-on: ubuntu-latest
     needs: [context, test-bake-targets]
@@ -1030,6 +1117,9 @@ jobs:
     # -- the CLI line: wheels, so comfyctl is usable without Docker ------------
     # Two, from the one uv workspace: comfyctl, and comfyfetch, the library its
     # `fetch` group mounts. Neither is on PyPI, so they install as a pair.
+    # Named, not --all-packages: the workspace also holds comfyrelay, which no
+    # release ships until #136. comfyctl does not depend on it; without it,
+    # `comfyctl relay` is a hidden command that says it is not in this build.
 
     - uses: astral-sh/setup-uv@v10.0.1
 
@@ -1037,8 +1127,18 @@ jobs:
       working-directory: services
       run: |
         set -euo pipefail
-        uv build --all-packages --wheel -o "${GITHUB_WORKSPACE}/dist"
+        for package in comfyfetch comfyctl; do
+          uv build --package "${package}" --wheel -o "${GITHUB_WORKSPACE}/dist"
+        done
         cd "${GITHUB_WORKSPACE}/dist"
+        # Exactly these two. A new workspace member must be added here on
+        # purpose, never published by accident.
+        want="$(printf '%s\n' "comfyctl-${FETCH_VERSION}-py3-none-any.whl" "comfyfetch-${FETCH_VERSION}-py3-none-any.whl")"
+        got="$(find . -maxdepth 1 -name '*.whl' -printf '%f\n' | sort)"
+        if [ "${got}" != "${want}" ]; then
+          echo "::error::the release built ${got//$'\n'/ }; it ships only ${want//$'\n'/ }"
+          exit 1
+        fi
         # A URL pin is only as good as a checksum next to it -- this is what the
         # SageAttention wheels already publish, and what consumers verify.
         sha256sum ./*.whl | tee SHA256SUMS

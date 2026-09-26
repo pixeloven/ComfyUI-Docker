@@ -376,6 +376,24 @@ group "fetch" {
     targets = ["fetch"]
 }
 
+// comfyrelay, the first-party MCP sidecar (#131). NOT PUBLISHED until #136
+// moves it into the `mcp` image, and kept that way by construction:
+//   - it is in no group, so `all` (which the release reads IMAGE-DIGESTS
+//     from) and `make all` never build it;
+//   - its one tag is a bare local name, with no registry and no version, so a
+//     stray `--push` fails rather than landing in GHCR, and no `-X.Y.Z` tag can
+//     match the release's digest filter.
+// The context is the uv workspace root, so the image installs services/uv.lock.
+target "comfyrelay" {
+    context = "services"
+    dockerfile = "comfyrelay/dockerfile.comfy.relay"
+    platforms = PLATFORMS
+    tags = ["comfyrelay:${IMAGE_LABEL}"]
+    args = {
+        COMFYUI_VERSION = COMFYUI_VERSION
+    }
+}
+
 // Convenience groups
 group "default" {
     targets = ["all"]

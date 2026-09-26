@@ -1,0 +1,107 @@
+# comfyrelay: the first-party MCP sidecar for one ComfyUI (#103, #131).
+# Standalone Python image; does NOT depend on the ComfyUI runtime images. It
+# talks to ComfyUI over HTTP (COMFYUI_URL) and to nothing else.
+#
+# NOT PUBLISHED. The bake target stays out of group "all", its only tag is a
+# local name with no registry, and no CI job pushes it. #136 moves it into the
+# `mcp` image, which is when it starts to publish.
+#
+# The build context is services/, the uv workspace root, so the image installs
+# exactly what services/uv.lock pins, hash-checked. comfyctl is the command:
+# `comfyctl relay serve` mounts comfyrelay, and comfyfetch comes with comfyctl.
+# dockerfile.comfy.relay.dockerignore, beside this file, is the context filter.
+
+# The uv that installs from the lock. Build stage only.
+FROM ghcr.io/astral-sh/uv:0.11.23@sha256:d0a0a753ab981624b49c97abc98821c1c09f4ca69d1ef5cee69c501be3d88479 AS uv
+
+FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS builder
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON=/usr/local/bin/python3 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_NO_CACHE=1
+WORKDIR /src
+# The lock and every member's pyproject first, so the dependency layer only
+# rebuilds when they change. --frozen installs the lock as written and fails
+# rather than re-resolving; every wheel is checked against its lock hash.
+COPY pyproject.toml uv.lock ./
+COPY fetch/pyproject.toml fetch/
+COPY comfyctl/pyproject.toml comfyctl/README.md comfyctl/
+COPY comfyrelay/pyproject.toml comfyrelay/README.md comfyrelay/
+RUN uv sync --frozen --no-dev --all-packages --no-install-workspace
+# Then the three workspace members themselves, not editable, so /src can go.
+COPY fetch/comfyfetch fetch/comfyfetch
+COPY comfyctl/comfyctl comfyctl/comfyctl
+COPY comfyrelay/comfyrelay comfyrelay/comfyrelay
+RUN uv sync --frozen --no-dev --all-packages --no-editable
+
+FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
+
+# tini as PID 1, so `docker stop` and a pod's SIGTERM reach the server at once
+# instead of waiting out the grace period.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tini && \
+    rm -rf /var/lib/apt/lists/*
+
+# comfy, 1000:1000, as in the mcp image. Any other UID works too: the server
+# writes nothing, so a read-only root filesystem needs no tmpfs beyond /tmp.
+ARG APP_UID=1000
+ARG APP_GID=1000
+RUN groupadd -g "$APP_GID" comfy && \
+    useradd -u "$APP_UID" -g "$APP_GID" -d /app -s /usr/sbin/nologin -M comfy && \
+    mkdir -p /app && chown comfy:comfy /app
+
+COPY --from=builder /opt/venv /opt/venv
+
+# The ComfyUI this image serves, from the bake pin, stated the way the ComfyUI
+# images state it: the label for `docker inspect`, and COMFYUI_VERSION for the
+# process, whose server_info compares it with what the live ComfyUI reports.
+ARG COMFYUI_VERSION
+RUN test -n "$COMFYUI_VERSION" || { echo "COMFYUI_VERSION is required; build with docker buildx bake" >&2; exit 1; }
+LABEL org.opencontainers.image.source="https://github.com/pixeloven/ComfyUI-Docker" \
+      org.opencontainers.image.description="comfyrelay: an MCP sidecar for one ComfyUI instance. Not affiliated with or endorsed by Comfy Org." \
+      org.opencontainers.image.version="$COMFYUI_VERSION"
+
+# The env contract, matching the mcp image where the two overlap. The token
+# (COMFYUI_MCP_HTTP_TOKEN) is never set here: without it the server refuses
+# to start.
+ENV PATH="/opt/venv/bin:$PATH" \
+    HOME=/app \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    COMFYUI_VERSION=$COMFYUI_VERSION \
+    COMFYUI_URL=http://localhost:8188 \
+    MCP_HOST=0.0.0.0 \
+    MCP_PORT=9000 \
+    COMFYUI_MCP_PROFILES=read,run
+
+WORKDIR /app
+USER comfy
+
+# Prove it at BUILD time, with the defaults above:
+#   - without a token it refuses to start, with exit 2 and the reason;
+#   - with one, `comfyctl relay probe` passes against it: 401 without the
+#     token, then initialize, tools/list and server_info. There is no ComfyUI
+#     here, so --no-comfyui: reaching ComfyUI is the integration test's job.
+RUN set -u; \
+    comfyctl --version > /dev/null && comfyctl relay --help > /dev/null || exit 1; \
+    log="$(mktemp)"; \
+    COMFYUI_MCP_HTTP_TOKEN= timeout 30 comfyctl relay serve > "$log" 2>&1; rc=$?; \
+    if [ "$rc" != 2 ] || ! grep -q "Refusing to start" "$log"; then \
+      echo "comfyrelay did not refuse to start without a token (exit $rc):" >&2; cat "$log" >&2; exit 1; \
+    fi; \
+    COMFYUI_MCP_HTTP_TOKEN=build-probe MCP_HOST=127.0.0.1 comfyctl relay serve > "$log" 2>&1 & \
+    pid=$!; \
+    for i in $(seq 60); do \
+      out="$(COMFYUI_MCP_HTTP_TOKEN=build-probe comfyctl relay probe --no-comfyui --timeout 5 2>&1)" && break; \
+      case "$out" in *"FAIL  reachable"*) sleep 1 ;; *) break ;; esac; \
+    done; \
+    kill "$pid"; wait "$pid" 2>/dev/null; \
+    case "$out" in *"probe: PASS"*) ;; *) echo "$out" >&2; cat "$log" >&2; exit 1 ;; esac; \
+    rm -f "$log"
+
+EXPOSE 9000
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["comfyctl", "relay", "serve"]
