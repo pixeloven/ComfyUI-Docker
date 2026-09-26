@@ -71,3 +71,55 @@ async def test_redirects_are_not_followed():
 def test_the_error_is_structured_json():
     err = ComfyUIError("comfyui_timeout", "slow", retryable=True)
     assert json.loads(str(err)) == {"error": {"code": "comfyui_timeout", "message": "slow", "retryable": True}}
+
+
+@pytest.mark.parametrize("body", [[], {"system": None}, {"system": []}, {}, None], ids=repr)
+async def test_system_stats_of_the_wrong_shape_is_a_bad_response(body):
+    """Any JSON parses; only an object with a "system" object is /system_stats."""
+    client = comfyui_answering({"/system_stats": httpx2.Response(200, text=json.dumps(body))})
+    with pytest.raises(ComfyUIError) as info:
+        await client.system_stats()
+    assert (info.value.code, info.value.retryable) == ("comfyui_bad_response", False)
+    assert "/system_stats with JSON that is not an object" in info.value.message
+
+
+async def test_object_info_of_the_wrong_shape_is_a_bad_response():
+    client = comfyui_answering({"/object_info": httpx2.Response(200, json=["KSampler"])})
+    with pytest.raises(ComfyUIError) as info:
+        await client.object_info()
+    assert info.value.code == "comfyui_bad_response"
+
+
+# -- credentials in COMFYUI_URL are sent, never shown -------------------------
+
+CREDENTIALED = "http://admin:hunter2@127.0.0.1:9"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        None,  # a real connection, refused: the transport's own message is included too
+        httpx2.Response(500),
+        httpx2.Response(200, text="<html>"),
+        httpx2.Response(200, json=[]),
+    ],
+    ids=["refused", "http-error", "not-json", "wrong-shape"],
+)
+async def test_credentials_in_the_url_never_appear_in_an_error(answer):
+    transport = None if answer is None else httpx2.MockTransport(lambda request: answer)
+    client = ComfyUIClient(CREDENTIALED, transport=transport)
+    with pytest.raises(ComfyUIError) as info:
+        await client.system_stats()
+    assert "hunter2" not in str(info.value) and "admin" not in str(info.value)
+    assert "http://***@127.0.0.1:9" in info.value.message
+
+
+async def test_credentials_in_the_url_are_still_sent():
+    seen = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request.headers.get("authorization"))
+        return httpx2.Response(200, json={"system": {}})
+
+    await ComfyUIClient(CREDENTIALED, transport=httpx2.MockTransport(handler)).system_stats()
+    assert seen == ["Basic YWRtaW46aHVudGVyMg=="]

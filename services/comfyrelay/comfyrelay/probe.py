@@ -26,6 +26,7 @@ from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
 from . import __version__
+from .settings import redact_url
 
 _INITIALIZE = {
     "jsonrpc": "2.0",
@@ -118,15 +119,16 @@ async def _session(report: Report, http: httpx2.AsyncClient, url: str, timeout: 
 
 
 async def probe(url: str, token: str, *, timeout: float = 30.0, require_comfyui: bool = True) -> Report:
-    report = Report(url=url)
+    shown = redact_url(url)  # what is rendered; `url` is what is requested
+    report = Report(url=shown)
 
     async with httpx2.AsyncClient(timeout=timeout) as anonymous:
         try:
             r = await anonymous.post(url, json=_INITIALIZE, headers={"Accept": "application/json, text/event-stream"})
         except httpx2.TransportError as exc:
-            report.add("reachable", False, f"nothing answers at {url}: {type(exc).__name__}: {exc}")
+            report.add("reachable", False, f"nothing answers at {shown}: {type(exc).__name__}: {exc}")
             return report
-    report.add("reachable", True, f"{url} answers")
+    report.add("reachable", True, f"{shown} answers")
     if not report.add(
         "auth",
         r.status_code == 401,

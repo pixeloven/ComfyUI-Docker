@@ -1,13 +1,20 @@
 """One async job mechanism for everything that outlives a tool call.
 
 A workflow run, a node install, a dev reload: each is submitted as a job, gets
-an id straight away, and is then followed with the one `job` tool (status, wait
-with a timeout, cancel). Producers never grow their own polling tools.
+an id straight away, and is then followed with the `job_*` tools: `job_status`
+(status, or wait with a timeout) and `job_cancel`. Producers never grow their
+own polling tools.
 
 A job is a coroutine the store runs as a task. Cancelling a job cancels that
 task, so a producer that must undo something outside this process (asking
 ComfyUI to interrupt a prompt, say) does it in its own
-`except asyncio.CancelledError:` block and re-raises.
+`except asyncio.CancelledError:` block and re-raises. A cancel waits at most
+`cancel_wait` seconds for that; a job still unwinding after it reports
+`cancelling`. The request is recorded, so a job whose cancel was requested
+ends `cancelled` even if its producer swallows the CancelledError and returns.
+
+At most `max_in_flight` jobs run at once (COMFYUI_MCP_MAX_JOBS); a submission
+past that is refused with `too_many_jobs`, which is retryable.
 
 The store is in memory. Jobs do not survive a restart, and an MCP session
 ending does not cancel them: any session can follow any job by id. Finished
@@ -26,16 +33,22 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .errors import RelayError
+from .settings import DEFAULT_MAX_JOBS
 
 # How long one `wait` may hold a tool call open. MCP clients time calls out on
 # their own, and an agent that needs longer calls `wait` again.
 MAX_WAIT_SECONDS = 300.0
+# How long a cancel waits for the producer to unwind before it answers
+# `cancelling`. The job keeps unwinding; job_status shows when it has.
+CANCEL_WAIT_SECONDS = 10.0
 KEEP_FINISHED = 256
 
 
 class JobState(str, enum.Enum):
     queued = "queued"
     running = "running"
+    # Reported, never stored: a cancel was requested and the job has not stopped yet.
+    cancelling = "cancelling"
     succeeded = "succeeded"
     failed = "failed"
     cancelled = "cancelled"
@@ -56,14 +69,22 @@ class Job:
     finished_at: float | None = None
     result: Any = None
     error: dict[str, Any] | None = None
+    cancel_requested: bool = False
     task: asyncio.Task[None] | None = field(default=None, repr=False)
+
+    @property
+    def status(self) -> JobState:
+        """The state to report: `cancelling` between a cancel request and the job stopping."""
+        if self.cancel_requested and not self.state.finished:
+            return JobState.cancelling
+        return self.state
 
     def snapshot(self) -> dict[str, Any]:
         return {
             "job_id": self.id,
             "kind": self.kind,
             "summary": self.summary,
-            "state": self.state.value,
+            "state": self.status.value,
             "finished": self.state.finished,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -83,12 +104,32 @@ def unknown_job(job_id: str) -> RelayError:
 
 
 class JobStore:
-    def __init__(self, *, keep_finished: int = KEEP_FINISHED) -> None:
+    def __init__(
+        self,
+        *,
+        keep_finished: int = KEEP_FINISHED,
+        max_in_flight: int = DEFAULT_MAX_JOBS,
+        cancel_wait: float = CANCEL_WAIT_SECONDS,
+    ) -> None:
         self._jobs: dict[str, Job] = {}
         self._keep_finished = keep_finished
+        self.max_in_flight = max_in_flight
+        self._cancel_wait = cancel_wait
 
     def submit(self, kind: str, work: Callable[[], Awaitable[Any]], *, summary: str = "") -> Job:
-        """Start `work()` as a job and return it at once. Needs a running event loop."""
+        """Start `work()` as a job and return it at once. Needs a running event loop.
+
+        Raises `too_many_jobs` (retryable) when `max_in_flight` jobs have not finished.
+        """
+        in_flight = sum(1 for j in self._jobs.values() if not j.state.finished)
+        if in_flight >= self.max_in_flight:
+            raise RelayError(
+                "too_many_jobs",
+                f"{in_flight} jobs are already in flight, the most this server runs at once; "
+                "wait for one to finish or cancel one, then submit again",
+                retryable=True,
+                limit=self.max_in_flight,
+            )
         job = Job(id=uuid.uuid4().hex, kind=kind, summary=summary)
         self._jobs[job.id] = job
         job.task = asyncio.get_running_loop().create_task(self._run(job, work), name=f"job-{job.id}")
@@ -115,11 +156,15 @@ class JobStore:
         return job
 
     async def cancel(self, job_id: str) -> Job:
-        """Cancel the job if it has not finished, and wait for it to stop."""
+        """Cancel the job if it has not finished, and wait up to `cancel_wait` seconds for it to stop.
+
+        A job still unwinding after that reports `cancelling`; it ends `cancelled`.
+        """
         job = self.get(job_id)
         if job.task is not None and not job.task.done():
+            job.cancel_requested = True
             job.task.cancel()
-            await asyncio.wait({job.task})
+            await asyncio.wait({job.task}, timeout=self._cancel_wait)
         return job
 
     @staticmethod
@@ -146,6 +191,10 @@ class JobStore:
             job.state = JobState.failed
             job.error = {"code": "job_failed", "message": f"{type(exc).__name__}: {exc}", "retryable": False}
         finally:
+            # A producer may swallow the CancelledError and return, or fail while
+            # unwinding. Either way it stopped because it was asked to.
+            if job.cancel_requested:
+                job.state = JobState.cancelled
             job.finished_at = time.time()
 
     def _prune(self) -> None:

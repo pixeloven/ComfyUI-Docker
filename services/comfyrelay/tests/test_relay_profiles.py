@@ -49,18 +49,18 @@ async def listed(profiles: tuple[str, ...]) -> tuple[set[str], Client]:
     server, _ = build_server(settings(profiles=profiles), comfyui=comfyui_answering())
     async with Client(server, mode="legacy") as client:
         names = {t.name for t in (await client.list_tools()).tools}
-        missing = await client.call_tool("job", {"job_id": "x"})
+        missing = await client.call_tool("job_status", {"job_id": "x"})
     return names, missing
 
 
-async def test_default_profiles_register_server_info_and_job():
+async def test_default_profiles_register_server_info_and_the_job_tools():
     names, _ = await listed(("read", "run"))
-    assert names == {"server_info", "job"}
+    assert names == {"server_info", "job_status", "job_cancel"}
 
 
 async def test_a_tool_in_a_disabled_profile_is_absent_and_uncallable():
     names, call = await listed(("read",))
-    assert "job" not in names
+    assert "job_status" not in names
     assert names == {"server_info"}
     assert call.is_error
     assert "Unknown tool" in call.content[0].text

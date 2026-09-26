@@ -7,12 +7,14 @@ it fails as an unknown tool. Nothing depends on a tool checking a flag.
 
 Names are part of the interface (#103, commitment 3): renaming or removing one
 is a major version. New tools take a namespace prefix: `workflow_*`, `node_*`,
-`model_*`, `docs_*`, `dev_*`. `server_info` and `job` are the two
-cross-cutting names, and each is also its namespace.
+`model_*`, `docs_*`, `dev_*`. `server_info` and the `job_*` group
+(`job_status`, `job_cancel`) are the cross-cutting names.
 
-A tool may belong to several profiles. `job` belongs to `run` today, because
-workflow runs are the only jobs; it joins `manage` and `develop` when installs
-and dev reloads start producing jobs.
+A tool may belong to several profiles. The `job_*` tools belong to `run`
+today, because workflow runs are the only jobs; they join `manage` and
+`develop` when installs and dev reloads start producing jobs. Reading a job
+and cancelling one are separate tools so that each carries honest
+annotations: `job_status` is read-only, `job_cancel` is destructive.
 """
 
 from __future__ import annotations
@@ -79,6 +81,9 @@ class ServerInfo(BaseModel):
     name: str
     version: str
     instance_id: str
+    instance_id_source: Literal["env", "hostname"] = Field(
+        description="env: set by COMFYUI_MCP_INSTANCE_ID. hostname: defaulted, so it may change on a restart"
+    )
     profiles: ProfileStatus
     capabilities: dict[str, Any]
     comfyui: ComfyUIStatus
@@ -103,7 +108,7 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
         live, error = None, None
         try:
             stats = await relay.comfyui.system_stats()
-            live = str(stats.get("system", {}).get("comfyui_version") or "") or None
+            live = str(stats["system"].get("comfyui_version") or "") or None
         except ComfyUIError as exc:
             error = exc.as_dict()
         caps = ctx.client_capabilities
@@ -111,6 +116,7 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
             name=SERVER_NAME,
             version=__version__,
             instance_id=s.instance_id,
+            instance_id_source=s.instance_id_source,
             profiles=ProfileStatus(
                 active=list(s.profiles),
                 available=list(PROFILES),
@@ -122,7 +128,11 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
                     "policy": relay.consent.policy.name,
                     "client_can_elicit": bool(caps and caps.elicitation),
                 },
-                "jobs": {"store": "memory", "max_wait_seconds": MAX_WAIT_SECONDS},
+                "jobs": {
+                    "store": "memory",
+                    "max_wait_seconds": MAX_WAIT_SECONDS,
+                    "max_in_flight": relay.jobs.max_in_flight,
+                },
             },
             comfyui=ComfyUIStatus(
                 reachable=error is None,
@@ -138,14 +148,14 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
     return server_info
 
 
-# -- job --------------------------------------------------------------------
+# -- job_* ------------------------------------------------------------------
 
 
 class JobView(BaseModel):
     job_id: str
     kind: str
     summary: str
-    state: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    state: Literal["queued", "running", "cancelling", "succeeded", "failed", "cancelled"]
     finished: bool
     created_at: float
     started_at: float | None
@@ -154,28 +164,38 @@ class JobView(BaseModel):
     error: dict[str, Any] | None = None
 
 
-def _job(relay: Relay) -> Callable[..., Any]:
-    async def job(
+def _job_status(relay: Relay) -> Callable[..., Any]:
+    async def job_status(
         job_id: str,
-        action: Literal["status", "wait", "cancel"] = "status",
         timeout_seconds: float = Field(
-            default=30.0, ge=0, le=MAX_WAIT_SECONDS, description="For wait: how long to wait at most"
+            default=0,
+            ge=0,
+            le=MAX_WAIT_SECONDS,
+            description="0 answers at once. Otherwise wait up to this long for the job to finish.",
         ),
     ) -> JobView:
-        """Follow a long-running job by its id: check its status, wait for it to finish, or cancel it.
+        """Check on a long-running job by its id, or wait for it to finish. Changes nothing.
 
-        Tools that start work lasting longer than one call return a job_id; poll it here. `wait` returns when the
-        job finishes or after timeout_seconds (the job keeps running; wait again). `cancel` stops it.
+        Tools that start work lasting longer than one call return a job_id; poll or wait on it here. A wait
+        returns when the job finishes or after timeout_seconds (the job keeps running; call again). To stop a
+        job, use job_cancel.
         """
-        if action == "wait":
-            found = await relay.jobs.wait(job_id, timeout_seconds)
-        elif action == "cancel":
-            found = await relay.jobs.cancel(job_id)
-        else:
-            found = relay.jobs.get(job_id)
+        found = await relay.jobs.wait(job_id, timeout_seconds) if timeout_seconds > 0 else relay.jobs.get(job_id)
         return JobView(**found.snapshot())
 
-    return job
+    return job_status
+
+
+def _job_cancel(relay: Relay) -> Callable[..., Any]:
+    async def job_cancel(job_id: str) -> JobView:
+        """Cancel a running job by its id, and report its state. Cancelling a finished job changes nothing.
+
+        It waits briefly for the job to stop. A job that is still unwinding reports `cancelling`; follow it with
+        job_status until it reports `cancelled`.
+        """
+        return JobView(**(await relay.jobs.cancel(job_id)).snapshot())
+
+    return job_cancel
 
 
 TOOLS: tuple[ToolSpec, ...] = (
@@ -186,9 +206,15 @@ TOOLS: tuple[ToolSpec, ...] = (
         ToolAnnotations(read_only_hint=True, open_world_hint=False),
     ),
     ToolSpec(
-        "job",
+        "job_status",
         frozenset({"run"}),
-        _job,
+        _job_status,
+        ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False),
+    ),
+    ToolSpec(
+        "job_cancel",
+        frozenset({"run"}),
+        _job_cancel,
         ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False),
     ),
 )
