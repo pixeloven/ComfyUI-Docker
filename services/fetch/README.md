@@ -19,8 +19,19 @@ Python 3.13 on Alpine — PyYAML and Typer — as a ~102 MB image **or** a CLI y
 install directly:
 
 ```sh
-uvx --from git+https://github.com/pixeloven/ComfyUI-Docker#subdirectory=services/comfyctl comfyctl fetch --help
+uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v4.0.0#subdirectory=services/comfyctl' comfyctl fetch --help
 ```
+
+Pin the tag, as above. An unpinned line follows `main`, and that's how 3.x users
+of the old `comfyfetch` line broke when 4.0.0 renamed the command.
+
+**Never let an installer resolve `comfyfetch` from a package index.** Neither
+`comfyfetch` nor `comfyctl` is registered on PyPI, so anyone could publish a
+package under either name. The `uvx` line above takes comfyfetch from the same
+git commit. From a release, pass the comfyfetch wheel explicitly with
+`--with <comfyfetch wheel url>`, as [services/comfyctl](../comfyctl/README.md#install)
+shows. `pip install` of the git subdirectory, or a bare `comfyctl` wheel with no
+`--with`, looks comfyfetch up on PyPI instead.
 
 The image is for automated deployment; the CLI is for managing your own
 configuration, and for agents. They are the same code and the same behaviour.
@@ -149,7 +160,8 @@ describing halves of it; see `VERSIONING.md`.
 
 A release publishes `fetch:1.2.0` and `fetch:1.2` alongside the commit-sha and
 `latest` tags an ordinary push produces, plus the `comfyctl` and `comfyfetch`
-wheels as release assets. Install them as a pair; see
+wheels as release assets. Install them as a pair, passing the comfyfetch wheel
+with `--with` so it never comes from an index; see
 [services/comfyctl](../comfyctl/README.md#install).
 
 **Pin by digest** — the semver tags say whether a digest change was a patch or a

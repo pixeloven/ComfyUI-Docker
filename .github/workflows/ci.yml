@@ -5,8 +5,9 @@ on:
     branches: [ main ]
     tags:
       # ONE release line. `v1.2.3` publishes everything this repo produces --
-      # the ComfyUI images, the mcp image, the comfyfetch image AND wheel, and
-      # the skills plugin -- from one commit, in one GitHub Release.
+      # the ComfyUI images, the mcp image, the fetch image, the comfyctl and
+      # comfyfetch wheels, and the skills plugin -- from one commit, in one
+      # GitHub Release.
       #
       # There used to be two lines, and a `comfyfetch/v*` tag published only the
       # CLI. The result was a releases page where neither entry described the
@@ -109,6 +110,14 @@ jobs:
     steps:
     - uses: actions/checkout@v7.0.1
 
+    # The lock agrees with every pyproject.toml, or nothing publishes. Here rather
+    # than only in validate-models because every publishing job needs this one:
+    # the release job tolerates a SKIPPED publish-fetch, which is what a failed
+    # validate-models produces.
+    - uses: astral-sh/setup-uv@v10.0.1
+    - name: services/uv.lock is current
+      run: uv lock --check --directory services
+
     - id: classify
       env:
         IMAGES_CHANGED: ${{ needs.changes.outputs.images }}
@@ -143,31 +152,10 @@ jobs:
         case "${GITHUB_REF}" in
           refs/tags/v*)
             release_version="${GITHUB_REF#refs/tags/v}"
-            # Every artifact carries the same number, so every manifest that
-            # states it has to agree. A wheel published as 1.2.0 out of a 1.3.0
-            # release is indistinguishable downstream from the real thing.
+            # The tag is checked against VERSION only. The table below checks
+            # every other file against VERSION on this same run, so together
+            # they tie the tag to every file that states the version.
             agree "${release_version}" "$(tr -d '[:space:]' < VERSION)" VERSION v
-            agree "${release_version}" \
-              "$(python3 -c "import tomllib;print(tomllib.load(open('services/fetch/pyproject.toml','rb'))['project']['version'])")" \
-              services/fetch/pyproject.toml v
-            agree "${release_version}" \
-              "$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['version'])")" \
-              .claude-plugin/plugin.json v
-            agree "${release_version}" \
-              "$(python3 -c "import json;print(json.load(open('package.json')).get('version','<no version key>'))")" \
-              package.json v
-            agree "${release_version}" \
-              "$(python3 -c "import tomllib;print(tomllib.load(open('services/comfyctl/pyproject.toml','rb'))['project']['version'])")" \
-              services/comfyctl/pyproject.toml v
-            agree "${release_version}" \
-              "$(python3 -c "import tomllib;m=[r.split('==',1)[1] for r in tomllib.load(open('services/comfyctl/pyproject.toml','rb'))['project']['dependencies'] if r.startswith('comfyfetch==')];print(m[0] if len(m)==1 else '<no comfyfetch== pin>')")" \
-              "the comfyfetch pin in services/comfyctl/pyproject.toml" v
-            agree "${release_version}" \
-              "$(python3 -c "import tomllib;d=tomllib.load(open('services/uv.lock','rb'));m=[p.get('version','<no version key>') for p in d['package'] if p['name']=='comfyfetch' and p.get('source',{}).get('editable')=='fetch'];print(m[0] if len(m)==1 else f'<{len(m)} comfyfetch entries>')")" \
-              "services/uv.lock (comfyfetch)" v
-            agree "${release_version}" \
-              "$(python3 -c "import tomllib;d=tomllib.load(open('services/uv.lock','rb'));m=[p.get('version','<no version key>') for p in d['package'] if p['name']=='comfyctl' and p.get('source',{}).get('editable')=='comfyctl'];print(m[0] if len(m)==1 else f'<{len(m)} comfyctl entries>')")" \
-              "services/uv.lock (comfyctl)" v
             image_version="${release_version}"
             fetch_version="${release_version}"
             ;;
@@ -178,24 +166,45 @@ jobs:
         esac
 
         # Every push, not just releases: drift found on the tag is drift found
-        # too late. One repo, one number -- every file below states it. The
-        # comfyfetch pin is here because uv does not hold a workspace member to
-        # it: the lock stays green while the two wheels refuse to install together.
+        # too late. One repo, one number, and this is the ONE table of the files
+        # that state it: a new versioned file is one row here.
+        #
+        # The comfyfetch pin is a row because uv does not hold a workspace member
+        # to it: the lock stays green while the two wheels refuse to install
+        # together. services/uv.lock is NOT a row: the `uv lock --check` step
+        # above fails whenever the lock disagrees with either pyproject.toml,
+        # and those two are rows, so the lock is covered transitively.
+        versions="$(python3 - <<'PY'
+        import json, tomllib
+
+        def toml(path):
+            with open(path, "rb") as f:
+                return tomllib.load(f)
+
+        def comfyfetch_pin():
+            deps = toml("services/comfyctl/pyproject.toml")["project"]["dependencies"]
+            pins = [d.split("==", 1)[1] for d in deps if d.startswith("comfyfetch==")]
+            return pins[0] if len(pins) == 1 else "<no single comfyfetch== pin>"
+
+        rows = {
+            "services/fetch/pyproject.toml": lambda: toml("services/fetch/pyproject.toml")["project"]["version"],
+            "services/comfyctl/pyproject.toml": lambda: toml("services/comfyctl/pyproject.toml")["project"]["version"],
+            "the comfyfetch pin in services/comfyctl/pyproject.toml": comfyfetch_pin,
+            ".claude-plugin/plugin.json": lambda: json.load(open(".claude-plugin/plugin.json"))["version"],
+            "package.json": lambda: json.load(open("package.json")).get("version", "<no version key>"),
+        }
+        for source, read in rows.items():
+            print(f"{source}\t{read()}")
+        PY
+        )"
         declared="$(tr -d '[:space:]' < VERSION)"
-        for pair in \
-          ".claude-plugin/plugin.json:$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['version'])")" \
-          "services/fetch/pyproject.toml:$(python3 -c "import tomllib;print(tomllib.load(open('services/fetch/pyproject.toml','rb'))['project']['version'])")" \
-          "package.json:$(python3 -c "import json;print(json.load(open('package.json')).get('version','<no version key>'))")" \
-          "services/comfyctl/pyproject.toml:$(python3 -c "import tomllib;print(tomllib.load(open('services/comfyctl/pyproject.toml','rb'))['project']['version'])")" \
-          "the comfyfetch pin in services/comfyctl/pyproject.toml:$(python3 -c "import tomllib;m=[r.split('==',1)[1] for r in tomllib.load(open('services/comfyctl/pyproject.toml','rb'))['project']['dependencies'] if r.startswith('comfyfetch==')];print(m[0] if len(m)==1 else '<no comfyfetch== pin>')")" \
-          "services/uv.lock (comfyfetch):$(python3 -c "import tomllib;d=tomllib.load(open('services/uv.lock','rb'));m=[p.get('version','<no version key>') for p in d['package'] if p['name']=='comfyfetch' and p.get('source',{}).get('editable')=='fetch'];print(m[0] if len(m)==1 else f'<{len(m)} comfyfetch entries>')")" \
-          "services/uv.lock (comfyctl):$(python3 -c "import tomllib;d=tomllib.load(open('services/uv.lock','rb'));m=[p.get('version','<no version key>') for p in d['package'] if p['name']=='comfyctl' and p.get('source',{}).get('editable')=='comfyctl'];print(m[0] if len(m)==1 else f'<{len(m)} comfyctl entries>')")"
-        do
-          if [ "${pair#*:}" != "${declared}" ]; then
-            echo "::error::${pair%%:*} is ${pair#*:} but VERSION is ${declared}; every artifact ships one version"
+        while IFS=$'\t' read -r source got; do
+          if [ "${got}" != "${declared}" ]; then
+            echo "::error::${source} is ${got} but VERSION is ${declared}; every artifact ships one version"
             exit 1
           fi
-        done
+          echo "version ${got} confirmed in ${source}"
+        done <<< "${versions}"
 
         # A label is a name a consumer can pin, so `latest` is never a fallback
         # here. Anything without a release version gets the commit sha, which is
@@ -339,11 +348,12 @@ jobs:
       working-directory: services
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: uv run pytest -q
+      # --locked: a stale lock fails here instead of being silently rewritten.
+      run: uv run --locked pytest -q
 
     - name: Validate the manifest and the locks
       run: |
-        # `comfyfetch check` validates the format now -- it bundles the
+        # `comfyctl fetch check` validates the format now -- comfyfetch bundles the
         # schemas, so there is exactly ONE definition of a valid manifest and
         # it is the one consumers get. The root schemas/ copy was deleted with
         # this change: two files with the same $id, and CI checking the stale
@@ -360,8 +370,8 @@ jobs:
     - name: Manifest and locks agree
       working-directory: services
       run: |
-        uv run comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml
-        uv run comfyctl fetch check ../comfy.yaml ../locks/preview.yaml --profile preview
+        uv run --locked comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml
+        uv run --locked comfyctl fetch check ../comfy.yaml ../locks/preview.yaml --profile preview
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0

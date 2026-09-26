@@ -52,7 +52,7 @@ Delegate by work domain, without asking first. Reach for delegation by default o
 
    | Change touches | Run |
    |---|---|
-   | `services/` Python (`fetch/`, `comfyctl/`), `comfy.yaml`, `comfy-lock.yaml`, `locks/` | `cd services && uv run pytest -q` (add `-m "not network"` offline), then `uv run comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml` |
+   | `services/` Python (`fetch/`, `comfyctl/`), `comfy.yaml`, `comfy-lock.yaml`, `locks/` | `cd services && uv run --locked pytest -q` (add `-m "not network"` offline), then `uv run --locked comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml` |
    | `docker-bake.hcl`, `examples/` | `make validate` (bake prints `all`, and every example's `docker compose config` resolves) |
    | A Dockerfile, `entrypoint.sh`, `startup.sh` | build the affected bake group and load it (`make cuda`, `make cpu`, `make rocm`, `make xpu`, or `docker buildx bake <target> --load`), then start the matching example |
    | `.github/workflows/` | `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color` |

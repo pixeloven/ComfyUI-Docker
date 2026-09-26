@@ -114,3 +114,17 @@ def test_json_mode_emits_no_progress(fixtures, tmp_path):
     r = runner.invoke(app, ["fetch", str(fixtures / "lock-good.yaml"),
                             str(tmp_path), "-o", "json"])
     json.loads(r.stdout)
+
+
+@pytest.mark.parametrize("verb", ["build", "resolve", "fetch", "check", "facts"])
+def test_module_entry_point_sees_every_verb(verb):
+    """`python -m comfyfetch.cli <verb>` must reach every verb.
+
+    Regression: the `__main__` guard sat above `build` and `facts`, so it ran
+    the app before they were registered and answered "No such command 'build'".
+    """
+    import subprocess
+    import sys
+    r = subprocess.run([sys.executable, "-m", "comfyfetch.cli", verb, "--help"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr

@@ -51,7 +51,9 @@ registry is what they check against.
   volume paths under `/app`, the port, `entrypoint.sh` user, chown and gosu logic,
   the `mcp` image's promises (`COMFYUI_MCP_HTTP_TOKEN` required, `MCP_PORT` 9000,
   the `/mcp` path, `COMFYUI_URL`, any UID, `SIGTERM` handling),
-  the permission steps in `dockerfile.comfy.core`, the volume mounts in
+  the fetch image's `ENTRYPOINT` in `dockerfile.comfy.fetch` (`comfyctl fetch fetch`:
+  Jobs and Compose append `/lock.yaml /app --apply` to it, and overrides name the
+  binary), the permission steps in `dockerfile.comfy.core`, the volume mounts in
   `examples/*/docker-compose.yml`, and removing a bake target, image, or example.
 - **Risk:** a deployment that worked breaks on `docker compose pull`, or only under
   a UID nobody tested. That includes Kubernetes `runAsUser` deployments, which

@@ -265,14 +265,6 @@ def check(
         raise typer.Exit(1)
 
 
-def main() -> None:
-    app()
-
-
-if __name__ == "__main__":
-    main()
-
-
 @app.command()
 def build(
     sources: Annotated[pathlib.Path, typer.Argument(
@@ -421,3 +413,14 @@ def facts(
     out.note(f"wrote {written} facts sidecars")
     if out.is_json:
         out.result("", {"sidecars": written})
+
+
+# LAST, after every @app.command(). Above `build` and `facts` it ran the app
+# before they were registered, so `python -m comfyfetch.cli build` said
+# "No such command 'build'".
+def main() -> None:
+    app()
+
+
+if __name__ == "__main__":
+    main()

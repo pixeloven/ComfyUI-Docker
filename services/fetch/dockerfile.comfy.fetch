@@ -33,16 +33,20 @@ COPY --from=comfyctl pyproject.toml README.md /src/comfyctl/
 COPY --from=comfyctl comfyctl/ /src/comfyctl/comfyctl/
 # pip, setuptools and the build machinery are removed after install: nothing at
 # runtime installs anything, and leaving them is both weight and attack surface.
+#
+# Each `|| true` is INSIDE braces. `&&` and `||` bind equally and left to right,
+# so a bare `… && x || true && …` also swallowed a failed `pip install`, and a
+# broken install built green.
 RUN pip install --no-cache-dir --no-compile /src/fetch /src/comfyctl \
  && rm -rf /src \
- && pip uninstall -y pip setuptools wheel 2>/dev/null || true \
+ && { pip uninstall -y pip setuptools wheel 2>/dev/null || true; } \
  && rm -rf /usr/local/lib/python*/ensurepip \
            /usr/local/lib/python*/idlelib \
            /usr/local/lib/python*/lib2to3 \
            /usr/local/lib/python*/tkinter \
            /usr/local/lib/python*/turtledemo \
            /usr/local/lib/python*/test \
- && find /usr/local -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+ && { find /usr/local -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true; }
 
 # Prove the binary and every verb resolve at BUILD time. A missing console
 # script is a green build that fails on the next scale-up.
