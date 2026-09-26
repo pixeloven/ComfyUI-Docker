@@ -302,6 +302,20 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
         docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
 
+    # The committed node schema describes one ComfyUI: the pinned one. A pin
+    # bump has to regenerate it in the same PR, so the schema diff is reviewed
+    # with the bump. Regenerate with `tests/smoke/run.sh --snapshot <image>`.
+    - name: The node-schema snapshot matches the ComfyUI pin
+      run: |
+        set -euo pipefail
+        pin="$(docker buildx bake --file docker-bake.hcl --print core-cpu | jq -r '.target["core-cpu"].args.COMFYUI_VERSION')"
+        snap="$(jq -r '.comfyui_version' schemas/comfyui/object_info.json)"
+        if [ "$snap" != "$pin" ]; then
+          echo "::error file=schemas/comfyui/object_info.json::the snapshot is for ComfyUI ${snap} but docker-bake.hcl pins ${pin}; regenerate it with tests/smoke/run.sh --snapshot"
+          exit 1
+        fi
+        echo "snapshot and pin agree: ${pin}"
+
   validate-models:
     runs-on: ubuntu-latest
     steps:
@@ -773,6 +787,59 @@ jobs:
         IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
 
+  # Boot the image, not just build it. build-cpu pushes without loading and a
+  # PR has no pushed tag to pull, so this builds core-cpu again with `load` and
+  # runs tests/smoke/run.sh on it: root start with PUID/PGID 1001 (the Compose
+  # path, the only one that runs the volume chown), /system_stats readiness,
+  # a write to /app/output as that UID, and a GET /object_info dump. It tests
+  # our packaging, not ComfyUI, so no workflow runs. `make smoke` is the same
+  # script locally.
+  smoke-cpu:
+    name: core-cpu boots
+    runs-on: ubuntu-latest
+    needs: [context, test-bake-targets]
+    if: needs.context.outputs.build_images == 'true'
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.3.0
+
+    # Never pushed: `push: false`, and the label is not one CI publishes.
+    - name: Build core-cpu
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: core-cpu
+        load: true
+        push: false
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
+        IMAGE_LABEL: smoke
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
+
+    - name: Boot it
+      env:
+        IMAGE: ${{ needs.context.outputs.registry_url }}core:cpu-smoke
+      run: tests/smoke/run.sh "$IMAGE"
+
+    - name: Record the startup time
+      if: always()
+      run: |
+        if [ -f tests/smoke/results/summary.json ]; then
+          { echo '### core-cpu boot smoke'; echo '```json'; cat tests/smoke/results/summary.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload the node schema and logs
+      if: always()
+      uses: actions/upload-artifact@v7.0.1
+      with:
+        name: smoke-cpu
+        path: tests/smoke/results/
+        if-no-files-found: warn
+
   build-linux-accelerators:
     runs-on: ubuntu-latest
     needs: [context, test-bake-targets]
@@ -842,7 +909,7 @@ jobs:
   release:
     name: cut the release
     runs-on: ubuntu-latest
-    needs: [context, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, build-linux-accelerators]
+    needs: [context, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, build-linux-accelerators, smoke-cpu]
     # `!contains(failure)` rather than the default all-succeeded: on a non-release
     # push some build jobs are legitimately `skipped` by the path filter, and
     # `skipped` is not `success`.
