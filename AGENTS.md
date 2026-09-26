@@ -55,9 +55,10 @@ Delegate by work domain, without asking first. Reach for delegation by default o
    | `services/` Python (`fetch/`, `comfyctl/`), `comfy.yaml`, `comfy-lock.yaml`, `locks/` | `cd services && uv run pytest -q` (add `-m "not network"` offline), then `uv run comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml` |
    | `docker-bake.hcl`, `examples/` | `make validate` (bake prints `all`, and every example's `docker compose config` resolves) |
    | A Dockerfile, `entrypoint.sh`, `startup.sh` | build the affected bake group and load it (`make cuda`, `make cpu`, `make rocm`, `make xpu`, or `docker buildx bake <target> --load`), then start the matching example |
+   | `services/comfy/`, `services/runtime/`, `docker-bake.hcl` | `make smoke` (add `SMOKE_NETWORK=host` on a host without a docker0 bridge). It builds `core-cpu` from the tree and boots it as root with `PUID`/`PGID` 1001 and all seven volume roots bind-mounted. It then checks `/system_stats`, that ComfyUI runs as 1001:1001 and owns and can write every root, and compares node classes with main's published `core:cpu-latest` (`SMOKE_BASELINE` overrides it). On the same ComfyUI version a missing class fails; after a `COMFYUI_VERSION` bump the diff is only reported, in `tests/smoke/results/node-diff.md` |
    | `.github/workflows/` | `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color` |
 
-   CI builds every image target on a PR that touches `services/comfy/`, `services/runtime/`, `services/mcp/`, `docker-bake.hcl` or `ci.yml`. It does not push from a PR.
+   CI builds every image target on a PR that touches `services/comfy/`, `services/runtime/`, `services/mcp/`, `docker-bake.hcl` or `ci.yml`, and its `smoke-cpu` job runs `make smoke`'s script on `core-cpu`. It does not push from a PR.
 
 ### Isolation
 
@@ -161,7 +162,7 @@ The platform (corpus, LLM gateway, cluster) is the **default path — reach for 
 
 Every role keeps its core value on a bare repo — `reviewer` reviews the diff, `researcher` evaluates from web + repo, `implementer` edits code — and sharpens that with platform capabilities wherever they're reachable.
 
-**▸ ComfyUI-Docker:** no GPU locally → the CPU example (`make cpu`, then `make test-cpu`) exercises the entrypoint, the startup and the data mounts. GPU-only behavior is then verified by CI's image builds, and nothing verifies it at runtime, so say so.
+**▸ ComfyUI-Docker:** no GPU locally → `make smoke` exercises the entrypoint, the startup and the data mounts the way CI's `smoke-cpu` job does, and the CPU example (`make test-cpu`) runs the full Compose deployment. Only `core-cpu` is booted, locally or in CI. GPU-only behavior is verified by CI's image builds and nothing boots those images, so say so.
 
 ## Skills — how agents find them
 

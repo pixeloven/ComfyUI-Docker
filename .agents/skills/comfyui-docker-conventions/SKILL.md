@@ -179,8 +179,31 @@ cd services && uv run comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml
 uvx --from ./services/comfyctl comfyctl fetch check comfy.yaml locks/preview.yaml --profile preview --parent comfy-lock.yaml
 make validate                                    # bake --print all + every example's compose config
 docker buildx bake <target|group> --load         # or make cuda / cpu / rocm / xpu
+make smoke                                       # builds core-cpu, boots it; SMOKE_NETWORK=host without a docker0 bridge
 docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
 ```
+
+`make smoke` builds `core:cpu-smoke` from the tree and runs `tests/smoke/run.sh`,
+which is also what CI's `smoke-cpu` job runs on image-touching PRs, `main` and tags.
+The script starts the image as root with `PUID`/`PGID` 1001, Manager off, and all
+seven volume roots bind-mounted from `root:root 0755` sources. It fails unless:
+
+- `/system_stats` answers within `SMOKE_TIMEOUT` (300 s);
+- ComfyUI runs as 1001:1001;
+- each root ends up owned by 1001:1001 and writable;
+- `comfyui.db` is 1001:1001;
+- no `comfy_extras` module fails to import;
+- on the same ComfyUI version as the baseline, no node class is missing.
+
+The baseline is an image main already published, pulled from GHCR, never a repo
+file. `make smoke` uses `core:cpu-latest` (`SMOKE_BASELINE` overrides it). CI uses
+`core:cpu-<sha8>` of the PR's merge-base with main, the previous main tip, or the
+tag's own commit, and falls back to `cpu-latest`. After a pin bump, the added,
+removed and changed classes go to `node-diff.md` and the job summary as a report.
+A baseline that can't be pulled fails the run.
+
+A failed smoke test on a tag withholds the GitHub Release, but not the image pushes.
+Nothing boots the non-root start, the other profiles or any GPU image.
 
 `uv run` creates `services/.venv`, which `.gitignore` covers (`.venv/`), but
 stage files by name anyway. No Python or shell linter or formatter is configured. The one

@@ -1,7 +1,7 @@
 # ComfyUI-Docker Makefile
 # Provides convenient targets for local development and building
 
-.PHONY: help all runtime core cuda cpu rocm xpu clean
+.PHONY: help all runtime core cuda cpu rocm xpu clean smoke
 
 # Default target
 help: ## Show this help message
@@ -72,6 +72,18 @@ validate: ## Validate Bake, example Compose configurations and the Kubernetes ex
 	cd examples/core-amd && docker compose config --quiet
 	cd examples/core-intel && docker compose config --quiet
 	$(KUBECONFORM) -strict -summary -kubernetes-version $(KUBERNETES_VERSION) examples/kubernetes
+
+# Boot smoke test, the same script CI's smoke-cpu job runs, on core-cpu built
+# from this tree under the never-published `smoke` label, as CI builds it.
+# SMOKE_NETWORK=host on a host without a docker0 bridge (build and run).
+# Node classes are compared against SMOKE_BASELINE, pulled from GHCR (main's
+# latest build by default); SMOKE_BASELINE= skips the comparison.
+SMOKE_NETWORK ?=
+SMOKE_BASELINE ?= ghcr.io/pixeloven/comfyui/core:cpu-latest
+
+smoke: ## Build core-cpu from this tree, boot it as PUID/PGID 1001, check readiness, volume ownership and nodes vs main
+	IMAGE_LABEL=smoke docker buildx bake core-cpu --load $(if $(filter host,$(SMOKE_NETWORK)),--set "*.network=host" --allow network.host)
+	tests/smoke/run.sh $(if $(SMOKE_NETWORK),--network $(SMOKE_NETWORK)) $(if $(SMOKE_BASELINE),--baseline $(SMOKE_BASELINE)) ghcr.io/pixeloven/comfyui/core:cpu-smoke
 
 push: ## Build and push all images to registry (don't load locally)
 	docker buildx bake all --push
