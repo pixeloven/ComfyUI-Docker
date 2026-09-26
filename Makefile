@@ -1,7 +1,7 @@
 # ComfyUI-Docker Makefile
 # Provides convenient targets for local development and building
 
-.PHONY: help all runtime core cuda cpu rocm xpu clean
+.PHONY: help all runtime core cuda cpu rocm xpu clean smoke
 
 # Default target
 help: ## Show this help message
@@ -72,6 +72,14 @@ validate: ## Validate Bake, example Compose configurations and the Kubernetes ex
 	cd examples/core-amd && docker compose config --quiet
 	cd examples/core-intel && docker compose config --quiet
 	$(KUBECONFORM) -strict -summary -kubernetes-version $(KUBERNETES_VERSION) examples/kubernetes
+
+# Boot smoke test, the same script CI's smoke-cpu job runs. Build the image
+# first (make core-cpu). SMOKE_NETWORK=host on a host without a docker0 bridge.
+SMOKE_IMAGE ?= ghcr.io/pixeloven/comfyui/core:cpu-latest
+SMOKE_NETWORK ?=
+
+smoke: ## Boot core-cpu as PUID 1001, check readiness and the UID write, dump /object_info
+	tests/smoke/run.sh $(if $(SMOKE_NETWORK),--network $(SMOKE_NETWORK)) $(SMOKE_IMAGE)
 
 push: ## Build and push all images to registry (don't load locally)
 	docker buildx bake all --push
