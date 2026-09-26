@@ -89,16 +89,63 @@ def test_relay_is_comfyrelays_app_when_installed():
     assert set(relay.commands) == set(typer.main.get_command(relay_app).commands) == {"serve", "probe"}
 
 
+def _hide_comfyrelay_distribution(monkeypatch):
+    real = importlib.metadata.distribution
+
+    def distribution(name):
+        if name == "comfyrelay":
+            raise importlib.metadata.PackageNotFoundError(name)
+        return real(name)
+
+    monkeypatch.setattr(importlib.metadata, "distribution", distribution)
+
+
 @pytest.fixture
 def comfyctl_without_comfyrelay(monkeypatch):
     """comfyctl.cli as a released wheel loads it: with no comfyrelay installed."""
     import importlib
-    import importlib.util
 
     import comfyctl.cli
 
-    real = importlib.util.find_spec
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None if name == "comfyrelay" else real(name, *a))
+    _hide_comfyrelay_distribution(monkeypatch)
+    yield importlib.reload(comfyctl.cli)
+    monkeypatch.undo()
+    importlib.reload(comfyctl.cli)
+
+
+@pytest.fixture
+def comfyctl_beside_a_stray_comfyrelay_dir(monkeypatch, tmp_path):
+    """No comfyrelay installed, but a directory of that name on sys.path, as with
+    `PYTHONPATH=services` or a `python -m` run from services/: it imports as an
+    empty namespace package, with no `comfyrelay.cli` in it."""
+    import importlib
+    import importlib.machinery
+    import importlib.util
+    import sys
+
+    import comfyctl.cli
+
+    (tmp_path / "comfyrelay").mkdir()
+
+    class StrayFirst:
+        """Resolves `comfyrelay` and its submodules from tmp_path only, as if the
+        installed one were absent (the editable install's finder would otherwise
+        find `comfyrelay.cli` by name)."""
+
+        @staticmethod
+        def find_spec(name, path=None, target=None):
+            if name != "comfyrelay" and not name.startswith("comfyrelay."):
+                return None
+            spec = importlib.machinery.PathFinder.find_spec(name, [str(tmp_path)] if name == "comfyrelay" else path)
+            if spec is None:
+                raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+            return spec
+
+    _hide_comfyrelay_distribution(monkeypatch)
+    monkeypatch.setattr(sys, "meta_path", [StrayFirst, *sys.meta_path])
+    for name in [m for m in sys.modules if m == "comfyrelay" or m.startswith("comfyrelay.")]:
+        monkeypatch.delitem(sys.modules, name)
+    assert importlib.util.find_spec("comfyrelay").submodule_search_locations  # the trap: it looks present
     yield importlib.reload(comfyctl.cli)
     monkeypatch.undo()
     importlib.reload(comfyctl.cli)
@@ -112,6 +159,39 @@ def test_without_comfyrelay_help_is_unchanged_and_relay_explains_itself(comfyctl
         assert r.exit_code == 2, args
         assert "comfyctl relay is not available in this build" in r.output
     assert runner.invoke(cli.app, ["fetch", "--help"]).exit_code == 0
+
+
+def test_a_stray_comfyrelay_directory_does_not_break_comfyctl(comfyctl_beside_a_stray_comfyrelay_dir):
+    """It used to: find_spec saw the directory, and importing comfyrelay.cli took fetch down too."""
+    cli = comfyctl_beside_a_stray_comfyrelay_dir
+    assert runner.invoke(cli.app, ["--version"]).exit_code == 0
+    assert runner.invoke(cli.app, ["fetch", "--help"]).exit_code == 0
+    r = runner.invoke(cli.app, ["relay", "serve"])
+    assert r.exit_code == 2
+    assert "comfyctl relay is not available in this build" in r.output
+
+
+@pytest.fixture
+def typer_that_shows_locals(monkeypatch):
+    """Typer as it was before 0.23, when pretty_exceptions_show_locals defaulted to True."""
+    import importlib
+
+    import comfyctl.cli
+    import comfyfetch.cli
+    import comfyrelay.cli
+
+    modules = (comfyfetch.cli, comfyrelay.cli, comfyctl.cli)  # comfyctl mounts the other two
+    monkeypatch.setitem(typer.Typer.__init__.__kwdefaults__, "pretty_exceptions_show_locals", True)
+    yield [importlib.reload(m).app for m in modules]
+    monkeypatch.undo()
+    for m in modules:
+        importlib.reload(m)
+
+
+def test_no_app_prints_locals_in_a_traceback(typer_that_shows_locals):
+    """Locals hold tokens (HF_TOKEN, COMFYUI_MCP_HTTP_TOKEN), so every app turns them off itself."""
+    for a in typer_that_shows_locals:
+        assert a.pretty_exceptions_show_locals is False, a.info.name
 
 
 def test_version_is_reportable():

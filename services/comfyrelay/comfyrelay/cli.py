@@ -49,6 +49,9 @@ app = typer.Typer(
     help=__doc__,
     no_args_is_help=True,
     rich_markup_mode="rich",
+    # A crash must not print local variables: they hold tokens. Typer before
+    # 0.23 prints them by default, and the typer>=0.12.5 floor allows those.
+    pretty_exceptions_show_locals=False,
 )
 
 
@@ -132,5 +135,5 @@ def probe(
     else:
         for check in report.checks:
             typer.echo(f"{'ok  ' if check.ok else 'FAIL'}  {check.name:<11} {check.detail}")
-        typer.echo(f"probe: {'PASS' if report.ok else 'FAIL'} {url}")
+        typer.echo(f"probe: {'PASS' if report.ok else 'FAIL'} {report.url}")
     raise typer.Exit(0 if report.ok else 1)

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
-import importlib.util
 from typing import Annotated
 
 import typer
@@ -32,6 +31,9 @@ app = typer.Typer(
     add_completion=True,
     no_args_is_help=True,
     rich_markup_mode="rich",
+    # A crash must not print local variables: they hold tokens. Typer before
+    # 0.23 prints them by default, and the typer>=0.12.5 floor allows those.
+    pretty_exceptions_show_locals=False,
 )
 
 # The group IS comfyfetch's app, so `comfyctl fetch <verb>` and `comfyfetch <verb>`
@@ -55,9 +57,20 @@ def _relay_unavailable() -> None:
 # package no release ships, which an installer would then look up on PyPI.
 # Without it, `relay` is a hidden command that says why, so `comfyctl --help`
 # is unchanged and `comfyctl relay …` explains itself rather than reporting
-# "No such command". find_spec, not try/except ImportError: a comfyrelay that
-# is installed but broken must fail loudly, not look absent.
-if importlib.util.find_spec("comfyrelay") is not None:
+# "No such command". Installed means installed distribution metadata, not
+# importable: any directory named comfyrelay on sys.path (a checkout's
+# services/, say) imports as an empty namespace package, which find_spec
+# reports as present. And not try/except ImportError: a comfyrelay that is
+# installed but broken must fail loudly, not look absent.
+def _relay_installed() -> bool:
+    try:
+        importlib.metadata.distribution("comfyrelay")
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    return True
+
+
+if _relay_installed():
     app.add_typer(importlib.import_module("comfyrelay.cli").app, name="relay")
 else:
     app.command(
