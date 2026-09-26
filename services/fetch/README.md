@@ -5,16 +5,21 @@ Three small tools and an image, following npm's shape:
 | | | |
 |---|---|---|
 | **`comfy.yaml`** | manifest | Hand-authored. Declares *intent*. |
-| **`comfyfetch resolve`** | resolver | Manifest → lock. Talks to the network. Run when you change the manifest or want to move a ref. |
+| **`comfyctl fetch resolve`** | resolver | Manifest → lock. Talks to the network. Run when you change the manifest or want to move a ref. |
 | **`comfy-lock.yaml`** | lock | **Generated.** Exact commits, exact URLs, exact hashes. |
-| **`comfyfetch fetch`** | fetcher | Lock → disk, verifying every file. Never reads the manifest. |
-| **`comfyfetch check`** | gate | Manifest and lock still agree. Offline. |
+| **`comfyctl fetch fetch`** | fetcher | Lock → disk, verifying every file. Never reads the manifest. |
+| **`comfyctl fetch check`** | gate | Manifest and lock still agree. Offline. |
+
+This directory is the `comfyfetch` **library**. Its command is `comfyctl fetch`,
+which mounts comfyfetch's own Typer app as a group
+([services/comfyctl](../comfyctl/README.md)). Before 4.0.0 it was a separate
+`comfyfetch` command, with the same verbs, flags, output and exit codes.
 
 Python 3.13 on Alpine — PyYAML and Typer — as a ~102 MB image **or** a CLI you
 install directly:
 
 ```sh
-uvx --from git+https://github.com/pixeloven/ComfyUI-Docker#subdirectory=services/fetch comfyfetch --help
+uvx --from git+https://github.com/pixeloven/ComfyUI-Docker#subdirectory=services/comfyctl comfyctl fetch --help
 ```
 
 The image is for automated deployment; the CLI is for managing your own
@@ -38,7 +43,7 @@ install an interpreter. The finished image is 102 MB against 48.5 MB.
 `--output auto` colours at a terminal and goes plain when piped, which is every
 CI job and every container. `--output json` gives automation and agents stable
 keys. Human output goes to **stderr**; stdout carries the artifact, so
-`comfyfetch resolve … > lock.yaml` stays correct.
+`comfyctl fetch resolve … > lock.yaml` stays correct.
 
 | exit | meaning |
 |---|---|
@@ -65,7 +70,7 @@ the sha256 of the bytes that commit serves:
 ```
 
 ```yaml
-# comfy-lock.yaml — comfyfetch resolve writes this
+# comfy-lock.yaml — comfyctl fetch resolve writes this
   - model: qwen_image_vae.safetensors
     url: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/7beb7b64…/split_files/vae/qwen_image_vae.safetensors
     paths:
@@ -103,12 +108,12 @@ profiles:
 
 ```sh
 # Resolve the full set ONCE, then derive each profile from it.
-comfyfetch resolve comfy.yaml                                       > locks/everything.yaml
-comfyfetch resolve comfy.yaml --profile image --from-lock locks/everything.yaml > locks/image.yaml
-comfyfetch resolve comfy.yaml --profile video --from-lock locks/everything.yaml > locks/video.yaml
+comfyctl fetch resolve comfy.yaml                                       > locks/everything.yaml
+comfyctl fetch resolve comfy.yaml --profile image --from-lock locks/everything.yaml > locks/image.yaml
+comfyctl fetch resolve comfy.yaml --profile video --from-lock locks/everything.yaml > locks/video.yaml
 
-comfyfetch fetch locks/image.yaml /workspace --apply
-comfyfetch fetch locks/video.yaml /workspace --apply   # shared files already correct, skipped
+comfyctl fetch fetch locks/image.yaml /workspace --apply
+comfyctl fetch fetch locks/video.yaml /workspace --apply   # shared files already correct, skipped
 ```
 
 `--from-lock` selects from an existing lock instead of resolving. Producing N
@@ -126,35 +131,32 @@ overrides, no diamonds. A model shared between two profiles is defined once and
 appears in both locks; materialising both installs it once, because the fetch is
 content-addressed and the second pass sees a matching hash.
 
-`comfyfetch check` validates profiles offline: every member must be a known model
+`comfyctl fetch check` validates profiles offline: every member must be a known model
 or another profile, and expansion must terminate. Cycle detection is by bounded
 expansion rather than a self-reference check, because `a → b → a` is the same
 defect one step further out.
 
 ## Versions
 
-`comfyfetch` shares the repository's version — one number covers the images, the
-wheel and the skills plugin. It lives in `VERSION`, and `pyproject.toml` must
-state the same value; CI checks that on every push, and **refuses a tag that
-disagrees**, so a `v1.2.0` tag cannot ship `1.1.0` code.
+`comfyfetch` and `comfyctl` share the repository's version — one number covers
+the images, the wheels and the skills plugin. It lives in `VERSION`, and both
+`pyproject.toml` files must state the same value; CI checks that on every push,
+and **refuses a tag that disagrees**, so a `v1.2.0` tag cannot ship `1.1.0` code.
 
 So this version does not say "what changed in the CLI" — `CHANGELOG.md` does.
 That trade buys one release page describing the whole repo instead of two
 describing halves of it; see `VERSIONING.md`.
 
 A release publishes `fetch:1.2.0` and `fetch:1.2` alongside the commit-sha and
-`latest` tags an ordinary push produces, plus the wheel as a release asset:
-
-```sh
-uv tool install \
-  https://github.com/pixeloven/ComfyUI-Docker/releases/download/v1.2.0/comfyfetch-1.2.0-py3-none-any.whl
-```
+`latest` tags an ordinary push produces, plus the `comfyctl` and `comfyfetch`
+wheels as release assets. Install them as a pair; see
+[services/comfyctl](../comfyctl/README.md#install).
 
 **Pin by digest** — the semver tags say whether a digest change was a patch or a
 break; they are not themselves a safe pin, because a tag can move.
 
-`comfyfetch --version` reports what an installed copy is. See
-[CHANGELOG.md](CHANGELOG.md).
+`comfyctl fetch --version` reports what an installed copy is. See
+[CHANGELOG.md](../../CHANGELOG.md).
 
 ## Validating before a deployment starts
 
@@ -165,7 +167,7 @@ config rather than trusting CI:
 initContainers:
   - name: check
     image: ghcr.io/pixeloven/comfyui/fetch@sha256:...
-    command: ["comfyfetch"]
+    command: ["comfyctl", "fetch"]
     args: ["check", "/config/comfy.yaml", "/config/locks/common.yaml", "--profile", "common"]
 ```
 
@@ -211,8 +213,8 @@ models/
 ```
 
 ```sh
-comfyfetch build models/ -O comfy.yaml
-comfyfetch build models/ -O comfy.yaml --check    # offline; what CI runs
+comfyctl fetch build models/ -O comfy.yaml
+comfyctl fetch build models/ -O comfy.yaml --check    # offline; what CI runs
 ```
 
 Each source file may carry a **`summary:`** — the judgement a reader needs and
@@ -223,7 +225,7 @@ so it survives into the artifact rather than staying in a file nobody reads.
 That is the whole reason `build` is not `cat`.
 
 The generated manifest stays **committed**. A build step between `git clone`
-and `comfyfetch check` is a step that gets skipped, and `--check` catches the
+and `comfyctl fetch check` is a step that gets skipped, and `--check` catches the
 staleness that results — a stale manifest resolves the *wrong models* while
 every other gate stays green.
 
@@ -235,16 +237,16 @@ boundary, so separating the halves later is `git mv` rather than a re-sort.
 ## Usage
 
 ```sh
-comfyfetch build models/ -O comfy.yaml                 # offline; manifest from sources
+comfyctl fetch build models/ -O comfy.yaml                 # offline; manifest from sources
 
-comfyfetch resolve comfy.yaml > /tmp/m.yaml            # then splice into comfy-lock.yaml
+comfyctl fetch resolve comfy.yaml > /tmp/m.yaml            # then splice into comfy-lock.yaml
 yq -i '.models = load("/tmp/m.yaml").models' comfy-lock.yaml
 
-comfyfetch fetch comfy-lock.yaml /workspace       # dry run
-comfyfetch fetch comfy-lock.yaml /workspace --apply
+comfyctl fetch fetch comfy-lock.yaml /workspace       # dry run
+comfyctl fetch fetch comfy-lock.yaml /workspace --apply
 
-comfyfetch check comfy.yaml comfy-lock.yaml       # offline; what CI runs
-comfyfetch build models/ -O comfy.yaml --check     # offline; what CI runs
+comfyctl fetch check comfy.yaml comfy-lock.yaml       # offline; what CI runs
+comfyctl fetch build models/ -O comfy.yaml --check     # offline; what CI runs
 ```
 
 Paths in the lock begin `models/`, so the fetcher's second argument is the
@@ -274,6 +276,14 @@ docker run --rm -v comfyui:/workspace -v "$PWD/comfy-lock.yaml:/lock.yaml:ro" \
   ghcr.io/pixeloven/comfyui/fetch:latest /lock.yaml /workspace --apply
 ```
 
+The entrypoint is `comfyctl fetch fetch`, so appended arguments go to the
+`fetch` verb. Any other verb replaces the entrypoint:
+
+```sh
+docker run --rm --entrypoint comfyctl -v "$PWD:/w:ro" \
+  ghcr.io/pixeloven/comfyui/fetch:latest fetch check /w/comfy.yaml /w/comfy-lock.yaml
+```
+
 ## Carrying your own metadata
 
 File and group entries reject unknown keys — `instal:` for `install:` installs
@@ -298,8 +308,8 @@ maintain can carry what your deployment needs.
 ## Validating
 
 ```sh
-comfyfetch check comfy.yaml comfy-lock.yaml
-comfyfetch check comfy.yaml locks/sdxl.yaml --profile sdxl --parent comfy-lock.yaml
+comfyctl fetch check comfy.yaml comfy-lock.yaml
+comfyctl fetch check comfy.yaml locks/sdxl.yaml --profile sdxl --parent comfy-lock.yaml
 ```
 
 The schemas ship **with the package**, so this needs no checkout of this repo.
@@ -369,15 +379,15 @@ Civitai's `model-versions` endpoint is public, and GitHub's release API is too
 | `https://…` | nothing — **you must supply `sha256:`** |
 
 `civitai:` sources require `as:`, because the filename comes from the API and
-would otherwise be unknowable offline — which `comfyfetch check` depends on.
+would otherwise be unknowable offline — which `comfyctl fetch check` depends on.
 
 ## Why CI does not re-resolve
 
-`comfyfetch check` compares manifest against lock **offline** and never re-resolves.
+`comfyctl fetch check` compares manifest against lock **offline** and never re-resolves.
 A moving `revision:` is *supposed* to yield a new commit once upstream advances —
 so a re-resolve gate would fail for the one reason that is not a mistake, and
 would need network access to do it. Hash changes arrive through a deliberate
-`comfyfetch resolve` run and are reviewed like any other diff.
+`comfyctl fetch resolve` run and are reviewed like any other diff.
 
 ## Things that will bite you
 
@@ -391,7 +401,7 @@ would need network access to do it. Hash changes arrive through a deliberate
   plausible-looking value. Resolve with `curl -sI`, never `-sIL`.
 - **GitHub only computes asset digests for newer uploads.** Much of the ComfyUI
   ecosystem's models sit on releases from 2021 — `xinntao/Real-ESRGAN@v0.1.0`
-  has none. `comfyfetch resolve` falls back to downloading and hashing, which is correct
+  has none. `comfyctl fetch resolve` falls back to downloading and hashing, which is correct
   but slow; state `sha256:` in the manifest to skip it.
 - **Bind mounts and DinD.** Where CI's filesystem is not the Docker host's,
   `-v "$(mktemp -d):/w"` silently mounts an empty directory. `verify.sh` is

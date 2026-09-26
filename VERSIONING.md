@@ -13,15 +13,16 @@ GitHub Release:
 |---|---|---|
 | `complete` / `core` / `runtime` images | GHCR | `@sha256:…`, reads the semver tag |
 | `mcp` image | GHCR | `@sha256:…` |
-| `comfyfetch` image | GHCR | `@sha256:…` |
-| `comfyfetch` **wheel** | release asset | URL + the published `SHA256SUMS` |
+| `fetch` image (`comfyctl fetch`) | GHCR | `@sha256:…` |
+| `comfyctl` and `comfyfetch` **wheels** | release assets, installed as a pair | URL + the published `SHA256SUMS` |
 | skills plugin | the git tag | `@v1.2.3` |
 
 The version lives in `VERSION`. `services/fetch/pyproject.toml`,
-`.claude-plugin/plugin.json`, `package.json` and the `comfyfetch` entry in
-`services/fetch/uv.lock` must state the same number — checked on **every
-push**, not at release time, because drift found on the tag is drift found too
-late.
+`services/comfyctl/pyproject.toml` (its version, and its `comfyfetch==` pin),
+`.claude-plugin/plugin.json`, `package.json`, and the `comfyfetch` and
+`comfyctl` entries in `services/uv.lock` must state the same number — checked on
+**every push**, not at release time, because drift found on the tag is drift
+found too late.
 
 ### Why not a line per component
 
@@ -108,6 +109,9 @@ Anything that breaks a consumer who changes nothing but the version they pull:
   worked on `1.4` must still work on `1.5`, and this repo cannot see most of
   them.
 - **A removed image, profile, or example.** Someone's `image:` line points at it.
+- **A removed or renamed command, verb or flag.** `comfyfetch` becoming
+  `comfyctl fetch` in 4.0.0 is the example: every script that typed the old
+  name breaks.
 
 Adding is never major: a new env var, volume, profile, or image is a minor.
 
@@ -115,8 +119,9 @@ Adding is never major: a new env var, volume, profile, or image is a minor.
 
 ```sh
 echo 1.2.3 > VERSION
-# match it in services/fetch/pyproject.toml, .claude-plugin/plugin.json and package.json
-(cd services/fetch && uv lock)   # after the pyproject.toml edit: uv.lock copies its version
+# match it in services/fetch/pyproject.toml, services/comfyctl/pyproject.toml (version
+# AND its comfyfetch==1.2.3 pin), .claude-plugin/plugin.json and package.json
+(cd services && uv lock)   # after the pyproject.toml edits: uv.lock copies both versions
 # add a dated `## 1.2.3 — YYYY-MM-DD` section to CHANGELOG.md
 git commit -am "release 1.2.3"
 git tag v1.2.3 && git push --tags
@@ -127,10 +132,11 @@ and it happens rarely; the alternative is a release whose images came from a
 different commit than its wheel.
 
 **Push the tag. Never create the GitHub Release by hand.** The tag is the
-trigger; CI does the rest — it checks the five version files agree with the tag,
+trigger; CI does the rest — it checks every version file agrees with the tag,
 builds every image from that one commit, builds and *attests* the wheel, and
-creates the Release with `comfyfetch-<ver>-py3-none-any.whl`, `SHA256SUMS` and
-`IMAGE-DIGESTS.txt` attached.
+creates the Release with `comfyctl-<ver>-py3-none-any.whl`,
+`comfyfetch-<ver>-py3-none-any.whl`, `SHA256SUMS` and `IMAGE-DIGESTS.txt`
+attached.
 
 `gh release create` looks equivalent and is not. CI refuses to write into a
 Release that already exists — *"releases are immutable"* — so creating one by
