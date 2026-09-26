@@ -174,8 +174,8 @@ These carry forward what was still true of the retired spec-kit constitution (v1
 These match what CI runs:
 
 ```sh
-cd services && uv run pytest -q                  # every member; add -m "not network" offline; gated cases skip without HF_TOKEN
-cd services && uv run comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml
+cd services && uv run --locked pytest -q         # every member; add -m "not network" offline; gated cases skip without HF_TOKEN
+cd services && uv run --locked comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml
 uvx --from ./services/comfyctl comfyctl fetch check comfy.yaml locks/preview.yaml --profile preview --parent comfy-lock.yaml
 make validate                                    # bake --print all + every example's compose config
 docker buildx bake <target|group> --load         # or make cuda / cpu / rocm / xpu

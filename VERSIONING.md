@@ -133,7 +133,7 @@ different commit than its wheel.
 
 **Push the tag. Never create the GitHub Release by hand.** The tag is the
 trigger; CI does the rest — it checks every version file agrees with the tag,
-builds every image from that one commit, builds and *attests* the wheel, and
+builds every image from that one commit, builds and *attests* both wheels, and
 creates the Release with `comfyctl-<ver>-py3-none-any.whl`,
 `comfyfetch-<ver>-py3-none-any.whl`, `SHA256SUMS` and `IMAGE-DIGESTS.txt`
 attached.

@@ -10,10 +10,13 @@ updates:
       actions:
         patterns: ["*"]
 
-  # comfyfetch is published as a wheel and an image consumers pin by digest, so
-  # its dependency updates are release-relevant, not housekeeping.
-  - package-ecosystem: pip
-    directory: /services/fetch
+  # comfyctl and comfyfetch are published as wheels and an image consumers pin
+  # by digest, so their dependency updates are release-relevant, not
+  # housekeeping. `uv` rather than `pip`: it reads the workspace root and
+  # updates services/uv.lock, the one lock both members share, where `pip` on
+  # one member saw neither the other member nor the lock.
+  - package-ecosystem: uv
+    directory: /services
     schedule:
       interval: weekly
     groups:

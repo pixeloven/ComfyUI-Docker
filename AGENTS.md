@@ -52,7 +52,7 @@ Delegate by work domain, without asking first. Reach for delegation by default o
 
    | Change touches | Run |
    |---|---|
-   | `services/` Python (`fetch/`, `comfyctl/`), `comfy.yaml`, `comfy-lock.yaml`, `locks/` | `cd services && uv run pytest -q` (add `-m "not network"` offline), then `uv run comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml` |
+   | `services/` Python (`fetch/`, `comfyctl/`), `comfy.yaml`, `comfy-lock.yaml`, `locks/` | `cd services && uv run --locked pytest -q` (add `-m "not network"` offline), then `uv run --locked comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml` |
    | `docker-bake.hcl`, `examples/` | `make validate` (bake prints `all`, and every example's `docker compose config` resolves) |
    | A Dockerfile, `entrypoint.sh`, `startup.sh` | build the affected bake group and load it (`make cuda`, `make cpu`, `make rocm`, `make xpu`, or `docker buildx bake <target> --load`), then start the matching example |
    | `services/comfy/`, `services/runtime/`, `docker-bake.hcl` | `make smoke` (add `SMOKE_NETWORK=host` on a host without a docker0 bridge). It builds `core-cpu` from the tree and boots it as root with `PUID`/`PGID` 1001 and all seven volume roots bind-mounted. It then checks `/system_stats`, that ComfyUI runs as 1001:1001 and owns and can write every root, and compares node classes with main's published `core:cpu-latest` (`SMOKE_BASELINE` overrides it). On the same ComfyUI version a missing class fails; after a `COMFYUI_VERSION` bump the diff is only reported, in `tests/smoke/results/node-diff.md` |

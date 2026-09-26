@@ -14,8 +14,27 @@ models/  --comfyctl fetch build-->  comfy.yaml  --comfyctl fetch resolve-->  com
 
 The command is `comfyctl fetch <verb>`. Up to 3.x it was `comfyfetch <verb>`, with
 the same verbs and flags. 4.0.0 removed that command and left no alias, so
-rewrite any old invocation you find. Without installing anything:
-`uvx --from git+https://github.com/pixeloven/ComfyUI-Docker#subdirectory=services/comfyctl comfyctl fetch --help`.
+rewrite any old invocation you find. Without installing anything, pinned to a tag:
+`uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v4.0.0#subdirectory=services/comfyctl' comfyctl fetch --help`.
+
+**Never let an installer resolve `comfyfetch` from a package index.** Neither
+`comfyctl` nor `comfyfetch` is registered on PyPI. Use the `uvx` line above, which
+takes comfyfetch from the same commit, or install the release's `comfyctl` wheel
+with `--with <comfyfetch wheel url>`. Don't use `pip install` on the git
+subdirectory, or a `comfyctl` wheel on its own.
+
+- **`fetch` is a dry run by default.** `comfyctl fetch fetch <lock> <ComfyUI root>`
+  only reports; add `--apply` to download. The root is the ComfyUI root, not
+  `models/`, because lock paths begin `models/`.
+- **`facts`** writes a `<lineage>.facts.yaml` sidecar per source file, recording
+  what the safetensors header says against what the publisher claims for the
+  file's hash: `comfyctl fetch facts models/ comfy-lock.yaml --store <root>`
+  (or `--headers <json>`). It needs the network.
+- **`-o json`** on any verb (after the verb, not after `fetch`) prints the result as
+  stable JSON on stdout. Progress stays on stderr, so the output parses.
+- **Exit codes:** `0` did what was asked, `1` a real failure (unresolved source,
+  hash mismatch, manifest and lock disagree), `2` a bad request (missing file,
+  unknown profile, incompatible flags).
 
 `comfy.yaml` may itself be generated. Past a few hundred lines a single manifest
 stops working — every family conflicts with every other on edit — so `build`
