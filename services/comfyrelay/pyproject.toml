@@ -1,0 +1,28 @@
+[project]
+name = "comfyrelay"
+version = "4.0.0"
+description = "comfyrelay: an MCP sidecar for one ComfyUI instance, with capability profiles"
+readme = "README.md"
+requires-python = ">=3.11"
+# mcp is pinned EXACTLY: tool registration, elicitation and the streamable-HTTP
+# transport are all the SDK's, and its 2.x minors have changed what a tool
+# error looks like to the client (tests/agent-tasks/README.md, finding 2).
+# httpx2 is the SDK's own HTTP client; the ComfyUI client and the probe use it
+# too, so the relay carries one HTTP stack. uvicorn serves the SDK's ASGI app.
+# Both come with mcp anyway; they are named because this package imports them.
+# uv.lock fixes every version.
+dependencies = ["mcp==2.2.0", "httpx2>=2.5", "uvicorn>=0.31.1", "typer>=0.12.5"]
+
+# NOT published before #136: the release builds only comfyctl and comfyfetch.
+# No console script either: the command is `comfyctl relay`, which mounts
+# `comfyrelay.cli.app` as a group when this package is installed.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["comfyrelay*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

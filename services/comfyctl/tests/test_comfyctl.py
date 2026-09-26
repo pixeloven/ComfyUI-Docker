@@ -81,6 +81,39 @@ def test_every_command_takes_the_one_output_flag():
         assert list(opts["output"].type.choices) == ["auto", "plain", "json"], path
 
 
+def test_relay_is_comfyrelays_app_when_installed():
+    """In the workspace comfyrelay is installed, so `relay` is its app, mounted as-is."""
+    from comfyrelay.cli import app as relay_app
+
+    relay = typer.main.get_command(app).commands["relay"]
+    assert set(relay.commands) == set(typer.main.get_command(relay_app).commands) == {"serve", "probe"}
+
+
+@pytest.fixture
+def comfyctl_without_comfyrelay(monkeypatch):
+    """comfyctl.cli as a released wheel loads it: with no comfyrelay installed."""
+    import importlib
+    import importlib.util
+
+    import comfyctl.cli
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None if name == "comfyrelay" else real(name, *a))
+    yield importlib.reload(comfyctl.cli)
+    monkeypatch.undo()
+    importlib.reload(comfyctl.cli)
+
+
+def test_without_comfyrelay_help_is_unchanged_and_relay_explains_itself(comfyctl_without_comfyrelay):
+    cli = comfyctl_without_comfyrelay
+    assert "relay" not in runner.invoke(cli.app, ["--help"]).output
+    for args in (["relay"], ["relay", "serve", "--port", "9000"], ["relay", "probe", "-o", "json"]):
+        r = runner.invoke(cli.app, args)
+        assert r.exit_code == 2, args
+        assert "comfyctl relay is not available in this build" in r.output
+    assert runner.invoke(cli.app, ["fetch", "--help"]).exit_code == 0
+
+
 def test_version_is_reportable():
     r = runner.invoke(app, ["--version"])
     assert r.exit_code == 0

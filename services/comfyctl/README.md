@@ -7,9 +7,15 @@ library behind it:
 | Group | Verbs | Package |
 |---|---|---|
 | `comfyctl fetch` | `build`, `resolve`, `fetch`, `check`, `facts` | [`comfyfetch`](../fetch/README.md): manifest, lock and verified model downloads |
+| `comfyctl relay` | `serve`, `probe` | [`comfyrelay`](../comfyrelay/README.md): the MCP sidecar. **Not released yet** |
 
 `comfyctl fetch` replaced the `comfyfetch` command in 4.0.0, with the same verbs,
 flags, output and exit codes. More groups join as they are built.
+
+`comfyctl relay` exists only where comfyrelay is installed: in this workspace and in
+the comfyrelay image. comfyctl doesn't depend on comfyrelay, and no release ships it
+yet, so an installed comfyctl has no `relay` group in `--help`. There, `comfyctl
+relay …` says it isn't available in this build, and exits 2.
 
 ## Conventions every group follows
 
