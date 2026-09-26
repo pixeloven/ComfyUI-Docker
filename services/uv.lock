@@ -2,6 +2,18 @@ version = 1
 revision = 3
 requires-python = ">=3.11"
 
+[manifest]
+members = [
+    "comfyctl",
+    "comfyfetch",
+]
+
+[manifest.dependency-groups]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "respx", specifier = ">=0.21" },
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.5"
@@ -52,9 +64,32 @@ wheels = [
 ]
 
 [[package]]
+name = "comfyctl"
+version = "4.0.0"
+source = { editable = "comfyctl" }
+dependencies = [
+    { name = "comfyfetch" },
+    { name = "typer" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "comfyfetch", editable = "fetch" },
+    { name = "typer", specifier = ">=0.12.5" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
+
+[[package]]
 name = "comfyfetch"
-version = "3.0.0"
-source = { editable = "." }
+version = "4.0.0"
+source = { editable = "fetch" }
 dependencies = [
     { name = "httpx" },
     { name = "jsonschema" },
