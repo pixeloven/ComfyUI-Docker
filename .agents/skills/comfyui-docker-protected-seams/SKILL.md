@@ -47,6 +47,8 @@ registry is what they check against.
 
 - **Pattern:** env var names and defaults (`PUID`, `PGID`, `COMFY_*`, `CLI_ARGS`),
   volume paths under `/app`, the port, `entrypoint.sh` user, chown and gosu logic,
+  the `mcp` image's promises (`COMFYUI_MCP_HTTP_TOKEN` required, `MCP_PORT` 9000,
+  the `/mcp` path, `COMFYUI_URL`, any UID, `SIGTERM` handling),
   the permission steps in `dockerfile.comfy.core`, the volume mounts in
   `examples/*/docker-compose.yml`, and removing a bake target, image, or example.
 - **Risk:** a deployment that worked breaks on `docker compose pull`, or only under
@@ -69,11 +71,23 @@ registry is what they check against.
 ### 6. Supply-chain pins
 
 - **Pattern:** `SAGEATTENTION_RELEASE_URL` and each `SAGEATTENTION_WHEEL_SHA256`,
-  `MCP_VERSION`, the `sam2` commit in `extra-requirements.txt`, the base-image tags in
-  `services/*/dockerfile.*`, action versions in workflows, and the two patches to
-  upstream in `services/mcp/`: the `sed` to `server.py` in `dockerfile.comfy.mcp`,
-  and the MCP SDK bound in `constraints.txt` (`mcp<2`, joenorton/comfyui-mcp-server#18).
+  `services/mcp/package.json` and `package-lock.json` (the pin for the `mcp` image:
+  `comfyui-mcp` at an exact version, and every package under it with an integrity
+  hash), the `sam2` commit in `extra-requirements.txt`, the base-image tags and
+  digests in `services/*/dockerfile.*`, action versions in workflows, and in
+  `services/mcp/dockerfile.comfy.mcp`: `npm ci --ignore-scripts`, the optional
+  dependencies it removes, and the hardening `ENV` (`COMFYUI_MCP_ENV_FILE`,
+  `COMFYUI_MCP_AUTO_UPDATE_DISABLE`, `COMFYUI_MCP_PANEL_AUTOINSTALL`,
+  `COMFYUI_MCP_FORCE_REMOTE`, `COMFYUI_MCP_TOOL_DENY`, and `MCP_HOST`, which with no
+  token makes the server refuse to start).
 - **Risk:** executing unreviewed third-party code, or a silent ABI or behavior change.
+  `comfyui-mcp` has one maintainer and ships several releases a week. By default it
+  updates itself from npm, installs its own custom node into ComfyUI, and loads a
+  dotenv that its own tools can write. A lock bump can rename a tool or an env var:
+  re-check the deny list against that version's `dist/tools/tool-surface-filter.js`.
+  The build probe fails if a denied tool reappears in `tools/list`, but not if a new
+  tool ought to be denied. Dropping `--ignore-scripts` runs `cloudflared`'s
+  postinstall, which downloads its latest binary as root.
 - **Response:** flag any change that removes a hash or moves a pin to a moving ref.
   A routine Dependabot action bump is expected.
 

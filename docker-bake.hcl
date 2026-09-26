@@ -342,9 +342,7 @@ target "mcp" {
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}mcp:cache,optional=true"]
     cache-to   = ["type=inline"]
-    args = {
-        MCP_VERSION = "v1.1.1"
-    }
+    // The comfyui-mcp version is pinned by services/mcp/package-lock.json.
 }
 
 group "mcp" {

@@ -1,0 +1,8 @@
+{
+  "name": "comfyui-mcp-image",
+  "private": true,
+  "description": "The pin for the mcp image: comfyui-mcp at an exact version, with package-lock.json fixing every dependency under it.",
+  "dependencies": {
+    "comfyui-mcp": "0.52.203"
+  }
+}

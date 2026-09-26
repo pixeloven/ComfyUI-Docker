@@ -48,7 +48,7 @@ custom nodes are distributed through the Comfy Registry and current Manager.
 | Multi-user storage | Opt-in | Add `--multi-user` to `CLI_ARGS` |
 | Dynamic VRAM / async offload | Enabled upstream | Add headroom or disable flags only when needed |
 | Comfy Kitchen attention | Opt-in | Add `--use-ck-attention` to `CLI_ARGS` |
-| MCP automation | Separate image | Build/run the `mcp` target and point `COMFYUI_URL` at this service |
+| MCP automation | Separate image | The `mcp` image (artokun/comfyui-mcp) serves agents on `:9000/mcp`. Set `COMFYUI_MCP_HTTP_TOKEN` (required) and point `COMFYUI_URL` at this service. Node installs through it need [#125](https://github.com/pixeloven/ComfyUI-Docker/issues/125); see [its README](../../services/mcp/README.md) |
 
 ## Hardware Matrix
 

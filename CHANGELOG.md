@@ -9,6 +9,105 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 3.0.0 — 2026-09-25
+
+### Breaking: the `mcp` image is now a hardened artokun/comfyui-mcp
+
+`ghcr.io/pixeloven/comfyui/mcp` keeps its name, its port (`9000`), its path
+(`/mcp`) and `COMFYUI_URL`, but the server inside is new, and it **requires a
+token**. It packages [artokun/comfyui-mcp](https://github.com/artokun/comfyui-mcp)
+`0.52.203` from npm, pinned with its whole dependency tree by
+`services/mcp/package-lock.json`, on a digest-pinned `node:22-slim`. It replaces
+joenorton/comfyui-mcp-server, which couldn't run an arbitrary workflow, inspect
+nodes or install anything, and served an unauthenticated endpoint.
+
+It was the only server that passed all four tasks of the Phase 1 evaluation
+(build and run a workflow, install a pinned node pack and use it, answer
+questions about the live node set, report a real validation error) against a
+containerized ComfyUI ([#102](https://github.com/pixeloven/ComfyUI-Docker/issues/102)).
+It's the interim default. A first-party server, planned in
+[#103](https://github.com/pixeloven/ComfyUI-Docker/issues/103), is meant to
+replace it in a later major version.
+
+**Unchanged:** the image name, port `9000`, the `/mcp` path, and `COMFYUI_URL`.
+
+**To upgrade:**
+
+1. **Set `COMFYUI_MCP_HTTP_TOKEN`** to a long random secret, such as
+   `openssl rand -hex 32`, from your secret store. Without it the container exits
+   1 at start with `Refusing to start: HTTP MCP transport bound on non-loopback
+   host 0.0.0.0 WITHOUT an auth token`.
+2. **Send the token from every client**, as `Authorization: Bearer <token>` or
+   `X-API-Key: <token>`. For Claude Code: `claude mcp add --transport http comfyui
+   http://<host>:9000/mcp --header "Authorization: Bearer <token>"`. A request
+   without it gets `401`.
+3. **Expect sessions.** The endpoint follows MCP's session-based streamable HTTP:
+   a client sends `initialize` first and then the `mcp-session-id` it gets back on
+   every request. MCP clients do this themselves, but a hand-written client that
+   sent bare requests will get `400`. Sessions live in the server's memory, so
+   more than one replica needs sticky sessions, and a restart ends them.
+4. **Update anything that names a tool.** The tool names are all different, for
+   example `get_system_stats`, `create_workflow`, `enqueue_workflow`,
+   `install_custom_node` and `restart_comfyui`. Prompts, allow lists and scripts
+   written for the old server's tools won't find them. Tool names follow the
+   upstream pin from now on.
+5. **Move saved workflows.** A `/app/workflows` mount is ignored. Saved workflows
+   now live in `COMFYUI_WORKFLOWS_DIR` (default `/app/.comfyui-mcp/workflows`), and
+   each JSON file there becomes a tool.
+6. **Drop the old server's variables.** These now do nothing:
+   `COMFY_MCP_WORKFLOW_DIR`, `COMFY_MCP_DEFAULT_IMAGE_MODEL`,
+   `COMFY_MCP_DEFAULT_AUDIO_MODEL`, `COMFY_MCP_DEFAULT_VIDEO_MODEL`,
+   `COMFY_MCP_ASSET_TTL_HOURS` and `COMFYUI_OUTPUT_ROOT`.
+7. **Keep ComfyUI-Manager on** (`COMFY_ENABLE_MANAGER=true`, the default) if agents
+   should restart ComfyUI: the server restarts it through Manager's reboot
+   endpoint.
+
+What the image sets, so a deployment can't forget it (the
+[README](services/mcp/README.md) explains each):
+
+- A token is required. The server binds `0.0.0.0` and refuses to start without one.
+- The update check at startup is off (`COMFYUI_MCP_AUTO_UPDATE_DISABLE=1`).
+  Upstream otherwise installs `comfyui-mcp@latest` over itself. The tool that can
+  still update it on request, `install_comfyui`, is denied, and the install is
+  owned by root.
+- The server's dotenv is off (`COMFYUI_MCP_ENV_FILE=/dev/null`). Upstream loads
+  `~/.comfyui-mcp/.env` at every start, and one of its own tools can write that
+  file, so an agent could otherwise plant settings such as `NODE_OPTIONS` that
+  apply after a restart. Pass settings as real environment variables.
+- Panel auto-install is off (`COMFYUI_MCP_PANEL_AUTOINSTALL=0`). Upstream otherwise
+  installs its own custom node into ComfyUI.
+- `runpod*`, `train_*`, `report_issue`, `apps` and `install_comfyui` are denied
+  (`COMFYUI_MCP_TOOL_DENY`). Those spend money, need Docker, publish to the
+  author's services, or modify the server itself. The other 33 tools stay.
+- ComfyUI is always treated as remote (`COMFYUI_MCP_FORCE_REMOTE=1`), so
+  `restart_comfyui` goes through Manager's reboot endpoint with no shell command.
+- It runs under any UID, with `HOME=/app` writable by all, and under a read-only
+  root filesystem with a tmpfs at `/app` and `/tmp`.
+- `tini` is PID 1, so `docker stop` and a pod's `SIGTERM` stop the server at once.
+- The build installs the lock with `npm ci --ignore-scripts`, and fails unless
+  `package.json` pins an exact version. It drops the bundled Claude Code and Codex
+  binaries, which only the denied and orchestrator paths use: the image is 643 MB.
+  A build-time probe checks that the server refuses to start without a token,
+  answers an MCP `initialize` with one, and lists none of the denied tools.
+
+Known limits:
+
+- **Node installs need Manager to accept them.** Manager refuses installs over HTTP
+  when ComfyUI listens on all interfaces, which is how our images start it. Until
+  [#125](https://github.com/pixeloven/ComfyUI-Docker/issues/125) decides the image
+  side, `install_custom_node` works only when ComfyUI listens on loopback and shares
+  the MCP container's network, or when Manager's security config allows it.
+- **ComfyUI still has no authentication.** The token protects the MCP server, not
+  ComfyUI's port.
+- **`upload_image` can send outputs to any URL.** Its `action:"output"` can `PUT` to
+  an address the agent names, with no guard against internal addresses. Restrict
+  the container's outbound network.
+- **Don't set `COMFYUI_PATH` or mount ComfyUI's volumes** into this container; the
+  file-writing tools would then act on files ComfyUI runs.
+
+`services/mcp/constraints.txt` and the `sed` patch to upstream's `server.py` are
+gone, with the Python server they existed for.
+
 ## 2.4.2 — 2026-09-25
 
 ### Any `PUID` and `PGID` work when the container starts as root

@@ -665,7 +665,7 @@ jobs:
   # in the image family -- but no job ever built it, so `mcp:latest` has never
   # existed and `mcp:0.1.0` failed the first release that went looking for it.
   #
-  # No free-disk-space step: this is python:3.12-slim plus a git clone, not a
+  # No free-disk-space step: this is node:22-slim plus one npm package, not a
   # CUDA stack.
   build-mcp:
     runs-on: ubuntu-latest
