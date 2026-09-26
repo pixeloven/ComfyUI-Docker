@@ -12,11 +12,14 @@ pinned in `docker-bake.hcl`, so a pin bump shows up as a reviewable schema diff.
   image's `org.opencontainers.image.version` label) and `generated_from` sit beside
   the `object_info` body.
 
-CI's `test-bake-targets` job fails when `comfyui_version` differs from the bake pin.
-To regenerate the snapshot after a bump, build `core-cpu` and run the smoke test with
-`--snapshot`:
+CI's `snapshot-pin` job fails when `comfyui_version` differs from the bake pin, and
+the release job needs it. The smoke test also fails when the image is the pinned
+ComfyUI and a node class listed here is missing from it.
+
+After a pin bump, commit the `object_info.json` from the `smoke-cpu` job's artifact,
+or regenerate it locally from `core-cpu` built from the tree:
 
 ```sh
-make core-cpu
-tests/smoke/run.sh --snapshot ghcr.io/pixeloven/comfyui/core:cpu-latest   # add --network host without a docker0 bridge
+make smoke   # builds ghcr.io/pixeloven/comfyui/core:cpu-smoke; add SMOKE_NETWORK=host without a docker0 bridge
+tests/smoke/run.sh --snapshot ghcr.io/pixeloven/comfyui/core:cpu-smoke   # --network host likewise
 ```
