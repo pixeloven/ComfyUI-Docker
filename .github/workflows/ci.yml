@@ -114,7 +114,7 @@ jobs:
     # than only in validate-models because every publishing job needs this one:
     # the release job tolerates a SKIPPED publish-fetch, which is what a failed
     # validate-models produces.
-    - uses: astral-sh/setup-uv@v10.0.1
+    - uses: astral-sh/setup-uv@v10.2.0
     - name: services/uv.lock is current
       run: uv lock --check --directory services
 
@@ -334,7 +334,7 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v10.0.1
+      uses: astral-sh/setup-uv@v10.2.0
       with:
         enable-cache: true
 
@@ -374,10 +374,10 @@ jobs:
         uv run --locked comfyctl fetch check ../comfy.yaml ../locks/preview.yaml --profile preview
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
 
     - name: Build the fetch image
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: fetch
@@ -414,10 +414,10 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
 
     - name: Build the fetch image
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: fetch
@@ -498,7 +498,7 @@ jobs:
     # No free-disk-space or prune step: this image is ~48 MB, not a CUDA stack.
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
 
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v4.6.0
@@ -509,7 +509,7 @@ jobs:
 
     - name: Build and push
       id: build
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: fetch
@@ -556,7 +556,7 @@ jobs:
     - uses: actions/checkout@v7.0.1
     
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@v1.3.1
+      uses: jlumbroso/free-disk-space@v2.0.0
       with:
         tool-cache: true
         android: true
@@ -573,7 +573,7 @@ jobs:
         echo "✅ Docker system cleaned"
         
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
       with:
         buildkitd-flags: --debug
   
@@ -594,7 +594,7 @@ jobs:
         GH_TOKEN: ${{ github.token }}
 
     - name: Build CUDA images
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: cuda
@@ -631,7 +631,7 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@v1.3.1
+      uses: jlumbroso/free-disk-space@v2.0.0
       with:
         tool-cache: true
         android: true
@@ -648,7 +648,7 @@ jobs:
         echo "✅ Docker system cleaned"
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
       with:
         buildkitd-flags: --debug
 
@@ -660,7 +660,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build architecture-specific CUDA images
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: cuda-arch
@@ -704,7 +704,7 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
 
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v4.6.0
@@ -714,7 +714,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build the mcp image
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: mcp
@@ -743,7 +743,7 @@ jobs:
     - uses: actions/checkout@v7.0.1
     
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@v1.3.1
+      uses: jlumbroso/free-disk-space@v2.0.0
       with:
         tool-cache: true
         android: true
@@ -760,7 +760,7 @@ jobs:
         echo "✅ Docker system cleaned"
         
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
       with:
         buildkitd-flags: --debug
   
@@ -772,7 +772,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build CPU images
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: cpu
@@ -818,11 +818,11 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
 
     # Never pushed: `push: false`, and the label is not one CI publishes.
     - name: Build core-cpu
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: core-cpu
@@ -901,7 +901,7 @@ jobs:
     - uses: actions/checkout@v7.0.1
 
     - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@v1.3.1
+      uses: jlumbroso/free-disk-space@v2.0.0
       with:
         tool-cache: true
         android: true
@@ -918,7 +918,7 @@ jobs:
         echo "✅ Docker system cleaned"
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
 
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v4.6.0
@@ -928,7 +928,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build ${{ matrix.target }} images
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: ${{ matrix.target }}
@@ -1031,7 +1031,7 @@ jobs:
     # Two, from the one uv workspace: comfyctl, and comfyfetch, the library its
     # `fetch` group mounts. Neither is on PyPI, so they install as a pair.
 
-    - uses: astral-sh/setup-uv@v10.0.1
+    - uses: astral-sh/setup-uv@v10.2.0
 
     - name: Build the wheels
       working-directory: services
