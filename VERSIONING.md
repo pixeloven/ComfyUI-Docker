@@ -19,10 +19,12 @@ GitHub Release:
 
 The version lives in `VERSION`. `services/fetch/pyproject.toml`,
 `services/comfyctl/pyproject.toml` (its version, and its `comfyfetch==` pin),
-`.claude-plugin/plugin.json`, `package.json`, and the `comfyfetch` and
-`comfyctl` entries in `services/uv.lock` must state the same number — checked on
-**every push**, not at release time, because drift found on the tag is drift
-found too late.
+`services/comfyrelay/pyproject.toml`, `.claude-plugin/plugin.json`,
+`package.json`, and the `comfyfetch`, `comfyctl` and `comfyrelay` entries in
+`services/uv.lock` must state the same number — checked on **every push**, not
+at release time, because drift found on the tag is drift found too late.
+comfyrelay isn't released yet (no wheel, no image), but it reports its version,
+so it moves with the others.
 
 ### Why not a line per component
 
@@ -120,8 +122,9 @@ Adding is never major: a new env var, volume, profile, or image is a minor.
 ```sh
 echo 1.2.3 > VERSION
 # match it in services/fetch/pyproject.toml, services/comfyctl/pyproject.toml (version
-# AND its comfyfetch==1.2.3 pin), .claude-plugin/plugin.json and package.json
-(cd services && uv lock)   # after the pyproject.toml edits: uv.lock copies both versions
+# AND its comfyfetch==1.2.3 pin), services/comfyrelay/pyproject.toml,
+# .claude-plugin/plugin.json and package.json
+(cd services && uv lock)   # after the pyproject.toml edits: uv.lock copies the versions
 # add a dated `## 1.2.3 — YYYY-MM-DD` section to CHANGELOG.md
 git commit -am "release 1.2.3"
 git tag v1.2.3 && git push --tags
