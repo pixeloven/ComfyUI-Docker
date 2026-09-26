@@ -946,20 +946,26 @@ jobs:
   release:
     name: cut the release
     runs-on: ubuntu-latest
-    needs: [context, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, build-linux-accelerators, smoke-cpu]
+    needs: [context, validate-models, end-to-end, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, build-linux-accelerators, smoke-cpu]
     # `!contains(failure)` rather than the default all-succeeded: on a non-release
     # push some build jobs are legitimately `skipped` by the path filter, and
     # `skipped` is not `success`.
     #
-    # An image release is the exception: smoke-cpu must have succeeded, not
-    # merely not failed. This gates the GitHub Release only. On a tag the
-    # build jobs push their images in parallel with smoke-cpu, so an image
-    # that fails it still reaches the registry.
+    # But this job only runs for a release, which is a `v*` tag, and on a tag
+    # nothing it needs is skipped legitimately: `context` forces build_images
+    # and build_fetch true, and validate-models, end-to-end and
+    # build-cuda-arch have no `if`. So a `skipped` need here means an upstream
+    # failure hid it -- a failed validate-models leaves publish-fetch
+    # skipped, not failed -- and every need must have succeeded.
+    #
+    # This gates the GitHub Release only. On a tag the build jobs push their
+    # images in parallel with smoke-cpu, so an image that fails it still
+    # reaches the registry.
     if: >-
       !cancelled()
       && !contains(needs.*.result, 'failure')
       && (needs.context.outputs.image_version != '' || needs.context.outputs.fetch_version != '')
-      && (needs.context.outputs.image_version == '' || needs.smoke-cpu.result == 'success')
+      && !contains(needs.*.result, 'skipped')
     permissions:
       contents: write
       id-token: write
