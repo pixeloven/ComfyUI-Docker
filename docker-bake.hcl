@@ -354,6 +354,10 @@ group "mcp" {
 target "fetch" {
     context = "services/fetch"
     dockerfile = "dockerfile.comfy.fetch"
+    // The image's command is comfyctl, which mounts comfyfetch as its `fetch` group.
+    contexts = {
+        comfyctl = "services/comfyctl"
+    }
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}fetch:${IMAGE_LABEL}",
