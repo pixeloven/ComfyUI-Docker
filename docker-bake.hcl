@@ -379,10 +379,12 @@ group "fetch" {
 // comfyrelay, the first-party MCP sidecar (#131). NOT PUBLISHED until #136
 // moves it into the `mcp` image, and kept that way by construction:
 //   - it is in no group, so `all` (which the release reads IMAGE-DIGESTS
-//     from) and `make all` never build it;
-//   - its one tag is a bare local name, with no registry and no version, so a
-//     stray `--push` fails rather than landing in GHCR, and no `-X.Y.Z` tag can
-//     match the release's digest filter.
+//     from) and `make all` never build it. This is what keeps it out of a
+//     release, and CI's validate job fails if it ever joins `all`;
+//   - its one tag is a bare local name, with no registry, so a stray `--push`
+//     fails rather than landing in GHCR. The tag does carry IMAGE_LABEL, so
+//     under a release (IMAGE_LABEL=4.0.1) it is `comfyrelay:4.0.1`, which the
+//     release's `:X.Y.Z` digest filter would match if the target were in `all`.
 // The context is the uv workspace root, so the image installs services/uv.lock.
 target "comfyrelay" {
     context = "services"
