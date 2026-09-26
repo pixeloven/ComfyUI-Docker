@@ -14,13 +14,14 @@ registry is what they check against.
 ### 1. Release line and publish paths
 
 - **Pattern:** `VERSION`; the version in `services/fetch/pyproject.toml`,
-  `.claude-plugin/plugin.json`, `package.json` and the `comfyfetch` entry in
-  `services/fetch/uv.lock`; the `context` and `release` jobs in `ci.yml`;
+  `services/comfyctl/pyproject.toml` (and its `comfyfetch==` pin),
+  `.claude-plugin/plugin.json`, `package.json`, and the `comfyfetch` and
+  `comfyctl` entries in `services/uv.lock`; the `context` and `release` jobs in `ci.yml`;
   `IMAGE_LABEL`, `PUBLISH_LATEST`, `IMAGE_VERSION`, `FETCH_VERSION` and every
   `tags = [...]` in `docker-bake.hcl`; anything in `nightly.yml` that sets tags.
 - **Risk:** a tag starts meaning two things. The nightly moving `*-latest` hands every
   consumer an unreviewed upstream commit. A hand-made Release makes the release job
-  fail after images publish. The `context` job fails any push where the five
+  fail after images publish. The `context` job fails any push where the
   version files disagree; a change that drops a file from that check lets a
   partial bump ship.
 - **Response:** flag it. Check against `VERSIONING.md`: one version line, three
@@ -37,7 +38,8 @@ registry is what they check against.
 ### 3. Manifest and lock format
 
 - **Pattern:** `services/fetch/comfyfetch/schemas/*.json`, `schema.py`, `lockfile.py`,
-  any change to which keys `comfy.yaml` or a lock accepts, and CLI verbs or flags.
+  any change to which keys `comfy.yaml` or a lock accepts, and CLI verbs or flags
+  (`comfyctl`, and the comfyfetch app it mounts as `comfyctl fetch`).
 - **Risk:** consumers pin these formats. `VERSIONING.md` says a format break is
   **major**, however small the diff.
 - **Response:** flag it and classify it as major or not. Update `skills/comfy-manifest/SKILL.md`

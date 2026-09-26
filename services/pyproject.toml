@@ -1,0 +1,26 @@
+# The uv workspace for this repo's Python tooling. It is a VIRTUAL root: not a
+# package, and it publishes nothing. Its members are packages, and each one
+# builds on its own:
+#
+#   fetch/     comfyfetch -- manifest, lock and verified model downloads
+#   comfyctl/  comfyctl   -- the umbrella CLI, which mounts each tool as a group
+#
+# It is rooted here rather than at the repository root because everything else
+# in this repo is Docker and Compose, and a root pyproject.toml would pull every
+# `uv run` anywhere in the checkout into this workspace. Members are listed
+# rather than globbed, because services/ also holds the images that are not
+# Python.
+#
+# One lock (uv.lock, beside this file) covers every member, so the members
+# can't drift onto different dependency versions.
+[tool.uv.workspace]
+members = ["fetch", "comfyctl"]
+
+# `uv run pytest -q` from here runs every member's tests in one pass. Each
+# member keeps its own pytest config, so `cd fetch && uv run pytest` still works.
+[dependency-groups]
+dev = ["pytest>=8.0", "respx>=0.21"]
+
+[tool.pytest.ini_options]
+testpaths = ["fetch/tests", "comfyctl/tests"]
+markers = ["network: hits real hosts on purpose"]

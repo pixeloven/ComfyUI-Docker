@@ -21,11 +21,19 @@ FROM python:${PYTHON_VERSION}-alpine
 # comfy-cli and Harmony's `hmy`, plus --output json for automation and agents.
 # --no-compile keeps the layer small; not caching bytecode is irrelevant next to
 # downloading gigabytes.
-COPY pyproject.toml /src/
-COPY comfyfetch/ /src/comfyfetch/
+#
+# comfyctl is the command; comfyfetch is the library its `fetch` group mounts.
+# comfyctl arrives through bake's named `comfyctl` context (docker-bake.hcl), so
+# this build context stays services/fetch. Both are installed in ONE pip call,
+# which is what lets comfyctl's `comfyfetch==X.Y.Z` pin resolve to /src/fetch
+# rather than to an index that does not carry it.
+COPY pyproject.toml /src/fetch/
+COPY comfyfetch/ /src/fetch/comfyfetch/
+COPY --from=comfyctl pyproject.toml README.md /src/comfyctl/
+COPY --from=comfyctl comfyctl/ /src/comfyctl/comfyctl/
 # pip, setuptools and the build machinery are removed after install: nothing at
 # runtime installs anything, and leaving them is both weight and attack surface.
-RUN pip install --no-cache-dir --no-compile /src \
+RUN pip install --no-cache-dir --no-compile /src/fetch /src/comfyctl \
  && rm -rf /src \
  && pip uninstall -y pip setuptools wheel 2>/dev/null || true \
  && rm -rf /usr/local/lib/python*/ensurepip \
@@ -36,12 +44,13 @@ RUN pip install --no-cache-dir --no-compile /src \
            /usr/local/lib/python*/test \
  && find /usr/local -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 
-# Prove the binary and all three verbs resolve at BUILD time. A missing console
+# Prove the binary and every verb resolve at BUILD time. A missing console
 # script is a green build that fails on the next scale-up.
-RUN comfyfetch --help > /dev/null \
- && comfyfetch resolve --help > /dev/null \
- && comfyfetch fetch --help > /dev/null \
- && comfyfetch check --help > /dev/null
+RUN comfyctl --help > /dev/null \
+ && comfyctl fetch --help > /dev/null \
+ && for verb in build resolve fetch check facts; do \
+      comfyctl fetch "$verb" --help > /dev/null || exit 1; \
+    done
 
 LABEL org.opencontainers.image.source="https://github.com/pixeloven/ComfyUI-Docker" \
       org.opencontainers.image.description="Resolve, verify and materialise ComfyUI model locks"
@@ -51,4 +60,8 @@ LABEL org.opencontainers.image.source="https://github.com/pixeloven/ComfyUI-Dock
 # Harmony's cluster need fsGroup 3000; the uid itself is the consumer's to
 # choose.
 USER 1000
-ENTRYPOINT ["comfyfetch", "fetch"]
+# The `fetch` VERB of the `fetch` group, exactly as `comfyfetch fetch` was before
+# 4.0.0, so arguments a Job or `docker run` appends (`/lock.yaml /app --apply`)
+# still mean the same thing. Other verbs replace the entrypoint:
+# `--entrypoint comfyctl <image> fetch check ...`, or `command: [comfyctl, fetch]`.
+ENTRYPOINT ["comfyctl", "fetch", "fetch"]

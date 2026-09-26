@@ -9,16 +9,21 @@ description: Author comfy.yaml and generate locks — source forms, when `as:` i
 the **resolution** and is generated — never hand-edit a lock.
 
 ```
-models/  --comfyfetch build-->  comfy.yaml  --comfyfetch resolve-->  comfy-lock.yaml  --comfyfetch fetch-->  disk
+models/  --comfyctl fetch build-->  comfy.yaml  --comfyctl fetch resolve-->  comfy-lock.yaml  --comfyctl fetch fetch-->  disk
 ```
+
+The command is `comfyctl fetch <verb>`. Up to 3.x it was `comfyfetch <verb>`, with
+the same verbs and flags. 4.0.0 removed that command and left no alias, so
+rewrite any old invocation you find. Without installing anything:
+`uvx --from git+https://github.com/pixeloven/ComfyUI-Docker#subdirectory=services/comfyctl comfyctl fetch --help`.
 
 `comfy.yaml` may itself be generated. Past a few hundred lines a single manifest
 stops working — every family conflicts with every other on edit — so `build`
 assembles it from one file per lineage under a directory you lay out:
 
 ```sh
-comfyfetch build models/ -O comfy.yaml
-comfyfetch build models/ -O comfy.yaml --check     # CI; the manifest is committed
+comfyctl fetch build models/ -O comfy.yaml
+comfyctl fetch build models/ -O comfy.yaml --check     # CI; the manifest is committed
 ```
 
 A source file may carry **`summary:`** — the judgement a file list cannot
@@ -89,8 +94,8 @@ Generate the full lock first, then **derive** the others so every profile pins
 identical commits:
 
 ```sh
-comfyfetch resolve comfy.yaml > comfy-lock.yaml
-comfyfetch resolve comfy.yaml --profile sdxl --from-lock comfy-lock.yaml > locks/sdxl.yaml
+comfyctl fetch resolve comfy.yaml > comfy-lock.yaml
+comfyctl fetch resolve comfy.yaml --profile sdxl --from-lock comfy-lock.yaml > locks/sdxl.yaml
 ```
 
 Resolving each independently is the mistake: locks made minutes apart can
@@ -122,12 +127,12 @@ A host listed here whose variable is unset does **not** block public files.
 - **A stale generated manifest.** If `comfy.yaml` is built from `models/`, an
   edit to a source file that is never rebuilt resolves the OLD models. Nothing
   errors — `resolve` is perfectly happy with a manifest that is merely out of
-  date. `comfyfetch build --check` is the only thing that says so.
+  date. `comfyctl fetch build --check` is the only thing that says so.
 - **An unprefixed custom key.** File and group entries reject unknown keys, so
   your own metadata needs an `x-` prefix (`x-triggers:`, `x-generation:`). That
   rejection is deliberate — it is what makes `instal:` an error instead of a
   silent no-op.
-- **Deriving locks independently.** `comfyfetch check --parent` asserts a
+- **Deriving locks independently.** `comfyctl fetch check --parent` asserts a
   profile lock is a verbatim subset of the full lock. Without it, locks made
   minutes apart can pin different upstream commits and every one of them passes
   `check` on its own.

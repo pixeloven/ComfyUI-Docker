@@ -1,6 +1,6 @@
 ---
 name: comfyui-docker-conventions
-description: ComfyUI-Docker's repository facts and project invariants — bake targets and profiles, image tag model, CUDA/torch/SageAttention coupling, data volumes, entrypoint UID contract, container standards, dependency rules, verification commands. Load before editing a Dockerfile, docker-bake.hcl, entrypoint/startup, an example compose file, or services/fetch.
+description: ComfyUI-Docker's repository facts and project invariants — bake targets and profiles, image tag model, CUDA/torch/SageAttention coupling, data volumes, entrypoint UID contract, container standards, dependency rules, verification commands. Load before editing a Dockerfile, docker-bake.hcl, entrypoint/startup, an example compose file, or the Python tooling under services/ (comfyctl, fetch).
 ---
 
 # ComfyUI-Docker conventions
@@ -17,7 +17,9 @@ this skill disagree, the file is right, so fix the skill in the same change.
 | `services/comfy/core/` | `dockerfile.comfy.core` (a builder stage, then the `core` stage), `entrypoint.sh`, `startup.sh` |
 | `services/comfy/complete/` | `dockerfile.comfy.cuda.complete`, built `FROM core`, and `extra-requirements.txt` |
 | `services/mcp/` | `dockerfile.comfy.mcp`, which installs upstream `artokun/comfyui-mcp` from npm with `npm ci --ignore-scripts` from the committed `package.json` and `package-lock.json` (the pin), and sets its hardening defaults in `ENV`: token required, deny list, force-remote restart, dotenv off, self-update and panel auto-install off. It is standalone on a digest-pinned `node:22-slim`, runs under `tini`, serves `:9000/mcp`, and runs as `comfy` (1000:1000) or any UID, with `HOME=/app`; see its README. |
-| `services/fetch/` | `comfyfetch` (Python, Typer, uv project; verbs `resolve`, `fetch`, `check`, `build`, `facts`), its bundled JSON schemas, its tests, and its image (`python:3.13-alpine`) |
+| `services/pyproject.toml`, `services/uv.lock` | The uv workspace: a virtual root (it publishes nothing) whose members are `fetch` and `comfyctl`, with one lock. `uv run pytest -q` from `services/` runs every member's tests. |
+| `services/fetch/` | `comfyfetch`, a library with no console script: its Typer app (verbs `resolve`, `fetch`, `check`, `build`, `facts`), its bundled JSON schemas, its tests, and the fetch image (`python:3.13-alpine`, entrypoint `comfyctl fetch fetch`) |
+| `services/comfyctl/` | `comfyctl`, the umbrella CLI. It mounts comfyfetch's app as the `fetch` group rather than reimplementing it. Its README states the conventions every group shares: `--output auto\|plain\|json`, the result on stdout, and exits 0/1/2. It pins `comfyfetch==<VERSION>`. |
 | `comfy.yaml`, `comfy-lock.yaml`, `locks/` | The model manifest (intent), the generated lock (resolution), and the derived profile locks (`locks/preview.yaml`) |
 | `examples/{core-gpu,complete-gpu,core-cpu,core-amd,core-intel}/` | One standalone Compose deployment per profile, each with `.env.example` and `extra_model_paths.yaml` |
 | `skills/`, `.claude-plugin/`, `package.json` | The **published** consumer skills plugin. See `skills/README.md`. |
@@ -172,16 +174,16 @@ These carry forward what was still true of the retired spec-kit constitution (v1
 These match what CI runs:
 
 ```sh
-cd services/fetch && uv run pytest -q            # add -m "not network" offline; gated cases skip without HF_TOKEN
-cd services/fetch && uv run comfyfetch check ../../comfy.yaml ../../comfy-lock.yaml
-uvx --from ./services/fetch comfyfetch check comfy.yaml locks/preview.yaml --profile preview --parent comfy-lock.yaml
+cd services && uv run pytest -q                  # every member; add -m "not network" offline; gated cases skip without HF_TOKEN
+cd services && uv run comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml
+uvx --from ./services/comfyctl comfyctl fetch check comfy.yaml locks/preview.yaml --profile preview --parent comfy-lock.yaml
 make validate                                    # bake --print all + every example's compose config
 docker buildx bake <target|group> --load         # or make cuda / cpu / rocm / xpu
 make smoke                                       # builds core-cpu, boots it; SMOKE_NETWORK=host without a docker0 bridge
 docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
 ```
 
-`make smoke` builds `core-cpu:cpu-smoke` from the tree and runs `tests/smoke/run.sh`,
+`make smoke` builds `core:cpu-smoke` from the tree and runs `tests/smoke/run.sh`,
 which is also what CI's `smoke-cpu` job runs on image-touching PRs, `main` and tags.
 The script starts the image as root with `PUID`/`PGID` 1001, Manager off, and all
 seven volume roots bind-mounted from `root:root 0755` sources. It fails unless:
@@ -201,7 +203,7 @@ nodes. The `snapshot-pin` job fails when its `comfyui_version` differs from the 
 so a bump commits the one from `smoke-cpu`'s artifact, or regenerates it with
 `tests/smoke/run.sh --snapshot`.
 
-`uv run` creates `services/fetch/.venv`, which `.gitignore` covers (`.venv/`), but
+`uv run` creates `services/.venv`, which `.gitignore` covers (`.venv/`), but
 stage files by name anyway. No Python or shell linter or formatter is configured. The one
 exception is actionlint, which runs shellcheck over the workflow `run:` blocks;
 `entrypoint.sh` and `startup.sh` are not linted.

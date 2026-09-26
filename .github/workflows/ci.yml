@@ -69,6 +69,9 @@ jobs:
             - '.github/workflows/ci.yml'
           fetch:
             - 'services/fetch/**'
+            - 'services/comfyctl/**'
+            - 'services/pyproject.toml'
+            - 'services/uv.lock'
             - 'comfy.yaml'
             - 'comfy-lock.yaml'
             - 'locks/**'
@@ -154,8 +157,17 @@ jobs:
               "$(python3 -c "import json;print(json.load(open('package.json')).get('version','<no version key>'))")" \
               package.json v
             agree "${release_version}" \
-              "$(python3 -c "import tomllib;d=tomllib.load(open('services/fetch/uv.lock','rb'));m=[p.get('version','<no version key>') for p in d['package'] if p['name']=='comfyfetch' and p.get('source',{}).get('editable')=='.'];print(m[0] if len(m)==1 else f'<{len(m)} comfyfetch entries>')")" \
-              services/fetch/uv.lock v
+              "$(python3 -c "import tomllib;print(tomllib.load(open('services/comfyctl/pyproject.toml','rb'))['project']['version'])")" \
+              services/comfyctl/pyproject.toml v
+            agree "${release_version}" \
+              "$(python3 -c "import tomllib;m=[r.split('==',1)[1] for r in tomllib.load(open('services/comfyctl/pyproject.toml','rb'))['project']['dependencies'] if r.startswith('comfyfetch==')];print(m[0] if len(m)==1 else '<no comfyfetch== pin>')")" \
+              "the comfyfetch pin in services/comfyctl/pyproject.toml" v
+            agree "${release_version}" \
+              "$(python3 -c "import tomllib;d=tomllib.load(open('services/uv.lock','rb'));m=[p.get('version','<no version key>') for p in d['package'] if p['name']=='comfyfetch' and p.get('source',{}).get('editable')=='fetch'];print(m[0] if len(m)==1 else f'<{len(m)} comfyfetch entries>')")" \
+              "services/uv.lock (comfyfetch)" v
+            agree "${release_version}" \
+              "$(python3 -c "import tomllib;d=tomllib.load(open('services/uv.lock','rb'));m=[p.get('version','<no version key>') for p in d['package'] if p['name']=='comfyctl' and p.get('source',{}).get('editable')=='comfyctl'];print(m[0] if len(m)==1 else f'<{len(m)} comfyctl entries>')")" \
+              "services/uv.lock (comfyctl)" v
             image_version="${release_version}"
             fetch_version="${release_version}"
             ;;
@@ -166,13 +178,18 @@ jobs:
         esac
 
         # Every push, not just releases: drift found on the tag is drift found
-        # too late. One repo, one number -- these five files all state it.
+        # too late. One repo, one number -- every file below states it. The
+        # comfyfetch pin is here because uv does not hold a workspace member to
+        # it: the lock stays green while the two wheels refuse to install together.
         declared="$(tr -d '[:space:]' < VERSION)"
         for pair in \
           ".claude-plugin/plugin.json:$(python3 -c "import json;print(json.load(open('.claude-plugin/plugin.json'))['version'])")" \
           "services/fetch/pyproject.toml:$(python3 -c "import tomllib;print(tomllib.load(open('services/fetch/pyproject.toml','rb'))['project']['version'])")" \
           "package.json:$(python3 -c "import json;print(json.load(open('package.json')).get('version','<no version key>'))")" \
-          "services/fetch/uv.lock:$(python3 -c "import tomllib;d=tomllib.load(open('services/fetch/uv.lock','rb'));m=[p.get('version','<no version key>') for p in d['package'] if p['name']=='comfyfetch' and p.get('source',{}).get('editable')=='.'];print(m[0] if len(m)==1 else f'<{len(m)} comfyfetch entries>')")"
+          "services/comfyctl/pyproject.toml:$(python3 -c "import tomllib;print(tomllib.load(open('services/comfyctl/pyproject.toml','rb'))['project']['version'])")" \
+          "the comfyfetch pin in services/comfyctl/pyproject.toml:$(python3 -c "import tomllib;m=[r.split('==',1)[1] for r in tomllib.load(open('services/comfyctl/pyproject.toml','rb'))['project']['dependencies'] if r.startswith('comfyfetch==')];print(m[0] if len(m)==1 else '<no comfyfetch== pin>')")" \
+          "services/uv.lock (comfyfetch):$(python3 -c "import tomllib;d=tomllib.load(open('services/uv.lock','rb'));m=[p.get('version','<no version key>') for p in d['package'] if p['name']=='comfyfetch' and p.get('source',{}).get('editable')=='fetch'];print(m[0] if len(m)==1 else f'<{len(m)} comfyfetch entries>')")" \
+          "services/uv.lock (comfyctl):$(python3 -c "import tomllib;d=tomllib.load(open('services/uv.lock','rb'));m=[p.get('version','<no version key>') for p in d['package'] if p['name']=='comfyctl' and p.get('source',{}).get('editable')=='comfyctl'];print(m[0] if len(m)==1 else f'<{len(m)} comfyctl entries>')")"
         do
           if [ "${pair#*:}" != "${declared}" ]; then
             echo "::error::${pair%%:*} is ${pair#*:} but VERSION is ${declared}; every artifact ships one version"
@@ -339,10 +356,10 @@ jobs:
     # The gated-repo cases skip without HF_TOKEN rather than failing, so a
     # contributor without access still gets a green suite instead of a mystery.
     - name: Test suite
-      working-directory: services/fetch
+      working-directory: services
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: uv run --with pytest pytest -q
+      run: uv run pytest -q
 
     - name: Validate the manifest and the locks
       run: |
@@ -351,9 +368,9 @@ jobs:
         # it is the one consumers get. The root schemas/ copy was deleted with
         # this change: two files with the same $id, and CI checking the stale
         # one, is worse than no schema check.
-        uvx --from ./services/fetch comfyfetch check comfy.yaml comfy-lock.yaml
+        uvx --from ./services/comfyctl comfyctl fetch check comfy.yaml comfy-lock.yaml
         for lock in locks/*.yaml; do
-          uvx --from ./services/fetch comfyfetch check comfy.yaml "$lock" \
+          uvx --from ./services/comfyctl comfyctl fetch check comfy.yaml "$lock" \
             --profile "$(basename "${lock%.yaml}")" --parent comfy-lock.yaml
         done
 
@@ -361,10 +378,10 @@ jobs:
     # whenever a moving `revision:` legitimately advanced upstream -- the one
     # case that is not a mistake.
     - name: Manifest and locks agree
-      working-directory: services/fetch
+      working-directory: services
       run: |
-        uv run comfyfetch check ../../comfy.yaml ../../comfy-lock.yaml
-        uv run comfyfetch check ../../comfy.yaml ../../locks/preview.yaml --profile preview
+        uv run comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml
+        uv run comfyctl fetch check ../comfy.yaml ../locks/preview.yaml --profile preview
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
@@ -912,8 +929,8 @@ jobs:
   # was a string in a file that no consumer could obtain.
   #
   # One release, everything in it: the digests of every image the run published,
-  # the comfyfetch wheel with its checksum and build provenance, and notes from
-  # the changelog. A consumer should not have to assemble a release from parts.
+  # the comfyctl and comfyfetch wheels with their checksums and build provenance,
+  # and notes from the changelog. A consumer should not have to assemble a release from parts.
   release:
     name: cut the release
     runs-on: ubuntu-latest
@@ -982,29 +999,38 @@ jobs:
         echo "title=${title}" >> "$GITHUB_ENV"
         echo "--- notes ---"; cat notes.md
 
-    # -- the comfyfetch line: a wheel, so the CLI is usable without Docker -----
+    # -- the CLI line: wheels, so comfyctl is usable without Docker ------------
+    # Two, from the one uv workspace: comfyctl, and comfyfetch, the library its
+    # `fetch` group mounts. Neither is on PyPI, so they install as a pair.
 
     - uses: astral-sh/setup-uv@v10.0.1
 
-    - name: Build the wheel
-      working-directory: services/fetch
+    - name: Build the wheels
+      working-directory: services
       run: |
         set -euo pipefail
-        uv build --wheel -o "${GITHUB_WORKSPACE}/dist"
+        uv build --all-packages --wheel -o "${GITHUB_WORKSPACE}/dist"
         cd "${GITHUB_WORKSPACE}/dist"
         # A URL pin is only as good as a checksum next to it -- this is what the
         # SageAttention wheels already publish, and what consumers verify.
         sha256sum ./*.whl | tee SHA256SUMS
 
-    - name: The wheel installs and runs
+    - name: The wheels install and run
       run: |
         set -euo pipefail
-        got="$(uvx --from ./dist/*.whl comfyfetch --version)"
-        if [ "${got}" != "${FETCH_VERSION}" ]; then
-          echo "::error::the wheel reports ${got}, the tag says ${FETCH_VERSION}"
-          exit 1
-        fi
-        echo "wheel ok: reports ${got}"
+        # The install services/comfyctl/README.md gives: both wheels, named, so
+        # comfyfetch can only come from this release and never from an index.
+        run() {
+          uvx --from "./dist/comfyctl-${FETCH_VERSION}-py3-none-any.whl" \
+            --with "./dist/comfyfetch-${FETCH_VERSION}-py3-none-any.whl" comfyctl "$@"
+        }
+        for got in "$(run --version)" "$(run fetch --version)"; do
+          if [ "${got}" != "${FETCH_VERSION}" ]; then
+            echo "::error::the wheels report ${got}, the tag says ${FETCH_VERSION}"
+            exit 1
+          fi
+        done
+        echo "wheels ok: comfyctl and comfyfetch report ${FETCH_VERSION}"
 
     - uses: actions/attest-build-provenance@v4.2.2
       with:
@@ -1012,8 +1038,12 @@ jobs:
 
     # An attestation nobody verifies is decoration. This is the selftest: if the
     # step above ever silently produced nothing, this fails the release.
-    - name: The attestation verifies
-      run: gh attestation verify ./dist/*.whl --repo "${GITHUB_REPOSITORY}"
+    - name: The attestations verify
+      run: |
+        set -euo pipefail
+        for whl in ./dist/*.whl; do
+          gh attestation verify "${whl}" --repo "${GITHUB_REPOSITORY}"
+        done
 
     # -- the image line: the digests, which are what consumers actually pin ----
 
@@ -1072,7 +1102,7 @@ jobs:
       run: |
         set -euo pipefail
         assets=""
-        if [ -d dist ]; then assets="dist/comfyfetch-${FETCH_VERSION}-py3-none-any.whl dist/SHA256SUMS"; fi
+        if [ -d dist ]; then assets="dist/comfyctl-${FETCH_VERSION}-py3-none-any.whl dist/comfyfetch-${FETCH_VERSION}-py3-none-any.whl dist/SHA256SUMS"; fi
         if [ -f IMAGE-DIGESTS.txt ]; then assets="${assets} IMAGE-DIGESTS.txt"; fi
         # shellcheck disable=SC2086
         gh release create "${tag}" ${assets} --title "${title}" --notes-file notes.md --verify-tag

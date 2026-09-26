@@ -1,17 +1,17 @@
-"""comfyfetch — resolve, verify and materialise ComfyUI model locks.
+"""Resolve, verify and materialise ComfyUI model locks.
 
 Typer, matching comfy-cli and Harmony's `hmy` rather than inventing a third
-convention. Deliberately NOT named `comfy`, `comfy-cli` or `comfycli`: comfy-cli
-owns those and shadowing them on a user's PATH would be hostile.
+convention. This app has no console script of its own: `comfyctl fetch` mounts
+it as a group (services/comfyctl), so there is one command and one behaviour.
 
-One tool, five verbs, and the same behaviour whether it is driven by a person,
-a Kubernetes Job, or an agent:
+Five verbs, and the same behaviour whether they are driven by a person, a
+Kubernetes Job, or an agent:
 
-    comfyfetch build models/ -o comfy.yaml
-    comfyfetch facts models/ comfy-lock.yaml --store /workspace/models
-    comfyfetch resolve comfy.yaml > comfy-lock.yaml
-    comfyfetch fetch comfy-lock.yaml /workspace --apply
-    comfyfetch check comfy.yaml comfy-lock.yaml
+    comfyctl fetch build models/ -O comfy.yaml
+    comfyctl fetch facts models/ comfy-lock.yaml --store /workspace/models
+    comfyctl fetch resolve comfy.yaml > comfy-lock.yaml
+    comfyctl fetch fetch comfy-lock.yaml /workspace --apply
+    comfyctl fetch check comfy.yaml comfy-lock.yaml
 
 EXIT CODES are part of the interface, because automation reads them:
 
