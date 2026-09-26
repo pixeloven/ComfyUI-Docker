@@ -17,7 +17,8 @@ this skill disagree, the file is right, so fix the skill in the same change.
 | `services/comfy/core/` | `dockerfile.comfy.core` (a builder stage, then the `core` stage), `entrypoint.sh`, `startup.sh` |
 | `services/comfy/complete/` | `dockerfile.comfy.cuda.complete`, built `FROM core`, and `extra-requirements.txt` |
 | `services/mcp/` | `dockerfile.comfy.mcp`, which installs upstream `artokun/comfyui-mcp` from npm with `npm ci --ignore-scripts` from the committed `package.json` and `package-lock.json` (the pin), and sets its hardening defaults in `ENV`: token required, deny list, force-remote restart, dotenv off, self-update and panel auto-install off. It is standalone on a digest-pinned `node:22-slim`, runs under `tini`, serves `:9000/mcp`, and runs as `comfy` (1000:1000) or any UID, with `HOME=/app`; see its README. |
-| `services/pyproject.toml`, `services/uv.lock` | The uv workspace: a virtual root (it publishes nothing) whose members are `fetch` and `comfyctl`, with one lock. `uv run pytest -q` from `services/` runs every member's tests. |
+| `services/pyproject.toml`, `services/uv.lock` | The uv workspace: a virtual root (it publishes nothing) whose members are `fetch`, `comfyctl` and `comfyrelay`, with one lock. `uv run pytest -q` from `services/` runs every member's tests. |
+| `services/comfyrelay/` | `comfyrelay`, the first-party MCP sidecar (#103), mounted as `comfyctl relay` (`serve`, `probe`) only when installed: comfyctl doesn't depend on it. SDK `mcp==2.2.0` (`MCPServer`), pinned exactly. Its image (`dockerfile.comfy.relay`, context `services/`, installed from `uv.lock`) is **not published** until #136: the bake target is in no group and its tag has no registry, and the release builds only the comfyctl and comfyfetch wheels. `tests/relay/run.sh` probes it against a booted core-cpu. |
 | `services/fetch/` | `comfyfetch`, a library with no console script: its Typer app (verbs `resolve`, `fetch`, `check`, `build`, `facts`), its bundled JSON schemas, its tests, and the fetch image (`python:3.13-alpine`, entrypoint `comfyctl fetch fetch`) |
 | `services/comfyctl/` | `comfyctl`, the umbrella CLI. It mounts comfyfetch's app as the `fetch` group rather than reimplementing it. Its README states the conventions every group shares: `--output auto\|plain\|json`, the result on stdout, and exits 0/1/2. It pins `comfyfetch==<VERSION>`. |
 | `comfy.yaml`, `comfy-lock.yaml`, `locks/` | The model manifest (intent), the generated lock (resolution), and the derived profile locks (`locks/preview.yaml`) |
@@ -39,6 +40,7 @@ Images are `ghcr.io/pixeloven/comfyui/<name>`. The bake targets:
 | `cuda-arch` | `complete-cuda-sm{80,86,89,90,120}` | Complete + one SageAttention 2.2.0 wheel per compute capability. Built separately so an ABI break cannot block the generic CUDA images. |
 | `mcp`, `fetch` | `mcp`, `fetch` | Independent of the runtime images |
 | `all` | all of the above | |
+| *(none)* | `comfyrelay` | Deliberately in no group, so `all` and the release's `IMAGE-DIGESTS` never include it. Tagged `comfyrelay:<IMAGE_LABEL>`, never pushed. |
 
 The five examples map to `core:cuda`, `complete:cuda`, `core:cpu`, `core:rocm`
 and `core:xpu`. `README.md` documents them, and `docs/user-guides/performance.md`

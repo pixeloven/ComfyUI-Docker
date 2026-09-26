@@ -15,10 +15,13 @@ registry is what they check against.
 
 - **Pattern:** `VERSION`; the version in `services/fetch/pyproject.toml`,
   `services/comfyctl/pyproject.toml` (and its `comfyfetch==` pin),
-  `.claude-plugin/plugin.json`, `package.json`, and the `comfyfetch` and
-  `comfyctl` entries in `services/uv.lock`; the `context` and `release` jobs in `ci.yml`;
-  `IMAGE_LABEL`, `PUBLISH_LATEST`, `IMAGE_VERSION`, `FETCH_VERSION` and every
-  `tags = [...]` in `docker-bake.hcl`; anything in `nightly.yml` that sets tags.
+  `services/comfyrelay/pyproject.toml`, `.claude-plugin/plugin.json`,
+  `package.json`, and the `comfyfetch`, `comfyctl` and `comfyrelay` entries in
+  `services/uv.lock`; the `context` and `release` jobs in `ci.yml` (including
+  which workspace packages the release builds wheels for); `IMAGE_LABEL`,
+  `PUBLISH_LATEST`, `IMAGE_VERSION`, `FETCH_VERSION` and every `tags = [...]` in
+  `docker-bake.hcl`, and which targets `group "all"` holds; comfyctl's
+  dependencies; anything in `nightly.yml` that sets tags.
 - **Risk:** a tag starts meaning two things. The nightly moving `*-latest` hands every
   consumer an unreviewed upstream commit. A hand-made Release makes the release job
   fail after images publish. The `context` job fails any push where the
@@ -78,7 +81,9 @@ registry is what they check against.
   `services/mcp/package.json` and `package-lock.json` (the pin for the `mcp` image:
   `comfyui-mcp` at an exact version, and every package under it with an integrity
   hash), the `sam2` commit in `extra-requirements.txt`, the base-image tags and
-  digests in `services/*/dockerfile.*`, action versions in workflows, and in
+  digests in `services/*/dockerfile.*` (and `services/comfyrelay/dockerfile.comfy.relay`,
+  including its `ghcr.io/astral-sh/uv` build stage), comfyrelay's exact `mcp==` pin
+  and `services/uv.lock`, which its image installs as written, action versions in workflows, and in
   `services/mcp/dockerfile.comfy.mcp`: `npm ci --ignore-scripts`, the optional
   dependencies it removes, and the hardening `ENV` (`COMFYUI_MCP_ENV_FILE`,
   `COMFYUI_MCP_AUTO_UPDATE_DISABLE`, `COMFYUI_MCP_PANEL_AUTOINSTALL`,

@@ -1,0 +1,15 @@
+# The context is services/ (the uv workspace root). Send only what the image
+# installs: the workspace files and the three Python members' sources.
+*
+!pyproject.toml
+!uv.lock
+!fetch/pyproject.toml
+!fetch/comfyfetch/
+!comfyctl/pyproject.toml
+!comfyctl/README.md
+!comfyctl/comfyctl/
+!comfyrelay/pyproject.toml
+!comfyrelay/README.md
+!comfyrelay/comfyrelay/
+**/__pycache__
+**/*.pyc
