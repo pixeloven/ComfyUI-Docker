@@ -1,0 +1,27 @@
+{
+  "derived_from": {
+    "comfyui_version": "0.37.0",
+    "image_id": "sha256:084ce9032b31086ff84d75ebc6c23955a263c41049ddf3b7ad5564dee5d9d2fe"
+  },
+  "answers": {
+    "q1": 1024,
+    "q2": 32,
+    "q3": 64,
+    "q4": 1.0,
+    "q5": 1.5,
+    "q6": [
+      "nearest-exact",
+      "bilinear",
+      "area",
+      "bicubic",
+      "bislerp"
+    ],
+    "q7": 40,
+    "q8": 6,
+    "q9": [
+      "IMAGE",
+      "MASK"
+    ],
+    "q10": 64
+  }
+}
