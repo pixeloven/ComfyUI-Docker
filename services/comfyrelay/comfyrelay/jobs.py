@@ -6,12 +6,27 @@ an id straight away, and is then followed with the `job_*` tools: `job_status`
 own polling tools.
 
 THE PRODUCER CONTRACT. A job is a coroutine the store runs as a task, and
-cancelling a job cancels that task. A producer MUST let `CancelledError`
-propagate, re-raising it within `cancel_wait` seconds (CANCEL_WAIT_SECONDS).
-One that must undo something outside this process (asking ComfyUI to
-interrupt a prompt, say) does it in its own `except asyncio.CancelledError:`
-block, bounded in time, and re-raises. Every producer's tests call
-`tests/relay_helpers.py: assert_producer_honours_cancel`.
+cancelling a job cancels that task. A producer MUST:
+
+1. Let `CancelledError` propagate, re-raising it within SHUTDOWN_WAIT_SECONDS
+   (3s) of the cancel. One that must undo something outside this process
+   (asking ComfyUI to interrupt a prompt, say) does it in its own
+   `except asyncio.CancelledError:` block, bounded in time, and re-raises.
+   3s is the budget at shutdown, the tightest one, so it is the contract:
+   `job_cancel` waits longer (CANCEL_WAIT_SECONDS, 10s) before it reports
+   `cancelling` and logs an overrun, as a margin for a slow ComfyUI, but a
+   producer that needs that margin is cut off when the server stops.
+2. Keep any work it hands to a thread (`asyncio.to_thread`, an executor)
+   interruptible, for example with a timeout or a stop flag the thread
+   checks. Cancelling the await returns at once while the thread keeps
+   running, and nothing can stop it from outside. On SIGINT or a normal exit
+   Python then joins executor threads without a time limit: measured, a job
+   in a 20s thread held a SIGINT stop for 20s. SIGTERM kills the process
+   after the jobs are cancelled, so it is not delayed, but the thread's work
+   is cut off wherever it was.
+
+Every producer's tests call `tests/relay_helpers.py:
+assert_producer_honours_cancel`, which checks (1) against the 3s budget.
 
 What the store does when a producer breaks the contract:
 - A job still running after its cancel deadline reports `cancelling`, and the
@@ -19,8 +34,9 @@ What the store does when a producer breaks the contract:
 - A job whose cancel was requested ends `cancelled`, even if its producer
   swallows the CancelledError and returns. A cancelled job has no `result`:
   whatever such a producer returned is dropped, because it was cut short.
-- On shutdown every job is cancelled, and the wait for them is bounded, so a
-  stuck producer cannot keep the server from exiting (server.run_until_stopped).
+- On shutdown, whether by SIGTERM, SIGINT or a plain return, every job is
+  cancelled and the wait for them is bounded, so a coroutine that will not
+  stop cannot keep the server from exiting (server.py). A thread can: see (2).
 
 At most `max_in_flight` jobs run at once (COMFYUI_MCP_MAX_JOBS); a submission
 past that is refused with `too_many_jobs`. It is retryable, unless every slot
@@ -52,9 +68,13 @@ log = logging.getLogger("comfyrelay.jobs")
 # How long one `wait` may hold a tool call open. MCP clients time calls out on
 # their own, and an agent that needs longer calls `wait` again.
 MAX_WAIT_SECONDS = 300.0
-# How long a producer has to stop once cancelled (the producer contract), and
-# so how long a cancel waits before it answers `cancelling`.
+# How long `job_cancel` waits for a producer to stop before it answers
+# `cancelling` and logs an overrun. The contract is the tighter number below.
 CANCEL_WAIT_SECONDS = 10.0
+# How long a stopping server waits for its jobs: the producer contract. With
+# uvicorn's 3s graceful shutdown and 3s for any other task, a stop takes at most
+# 9s, inside the 10s Docker and Kubernetes allow between SIGTERM and SIGKILL.
+SHUTDOWN_WAIT_SECONDS = 3.0
 KEEP_FINISHED = 256
 
 
@@ -85,6 +105,7 @@ class Job:
     error: dict[str, Any] | None = None
     # When a cancel was first requested (time.monotonic()), or None.
     cancel_requested_at: float | None = None
+    overrun_logged: bool = field(default=False, repr=False)
     task: asyncio.Task[None] | None = field(default=None, repr=False)
 
     @property
@@ -142,6 +163,7 @@ class JobStore:
         self._keep_finished = keep_finished
         self.max_in_flight = max_in_flight
         self._cancel_wait = cancel_wait
+        self._stuck_at_shutdown: list[Job] | None = None
 
     def submit(self, kind: str, work: Callable[[], Awaitable[Any]], *, summary: str = "") -> Job:
         """Start `work()` as a job and return it at once. Needs a running event loop.
@@ -210,19 +232,24 @@ class JobStore:
                 self._log_overrun(job)
         return job
 
-    async def shutdown(self, wait: float = CANCEL_WAIT_SECONDS) -> list[Job]:
+    async def shutdown(self, wait: float = SHUTDOWN_WAIT_SECONDS) -> list[Job]:
         """Cancel every unfinished job and wait up to `wait` seconds for them all.
 
-        Returns the jobs that did not stop, each logged. Nothing here waits longer.
+        Returns the jobs that did not stop, each logged. Only the first call
+        cancels and waits; a later one (the server stops by more than one path)
+        returns the jobs still running from the first, without waiting again.
         """
+        if self._stuck_at_shutdown is not None:
+            return [j for j in self._stuck_at_shutdown if not j.task.done()]
         live = [j for j in self._jobs.values() if self._request_cancel(j)]
+        self._stuck_at_shutdown = []
         if live:
             log.info("shutting down: cancelling %d job(s)", len(live))
             await asyncio.wait({j.task for j in live}, timeout=wait)
-        stuck = [j for j in live if not j.task.done()]
-        for job in stuck:
+        self._stuck_at_shutdown = [j for j in live if not j.task.done()]
+        for job in self._stuck_at_shutdown:
             self._log_overrun(job)
-        return stuck
+        return list(self._stuck_at_shutdown)
 
     def _request_cancel(self, job: Job) -> bool:
         """Cancel the job's task if it is still running. True if it was."""
@@ -235,6 +262,9 @@ class JobStore:
 
     @staticmethod
     def _log_overrun(job: Job) -> None:
+        if job.overrun_logged:
+            return
+        job.overrun_logged = True
         log.error(
             "job %s (%s) did not stop within %.0fs of being cancelled: its producer must re-raise "
             "CancelledError (the producer contract in comfyrelay/jobs.py). It holds a job slot until it stops.",

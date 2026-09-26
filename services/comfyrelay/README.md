@@ -103,12 +103,25 @@ the `job_*` group are the cross-cutting names.
 Jobs live in memory, so they don't survive a restart. At most `COMFYUI_MCP_MAX_JOBS` run at
 once. Nothing produces jobs yet; workflow runs will (#132).
 
-**The producer contract.** Code that runs as a job must let a cancellation through, re-raising
-`CancelledError` within 10 seconds. A job that overruns that is logged as an error and keeps
-its slot until it stops. On shutdown every job is cancelled and each wait is bounded, so a job
-that never stops can't hold the server open past a `docker stop`. Every producer's tests call
-`assert_producer_honours_cancel` (`tests/relay_helpers.py`); the contract is written out in
-`comfyrelay/jobs.py`.
+**The producer contract** (written out in `comfyrelay/jobs.py`). Code that runs as a job must:
+
+1. Let a cancellation through, re-raising `CancelledError` within 3 seconds. That's its budget
+   when the server stops, so it's the contract. `job_cancel` waits up to 10 seconds before it
+   reports `cancelling`, as a margin, but a producer that needs the margin is cut off at
+   shutdown. Every producer's tests call `assert_producer_honours_cancel`
+   (`tests/relay_helpers.py`), which checks the 3-second budget.
+2. Keep any work it hands to a thread interruptible, with a timeout or a stop flag the thread
+   checks. Cancelling the await returns at once, but the thread keeps running. On SIGINT or a
+   normal exit Python waits for it with no time limit (a job in a 20-second thread held a
+   SIGINT stop for 20 seconds). SIGTERM isn't delayed, but it cuts the thread off wherever it
+   is.
+
+A job that overruns its cancel is logged as an error, once, and keeps its slot until it
+stops. On a stop (SIGTERM, which is how `docker stop` and Kubernetes stop a container, or
+SIGINT) every job is cancelled during the server's own shutdown and each wait is bounded:
+about 3 seconds for the jobs and 3 for anything else, after uvicorn's 3-second graceful
+shutdown. So a coroutine that never stops can't hold the server past the default 10-second
+grace period. A thread that never stops can, on SIGINT (rule 2).
 
 **Job access is per token, not per client.** The token is the only credential, so everyone who
 holds it is one principal: any session can follow or cancel any job by its ID, and IDs are

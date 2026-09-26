@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx2
 from comfyrelay.comfyui import ComfyUIClient
-from comfyrelay.jobs import CANCEL_WAIT_SECONDS, JobState, JobStore
+from comfyrelay.jobs import SHUTDOWN_WAIT_SECONDS, JobState, JobStore
 from comfyrelay.settings import Settings
 
 TOKEN = "test-token-0123456789"
@@ -62,12 +62,15 @@ async def serve_nothing(self, sockets=None) -> None:
 
 
 async def assert_producer_honours_cancel(
-    work: Callable[[], Awaitable[Any]], *, started: asyncio.Event | None = None, within: float = CANCEL_WAIT_SECONDS
+    work: Callable[[], Awaitable[Any]], *, started: asyncio.Event | None = None, within: float = SHUTDOWN_WAIT_SECONDS
 ) -> None:
     """The producer contract (comfyrelay/jobs.py): cancelled, a producer stops within
-    `within` seconds by letting CancelledError propagate. Every job producer's tests
-    call this with its real work, and with `started` if it has a point where it is
-    well under way (set it there), so the cancel lands mid-work, not before it began.
+    SHUTDOWN_WAIT_SECONDS (3s, its budget when the server stops) by letting
+    CancelledError propagate. Every job producer's tests call this with its real
+    work, and with `started` if it has a point where it is well under way (set it
+    there), so the cancel lands mid-work, not before it began. It cannot see into
+    threads: work handed to one must be interruptible on its own (the contract's
+    second rule).
     """
     store = JobStore(cancel_wait=within)
     job = store.submit("contract.check", work)
