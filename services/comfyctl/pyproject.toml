@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 # Pinned EXACTLY. `comfyctl fetch` mounts comfyfetch's own Typer app, so the two
 # ship as a pair from one release. comfyfetch is not on PyPI; see the README
 # for installing both wheels together.
-dependencies = ["comfyfetch==4.0.0", "typer>=0.12.5"]
+dependencies = ["comfyfetch==4.0.0", "typer>=0.13.1"]
 
 [dependency-groups]
 dev = ["pytest>=8.0"]
