@@ -53,7 +53,7 @@ Straight from git, pinned to a release tag (uv resolves comfyfetch from the same
 commit, through the workspace):
 
 ```sh
-uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v4.0.0#subdirectory=services/comfyctl' comfyctl --help
+uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v4.0.1#subdirectory=services/comfyctl' comfyctl --help
 ```
 
 Use uv for this line. `pip install git+…#subdirectory=services/comfyctl`
@@ -63,7 +63,7 @@ From a release, as two wheels, naming both. The `--with` wheel is what keeps
 comfyfetch coming from the release:
 
 ```sh
-v=4.0.0
+v=4.0.1
 uv tool install \
   "https://github.com/pixeloven/ComfyUI-Docker/releases/download/v${v}/comfyctl-${v}-py3-none-any.whl" \
   --with "https://github.com/pixeloven/ComfyUI-Docker/releases/download/v${v}/comfyfetch-${v}-py3-none-any.whl"

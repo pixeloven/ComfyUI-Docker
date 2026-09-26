@@ -19,7 +19,7 @@ Python 3.13 on Alpine — PyYAML and Typer — as a ~102 MB image **or** a CLI y
 install directly:
 
 ```sh
-uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v4.0.0#subdirectory=services/comfyctl' comfyctl fetch --help
+uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v4.0.1#subdirectory=services/comfyctl' comfyctl fetch --help
 ```
 
 Pin the tag, as above. An unpinned line follows `main`, and that's how 3.x users

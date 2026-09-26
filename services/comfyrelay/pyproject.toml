@@ -1,6 +1,6 @@
 [project]
 name = "comfyrelay"
-version = "4.0.0"
+version = "4.0.1"
 description = "comfyrelay: an MCP sidecar for one ComfyUI instance, with capability profiles"
 readme = "README.md"
 requires-python = ">=3.11"

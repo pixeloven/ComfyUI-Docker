@@ -9,6 +9,51 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 4.0.1 — 2026-09-26
+
+### `comfyctl fetch` could pass without doing anything: typer is now `>=0.13.1`
+
+With typer 0.12.x and click 8.2 or later, every `comfyctl fetch <verb>` printed
+the version and exited 0 **without running the verb**. So
+`comfyctl fetch check /nonexistent.yaml /nonexistent-lock.yaml` "passed", and a
+CI step that gates on it went green. `comfyctl --version` exited 2 with
+`Missing command`. typer 0.12.x doesn't cap click, and the 4.0.0 wheels asked
+only for `typer>=0.12.5`, so an installer was free to pick that pair.
+
+`comfyctl`, `comfyfetch` and `comfyrelay` now require `typer>=0.13.1`, and an
+installer refuses typer 0.12.x. 0.13.1 and every later typer tested run the verb.
+
+**Who was affected:** only an install that ended up with typer 0.12.x, because
+something else held typer back (a shared environment, or a constraints file). A
+fresh `uv tool install` or `uvx` resolves the newest typer, and the `fetch`
+image has typer 0.27.2. If you pinned typer below 0.13.1 to install comfyctl,
+drop the pin.
+
+### Fixed
+
+- **A crash no longer prints local variables.** With typer older than 0.23,
+  which the floor above still allows, a traceback showed every frame's locals,
+  and those can hold `HF_TOKEN` or another credential. `comfyctl` and
+  `comfyctl fetch` now turn that off explicitly, and so does `comfyctl relay`
+  (see below). Raising the floor alone wouldn't cover it: typer 0.13.1 to 0.22.x
+  still print locals by default.
+- **A directory named `comfyrelay` on `sys.path` no longer breaks `comfyctl`.**
+  With `PYTHONPATH=services` in a checkout, for example, every command failed
+  with `ModuleNotFoundError: No module named 'comfyrelay.cli'`, including
+  `comfyctl fetch`. The relay mount below introduced this after 4.0.0, so no
+  release had it. `comfyctl` now mounts `relay` only when the `comfyrelay`
+  package is installed.
+
+### Also in this release
+
+- **`comfyctl relay` is a hidden stub in the released wheels.** It prints why
+  it isn't available and exits 2. comfyrelay isn't released yet: it runs from
+  the source tree (`uv run comfyctl relay …` under `services/`), and its image
+  isn't published ([#136](https://github.com/pixeloven/ComfyUI-Docker/issues/136)).
+  `comfyctl --help` doesn't list it.
+- The install lines in the READMEs and the published `comfy-manifest` skill now
+  pin `@v4.0.1`.
+
 ## 4.0.0 — 2026-09-26
 
 ### Breaking: `comfyfetch` is now `comfyctl fetch`
