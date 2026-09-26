@@ -177,8 +177,26 @@ cd services/fetch && uv run comfyfetch check ../../comfy.yaml ../../comfy-lock.y
 uvx --from ./services/fetch comfyfetch check comfy.yaml locks/preview.yaml --profile preview --parent comfy-lock.yaml
 make validate                                    # bake --print all + every example's compose config
 docker buildx bake <target|group> --load         # or make cuda / cpu / rocm / xpu
+make core-cpu && make smoke                      # boot smoke test; SMOKE_NETWORK=host without a docker0 bridge
 docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
 ```
+
+`make smoke` runs `tests/smoke/run.sh`, the script CI's `smoke-cpu` job runs on
+every image-touching PR and every release; the release job needs it. It starts
+`core-cpu` as root with `PUID`/`PGID` 1001 and Manager off, with `/app/output`
+bind-mounted from a directory Docker creates as root. It fails unless
+`/system_stats` answers within `SMOKE_TIMEOUT` (300 s), ComfyUI runs as 1001, and
+1001 can write to `/app/output`, which is the entrypoint's volume `chown` at work.
+It leaves `object_info.json`, `system_stats.json`, `container.log` and
+`summary.json` (with the startup time) in `tests/smoke/results/`. This is the only
+runtime check: the non-root start, the other profiles and every GPU image are
+never booted.
+
+`schemas/comfyui/object_info.json` is the node schema of the pinned ComfyUI,
+keys sorted, under `comfyui_version` and `generated_from` headers. It holds the
+`core-cpu` image's built-in nodes only. `test-bake-targets` fails when its
+`comfyui_version` differs from the bake pin, so a pin bump regenerates it in the
+same PR: `tests/smoke/run.sh --snapshot <image>`.
 
 `uv run` creates `services/fetch/.venv`, which `.gitignore` covers (`.venv/`), but
 stage files by name anyway. No Python or shell linter or formatter is configured. The one

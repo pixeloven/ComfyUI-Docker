@@ -184,11 +184,10 @@ readinessProbe:
     port: 8188
 ```
 
-The route was checked against upstream's `server.py` at the pinned `COMFYUI_VERSION`
-(`v0.37.0`, in `docker-bake.hcl`), by reading the source. CI does not yet start an
-image and call it. That check is planned in
-[#105](https://github.com/pixeloven/ComfyUI-Docker/issues/105), and until it lands, a
-`COMFYUI_VERSION` bump is the moment to confirm the route still exists.
+CI verifies this probe. The `smoke-cpu` job starts `core-cpu` on every change to the
+images and on every release, and fails unless `/system_stats` answers `200`, so a
+`COMFYUI_VERSION` bump that dropped the route would fail it. The check boots the CPU
+image only. `make smoke` runs the same script (`tests/smoke/run.sh`) locally.
 
 The image defines no `HEALTHCHECK`, and this repo doesn't prescribe a liveness probe.
 `/system_stats` shows that the server answers. It can't tell a wedged ComfyUI from a
