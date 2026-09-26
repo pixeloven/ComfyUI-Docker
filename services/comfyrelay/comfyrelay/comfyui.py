@@ -10,8 +10,9 @@ propagate as a structured MCP error:
     comfyui_unreachable   nothing answered (connection refused, DNS, reset)
     comfyui_timeout       it answered too slowly
     comfyui_http_error    it answered with a 4xx or 5xx (`status` is included)
-    comfyui_bad_response  it answered 2xx with something that is not JSON, or
-                          with JSON that is not the shape that endpoint returns
+    comfyui_bad_response  it answered 2xx with a body that cannot be read
+                          (corrupt compression), that is not JSON, or that is
+                          JSON of the wrong shape for that endpoint
 
 Messages name ComfyUI's URL with any user:password in it redacted.
 """
@@ -85,6 +86,10 @@ class ComfyUIClient:
                 "comfyui_unreachable",
                 f"could not reach ComfyUI at {self._shown_url}: {exc}",
                 retryable=True,
+            ) from exc
+        except httpx2.RequestError as exc:  # the rest: a body that will not decode, say
+            raise ComfyUIError(
+                "comfyui_bad_response", f"ComfyUI answered {url} with a body that could not be read: {exc}"
             ) from exc
         if response.status_code >= 400:
             raise ComfyUIError(

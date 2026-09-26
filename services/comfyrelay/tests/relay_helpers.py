@@ -4,11 +4,14 @@ collects both."""
 
 from __future__ import annotations
 
+import asyncio
 import socket
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import httpx2
 from comfyrelay.comfyui import ComfyUIClient
+from comfyrelay.jobs import CANCEL_WAIT_SECONDS, JobState, JobStore
 from comfyrelay.settings import Settings
 
 TOKEN = "test-token-0123456789"
@@ -52,3 +55,28 @@ def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+async def serve_nothing(self, sockets=None) -> None:
+    """Stands in for uvicorn.Server.serve: `serve()` runs everything but the listening."""
+
+
+async def assert_producer_honours_cancel(
+    work: Callable[[], Awaitable[Any]], *, started: asyncio.Event | None = None, within: float = CANCEL_WAIT_SECONDS
+) -> None:
+    """The producer contract (comfyrelay/jobs.py): cancelled, a producer stops within
+    `within` seconds by letting CancelledError propagate. Every job producer's tests
+    call this with its real work, and with `started` if it has a point where it is
+    well under way (set it there), so the cancel lands mid-work, not before it began.
+    """
+    store = JobStore(cancel_wait=within)
+    job = store.submit("contract.check", work)
+    if started is not None:
+        await asyncio.wait_for(started.wait(), 10)
+    else:
+        await asyncio.sleep(0.05)
+    assert not job.task.done(), "the producer finished before it could be cancelled; set `started` mid-work"
+    await store.cancel(job.id)
+    assert job.task.done(), f"the producer did not stop within {within}s of being cancelled"
+    assert job.task.cancelled(), "the producer swallowed CancelledError; it must re-raise it"
+    assert job.state is JobState.cancelled

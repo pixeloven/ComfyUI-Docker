@@ -17,7 +17,7 @@ from comfyctl.cli import app
 from comfyrelay.server import build_server, serve
 from comfyrelay.settings import TOKEN_ENV, ConfigError, Settings, redact_url
 from mcp import Client
-from relay_helpers import TOKEN, comfyui_answering, settings
+from relay_helpers import TOKEN, comfyui_answering, serve_nothing, settings
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -56,7 +56,7 @@ def test_the_probe_never_prints_the_token(live_server, monkeypatch, output):
 
 def test_the_logs_never_carry_the_token(live_server, monkeypatch, caplog):
     caplog.set_level(logging.DEBUG)
-    monkeypatch.setattr(uvicorn.Server, "run", lambda self: None)
+    monkeypatch.setattr(uvicorn.Server, "serve", serve_nothing)
     serve(settings(instance_id_source="hostname"))  # the startup lines, and the hostname warning
     httpx2.post(live_server, json={}, headers={"Authorization": f"Bearer {TOKEN}x"})  # a 401, logged
     assert "on http://127.0.0.1:9000/mcp" in caplog.text and "401 for POST /mcp" in caplog.text
@@ -131,11 +131,90 @@ def test_a_malformed_comfyui_url_exits_2_without_a_traceback(monkeypatch):
         ("http://a:b@c@comfyui:8188/", "http://***@comfyui:8188/"),
         ("http://comfyui:8188", "http://comfyui:8188"),
         ("http://[::1", "http://[::1"),
-        ("http://u:p@[::1", "<unparseable URL>"),
+        ("http://u:p@[::1", "http://***@[::1"),
+        ("http://[fe80::1%25eth0]:8188", "http://[fe80::1%25eth0]:8188"),
+        ("http://u:p@[fe80::1%25eth0]:8188", "http://***@[fe80::1%25eth0]:8188"),
+        ("http://ad%40min:pa%2Fss@comfyui:8188", "http://***@comfyui:8188"),
+        # A password with an unencoded '/', '?' or '#': a URL parser ends the host
+        # at that character, which leaves the '@' and the password outside it.
+        ("http://admin:pa/ss@comfyui:8188", "http://***@comfyui:8188"),
+        ("http://admin:12/ss@comfyui:8188", "http://***@comfyui:8188"),
+        ("http://admin:8188?x@comfyui", "http://***@comfyui"),
+        ("http://admin:88#x@comfyui", "http://***@comfyui"),
+        ("admin:hunter2@comfyui:8188", "***@comfyui:8188"),
     ],
 )
 def test_redact_url(url, shown):
     assert redact_url(url) == shown
+
+
+@pytest.mark.parametrize(
+    ("url", "secret"),
+    [
+        ("http://admin:pa/ss@comfyui:8188", "pa/ss"),  # a "port" of `pa`: its parse error quoted it
+        ("http://admin:12/ss@comfyui:8188", "12/ss"),  # used to validate as host admin, port 12
+        ("http://admin:8188?x@comfyui", "8188?x"),
+        ("http://admin:88#x@comfyui", "88#x"),
+    ],
+)
+def test_an_at_sign_outside_the_host_is_refused_without_echoing_the_password(url, secret):
+    with pytest.raises(ConfigError) as info:
+        Settings.load(comfyui_url=url, host="h", port=1, profiles="read", env={TOKEN_ENV: TOKEN})
+    message = str(info.value)
+    assert "outside its host part" in message and "percent-encode" in message
+    assert secret not in message and "admin" not in message
+
+
+def test_percent_encoded_credentials_are_accepted():
+    url = "http://admin:pa%2Fss%3Fx%23y@comfyui:8188"
+    s = Settings.load(comfyui_url=url, host="h", port=1, profiles="read", env={TOKEN_ENV: TOKEN})
+    assert s.comfyui_url == url
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [("http://exämple..:8188", "Invalid IDNA hostname"), ("http://a:b@exämple..:8188", "Invalid IDNA hostname")],
+)
+def test_a_host_the_http_client_would_refuse_is_a_config_error(url, reason):
+    with pytest.raises(ConfigError, match=reason) as info:
+        Settings.load(comfyui_url=url, host="h", port=1, profiles="read", env={TOKEN_ENV: TOKEN})
+    assert "a:b" not in str(info.value)
+
+
+def test_an_idna_host_the_http_client_accepts_is_accepted():
+    s = Settings.load(comfyui_url="http://exämple.com:8188", host="h", port=1, profiles="read", env={TOKEN_ENV: "t"})
+    assert s.comfyui_url == "http://exämple.com:8188"
+
+
+def test_the_settings_repr_hides_comfyui_url():
+    assert "hunter2" not in repr(settings(comfyui_url="http://admin:hunter2@comfyui:8188"))
+
+
+# -- the token must be sendable in a header ----------------------------------------
+
+
+@pytest.mark.parametrize("token", ["abc\ndef", "abc def", "abc\tdef", "tökén", "abc\x00def", "abc\x7fdef"], ids=repr)
+def test_a_token_that_cannot_be_sent_is_refused_without_echoing_it(token):
+    with pytest.raises(ConfigError, match="cannot be sent in an HTTP header") as info:
+        Settings.load(comfyui_url="http://x", host="h", port=1, profiles="read", env={TOKEN_ENV: token})
+    assert "abc" not in str(info.value) and "tök" not in str(info.value)
+
+
+def test_the_probe_refuses_a_token_with_a_line_break_without_printing_it(monkeypatch):
+    """It used to send it: h11 raised `Illegal header value b'Bearer …'`, printing the token twice."""
+    monkeypatch.setenv(TOKEN_ENV, "secret-part-one\nsecret-part-two")
+    r = runner.invoke(app, ["relay", "probe", "http://127.0.0.1:9/mcp", "--timeout", "2"])
+    assert r.exit_code == 2
+    assert "cannot be sent in an HTTP header" in r.output
+    assert "secret-part" not in r.output
+
+
+def test_serve_refuses_a_token_with_a_line_break_without_printing_it(monkeypatch):
+    monkeypatch.setenv(TOKEN_ENV, "secret-part-one\nsecret-part-two")
+    r = runner.invoke(app, ["relay", "serve"])
+    assert r.exit_code == 2
+    assert "cannot be sent in an HTTP header" in r.output
+    assert "secret-part" not in r.output
 
 
 @pytest.mark.anyio
@@ -152,7 +231,7 @@ async def test_server_info_does_not_echo_credentials():
 
 def test_the_startup_log_does_not_echo_credentials(monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger="comfyrelay")
-    monkeypatch.setattr(uvicorn.Server, "run", lambda self: None)
+    monkeypatch.setattr(uvicorn.Server, "serve", serve_nothing)
     serve(settings(comfyui_url="http://admin:hunter2@comfyui:8188"))
     assert "ComfyUI at http://***@comfyui:8188" in caplog.text
     assert "hunter2" not in caplog.text

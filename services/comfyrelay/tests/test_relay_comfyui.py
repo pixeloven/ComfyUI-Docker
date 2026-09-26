@@ -83,6 +83,15 @@ async def test_system_stats_of_the_wrong_shape_is_a_bad_response(body):
     assert "/system_stats with JSON that is not an object" in info.value.message
 
 
+async def test_a_body_that_will_not_decode_is_a_bad_response():
+    """A 200 whose gzip is corrupt raised httpx2.DecodingError raw."""
+    corrupt = httpx2.Response(200, stream=httpx2.ByteStream(b"not gzip at all"), headers={"Content-Encoding": "gzip"})
+    with pytest.raises(ComfyUIError) as info:
+        await comfyui_answering({"/system_stats": corrupt}).system_stats()
+    assert (info.value.code, info.value.retryable) == ("comfyui_bad_response", False)
+    assert "could not be read" in info.value.message
+
+
 async def test_object_info_of_the_wrong_shape_is_a_bad_response():
     client = comfyui_answering({"/object_info": httpx2.Response(200, json=["KSampler"])})
     with pytest.raises(ComfyUIError) as info:

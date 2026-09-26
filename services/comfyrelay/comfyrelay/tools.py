@@ -171,14 +171,16 @@ def _job_status(relay: Relay) -> Callable[..., Any]:
             default=0,
             ge=0,
             le=MAX_WAIT_SECONDS,
-            description="0 answers at once. Otherwise wait up to this long for the job to finish.",
+            description="0 answers at once. Otherwise wait up to this long for the job to finish; keep it under "
+            "your own client's tool-call timeout (often about 60s).",
         ),
     ) -> JobView:
         """Check on a long-running job by its id, or wait for it to finish. Changes nothing.
 
         Tools that start work lasting longer than one call return a job_id; poll or wait on it here. A wait
-        returns when the job finishes or after timeout_seconds (the job keeps running; call again). To stop a
-        job, use job_cancel.
+        returns when the job finishes or after timeout_seconds (the job keeps running; call again). Keep each
+        wait under your own client's tool-call timeout, often about 60s, and wait again rather than longer.
+        To stop a job, use job_cancel.
         """
         found = await relay.jobs.wait(job_id, timeout_seconds) if timeout_seconds > 0 else relay.jobs.get(job_id)
         return JobView(**found.snapshot())
@@ -215,7 +217,7 @@ TOOLS: tuple[ToolSpec, ...] = (
         "job_cancel",
         frozenset({"run"}),
         _job_cancel,
-        ToolAnnotations(read_only_hint=False, destructive_hint=True, open_world_hint=False),
+        ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False),
     ),
 )
 

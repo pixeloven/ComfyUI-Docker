@@ -49,12 +49,12 @@ environment when comfyrelay moves into that image.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `COMFYUI_MCP_HTTP_TOKEN` | *(unset, required)* | The token clients send, as `Authorization: Bearer <token>` or `X-API-Key: <token>`. Without it the server logs `Refusing to start` and exits 2. |
-| `COMFYUI_URL` | `http://localhost:8188` | Where ComfyUI answers, from this container. It must be an `http://` or `https://` URL with a host, or the server exits 2 at startup. A `user:password@` in it is sent to ComfyUI but never shown: logs and errors print `***@`. |
+| `COMFYUI_MCP_HTTP_TOKEN` | *(unset, required)* | The token clients send, as `Authorization: Bearer <token>` or `X-API-Key: <token>`. Without it the server logs `Refusing to start` and exits 2. It must be visible ASCII (no spaces, line breaks or other characters a header can't carry); anything else also exits 2, and the value is never printed. |
+| `COMFYUI_URL` | `http://localhost:8188` | Where ComfyUI answers, from this container. It must be an `http://` or `https://` URL with a host, or the server exits 2 at startup. A `user:password@` in it is sent to ComfyUI but never shown: logs and errors print `***@`. Percent-encode any `/`, `?`, `#` or `@` in the credentials (`/` is `%2F`): unencoded, they end the host part early, and the server refuses the URL. |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `9000` | The listen address. The path is always `/mcp`. |
 | `COMFYUI_MCP_PROFILES` | `read,run` | The capability profiles to enable (below) |
 | `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar. In a container the hostname is the container ID or pod name, which can change when it's recreated, so set this when a gateway federates sidecars. `server_info` reports where the ID came from (`instance_id_source`: `env` or `hostname`), and startup logs a warning when it's the hostname. |
-| `COMFYUI_MCP_MAX_JOBS` | `16` | How many jobs may be in flight at once. A submission past it is refused with `too_many_jobs`, which is retryable. |
+| `COMFYUI_MCP_MAX_JOBS` | `16` | How many jobs may be in flight at once. A submission past it is refused with `too_many_jobs`. It's retryable, unless every slot is held by a job that didn't stop when cancelled, since those may never free. |
 | `COMFYUI_VERSION` | set by the image | The ComfyUI version the image was built for, from the bake pin |
 
 `serve` takes the same settings as flags (`--comfyui-url`, `--host`, `--port`, `--profiles`),
@@ -92,14 +92,23 @@ the `job_*` group are the cross-cutting names.
   down or answers with something unexpected; `comfyui.error` says why.
 - **`job_status`** reads a long-running job by `job_id`, and changes nothing (it's annotated
   read-only). With `timeout_seconds` above 0 it waits up to that long (at most 300) for the job
-  to finish; the job keeps running when a wait times out.
-- **`job_cancel`** stops a job (it's annotated destructive). It waits up to 10 seconds for the
-  job to unwind; a job still unwinding after that reports `cancelling`, and `job_status` shows
-  it reach `cancelled`. A cancelled job ends `cancelled` even if its work swallows the
-  cancellation and returns. Cancelling a finished job changes nothing.
+  to finish; the job keeps running when a wait times out. Keep each wait under your client's
+  own tool-call timeout (often about 60 seconds), and wait again rather than longer.
+- **`job_cancel`** stops a job (it's annotated destructive and idempotent). It waits up to 10
+  seconds for the job to unwind; a job still unwinding after that reports `cancelling`, and
+  `job_status` shows it reach `cancelled`. A cancelled job ends `cancelled`, with no `result`,
+  even if its work swallows the cancellation and returns something. Cancelling a finished job
+  changes nothing.
 
 Jobs live in memory, so they don't survive a restart. At most `COMFYUI_MCP_MAX_JOBS` run at
 once. Nothing produces jobs yet; workflow runs will (#132).
+
+**The producer contract.** Code that runs as a job must let a cancellation through, re-raising
+`CancelledError` within 10 seconds. A job that overruns that is logged as an error and keeps
+its slot until it stops. On shutdown every job is cancelled and each wait is bounded, so a job
+that never stops can't hold the server open past a `docker stop`. Every producer's tests call
+`assert_producer_honours_cancel` (`tests/relay_helpers.py`); the contract is written out in
+`comfyrelay/jobs.py`.
 
 **Job access is per token, not per client.** The token is the only credential, so everyone who
 holds it is one principal: any session can follow or cancel any job by its ID, and IDs are

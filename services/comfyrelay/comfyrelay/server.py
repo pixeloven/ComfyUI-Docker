@@ -11,9 +11,11 @@ other scope, a websocket included, is refused whatever it carries.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import logging
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
@@ -29,6 +31,11 @@ from .settings import INSTANCE_ID_ENV, MCP_PATH, Settings, redact_url
 from .tools import SERVER_NAME, Relay, register
 
 log = logging.getLogger("comfyrelay")
+
+# How long a stop waits for jobs to unwind, and then for everything else. With
+# uvicorn's 3s graceful shutdown that is at most 9s, inside the 10s Docker and
+# Kubernetes allow by default between SIGTERM (tini forwards it) and SIGKILL.
+SHUTDOWN_WAIT_SECONDS = 3.0
 
 INSTRUCTIONS = """\
 comfyrelay drives one ComfyUI instance. Call server_info first: it names the instance, its active capability \
@@ -127,4 +134,38 @@ def serve(settings: Settings) -> None:
         # A stop must not wait on open SSE streams for long.
         timeout_graceful_shutdown=3,
     )
-    uvicorn.Server(config).run()
+    run_until_stopped(
+        uvicorn.Server(config).serve(), relay.jobs, wait=SHUTDOWN_WAIT_SECONDS, loop_factory=config.get_loop_factory()
+    )
+
+
+def run_until_stopped(
+    main: Coroutine[Any, Any, None],
+    jobs: JobStore,
+    *,
+    wait: float = SHUTDOWN_WAIT_SECONDS,
+    loop_factory: Callable[[], asyncio.AbstractEventLoop] | None = None,
+) -> None:
+    """Run `main` (the server) to completion, then stop every job, with every wait bounded.
+
+    This replaces `asyncio.run`, which uvicorn's `Server.run` uses: its cleanup
+    cancels every remaining task and then waits for all of them WITHOUT a
+    limit, so one job whose producer swallows CancelledError in a loop would
+    keep the process alive until `docker stop` escalates to SIGKILL. Here the
+    jobs get `wait` seconds (JobStore.shutdown logs any that overrun), then
+    every other task gets `wait` seconds, then the loop closes regardless.
+    """
+    loop = (loop_factory or asyncio.new_event_loop)()
+    try:
+        loop.run_until_complete(main)
+    finally:
+        try:
+            loop.run_until_complete(jobs.shutdown(wait))
+            rest = [t for t in asyncio.all_tasks(loop) if not t.done()]
+            for task in rest:
+                task.cancel()
+            if rest:
+                loop.run_until_complete(asyncio.wait(rest, timeout=wait))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        finally:
+            loop.close()

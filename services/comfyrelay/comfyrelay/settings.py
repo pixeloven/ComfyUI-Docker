@@ -26,11 +26,12 @@ image (#136).
 from __future__ import annotations
 
 import os
+import re
 import socket
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 TOKEN_ENV = "COMFYUI_MCP_HTTP_TOKEN"
 PROFILES_ENV = "COMFYUI_MCP_PROFILES"
@@ -56,31 +57,73 @@ def redact_url(url: str) -> str:
     """`url` with any user:password replaced by `***`, for logs and messages.
 
     COMFYUI_URL may carry credentials for a proxy in front of ComfyUI. They
-    are still sent; they are never rendered. Anything that does not parse is
-    replaced whole, since it cannot be shown safely.
+    are still sent; they are never rendered. Everything up to the LAST `@`
+    after the scheme is replaced, without parsing: a password containing an
+    unencoded `/`, `?` or `#` ends a parser's idea of the host early, which
+    would leave the `@` and the password outside it. Over-redacting a URL
+    whose path has an `@` is the safe way to be wrong.
     """
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return url if "@" not in url else "<unparseable URL>"
-    if "@" not in parts.netloc:
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        scheme, rest = "", url
+    if "@" not in rest:
         return url
-    return urlunsplit(parts._replace(netloc="***@" + parts.netloc.rpartition("@")[2]))
+    return f"{scheme}{sep}***@{rest.rpartition('@')[2]}"
 
 
 def check_comfyui_url(url: str) -> str:
-    """An http(s) URL with a host and a valid port, or a ConfigError that says why."""
+    """An http(s) URL with a host and a valid port, or a ConfigError that says why.
+
+    Every message shows the URL redacted.
+    """
+    import httpx2  # here, not at the top: `comfyctl --help` imports this module
+
+    shown = redact_url(url)
+
+    def invalid(exc: Exception) -> ConfigError:
+        # A parser's message can quote part of the URL; redact it the same way.
+        return ConfigError(f"COMFYUI_URL {shown!r} is not a valid URL: {redact_url(str(exc))}")
+
     try:
         parts = urlsplit(url)
-        _ = parts.port  # raises ValueError on a bad port
     except ValueError as exc:
-        raise ConfigError(f"COMFYUI_URL {redact_url(url)!r} is not a valid URL: {exc}") from None
+        raise invalid(exc) from None
+    # Before the port is parsed: with an '@' outside the netloc, the "port" is
+    # part of the password, and its parse error would quote it.
+    if url.count("@") != parts.netloc.count("@"):
+        raise ConfigError(
+            f"COMFYUI_URL {shown!r} has an '@' outside its host part. If it carries credentials, "
+            "percent-encode any '/', '?', '#' or '@' in them (for example '/' as %2F)."
+        )
+    try:
+        _ = parts.port  # raises ValueError on a bad port
+        httpx2.URL(url)  # what the client will make of it: IDNA, and the rest of its rules
+    except (ValueError, httpx2.InvalidURL) as exc:
+        raise invalid(exc) from None
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise ConfigError(
-            f"COMFYUI_URL {redact_url(url)!r} must be an http:// or https:// URL with a host, "
-            f"such as {DEFAULT_COMFYUI_URL}"
+            f"COMFYUI_URL {shown!r} must be an http:// or https:// URL with a host, such as {DEFAULT_COMFYUI_URL}"
         )
     return url
+
+
+def check_token(token: str) -> str:
+    """The token, if it can be sent in an HTTP header: visible ASCII only.
+
+    A space, a line break, a control or a non-ASCII character would make every
+    client's request invalid, so no client could ever authenticate. The error
+    never shows the value.
+    """
+    if not _TOKEN_CHARS.fullmatch(token):
+        raise ConfigError(
+            f"{TOKEN_ENV} contains a character that cannot be sent in an HTTP header (a space, a line "
+            "break, a control or a non-ASCII character). Use visible ASCII only, for example the output "
+            "of `openssl rand -hex 32`."
+        )
+    return token
+
+
+_TOKEN_CHARS = re.compile(r"[\x21-\x7e]+")
 
 
 def parse_profiles(value: str) -> tuple[str, ...]:
@@ -96,9 +139,9 @@ def parse_profiles(value: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class Settings:
-    # Never in the repr: a traceback that shows locals must not show it.
+    # Never in the repr: a traceback that shows locals must not show either.
     token: str = field(repr=False)
-    comfyui_url: str = DEFAULT_COMFYUI_URL
+    comfyui_url: str = field(default=DEFAULT_COMFYUI_URL, repr=False)  # may carry credentials
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
     profiles: tuple[str, ...] = DEFAULT_PROFILES
@@ -126,6 +169,7 @@ class Settings:
                 "and without a token anyone who can reach it could use it. Set it to a long "
                 "random secret (for example `openssl rand -hex 32`) from your secret store."
             )
+        check_token(token)
         if not 0 < port < 65536:
             raise ConfigError(f"port {port} is out of range")
         instance_id = env.get(INSTANCE_ID_ENV, "").strip()

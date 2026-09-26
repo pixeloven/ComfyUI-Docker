@@ -13,7 +13,7 @@ from comfyrelay import __version__
 from comfyrelay.server import build_server, serve
 from comfyrelay.settings import Settings
 from mcp import Client
-from relay_helpers import comfyui_answering, comfyui_raising, settings
+from relay_helpers import comfyui_answering, comfyui_raising, serve_nothing, settings
 
 pytestmark = pytest.mark.anyio
 
@@ -112,7 +112,7 @@ async def test_a_hostname_instance_id_is_reported_as_such():
 
 def test_startup_warns_when_the_instance_id_is_the_hostname(monkeypatch, caplog):
     """A federating gateway needs stable ids; a hostname is not one."""
-    monkeypatch.setattr(uvicorn.Server, "run", lambda self: None)
+    monkeypatch.setattr(uvicorn.Server, "serve", serve_nothing)
     caplog.set_level(logging.INFO, logger="comfyrelay")
     serve(settings(instance_id="abc123", instance_id_source="hostname"))
     assert "COMFYUI_MCP_INSTANCE_ID is not set, so the instance id is the hostname 'abc123'" in caplog.text

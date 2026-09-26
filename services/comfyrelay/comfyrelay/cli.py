@@ -37,6 +37,7 @@ from .settings import (
     TOKEN_ENV,
     ConfigError,
     Settings,
+    check_token,
 )
 
 # The server and the probe import the MCP SDK, so each command imports its own
@@ -126,6 +127,11 @@ def probe(
     if not token:
         typer.echo(f"{TOKEN_ENV} is not set: the probe needs the server's token", err=True)
         raise typer.Exit(2)
+    try:
+        check_token(token)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
     from .probe import probe as run_probe
 
     report = asyncio.run(run_probe(url, token, timeout=timeout, require_comfyui=not no_comfyui))
