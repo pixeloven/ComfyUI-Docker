@@ -202,7 +202,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "comfyfetch", editable = "fetch" },
-    { name = "typer", specifier = ">=0.13.1" },
+    { name = "typer", specifier = ">=0.16.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -230,7 +230,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "jsonschema", specifier = ">=4.20" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "typer", specifier = ">=0.13.1" },
+    { name = "typer", specifier = ">=0.16.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -254,7 +254,7 @@ dependencies = [
 requires-dist = [
     { name = "httpx2", specifier = ">=2.5" },
     { name = "mcp", specifier = "==2.2.0" },
-    { name = "typer", specifier = ">=0.13.1" },
+    { name = "typer", specifier = ">=0.16.0" },
     { name = "uvicorn", specifier = ">=0.31.1" },
 ]
 

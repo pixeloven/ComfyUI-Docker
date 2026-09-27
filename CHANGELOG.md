@@ -9,9 +9,9 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
-## 4.0.1 — 2026-09-26
+## 4.0.1 — 2026-09-27
 
-### `comfyctl fetch` could pass without doing anything: typer is now `>=0.13.1`
+### `comfyctl fetch` could pass without doing anything: typer is now `>=0.16.0`
 
 With typer 0.12.x and click 8.2 or later, every `comfyctl fetch <verb>` printed
 the version and exited 0 **without running the verb**. So
@@ -20,14 +20,16 @@ CI step that gates on it went green. `comfyctl --version` exited 2 with
 `Missing command`. typer 0.12.x doesn't cap click, and the 4.0.0 wheels asked
 only for `typer>=0.12.5`, so an installer was free to pick that pair.
 
-`comfyctl`, `comfyfetch` and `comfyrelay` now require `typer>=0.13.1`, and an
-installer refuses typer 0.12.x. 0.13.1 and every later typer tested run the verb.
+`comfyctl`, `comfyfetch` and `comfyrelay` now require `typer>=0.16.0`, and an
+installer refuses anything older. Why 0.16.0: it's the first typer that
+supports click 8.2, and 0.13.1 to 0.15.3 run the verbs but crash on every
+`--help` with click 8.2 or later.
 
-**Who was affected:** only an install that ended up with typer 0.12.x, because
-something else held typer back (a shared environment, or a constraints file). A
-fresh `uv tool install` or `uvx` resolves the newest typer, and the `fetch`
-image has typer 0.27.2. If you pinned typer below 0.13.1 to install comfyctl,
-drop the pin.
+**Who was affected:** only an install that ended up with typer older than
+0.16.0, because something else held typer back (a shared environment, or a
+constraints file). A fresh `uv tool install` or `uvx` resolves the newest typer,
+and the `fetch` image has typer 0.27.2. If you pinned typer below 0.16.0 to
+install comfyctl, drop the pin.
 
 ### Fixed
 
@@ -35,7 +37,7 @@ drop the pin.
   which the floor above still allows, a traceback showed every frame's locals,
   and those can hold `HF_TOKEN` or another credential. `comfyctl` and
   `comfyctl fetch` now turn that off explicitly, and so does `comfyctl relay`
-  (see below). Raising the floor alone wouldn't cover it: typer 0.13.1 to 0.22.x
+  (see below). Raising the floor alone wouldn't cover it: typer 0.16.0 to 0.22.x
   still print locals by default.
 - **A directory named `comfyrelay` on `sys.path` no longer breaks `comfyctl`.**
   With `PYTHONPATH=services` in a checkout, for example, every command failed
