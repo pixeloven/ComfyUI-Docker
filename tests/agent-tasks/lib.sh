@@ -29,6 +29,14 @@ if [ -z "${ARTOKUN_MCP_TOKEN:-}" ]; then
 fi
 export ARTOKUN_MCP_TOKEN
 
+# comfyrelay's token, the same way: servers/comfyrelay.json reads it as
+# ${COMFYRELAY_MCP_TOKEN}, and servers/comfyrelay.sh starts the server with it.
+if [ -z "${COMFYRELAY_MCP_TOKEN:-}" ]; then
+  [ -s "$RESULTS/.comfyrelay-token" ] || (umask 077; python3 -c 'import secrets; print(secrets.token_hex(24))' > "$RESULTS/.comfyrelay-token")
+  COMFYRELAY_MCP_TOKEN="$(cat "$RESULTS/.comfyrelay-token")"
+fi
+export COMFYRELAY_MCP_TOKEN
+
 # The ComfyUI pin, read from docker-bake.hcl (the single source of truth).
 bake_pin() {
   sed -n '/^variable "COMFYUI_VERSION"/,/^}/s/^ *default *= *"\(.*\)"/\1/p' "$HARNESS_REPO/docker-bake.hcl"
