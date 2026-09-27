@@ -74,8 +74,8 @@ class ComfyUIClient:
             "comfyui_bad_response", f"ComfyUI answered {self._shown_url}{path} with JSON that is not {expected}"
         )
 
-    async def _get_json(self, path: str) -> dict[str, Any]:
-        """The JSON object at `path`. Every endpoint this client reads answers with an object."""
+    async def _get_json(self, path: str, *, expect: type[dict | list] = dict) -> Any:
+        """The JSON at `path`: an object, or an array for the few endpoints that answer with one (`expect=list`)."""
         url = f"{self._shown_url}{path}"
         try:
             response = await self._http.get(path)
@@ -104,6 +104,42 @@ class ComfyUIClient:
             raise ComfyUIError(
                 "comfyui_bad_response", f"ComfyUI answered {url} with something that is not JSON"
             ) from exc
-        if not isinstance(data, dict):
-            raise self._bad_shape(path, "an object")
+        if not isinstance(data, expect):
+            raise self._bad_shape(path, "an object" if expect is dict else "an array")
+        return data
+
+    # -- introspection (#133): model folders and workflow templates ------------
+    #
+    # Templates come from the running ComfyUI, not from a package in this
+    # image: ComfyUI v0.37.0 serves the comfyui-workflow-templates package it
+    # pins at /templates/{path} (server.py, FrontendManager.template_asset_handler),
+    # and the frontend reads /templates/index.json from there.
+
+    async def model_folders(self) -> list[str]:
+        """GET /models: the model folder types ComfyUI knows (checkpoints, loras, vae, ...)."""
+        return self._strings("/models", await self._get_json("/models", expect=list))
+
+    async def model_files(self, folder: str) -> list[str]:
+        """GET /models/<folder>: the files ComfyUI finds for one folder type. HTTP 404 for a folder it doesn't know."""
+        path = f"/models/{quote(folder, safe='')}"
+        return self._strings(path, await self._get_json(path, expect=list))
+
+    async def templates_index(self) -> list[dict[str, Any]]:
+        """GET /templates/index.json: the template categories, each with its `templates`, as the frontend reads them."""
+        data = await self._get_json("/templates/index.json", expect=list)
+        if not all(isinstance(c, dict) and isinstance(c.get("templates", []), list) for c in data):
+            raise self._bad_shape("/templates/index.json", "an array of categories with a templates array")
+        return data
+
+    async def template(self, name: str) -> dict[str, Any]:
+        """GET /templates/<name>.json: one template's workflow, in the frontend's (UI) format."""
+        path = f"/templates/{quote(name, safe='')}.json"
+        data = await self._get_json(path)
+        if not isinstance(data.get("nodes"), list):
+            raise self._bad_shape(path, 'a workflow with a "nodes" array')
+        return data
+
+    def _strings(self, path: str, data: list[Any]) -> list[str]:
+        if not all(isinstance(x, str) for x in data):
+            raise self._bad_shape(path, "an array of strings")
         return data
