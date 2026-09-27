@@ -53,8 +53,9 @@ POLL_SECONDS = 0.5
 # How long a run rides out ComfyUI not answering before the job fails.
 UNREACHABLE_GRACE_SECONDS = 60.0
 # Polls that find the prompt neither queued, running nor in the history before
-# the run is declared lost. History is written before a prompt leaves the
-# queue, so one such poll is already conclusive; three rides out a proxy blip.
+# the run is declared lost. ComfyUI moves a prompt from running to history
+# in one step under its queue lock (PromptQueue.task_done, v0.37.0), so one
+# such poll is already conclusive; three rides out a proxy blip.
 VANISHED_POLLS = 3
 # The whole unwind after a cancel: the producer contract's 3s, less a margin.
 STOP_BUDGET_SECONDS = 2.5
