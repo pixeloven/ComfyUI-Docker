@@ -590,7 +590,10 @@ class MissingNode(BaseModel):
 class MissingModel(BaseModel):
     name: str
     directory: str = Field(description="The model folder type it belongs in")
-    url: str | None = Field(description="Where the template says it comes from. Nothing here downloads it.")
+    url: str | None = Field(
+        description="Where the template says it comes from. Nothing here downloads it: to add it, propose an entry "
+        "in the deployment's manifest (comfy.yaml) for a human to apply"
+    )
     folder_known: bool = Field(description="false: this ComfyUI has no such folder type at all")
 
 
