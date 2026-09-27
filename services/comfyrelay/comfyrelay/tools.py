@@ -34,6 +34,7 @@ from .comfyui import ComfyUIClient, ComfyUIError
 from .consent import ConsentGate
 from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
+from .tools_workflow import workflow_tool_specs
 
 log = logging.getLogger("comfyrelay")
 
@@ -162,6 +163,11 @@ class JobView(BaseModel):
     finished_at: float | None
     result: Any = None
     error: dict[str, Any] | None = None
+    progress: dict[str, Any] | None = Field(
+        default=None,
+        description="What the job reports while it works. A workflow run: prompt_id, comfyui_state (submitting, "
+        "queued, running, finished) and, while queued, queue_position (0 is next)",
+    )
 
 
 def _job_status(relay: Relay) -> Callable[..., Any]:
@@ -219,6 +225,8 @@ TOOLS: tuple[ToolSpec, ...] = (
         _job_cancel,
         ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False),
     ),
+    # workflow_* (#132): tools_workflow.py
+    *workflow_tool_specs(ToolSpec),
 )
 
 

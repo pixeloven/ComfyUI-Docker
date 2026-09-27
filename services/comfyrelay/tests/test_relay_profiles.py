@@ -53,9 +53,17 @@ async def listed(profiles: tuple[str, ...]) -> tuple[set[str], Client]:
     return names, missing
 
 
-async def test_default_profiles_register_server_info_and_the_job_tools():
+async def test_default_profiles_register_server_info_the_job_tools_and_the_workflow_tools():
     names, _ = await listed(("read", "run"))
-    assert names == {"server_info", "job_status", "job_cancel"}
+    assert names == {
+        "job_cancel",
+        "job_status",
+        "server_info",
+        "workflow_outputs",
+        "workflow_run",
+        "workflow_upload_input",
+        "workflow_validate",
+    }
 
 
 async def test_a_tool_in_a_disabled_profile_is_absent_and_uncallable():

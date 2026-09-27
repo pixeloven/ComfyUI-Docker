@@ -71,7 +71,7 @@ as an unknown tool.
 | Profile | For | Tools in this version |
 |---|---|---|
 | `read` | Introspection: nodes, models, templates, docs | `server_info` |
-| `run` | Validating and running workflows | `server_info`, `job_status`, `job_cancel` |
+| `run` | Validating and running workflows | `server_info`, `job_status`, `job_cancel`, `workflow_validate`, `workflow_run`, `workflow_outputs`, `workflow_upload_input` |
 | `manage` | Changing what's installed, through the manifest and lock (v2) | `server_info` |
 | `develop` | Custom node development, on a sandboxed dev instance only | `server_info` |
 
@@ -101,7 +101,7 @@ the `job_*` group are the cross-cutting names.
   changes nothing.
 
 Jobs live in memory, so they don't survive a restart. At most `COMFYUI_MCP_MAX_JOBS` run at
-once. Nothing produces jobs yet; workflow runs will (#132).
+once. Workflow runs are the only jobs so far (see *Workflow tools*).
 
 **The producer contract** (written out in `comfyrelay/jobs.py`). Code that runs as a job must:
 
@@ -136,6 +136,99 @@ prefix, then JSON:
 ```json
 {"error": {"code": "comfyui_unreachable", "message": "...", "retryable": true}}
 ```
+
+## Workflow tools
+
+The `run` profile's tools for ComfyUI workflows in **API format**
+(`{"<node id>": {"class_type": ..., "inputs": {...}}}`, where an input is a constant or a link
+`["<node id>", <output index>]`). The editor's UI-format save file is refused with directions
+to export the API format. The code is `comfyrelay/tools_workflow.py`, with the checks in
+`comfyrelay/workflow.py` (#132).
+
+- **`workflow_validate`** type-checks a graph against the live `/object_info` without running
+  it. It reads `/object_info` afresh on every call, so newly installed nodes and uploaded files
+  count. Each problem names `node_id`, `class_type`, `input`, `expected` and `got`, and uses
+  ComfyUI's own `type` and message wherever ComfyUI reports the same fault. So a MASK wired
+  into an IMAGE input is `return_type_mismatch`, "Return type mismatch between linked nodes",
+  as `/prompt` would say. It reports:
+  - errors: `missing_node_type` (with near names), `required_input_missing`,
+    `bad_linked_input`, `linked_node_missing`, `linked_output_missing`,
+    `return_type_mismatch`, `invalid_input_type`, `value_smaller_than_min`,
+    `value_bigger_than_max`, `value_not_in_list` (with near values), `prompt_no_outputs`,
+    `invalid_workflow`;
+  - warnings, which don't stop a run: `not_connected_to_output`, `unknown_input`,
+    `constant_for_link`, and a file-picker COMBO (LoadImage's `image`) set to a file that
+    isn't listed. ComfyUI checks that file itself on submission.
+
+  It expands ComfyUI's dynamic V3 inputs as ComfyUI does: `images.image0` for an Autogrow,
+  `resize_type.width` for a DynamicCombo's chosen option. It's stricter than ComfyUI in two
+  places. One failing output fails the graph, where ComfyUI would run the outputs that pass.
+  A required DynamicCombo that's left out is an error, where ComfyUI accepts it and the node
+  then fails when it runs. It can't see a node's own `VALIDATE_INPUTS` or anything that fails
+  only while running. Read-only.
+- **`workflow_run`** runs `workflow_validate`'s check first, and refuses an invalid graph with
+  those errors (`workflow_invalid`). It refuses any graph with a **partner-API node**
+  (`partner_api_nodes_refused`, naming the nodes; see below). Otherwise it submits the graph
+  to `/prompt` and returns `job_id` and `prompt_id` at once. When ComfyUI refuses the graph
+  anyway (`workflow_rejected`), the error carries ComfyUI's own error and its per-node errors,
+  also flattened into the same shape as `workflow_validate`'s. ComfyUI drops any output that
+  fails its checks and runs the rest; the dropped ones come back as warnings. Follow the job
+  with `job_status`. Its `progress` says where ComfyUI has the prompt: `comfyui_state` is
+  `submitting`, `queued` (with `queue_position`, where 0 is next), `running` or `finished`.
+  The executing node isn't reported: that needs ComfyUI's websocket, and the relay only polls
+  `/queue` and `/history/<id>`, twice a second. A finished job's `result` lists the saved
+  files. A failure is a structured `error`:
+  - `workflow_execution_failed`: the node id and type, the exception type and message, and
+    the last traceback lines;
+  - `workflow_interrupted`: something other than this job stopped it;
+  - `workflow_vanished`: ComfyUI lost it (another client dequeued it, or ComfyUI restarted).
+
+  If ComfyUI stops answering, a run waits up to 60 seconds for it to come back.
+- **`workflow_outputs`** lists a finished run's files: node, `kind` (images, gifs, audio,
+  ...), filename, subfolder, `type` (output or temp), MIME type, and size from a `HEAD /view`
+  for the first 32 files. It also lists non-file outputs such as text. Failed and cancelled
+  runs are listed too, since they may have saved something. **It streams nothing unless
+  asked.** `fetch=<filename>` returns that one file inline, up to **5 MiB**: an image as MCP
+  image content the model can see, audio as audio content, anything else as an embedded
+  resource. A larger file is refused (`output_too_large`) with its `/view` path, which a
+  person or tool with direct access to ComfyUI can use. Read-only.
+- **`workflow_upload_input`** puts a file into ComfyUI's input directory through
+  `POST /upload/image` (`type=input`) and returns the name ComfyUI stored it under, to put in
+  LoadImage's `image` input. The file arrives base64-encoded (a `data:` URL is fine), at most
+  **10 MiB** decoded. The name is sanitised: directories are dropped, anything outside
+  `A-Z a-z 0-9 . _ ( ) + -` and space becomes `_`, and leading dots go. A name with nothing
+  left is refused. It never overwrites: a different file under a taken name is stored as
+  `name (1).ext` (`renamed: true`), and the same bytes again reuse the file that's there. It
+  writes nowhere else. There's no mask variant: `/upload/mask` edits the alpha of an image
+  that's already there.
+
+**Annotations.** `workflow_validate` and `workflow_outputs` are read-only. `workflow_run` isn't
+read-only, since it queues work and ComfyUI writes new output files. It isn't destructive
+either: it replaces or deletes nothing, and SaveImage numbers its files rather than
+overwriting them. It isn't idempotent, since every call is a new run. `workflow_upload_input`
+isn't read-only, since it adds a file to the input directory, and isn't destructive, since it
+never overwrites. It is idempotent, because the same bytes under the same name are stored
+once. All four are closed-world: they reach only `COMFYUI_URL`.
+
+**Partner-API nodes** call paid external services with the user's Comfy.org credentials, and
+v1 never runs them (#103). A node counts as one when `/object_info` gives it
+`"api_node": true`, or gives it a hidden input of type `AUTH_TOKEN_COMFY_ORG` or
+`API_KEY_COMFY_ORG`, which is how such a node is handed the credentials that pay. Either is
+enough, and the refusal names both the node and the signal. At the pinned v0.37.0, 271 of 959
+node classes have `api_node: true`. ComfyUI sets that flag from a node's `API_NODE`, and
+`--disable-api-nodes` and the editor's badge use the same one. Three more
+(`ByteDanceCreateImageAsset`, `ByteDanceCreateVideoAsset`, `Krea2StyleReferenceNode`) aren't
+flagged but take the credentials. A custom node that spends money by some other route shows
+neither signal, and can't be detected from `/object_info`.
+
+**Cancelling.** `job_cancel` on a run first deletes its prompt from ComfyUI's queue
+(`POST /queue {"delete": [id]}`), which is a no-op unless the prompt is still waiting. Then, if
+`/queue` shows the prompt running, it sends `POST /interrupt {"prompt_id": id}`. It deletes
+before it looks, so a prompt that starts in between is seen running. It interrupts only its
+own prompt, and ComfyUI makes the same check again on its side. Each call has a 1-second
+timeout and the whole unwind has 2.5 seconds, inside the producer contract's 3. ComfyUI
+honours an interrupt at the next node boundary. **A stopping relay cancels its runs the same
+way.** Jobs live in memory, so a run whose relay has gone could never be followed or collected.
 
 ## Consent
 

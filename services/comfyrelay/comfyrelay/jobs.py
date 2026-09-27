@@ -103,6 +103,9 @@ class Job:
     finished_at: float | None = None
     result: Any = None
     error: dict[str, Any] | None = None
+    # What the producer reports while it works, if anything: a dict it keeps
+    # up to date (a workflow run: its prompt id, and where ComfyUI has it).
+    progress: dict[str, Any] | None = None
     # When a cancel was first requested (time.monotonic()), or None.
     cancel_requested_at: float | None = None
     overrun_logged: bool = field(default=False, repr=False)
@@ -139,6 +142,7 @@ class Job:
             "finished_at": self.finished_at,
             "result": self.result,
             "error": self.error,
+            "progress": dict(self.progress) if self.progress is not None else None,
         }
 
 

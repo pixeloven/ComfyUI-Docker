@@ -1,0 +1,1547 @@
+{
+ "BatchImagesNode": {
+  "api_node": false,
+  "category": "image/batch",
+  "deprecated": false,
+  "description": "",
+  "dev_only": false,
+  "display_name": "Batch Images",
+  "essentials_category": "Image Tools",
+  "experimental": false,
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "images": [
+     "COMFY_AUTOGROW_V3",
+     {
+      "template": {
+       "input": {
+        "required": {
+         "image": [
+          "IMAGE",
+          {}
+         ]
+        }
+       },
+       "max": 50,
+       "min": 1,
+       "prefix": "image"
+      }
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "images"
+   ]
+  },
+  "is_input_list": false,
+  "name": "BatchImagesNode",
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_matchtypes": null,
+  "output_name": [
+   "IMAGE"
+  ],
+  "output_node": false,
+  "output_tooltips": [
+   null
+  ],
+  "price_badge": null,
+  "python_module": "comfy_extras.nodes_post_processing"
+ },
+ "ByteDanceCreateImageAsset": {
+  "api_node": false,
+  "category": "partner/image/ByteDance",
+  "deprecated": false,
+  "description": "Create a Seedance 2.0 personal image asset. Uploads the input image and registers it in the given asset group. If group_id is empty, runs a real-person H5 authentication flow to create a new group before adding the asset.",
+  "dev_only": false,
+  "display_name": "ByteDance Create Image Asset",
+  "essentials_category": null,
+  "experimental": false,
+  "has_intermediate_output": false,
+  "input": {
+   "hidden": {
+    "api_key_comfy_org": [
+     "API_KEY_COMFY_ORG"
+    ],
+    "auth_token_comfy_org": [
+     "AUTH_TOKEN_COMFY_ORG"
+    ],
+    "unique_id": [
+     "UNIQUE_ID"
+    ]
+   },
+   "required": {
+    "group_id": [
+     "STRING",
+     {
+      "default": "",
+      "multiline": false,
+      "tooltip": "Reuse an existing Seedance asset group ID to skip repeated human verification for the same person. Leave empty to run real-person authentication in the browser and create a new group."
+     }
+    ],
+    "image": [
+     "IMAGE",
+     {
+      "tooltip": "Image to register as a personal asset."
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "hidden": [
+    "auth_token_comfy_org",
+    "api_key_comfy_org",
+    "unique_id"
+   ],
+   "required": [
+    "image",
+    "group_id"
+   ]
+  },
+  "is_input_list": false,
+  "name": "ByteDanceCreateImageAsset",
+  "output": [
+   "STRING",
+   "STRING"
+  ],
+  "output_is_list": [
+   false,
+   false
+  ],
+  "output_matchtypes": null,
+  "output_name": [
+   "asset_id",
+   "group_id"
+  ],
+  "output_node": false,
+  "output_tooltips": [
+   null,
+   null
+  ],
+  "price_badge": null,
+  "python_module": "comfy_api_nodes.nodes_bytedance"
+ },
+ "ClaudeNode": {
+  "api_node": true,
+  "category": "partner/text/Anthropic",
+  "deprecated": false,
+  "description": "Generate text responses with Anthropic's Claude models. Provide a text prompt and optionally one or more images for multimodal context.",
+  "dev_only": false,
+  "display_name": "Anthropic Claude",
+  "essentials_category": "Text Generation",
+  "experimental": false,
+  "has_intermediate_output": false,
+  "input": {
+   "hidden": {
+    "api_key_comfy_org": [
+     "API_KEY_COMFY_ORG"
+    ],
+    "auth_token_comfy_org": [
+     "AUTH_TOKEN_COMFY_ORG"
+    ],
+    "comfy_usage_source": [
+     "COMFY_USAGE_SOURCE"
+    ],
+    "unique_id": [
+     "UNIQUE_ID"
+    ]
+   },
+   "optional": {
+    "system_prompt": [
+     "STRING",
+     {
+      "advanced": true,
+      "default": "",
+      "multiline": true,
+      "tooltip": "Foundational instructions that dictate the model's behavior."
+     }
+    ]
+   },
+   "required": {
+    "images": [
+     "COMFY_AUTOGROW_V3",
+     {
+      "template": {
+       "input": {
+        "required": {
+         "image": [
+          "IMAGE",
+          {}
+         ]
+        }
+       },
+       "min": 0,
+       "names": [
+        "image_1",
+        "image_2",
+        "image_3",
+        "image_4",
+        "image_5",
+        "image_6",
+        "image_7",
+        "image_8",
+        "image_9",
+        "image_10",
+        "image_11",
+        "image_12",
+        "image_13",
+        "image_14",
+        "image_15",
+        "image_16",
+        "image_17",
+        "image_18",
+        "image_19",
+        "image_20"
+       ]
+      },
+      "tooltip": "Optional image(s) to use as context for the model. Up to 20 images."
+     }
+    ],
+    "model": [
+     "COMFY_DYNAMICCOMBO_V3",
+     {
+      "options": [
+       {
+        "inputs": {
+         "required": {
+          "max_tokens": [
+           "INT",
+           {
+            "advanced": true,
+            "default": 32768,
+            "max": 64000,
+            "min": 4096,
+            "tooltip": "Maximum number of tokens to generate (includes reasoning tokens when enabled)."
+           }
+          ],
+          "reasoning_effort": [
+           "COMBO",
+           {
+            "advanced": true,
+            "default": "high",
+            "multiselect": false,
+            "options": [
+             "low",
+             "medium",
+             "high",
+             "xhigh",
+             "max"
+            ],
+            "tooltip": "Extended thinking effort. Reasoning is always enabled for this model."
+           }
+          ]
+         }
+        },
+        "key": "Opus 5"
+       },
+       {
+        "inputs": {
+         "required": {
+          "max_tokens": [
+           "INT",
+           {
+            "advanced": true,
+            "default": 32768,
+            "max": 64000,
+            "min": 4096,
+            "tooltip": "Maximum number of tokens to generate (includes reasoning tokens when enabled)."
+           }
+          ],
+          "reasoning_effort": [
+           "COMBO",
+           {
+            "advanced": true,
+            "default": "off",
+            "multiselect": false,
+            "options": [
+             "off",
+             "low",
+             "medium",
+             "high",
+             "xhigh",
+             "max"
+            ],
+            "tooltip": "Extended thinking effort. 'off' disables reasoning."
+           }
+          ]
+         }
+        },
+        "key": "Opus 4.8"
+       },
+       {
+        "inputs": {
+         "required": {
+          "max_tokens": [
+           "INT",
+           {
+            "advanced": true,
+            "default": 32768,
+            "max": 64000,
+            "min": 4096,
+            "tooltip": "Maximum number of tokens to generate (includes reasoning tokens when enabled)."
+           }
+          ],
+          "reasoning_effort": [
+           "COMBO",
+           {
+            "advanced": true,
+            "default": "high",
+            "multiselect": false,
+            "options": [
+             "low",
+             "medium",
+             "high",
+             "xhigh",
+             "max"
+            ],
+            "tooltip": "Extended thinking effort. Reasoning is always enabled for this model."
+           }
+          ]
+         }
+        },
+        "key": "Fable 5.1"
+       },
+       {
+        "inputs": {
+         "required": {
+          "max_tokens": [
+           "INT",
+           {
+            "advanced": true,
+            "default": 32768,
+            "max": 64000,
+            "min": 4096,
+            "tooltip": "Maximum number of tokens to generate (includes reasoning tokens when enabled)."
+           }
+          ],
+          "reasoning_effort": [
+           "COMBO",
+           {
+            "advanced": true,
+            "default": "high",
+            "multiselect": false,
+            "options": [
+             "low",
+             "medium",
+             "high",
+             "xhigh",
+             "max"
+            ],
+            "tooltip": "Extended thinking effort. Reasoning is always enabled for this model."
+           }
+          ]
+         }
+        },
+        "key": "Fable 5"
+       },
+       {
+        "inputs": {
+         "required": {
+          "max_tokens": [
+           "INT",
+           {
+            "advanced": true,
+            "default": 32768,
+            "max": 64000,
+            "min": 4096,
+            "tooltip": "Maximum number of tokens to generate (includes reasoning tokens when enabled)."
+           }
+          ],
+          "reasoning_effort": [
+           "COMBO",
+           {
+            "advanced": true,
+            "default": "off",
+            "multiselect": false,
+            "options": [
+             "off",
+             "low",
+             "medium",
+             "high",
+             "xhigh",
+             "max"
+            ],
+            "tooltip": "Extended thinking effort. 'off' disables reasoning."
+           }
+          ]
+         }
+        },
+        "key": "Sonnet 5"
+       },
+       {
+        "inputs": {
+         "required": {
+          "max_tokens": [
+           "INT",
+           {
+            "advanced": true,
+            "default": 32768,
+            "max": 64000,
+            "min": 4096,
+            "tooltip": "Maximum number of tokens to generate (includes reasoning tokens when enabled)."
+           }
+          ],
+          "reasoning_effort": [
+           "COMBO",
+           {
+            "advanced": true,
+            "default": "off",
+            "multiselect": false,
+            "options": [
+             "off",
+             "low",
+             "medium",
+             "high",
+             "xhigh",
+             "max"
+            ],
+            "tooltip": "Extended thinking effort. 'off' disables reasoning."
+           }
+          ],
+          "temperature": [
+           "FLOAT",
+           {
+            "advanced": true,
+            "default": 1.0,
+            "max": 1.0,
+            "min": 0.0,
+            "step": 0.01,
+            "tooltip": "Controls randomness. 0.0 is deterministic, 1.0 is most random. Ignored for Opus 4.7 and any model when reasoning_effort is set."
+           }
+          ]
+         }
+        },
+        "key": "Opus 4.7"
+       },
+       {
+        "inputs": {
+         "required": {
+          "max_tokens": [
+           "INT",
+           {
+            "advanced": true,
+            "default": 32768,
+            "max": 64000,
+            "min": 4096,
+            "tooltip": "Maximum number of tokens to generate (includes reasoning tokens when enabled)."
+           }
+          ],
+          "reasoning_effort": [
+           "COMBO",
+           {
+            "advanced": true,
+            "default": "off",
+            "multiselect": false,
+            "options": [
+             "off",
+             "low",
+             "medium",
+             "high",
+             "max"
+            ],
+            "tooltip": "Extended thinking effort. 'off' disables reasoning."
+           }
+          ],
+          "temperature": [
+           "FLOAT",
+           {
+            "advanced": true,
+            "default": 1.0,
+            "max": 1.0,
+            "min": 0.0,
+            "step": 0.01,
+            "tooltip": "Controls randomness. 0.0 is deterministic, 1.0 is most random. Ignored for Opus 4.7 and any model when reasoning_effort is set."
+           }
+          ]
+         }
+        },
+        "key": "Opus 4.6"
+       },
+       {
+        "inputs": {
+         "required": {
+          "max_tokens": [
+           "INT",
+           {
+            "advanced": true,
+            "default": 32768,
+            "max": 64000,
+            "min": 4096,
+            "tooltip": "Maximum number of tokens to generate (includes reasoning tokens when enabled)."
+           }
+          ],
+          "reasoning_effort": [
+           "COMBO",
+           {
+            "advanced": true,
+            "default": "off",
+            "multiselect": false,
+            "options": [
+             "off",
+             "low",
+             "medium",
+             "high",
+             "max"
+            ],
+            "tooltip": "Extended thinking effort. 'off' disables reasoning."
+           }
+          ],
+          "temperature": [
+           "FLOAT",
+           {
+            "advanced": true,
+            "default": 1.0,
+            "max": 1.0,
+            "min": 0.0,
+            "step": 0.01,
+            "tooltip": "Controls randomness. 0.0 is deterministic, 1.0 is most random. Ignored for Opus 4.7 and any model when reasoning_effort is set."
+           }
+          ]
+         }
+        },
+        "key": "Sonnet 4.6"
+       },
+       {
+        "inputs": {
+         "required": {
+          "max_tokens": [
+           "INT",
+           {
+            "advanced": true,
+            "default": 32768,
+            "max": 64000,
+            "min": 4096,
+            "tooltip": "Maximum number of tokens to generate (includes reasoning tokens when enabled)."
+           }
+          ],
+          "reasoning_effort": [
+           "COMBO",
+           {
+            "advanced": true,
+            "default": "off",
+            "multiselect": false,
+            "options": [
+             "off",
+             "low",
+             "medium",
+             "high"
+            ],
+            "tooltip": "Extended thinking effort. 'off' disables reasoning."
+           }
+          ],
+          "temperature": [
+           "FLOAT",
+           {
+            "advanced": true,
+            "default": 1.0,
+            "max": 1.0,
+            "min": 0.0,
+            "step": 0.01,
+            "tooltip": "Controls randomness. 0.0 is deterministic, 1.0 is most random. Ignored for Opus 4.7 and any model when reasoning_effort is set."
+           }
+          ]
+         }
+        },
+        "key": "Sonnet 4.5"
+       },
+       {
+        "inputs": {
+         "required": {
+          "max_tokens": [
+           "INT",
+           {
+            "advanced": true,
+            "default": 32768,
+            "max": 64000,
+            "min": 4096,
+            "tooltip": "Maximum number of tokens to generate (includes reasoning tokens when enabled)."
+           }
+          ],
+          "temperature": [
+           "FLOAT",
+           {
+            "advanced": true,
+            "default": 1.0,
+            "max": 1.0,
+            "min": 0.0,
+            "step": 0.01,
+            "tooltip": "Controls randomness. 0.0 is deterministic, 1.0 is most random. Ignored for Opus 4.7 and any model when reasoning_effort is set."
+           }
+          ]
+         }
+        },
+        "key": "Haiku 4.5"
+       }
+      ],
+      "tooltip": "The Claude model used to generate the response."
+     }
+    ],
+    "prompt": [
+     "STRING",
+     {
+      "default": "",
+      "multiline": true,
+      "tooltip": "Text input to the model."
+     }
+    ],
+    "seed": [
+     "INT",
+     {
+      "control_after_generate": true,
+      "default": 0,
+      "max": 2147483647,
+      "min": 0,
+      "tooltip": "Seed controls whether the node should re-run; results are non-deterministic regardless of seed."
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "hidden": [
+    "auth_token_comfy_org",
+    "api_key_comfy_org",
+    "unique_id",
+    "comfy_usage_source"
+   ],
+   "optional": [
+    "system_prompt"
+   ],
+   "required": [
+    "prompt",
+    "model",
+    "seed",
+    "images"
+   ]
+  },
+  "is_input_list": false,
+  "name": "ClaudeNode",
+  "output": [
+   "STRING"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_matchtypes": null,
+  "output_name": [
+   "STRING"
+  ],
+  "output_node": false,
+  "output_tooltips": [
+   null
+  ],
+  "price_badge": {
+   "depends_on": {
+    "input_groups": [],
+    "inputs": [],
+    "widgets": [
+     {
+      "name": "model",
+      "type": "COMFY_DYNAMICCOMBO_V3"
+     }
+    ]
+   },
+   "engine": "jsonata",
+   "expr": "\n                (\n                  $m := widgets.model;\n                  $contains($m, \"fable\") ? {\n                    \"type\": \"list_usd\",\n                    \"usd\": [0.0143, 0.0715],\n                    \"format\": { \"approximate\": true, \"separator\": \"-\", \"suffix\": \" per 1K tokens\" }\n                  }\n                  : $contains($m, \"opus 4.8\") ? {\n                    \"type\": \"list_usd\",\n                    \"usd\": [0.00715, 0.03575],\n                    \"format\": { \"approximate\": true, \"separator\": \"-\", \"suffix\": \" per 1K tokens\" }\n                  }\n                  : $contains($m, \"sonnet 5\") ? {\n                    \"type\": \"list_usd\",\n                    \"usd\": [0.00286, 0.0143],\n                    \"format\": { \"approximate\": true, \"separator\": \"-\", \"suffix\": \" per 1K tokens\" }\n                  }\n                  : $contains($m, \"opus 5\") ? {\n                    \"type\": \"list_usd\",\n                    \"usd\": [0.00715, 0.03575],\n                    \"format\": { \"approximate\": true, \"separator\": \"-\", \"suffix\": \" per 1K tokens\" }\n                  }\n                  : $contains($m, \"opus\") ? {\n                    \"type\": \"list_usd\",\n                    \"usd\": [0.005, 0.025],\n                    \"format\": { \"approximate\": true, \"separator\": \"-\", \"suffix\": \" per 1K tokens\" }\n                  }\n                  : $contains($m, \"sonnet\") ? {\n                    \"type\": \"list_usd\",\n                    \"usd\": [0.003, 0.015],\n                    \"format\": { \"approximate\": true, \"separator\": \"-\", \"suffix\": \" per 1K tokens\" }\n                  }\n                  : $contains($m, \"haiku\") ? {\n                    \"type\": \"list_usd\",\n                    \"usd\": [0.001, 0.005],\n                    \"format\": { \"approximate\": true, \"separator\": \"-\", \"suffix\": \" per 1K tokens\" }\n                  }\n                  : {\"type\":\"text\", \"text\":\"Token-based\"}\n                )\n                "
+  },
+  "python_module": "comfy_api_nodes.nodes_anthropic"
+ },
+ "EmptyImage": {
+  "category": "image",
+  "description": "",
+  "display_name": "Empty Image",
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "batch_size": [
+     "INT",
+     {
+      "default": 1,
+      "max": 4096,
+      "min": 1
+     }
+    ],
+    "color": [
+     "INT",
+     {
+      "default": 0,
+      "display": "color",
+      "max": 16777215,
+      "min": 0,
+      "step": 1
+     }
+    ],
+    "height": [
+     "INT",
+     {
+      "default": 512,
+      "max": 16384,
+      "min": 1,
+      "step": 1
+     }
+    ],
+    "width": [
+     "INT",
+     {
+      "default": 512,
+      "max": 16384,
+      "min": 1,
+      "step": 1
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "width",
+    "height",
+    "batch_size",
+    "color"
+   ]
+  },
+  "is_input_list": false,
+  "name": "EmptyImage",
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "IMAGE"
+  ],
+  "output_node": false,
+  "python_module": "nodes"
+ },
+ "ImageBlur": {
+  "api_node": false,
+  "category": "image/filters",
+  "deprecated": false,
+  "description": "",
+  "dev_only": false,
+  "display_name": "Blur Image",
+  "essentials_category": null,
+  "experimental": false,
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "blur_radius": [
+     "INT",
+     {
+      "default": 1,
+      "max": 31,
+      "min": 1,
+      "step": 1
+     }
+    ],
+    "image": [
+     "IMAGE",
+     {}
+    ],
+    "sigma": [
+     "FLOAT",
+     {
+      "default": 1.0,
+      "max": 10.0,
+      "min": 0.1,
+      "step": 0.1
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "image",
+    "blur_radius",
+    "sigma"
+   ]
+  },
+  "is_input_list": false,
+  "name": "ImageBlur",
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_matchtypes": null,
+  "output_name": [
+   "IMAGE"
+  ],
+  "output_node": false,
+  "output_tooltips": [
+   null
+  ],
+  "price_badge": null,
+  "python_module": "comfy_extras.nodes_post_processing"
+ },
+ "ImageInvert": {
+  "category": "image/color",
+  "description": "",
+  "display_name": "Invert Image Colors",
+  "essentials_category": "Image Tools",
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "image": [
+     "IMAGE"
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "image"
+   ]
+  },
+  "is_input_list": false,
+  "name": "ImageInvert",
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "IMAGE"
+  ],
+  "output_node": false,
+  "python_module": "nodes"
+ },
+ "ImageScale": {
+  "category": "image/upscaling",
+  "description": "",
+  "display_name": "Upscale Image",
+  "essentials_category": "Image Tools",
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "crop": [
+     [
+      "disabled",
+      "center"
+     ]
+    ],
+    "height": [
+     "INT",
+     {
+      "default": 512,
+      "max": 16384,
+      "min": 0,
+      "step": 1
+     }
+    ],
+    "image": [
+     "IMAGE"
+    ],
+    "upscale_method": [
+     [
+      "nearest-exact",
+      "bilinear",
+      "area",
+      "bicubic",
+      "lanczos"
+     ]
+    ],
+    "width": [
+     "INT",
+     {
+      "default": 512,
+      "max": 16384,
+      "min": 0,
+      "step": 1
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "image",
+    "upscale_method",
+    "width",
+    "height",
+    "crop"
+   ]
+  },
+  "is_input_list": false,
+  "name": "ImageScale",
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "IMAGE"
+  ],
+  "output_node": false,
+  "python_module": "nodes"
+ },
+ "ImageToMask": {
+  "api_node": false,
+  "category": "image/mask",
+  "deprecated": false,
+  "description": "",
+  "dev_only": false,
+  "display_name": "Convert Image to Mask",
+  "essentials_category": null,
+  "experimental": false,
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "channel": [
+     "COMBO",
+     {
+      "multiselect": false,
+      "options": [
+       "red",
+       "green",
+       "blue",
+       "alpha"
+      ]
+     }
+    ],
+    "image": [
+     "IMAGE",
+     {}
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "image",
+    "channel"
+   ]
+  },
+  "is_input_list": false,
+  "name": "ImageToMask",
+  "output": [
+   "MASK"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_matchtypes": null,
+  "output_name": [
+   "MASK"
+  ],
+  "output_node": false,
+  "output_tooltips": [
+   null
+  ],
+  "price_badge": null,
+  "python_module": "comfy_extras.nodes_mask"
+ },
+ "LoadImage": {
+  "category": "image",
+  "description": "",
+  "display_name": "Load Image",
+  "essentials_category": "Basics",
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "image": [
+     [
+      "example.png",
+      "harness-input.png"
+     ],
+     {
+      "image_upload": true
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "image"
+   ]
+  },
+  "is_input_list": false,
+  "name": "LoadImage",
+  "output": [
+   "IMAGE",
+   "MASK"
+  ],
+  "output_is_list": [
+   false,
+   false
+  ],
+  "output_name": [
+   "IMAGE",
+   "MASK"
+  ],
+  "output_node": false,
+  "python_module": "nodes"
+ },
+ "MaskPreview": {
+  "api_node": false,
+  "category": "image/mask",
+  "deprecated": false,
+  "description": "Preview the masks without saving them to the ComfyUI output directory.",
+  "dev_only": false,
+  "display_name": "Preview Mask",
+  "essentials_category": null,
+  "experimental": false,
+  "has_intermediate_output": false,
+  "input": {
+   "hidden": {
+    "extra_pnginfo": [
+     "EXTRA_PNGINFO"
+    ],
+    "prompt": [
+     "PROMPT"
+    ]
+   },
+   "required": {
+    "mask": [
+     "MASK",
+     {}
+    ]
+   }
+  },
+  "input_order": {
+   "hidden": [
+    "prompt",
+    "extra_pnginfo"
+   ],
+   "required": [
+    "mask"
+   ]
+  },
+  "is_input_list": false,
+  "name": "MaskPreview",
+  "output": [
+   "MASK"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_matchtypes": null,
+  "output_name": [
+   "mask"
+  ],
+  "output_node": true,
+  "output_tooltips": [
+   null
+  ],
+  "price_badge": null,
+  "python_module": "comfy_extras.nodes_mask"
+ },
+ "MaskToImage": {
+  "api_node": false,
+  "category": "image/mask",
+  "deprecated": false,
+  "description": "",
+  "dev_only": false,
+  "display_name": "Convert Mask to Image",
+  "essentials_category": null,
+  "experimental": false,
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "mask": [
+     "MASK",
+     {}
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "mask"
+   ]
+  },
+  "is_input_list": false,
+  "name": "MaskToImage",
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_matchtypes": null,
+  "output_name": [
+   "IMAGE"
+  ],
+  "output_node": false,
+  "output_tooltips": [
+   null
+  ],
+  "price_badge": null,
+  "python_module": "comfy_extras.nodes_mask"
+ },
+ "PreviewAny": {
+  "category": "utilities",
+  "description": "Preview any input value as text.",
+  "display_name": "Preview as Text",
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "source": [
+     "*",
+     {}
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "source"
+   ]
+  },
+  "is_input_list": false,
+  "name": "PreviewAny",
+  "output": [
+   "STRING"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "STRING"
+  ],
+  "output_node": true,
+  "python_module": "comfy_extras.nodes_preview_any"
+ },
+ "PreviewImage": {
+  "category": "image",
+  "description": "Preview the images without saving them to the ComfyUI output directory.",
+  "display_name": "Preview Image",
+  "essentials_category": "Basics",
+  "has_intermediate_output": false,
+  "input": {
+   "hidden": {
+    "extra_pnginfo": "EXTRA_PNGINFO",
+    "prompt": "PROMPT"
+   },
+   "required": {
+    "images": [
+     "IMAGE"
+    ]
+   }
+  },
+  "input_order": {
+   "hidden": [
+    "prompt",
+    "extra_pnginfo"
+   ],
+   "required": [
+    "images"
+   ]
+  },
+  "is_input_list": false,
+  "name": "PreviewImage",
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "images"
+  ],
+  "output_node": true,
+  "python_module": "nodes"
+ },
+ "PrimitiveInt": {
+  "api_node": false,
+  "category": "utilities/primitive",
+  "deprecated": false,
+  "description": "",
+  "dev_only": false,
+  "display_name": "Int",
+  "essentials_category": null,
+  "experimental": false,
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "value": [
+     "INT",
+     {
+      "control_after_generate": "fixed",
+      "max": 9223372036854775807,
+      "min": -9223372036854775807
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "value"
+   ]
+  },
+  "is_input_list": false,
+  "name": "PrimitiveInt",
+  "output": [
+   "INT"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_matchtypes": null,
+  "output_name": [
+   "INT"
+  ],
+  "output_node": false,
+  "output_tooltips": [
+   null
+  ],
+  "price_badge": null,
+  "python_module": "comfy_extras.nodes_primitive"
+ },
+ "PrimitiveString": {
+  "api_node": false,
+  "category": "utilities/primitive",
+  "deprecated": false,
+  "description": "",
+  "dev_only": false,
+  "display_name": "Text",
+  "essentials_category": null,
+  "experimental": false,
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "value": [
+     "STRING",
+     {
+      "multiline": false
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "value"
+   ]
+  },
+  "is_input_list": false,
+  "name": "PrimitiveString",
+  "output": [
+   "STRING"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_matchtypes": null,
+  "output_name": [
+   "STRING"
+  ],
+  "output_node": false,
+  "output_tooltips": [
+   null
+  ],
+  "price_badge": null,
+  "python_module": "comfy_extras.nodes_primitive"
+ },
+ "ResizeImageMaskNode": {
+  "api_node": false,
+  "category": "image/transform",
+  "deprecated": false,
+  "description": "Resize an image or mask using various scaling methods.",
+  "dev_only": false,
+  "display_name": "Resize Image/Mask",
+  "essentials_category": null,
+  "experimental": false,
+  "has_intermediate_output": false,
+  "input": {
+   "required": {
+    "input": [
+     "COMFY_MATCHTYPE_V3",
+     {
+      "template": {
+       "allowed_types": "IMAGE,MASK",
+       "template_id": "input_type"
+      }
+     }
+    ],
+    "resize_type": [
+     "COMFY_DYNAMICCOMBO_V3",
+     {
+      "options": [
+       {
+        "inputs": {
+         "required": {
+          "crop": [
+           "COMBO",
+           {
+            "default": "center",
+            "multiselect": false,
+            "options": [
+             "disabled",
+             "center"
+            ],
+            "tooltip": "How to handle aspect ratio mismatch: 'disabled' stretches to fit, 'center' crops to maintain aspect ratio."
+           }
+          ],
+          "height": [
+           "INT",
+           {
+            "default": 512,
+            "max": 16384,
+            "min": 0,
+            "step": 1,
+            "tooltip": "Target height in pixels. Set to 0 to auto-calculate from width while preserving aspect ratio."
+           }
+          ],
+          "width": [
+           "INT",
+           {
+            "default": 512,
+            "max": 16384,
+            "min": 0,
+            "step": 1,
+            "tooltip": "Target width in pixels. Set to 0 to auto-calculate from height while preserving aspect ratio."
+           }
+          ]
+         }
+        },
+        "key": "scale dimensions"
+       },
+       {
+        "inputs": {
+         "required": {
+          "multiplier": [
+           "FLOAT",
+           {
+            "default": 1.0,
+            "max": 8.0,
+            "min": 0.01,
+            "step": 0.01,
+            "tooltip": "Scale factor (e.g., 2.0 doubles size, 0.5 halves size)."
+           }
+          ]
+         }
+        },
+        "key": "scale by multiplier"
+       },
+       {
+        "inputs": {
+         "required": {
+          "longer_size": [
+           "INT",
+           {
+            "default": 512,
+            "max": 16384,
+            "min": 0,
+            "step": 1,
+            "tooltip": "The longer edge will be resized to this value. Aspect ratio is preserved."
+           }
+          ]
+         }
+        },
+        "key": "scale longer dimension"
+       },
+       {
+        "inputs": {
+         "required": {
+          "shorter_size": [
+           "INT",
+           {
+            "default": 512,
+            "max": 16384,
+            "min": 0,
+            "step": 1,
+            "tooltip": "The shorter edge will be resized to this value. Aspect ratio is preserved."
+           }
+          ]
+         }
+        },
+        "key": "scale shorter dimension"
+       },
+       {
+        "inputs": {
+         "required": {
+          "width": [
+           "INT",
+           {
+            "default": 512,
+            "max": 16384,
+            "min": 0,
+            "step": 1,
+            "tooltip": "Target width in pixels. Height auto-adjusts to preserve aspect ratio."
+           }
+          ]
+         }
+        },
+        "key": "scale width"
+       },
+       {
+        "inputs": {
+         "required": {
+          "height": [
+           "INT",
+           {
+            "default": 512,
+            "max": 16384,
+            "min": 0,
+            "step": 1,
+            "tooltip": "Target height in pixels. Width auto-adjusts to preserve aspect ratio."
+           }
+          ]
+         }
+        },
+        "key": "scale height"
+       },
+       {
+        "inputs": {
+         "required": {
+          "megapixels": [
+           "FLOAT",
+           {
+            "default": 1.0,
+            "max": 16.0,
+            "min": 0.01,
+            "step": 0.01,
+            "tooltip": "Target total megapixels (e.g., 1.0 \u2248 1024\u00d71024). Aspect ratio is preserved."
+           }
+          ]
+         }
+        },
+        "key": "scale total pixels"
+       },
+       {
+        "inputs": {
+         "required": {
+          "crop": [
+           "COMBO",
+           {
+            "default": "center",
+            "multiselect": false,
+            "options": [
+             "disabled",
+             "center"
+            ],
+            "tooltip": "How to handle aspect ratio mismatch: 'disabled' stretches to fit, 'center' crops to maintain aspect ratio."
+           }
+          ],
+          "match": [
+           "IMAGE,MASK",
+           {
+            "tooltip": "Resize input to match the dimensions of this reference image or mask."
+           }
+          ]
+         }
+        },
+        "key": "match size"
+       },
+       {
+        "inputs": {
+         "required": {
+          "multiple": [
+           "INT",
+           {
+            "default": 8,
+            "max": 16384,
+            "min": 1,
+            "step": 1,
+            "tooltip": "Resize so width and height are divisible by this number. Useful for latent alignment (e.g., 8 or 64)."
+           }
+          ]
+         }
+        },
+        "key": "scale to multiple"
+       }
+      ],
+      "tooltip": "Select how to resize: by exact dimensions, scale factor, matching another image, etc."
+     }
+    ],
+    "scale_method": [
+     "COMBO",
+     {
+      "default": "area",
+      "multiselect": false,
+      "options": [
+       "nearest-exact",
+       "bilinear",
+       "area",
+       "bicubic",
+       "lanczos"
+      ],
+      "tooltip": "Interpolation algorithm. 'area' is best for downscaling, 'lanczos' for upscaling, 'nearest-exact' for pixel art."
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "input",
+    "resize_type",
+    "scale_method"
+   ]
+  },
+  "is_input_list": false,
+  "name": "ResizeImageMaskNode",
+  "output": [
+   "COMFY_MATCHTYPE_V3"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_matchtypes": [
+   "input_type"
+  ],
+  "output_name": [
+   "resized"
+  ],
+  "output_node": false,
+  "output_tooltips": [
+   null
+  ],
+  "price_badge": null,
+  "python_module": "comfy_extras.nodes_post_processing"
+ },
+ "SaveImage": {
+  "category": "image",
+  "description": "Saves the input images to your ComfyUI output directory.",
+  "display_name": "Save Image",
+  "essentials_category": "Basics",
+  "has_intermediate_output": false,
+  "input": {
+   "hidden": {
+    "extra_pnginfo": "EXTRA_PNGINFO",
+    "prompt": "PROMPT"
+   },
+   "required": {
+    "filename_prefix": [
+     "STRING",
+     {
+      "default": "ComfyUI",
+      "tooltip": "The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes."
+     }
+    ],
+    "images": [
+     "IMAGE",
+     {
+      "tooltip": "The images to save."
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "hidden": [
+    "prompt",
+    "extra_pnginfo"
+   ],
+   "required": [
+    "images",
+    "filename_prefix"
+   ]
+  },
+  "is_input_list": false,
+  "name": "SaveImage",
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "images"
+  ],
+  "output_node": true,
+  "python_module": "nodes"
+ }
+}
