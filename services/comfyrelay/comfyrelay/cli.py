@@ -50,8 +50,8 @@ app = typer.Typer(
     help=__doc__,
     no_args_is_help=True,
     rich_markup_mode="rich",
-    # A crash must not print local variables: they hold tokens. Typer before
-    # 0.23 prints them by default, and the typer>=0.12.5 floor allows those.
+    # A crash must not print local variables: they hold tokens. Set explicitly,
+    # so it holds on any Typer version the dependency floor allows.
     pretty_exceptions_show_locals=False,
 )
 
