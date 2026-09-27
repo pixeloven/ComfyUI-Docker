@@ -115,8 +115,8 @@ class ComfyUIClient:
     # COMFYUI_URL and nowhere else.
 
     # How long each call made while cancelling a job may take. The producer
-    # contract gives the whole unwind 3s (jobs.py); it makes up to three calls,
-    # and tools_workflow.stop_prompt bounds them together at 2.5s.
+    # contract gives the whole unwind 3s (jobs.py), and tools_workflow bounds
+    # the calls it makes then together at 2.5s.
     CANCEL_TIMEOUT = httpx2.Timeout(1.0)
 
     async def queue_prompt(self, graph: dict[str, Any], prompt_id: str) -> dict[str, Any]:
@@ -168,14 +168,49 @@ class ComfyUIClient:
         response = await self._send("POST", "/queue", json={"delete": [prompt_id]}, timeout=self.CANCEL_TIMEOUT)
         self._raise_for_status(response, "/queue")
 
-    async def interrupt(self, prompt_id: str) -> None:
-        """POST /interrupt {"prompt_id": ...}. ComfyUI interrupts only if that prompt is the one running.
+    async def cancel_job(self, prompt_id: str) -> bool | None:
+        """POST /api/jobs/<id>/cancel: ComfyUI's atomic cancel. It dequeues the prompt if it is waiting and
+        interrupts it if, and only if, it is the prompt running, under ComfyUI's queue lock.
 
-        The caller checks /queue first as well: a ComfyUI older than targeted
-        interrupts would stop whatever is running.
+        Returns whether ComfyUI dispatched a cancel (false: already finished,
+        or unknown), or None when this ComfyUI has no jobs API. There is
+        deliberately no /interrupt here: at v0.37.0 it checks the running
+        prompt and interrupts outside the lock, and without a prompt id it
+        stops whatever is running.
         """
-        response = await self._send("POST", "/interrupt", json={"prompt_id": prompt_id}, timeout=self.CANCEL_TIMEOUT)
-        self._raise_for_status(response, "/interrupt")
+        path = f"/api/jobs/{quote(prompt_id, safe='')}/cancel"
+        response = await self._send("POST", path, timeout=self.CANCEL_TIMEOUT)
+        if self._no_route(response):
+            return None
+        self._raise_for_status(response, path)
+        return bool(self._json_object(response, path).get("cancelled"))
+
+    async def job(self, prompt_id: str, *, cancelling: bool = False) -> dict[str, Any] | None:
+        """GET /api/jobs/<id>: a small {"id", "status", ...} while the prompt is pending or in_progress (and
+        the full entry once it is completed, failed or cancelled). None when ComfyUI does not know the id.
+
+        Raises `jobs_api_unavailable` when this ComfyUI has no jobs API.
+        """
+        path = f"/api/jobs/{quote(prompt_id, safe='')}"
+        response = await self._send("GET", path, **({"timeout": self.CANCEL_TIMEOUT} if cancelling else {}))
+        if self._no_route(response):
+            raise ComfyUIError("jobs_api_unavailable", f"ComfyUI at {self._shown_url} has no /api/jobs")
+        if response.status_code == 404:
+            return None  # {"error": "Job not found"}
+        self._raise_for_status(response, path)
+        data = self._json_object(response, path)
+        if not isinstance(data.get("status"), str):
+            raise self._bad_shape(path, 'an object with a "status" string')
+        return data
+
+    @staticmethod
+    def _no_route(response: httpx2.Response) -> bool:
+        """ComfyUI (aiohttp) has no such route: a 405, or a 404 that is not ComfyUI's JSON "not found"."""
+        if response.status_code == 405:
+            return True
+        return response.status_code == 404 and not response.headers.get("content-type", "").startswith(
+            "application/json"
+        )
 
     async def upload_input(self, filename: str, content: bytes, content_type: str) -> dict[str, Any]:
         """POST /upload/image into ComfyUI's input directory, never overwriting. Returns name, subfolder, type.

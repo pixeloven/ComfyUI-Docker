@@ -16,6 +16,14 @@ cancelling a job cancels that task. A producer MUST:
    `job_cancel` waits longer (CANCEL_WAIT_SECONDS, 10s) before it reports
    `cancelling` and logs an overrun, as a margin for a slow ComfyUI, but a
    producer that needs that margin is cut off when the server stops.
+   A cancel is delivered once. A second `job_cancel`, or a shutdown that
+   comes while a job is already unwinding, waits for that unwind; it does
+   not cancel the task again, so it cannot cut a producer's cleanup short.
+   A producer can read why it was cancelled from `current_job().cancel_reason`:
+   "cancel" (job_cancel) or "shutdown" (the server is stopping). At shutdown
+   a producer may leave its outside work running instead of undoing it; a
+   workflow run does, so its prompt carries on in ComfyUI for a restarted
+   relay to find (#146). It still re-raises within the 3s.
 2. Keep any work it hands to a thread (`asyncio.to_thread`, an executor)
    interruptible, for example with a timeout or a stop flag the thread
    checks. Cancelling the await returns at once while the thread keeps
@@ -52,6 +60,7 @@ does not grow without bound.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import enum
 import logging
 import time
@@ -64,6 +73,15 @@ from .errors import RelayError
 from .settings import DEFAULT_MAX_JOBS
 
 log = logging.getLogger("comfyrelay.jobs")
+
+# The job whose producer is running in this task (set by JobStore._run).
+_current_job: contextvars.ContextVar[Job] = contextvars.ContextVar("comfyrelay_current_job")
+
+
+def current_job() -> Job | None:
+    """The job this code runs as, from inside a producer; None outside one."""
+    return _current_job.get(None)
+
 
 # How long one `wait` may hold a tool call open. MCP clients time calls out on
 # their own, and an agent that needs longer calls `wait` again.
@@ -108,6 +126,8 @@ class Job:
     progress: dict[str, Any] | None = None
     # When a cancel was first requested (time.monotonic()), or None.
     cancel_requested_at: float | None = None
+    # Why: "cancel" (job_cancel) or "shutdown" (the server is stopping). The first request decides.
+    cancel_reason: str | None = None
     overrun_logged: bool = field(default=False, repr=False)
     task: asyncio.Task[None] | None = field(default=None, repr=False)
 
@@ -230,7 +250,7 @@ class JobStore:
         breaking the producer contract; it ends `cancelled` when it stops.
         """
         job = self.get(job_id)
-        if self._request_cancel(job):
+        if self._request_cancel(job, "cancel"):
             await asyncio.wait({job.task}, timeout=self._cancel_wait)
             if not job.task.done():
                 self._log_overrun(job)
@@ -245,7 +265,7 @@ class JobStore:
         """
         if self._stuck_at_shutdown is not None:
             return [j for j in self._stuck_at_shutdown if not j.task.done()]
-        live = [j for j in self._jobs.values() if self._request_cancel(j)]
+        live = [j for j in self._jobs.values() if self._request_cancel(j, "shutdown")]
         self._stuck_at_shutdown = []
         if live:
             log.info("shutting down: cancelling %d job(s)", len(live))
@@ -255,13 +275,19 @@ class JobStore:
             self._log_overrun(job)
         return list(self._stuck_at_shutdown)
 
-    def _request_cancel(self, job: Job) -> bool:
-        """Cancel the job's task if it is still running. True if it was."""
+    def _request_cancel(self, job: Job, reason: str) -> bool:
+        """Cancel the job's task if it is still running. True if it was.
+
+        Only the first request cancels the task. A later one (a second
+        job_cancel, or a shutdown during the unwind) leaves it alone: another
+        CancelledError would land inside the producer's cleanup and abort it.
+        """
         if job.task is None or job.task.done():
             return False
         if job.cancel_requested_at is None:
             job.cancel_requested_at = time.monotonic()
-        job.task.cancel()
+            job.cancel_reason = reason
+            job.task.cancel()
         return True
 
     @staticmethod
@@ -286,6 +312,7 @@ class JobStore:
             job.finished_at = time.time()
 
     async def _run(self, job: Job, work: Callable[[], Awaitable[Any]]) -> None:
+        _current_job.set(job)
         job.state = JobState.running
         job.started_at = time.time()
         try:
