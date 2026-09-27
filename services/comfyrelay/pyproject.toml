@@ -1,6 +1,6 @@
 [project]
 name = "comfyrelay"
-version = "4.0.0"
+version = "4.0.1"
 description = "comfyrelay: an MCP sidecar for one ComfyUI instance, with capability profiles"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 # too, so the relay carries one HTTP stack. uvicorn serves the SDK's ASGI app.
 # Both come with mcp anyway; they are named because this package imports them.
 # uv.lock fixes every version.
-dependencies = ["mcp==2.2.0", "httpx2>=2.5", "uvicorn>=0.31.1", "typer>=0.12.5"]
+dependencies = ["mcp==2.2.0", "httpx2>=2.5", "uvicorn>=0.31.1", "typer>=0.16.0"]
 
 # NOT published before #136: the release builds only comfyctl and comfyfetch.
 # No console script either: the command is `comfyctl relay`, which mounts

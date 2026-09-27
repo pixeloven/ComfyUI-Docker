@@ -187,7 +187,7 @@ wheels = [
 
 [[package]]
 name = "comfyctl"
-version = "4.0.0"
+version = "4.0.1"
 source = { editable = "comfyctl" }
 dependencies = [
     { name = "comfyfetch" },
@@ -202,7 +202,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "comfyfetch", editable = "fetch" },
-    { name = "typer", specifier = ">=0.12.5" },
+    { name = "typer", specifier = ">=0.16.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -210,7 +210,7 @@ dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "comfyfetch"
-version = "4.0.0"
+version = "4.0.1"
 source = { editable = "fetch" }
 dependencies = [
     { name = "httpx" },
@@ -230,7 +230,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "jsonschema", specifier = ">=4.20" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "typer", specifier = ">=0.12.5" },
+    { name = "typer", specifier = ">=0.16.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -241,7 +241,7 @@ dev = [
 
 [[package]]
 name = "comfyrelay"
-version = "4.0.0"
+version = "4.0.1"
 source = { editable = "comfyrelay" }
 dependencies = [
     { name = "httpx2" },
@@ -254,7 +254,7 @@ dependencies = [
 requires-dist = [
     { name = "httpx2", specifier = ">=2.5" },
     { name = "mcp", specifier = "==2.2.0" },
-    { name = "typer", specifier = ">=0.12.5" },
+    { name = "typer", specifier = ">=0.16.0" },
     { name = "uvicorn", specifier = ">=0.31.1" },
 ]
 
