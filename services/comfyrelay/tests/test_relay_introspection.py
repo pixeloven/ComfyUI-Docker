@@ -7,6 +7,7 @@ import json
 
 import httpx2
 import pytest
+from comfyrelay import tools_introspection
 from comfyrelay.comfyui import ComfyUIClient
 from comfyrelay.server import build_server
 from mcp import Client
@@ -73,26 +74,94 @@ OBJECT_INFO = {
         "category": "sampling",
         "output_node": False,
     },
-    "ResizeImage": {
+    # The shapes of ComfyUI's V3 dynamic inputs (comfy_api/latest/_io.py), from
+    # ResizeImageMaskNode and BatchImagesNode at v0.37.0, with a nested combo and
+    # a names-form Autogrow added to exercise the dotted naming at depth.
+    "ResizeImageMaskNode": {
         "input": {
             "required": {
-                "method": ["COMBO", {"default": "area", "options": ["area", "bicubic"], "multiselect": False}],
+                "input": [
+                    "COMFY_MATCHTYPE_V3",
+                    {"template": {"template_id": "input_type", "allowed_types": "IMAGE,MASK"}},
+                ],
                 "resize_type": [
                     "COMFY_DYNAMICCOMBO_V3",
                     {
+                        "tooltip": "How to resize.",
                         "options": [
                             {"key": "by factor", "inputs": {"required": {"factor": ["FLOAT", {"default": 1.0}]}}},
-                            {"key": "to size", "inputs": {"required": {"width": ["INT", {"default": 512}]}}},
-                        ]
+                            {
+                                "key": "to size",
+                                "inputs": {
+                                    "required": {
+                                        "width": ["INT", {"default": 512}],
+                                        "crop": [
+                                            "COMFY_DYNAMICCOMBO_V3",
+                                            {
+                                                "options": [
+                                                    {"key": "none", "inputs": {"required": {}}},
+                                                    {"key": "offset", "inputs": {"required": {"x": ["INT", {}]}}},
+                                                ]
+                                            },
+                                        ],
+                                    },
+                                    "optional": {
+                                        "refs": [
+                                            "COMFY_AUTOGROW_V3",
+                                            {
+                                                "template": {
+                                                    "input": {"optional": {"ref": ["IMAGE", {}]}},
+                                                    "names": ["first", "second"],
+                                                    "min": 0,
+                                                }
+                                            },
+                                        ]
+                                    },
+                                },
+                            },
+                        ],
                     },
                 ],
+                "method": ["COMBO", {"default": "area", "options": ["area", "bicubic"], "multiselect": False}],
             }
         },
-        "output": ["IMAGE", "MASK"],
-        "output_name": ["image", "mask"],
-        "display_name": "Resize Image",
+        "input_order": {"required": ["input", "resize_type", "method"]},
+        "output": ["COMFY_MATCHTYPE_V3"],
+        "output_name": ["resized"],
+        "output_matchtypes": ["input_type"],
+        "display_name": "Resize Image/Mask",
         "python_module": "comfy_extras.nodes_images",
-        "category": "image/transform",
+        "category": "transform",
+        "output_node": False,
+    },
+    "BatchImagesNode": {
+        "input": {
+            "required": {
+                "images": [
+                    "COMFY_AUTOGROW_V3",
+                    {
+                        "template": {
+                            "input": {"required": {"image": ["IMAGE", {}]}},
+                            "prefix": "image",
+                            "min": 2,
+                            "max": 50,
+                        }
+                    },
+                ]
+            }
+        },
+        "output": ["IMAGE"],
+        "display_name": "Batch Images",
+        "python_module": "comfy_extras.nodes_post_processing",
+        "category": "image/batch",
+        "output_node": False,
+    },
+    "LoadImage": {
+        "input": {"required": {"image": [["present.png", "sub/other.png"], {"image_upload": True}]}},
+        "output": ["IMAGE", "MASK"],
+        "display_name": "Load Image",
+        "python_module": "nodes",
+        "category": "image",
         "output_node": False,
     },
     "MathExpression|pysssss": {
@@ -172,6 +241,21 @@ TEMPLATES = {
     # A partner-API template.
     "api_dalle": {"nodes": [node("OpenAIDalle3"), node("SaveImage")]},
     "video_wan": {"nodes": [node("SaveImage")]},
+    # Input files: one missing, one present, one fed by a link (so its widget
+    # value is not used), and a missing one inside a bypassed node.
+    "restore_photo": {
+        "nodes": [
+            {**node("LoadImage"), "widgets_values": ["old_photo.png", "image"]},
+            {**node("LoadImage"), "widgets_values_named": {"image": "present.png"}, "widgets_values": []},
+            {**node("LoadImage"), "widgets_values": ["linked.png"], "inputs": [{"name": "image", "link": 7}]},
+            {**node("LoadImage", mode=4), "widgets_values": ["bypassed.png"]},
+            node("SaveImage"),
+        ]
+    },
+    # The declared checkpoint is on disk only in a subfolder.
+    "sdxl_sub": {"nodes": [node("CheckpointLoaderSimple", models=[model("sdxl_base.safetensors", "checkpoints")])]},
+    # Uses a partner-API node although the index doesn't flag it.
+    "restore_cloud": {"nodes": [node("OpenAIDalle3"), node("SaveImage")]},
 }
 INDEX = [
     {
@@ -218,6 +302,16 @@ INDEX = [
         "category": "Foundation",
         "title": "Video",
         "templates": [{"name": "video_wan", "title": "Wan 2.1: Text to Video", "tags": ["Video"], "models": ["Wan"]}],
+    },
+    {
+        "moduleName": "default",
+        "category": "Utility",
+        "title": "Tools",
+        "templates": [
+            {"name": "restore_photo", "title": "Restore a photo", "tags": ["Restore"], "usage": 10},
+            {"name": "sdxl_sub", "title": "SDXL base from a subfolder", "tags": ["SDXL"]},
+            {"name": "restore_cloud", "title": "Restore with a cloud model", "tags": ["Restore"], "usage": 99},
+        ],
     },
 ]
 MODEL_FOLDERS = ["checkpoints", "loras", "vae", "custom_nodes", "download_model_base"]
@@ -358,24 +452,104 @@ async def test_describe_truncates_a_long_combo_and_counts_it():
         i for i in (await ok("node_describe", {"class_type": "KSampler"}))["inputs"] if i["name"] == "sampler_name"
     )
     assert sampler["type"] == "COMBO"
-    assert sampler["options"] == LONG_COMBO[:50]
+    assert sampler["options"] == LONG_COMBO[:20]
     assert (sampler["options_total"], sampler["options_truncated"]) == (120, True)
     wide = await ok("node_describe", {"class_type": "KSampler", "max_options": 500})
     sampler = next(i for i in wide["inputs"] if i["name"] == "sampler_name")
     assert sampler["options"] == LONG_COMBO and "options_truncated" not in sampler
 
 
-async def test_describe_new_style_and_dynamic_combos():
-    got = await ok("node_describe", {"class_type": "ResizeImage"})
-    method, resize = got["inputs"]
+async def test_describe_dynamic_combo_inputs_are_named_with_their_combo_path():
+    """ComfyUI names a DynamicCombo's inputs <combo>.<input> (finalize_prefix), at every depth."""
+    got = await ok("node_describe", {"class_type": "ResizeImageMaskNode"})
+    _, resize, method = got["inputs"]
     assert (method["type"], method["options"], method["default"]) == ("COMBO", ["area", "bicubic"], "area")
     assert method["other"] == {"multiselect": False}
     assert resize["type"] == "COMFY_DYNAMICCOMBO_V3"
-    assert resize["options"][0] == {
+    assert "other" not in resize  # the options are rendered, not dumped raw
+    by_factor, to_size = resize["options"]
+    assert by_factor == {
         "value": "by factor",
-        "inputs": [{"name": "factor", "type": "FLOAT", "required": True, "default": 1.0}],
+        "inputs": [{"name": "resize_type.factor", "type": "FLOAT", "required": True, "default": 1.0}],
     }
-    assert [o["name"] for o in got["outputs"]] == ["image", "mask"]
+    assert to_size["value"] == "to size"
+    width, crop, refs = to_size["inputs"]
+    assert width["name"] == "resize_type.width"
+    assert crop["name"] == "resize_type.crop"
+    assert crop["options"][1] == {
+        "value": "offset",
+        "inputs": [{"name": "resize_type.crop.x", "type": "INT", "required": True}],
+    }
+    assert refs["name"] == "resize_type.refs" and refs["required"] is False
+    assert refs["autogrow"]["names"] == ["resize_type.refs.first", "resize_type.refs.second"]
+    assert "prefix" not in refs["autogrow"]
+
+
+async def test_describe_autogrow_as_a_naming_rule():
+    (images,) = (await ok("node_describe", {"class_type": "BatchImagesNode"}))["inputs"]
+    assert images["type"] == "COMFY_AUTOGROW_V3"
+    assert "other" not in images  # no raw template
+    grow = images["autogrow"]
+    assert grow["prefix"] == "images.image"
+    assert (grow["min"], grow["max"], grow["names_total"], grow["names_truncated"]) == (2, 50, 50, True)
+    assert grow["names"][:3] == ["images.image0", "images.image1", "images.image2"]
+    assert len(grow["names"]) == 20
+    assert grow["item"] == {"name": "images.image<n>", "type": "IMAGE", "required": True}
+
+
+async def test_describe_match_type_input_and_output():
+    got = await ok("node_describe", {"class_type": "ResizeImageMaskNode"})
+    matched = got["inputs"][0]
+    assert matched["name"] == "input"
+    assert matched["match_type"] == {"template_id": "input_type", "allowed_types": ["IMAGE", "MASK"]}
+    assert "other" not in matched
+    assert got["outputs"] == [
+        {"index": 0, "type": "COMFY_MATCHTYPE_V3", "name": "resized", "is_list": False, "same_type_as": "input"}
+    ]
+
+
+async def test_describe_dynamic_slot():
+    slot = {
+        "input": {
+            "optional": {
+                "latent": [
+                    "COMFY_DYNAMICSLOT_V3",
+                    {"slotType": "LATENT", "inputs": {"required": {"strength": ["FLOAT", {}]}}},
+                ]
+            }
+        },
+        "output": [],
+    }
+    got = await ok(
+        "node_describe",
+        {"class_type": "SlotNode"},
+        **{"/object_info/SlotNode": httpx2.Response(200, json={"SlotNode": slot})},
+    )
+    assert got["inputs"] == [
+        {
+            "name": "latent",
+            "type": "LATENT",
+            "required": False,
+            "slot_inputs": [{"name": "latent.strength", "type": "FLOAT", "required": True}],
+        }
+    ]
+
+
+@pytest.mark.parametrize("class_type", [".", ".."])
+async def test_describe_never_sends_a_dot_segment(class_type):
+    seen = []
+    table = routes()
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request.url.raw_path.decode())
+        return table.get(request.url.raw_path.decode(), httpx2.Response(404))
+
+    client = ComfyUIClient("http://comfyui.test:8188", transport=httpx2.MockTransport(handler))
+    server, _ = build_server(settings(profiles=("read",)), comfyui=client)
+    async with Client(server, mode="legacy") as mcp:
+        result = await mcp.call_tool("node_describe", {"class_type": class_type})
+    assert result.is_error and "unknown_node_class" in result.content[0].text
+    assert seen == ["/object_info"]
 
 
 async def test_describe_a_custom_node():
@@ -425,7 +599,23 @@ async def test_model_list_one_folder_truncated():
     ]
 
 
-@pytest.mark.parametrize("folder", ["sams", "custom_nodes", "download_model_base"])
+async def test_model_list_defaults_to_50_per_folder_and_a_total_budget(monkeypatch):
+    many = [f"m{i:03}.safetensors" for i in range(70)]
+    overrides = {"/models/checkpoints": httpx2.Response(200, json=many), "/models/vae": httpx2.Response(200, json=many)}
+    got = await ok("model_list", {}, **overrides)
+    assert [(f["folder"], f["count"], len(f["files"]), f["truncated"]) for f in got["folders"]] == [
+        ("checkpoints", 70, 50, True),
+        ("vae", 70, 50, True),
+    ]
+    monkeypatch.setattr(tools_introspection, "MAX_TOTAL_FILES", 60)
+    got = await ok("model_list", {}, **overrides)
+    assert [(f["folder"], len(f["files"]), f["truncated"]) for f in got["folders"]] == [
+        ("checkpoints", 50, True),
+        ("vae", 10, True),
+    ]
+
+
+@pytest.mark.parametrize("folder", ["sams", "custom_nodes", "download_model_base", ".."])
 async def test_model_list_an_unknown_folder(folder):
     err = await error("model_list", {"folder": folder})
     assert err["code"] == "unknown_model_folder"
@@ -447,6 +637,8 @@ async def test_template_search_ranks_and_checks_runnability():
         "runnable": True,
         "missing_nodes": [],
         "missing_models": [],
+        "models_need_value_change": [],
+        "missing_inputs": [],
         "api_nodes": [],
         "node_classes_checked": 3,
         "models_checked": 1,
@@ -489,6 +681,80 @@ async def test_template_search_partner_api_on_request():
     assert api["partner_api"] is True
     assert api["runnability"]["runnable"] is False
     assert api["runnability"]["api_nodes"] == ["OpenAIDalle3"]
+
+
+async def test_template_runnability_reports_input_files_the_input_directory_lacks():
+    check = (await ok("template_get", {"name": "restore_photo", "include_workflow": False}))["runnability"]
+    # present.png is there; linked.png comes over a link; bypassed.png is in a node that doesn't run.
+    assert check["missing_inputs"] == [{"class_type": "LoadImage", "input": "image", "file": "old_photo.png"}]
+    assert check["runnable"] is False
+    assert check["missing_nodes"] == check["missing_models"] == check["api_nodes"] == []
+
+
+async def test_template_runnability_a_model_only_in_a_subfolder_needs_a_value_change():
+    check = (await ok("template_get", {"name": "sdxl_sub", "include_workflow": False}))["runnability"]
+    assert check["runnable"] is False
+    assert check["missing_models"] == []
+    assert check["models_need_value_change"] == [
+        {
+            "name": "sdxl_base.safetensors",
+            "directory": "checkpoints",
+            "found_at": "sdxl/sdxl_base.safetensors",
+            "needs_value_change": "set the loader's value from 'sdxl_base.safetensors' to 'sdxl/sdxl_base.safetensors'",
+        }
+    ]
+
+
+async def test_template_search_drops_hits_whose_graph_uses_partner_api_nodes():
+    """restore_cloud isn't flagged in the index, but its graph has an API node."""
+    got = await ok("template_search", {"query": "restore"})
+    assert [h["name"] for h in got["results"]] == ["restore_photo"]
+    assert (got["hidden_partner_api"], got["total_matches"]) == (1, 1)
+    shown = await ok("template_search", {"query": "restore", "include_partner_api": True})
+    assert [h["name"] for h in shown["results"]] == ["restore_cloud", "restore_photo"]
+
+
+@pytest.mark.parametrize("tool", ["node_search", "template_search"])
+@pytest.mark.parametrize("query", ["!!!", " - ", "|"])
+async def test_a_query_with_nothing_to_search_for_is_invalid(tool, query):
+    err = await error(tool, {"query": query})
+    assert (err["code"], err["retryable"]) == ("invalid_query", False)
+
+
+async def test_template_get_refuses_a_workflow_too_large_to_return():
+    big = {"nodes": [node("SaveImage")], "extra": {"blob": "x" * 90_000}}
+    overrides = {"/templates/sd15_simple.json": httpx2.Response(200, json=big)}
+    err = await error("template_get", {"name": "sd15_simple"}, **overrides)
+    assert err["code"] == "workflow_too_large"
+    assert err["limit"] == 80_000 and err["size"] > 90_000
+    assert "include_workflow=false" in err["message"]
+    lean = await ok("template_get", {"name": "sd15_simple", "include_workflow": False}, **overrides)
+    assert lean["runnability"]["runnable"] is True
+
+
+async def test_template_dot_segment_directories_and_names_are_never_requested():
+    seen = []
+    workflow = {"nodes": [node("CheckpointLoaderSimple", models=[model("x.safetensors", "..")])]}
+    index = [{"title": "T", "templates": [{"name": "..", "title": "dots"}, {"name": "dots", "title": "dots"}]}]
+    table = routes(
+        **{
+            "/templates/index.json": httpx2.Response(200, json=index),
+            "/templates/dots.json": httpx2.Response(200, json=workflow),
+        }
+    )
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request.url.raw_path.decode())
+        return table.get(request.url.raw_path.decode(), httpx2.Response(404))
+
+    client = ComfyUIClient("http://comfyui.test:8188", transport=httpx2.MockTransport(handler))
+    server, _ = build_server(settings(profiles=("read",)), comfyui=client)
+    async with Client(server, mode="legacy") as mcp:
+        result = await mcp.call_tool("template_search", {"query": "dots"})
+    assert not result.is_error, result.content[0].text
+    assert [h["name"] for h in result.structured_content["results"]] == ["dots"]
+    assert result.structured_content["results"][0]["runnability"]["missing_models"][0]["folder_known"] is False
+    assert not [p for p in seen if p.startswith("/models/") or p == "/templates/...json"]
 
 
 async def test_template_get_returns_the_workflow_and_its_check():
