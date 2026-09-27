@@ -42,13 +42,22 @@ async def test_identity_and_profiles():
     assert got["profiles"] == {
         "active": ["read", "run"],
         "available": ["read", "run", "manage", "develop"],
-        "without_tools": ["read"],
+        "without_tools": [],
     }
 
 
 async def test_capabilities():
     got = await info()
-    assert got["capabilities"]["tools"] == ["job_cancel", "job_status", "server_info"]
+    assert got["capabilities"]["tools"] == [
+        "job_cancel",
+        "job_status",
+        "model_list",
+        "node_describe",
+        "node_search",
+        "server_info",
+        "template_get",
+        "template_search",
+    ]
     assert got["capabilities"]["consent"] == {"policy": "refuse-all", "client_can_elicit": False}
     assert got["capabilities"]["jobs"] == {"store": "memory", "max_wait_seconds": 300.0, "max_in_flight": 16}
     assert (await info(settings(max_jobs=3)))["capabilities"]["jobs"]["max_in_flight"] == 3

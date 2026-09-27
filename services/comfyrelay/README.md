@@ -70,14 +70,14 @@ as an unknown tool.
 
 | Profile | For | Tools in this version |
 |---|---|---|
-| `read` | Introspection: nodes, models, templates, docs | `server_info` |
+| `read` | Introspection: nodes, models, templates, docs | `server_info`, `node_search`, `node_describe`, `model_list`, `template_search`, `template_get` |
 | `run` | Validating and running workflows | `server_info`, `job_status`, `job_cancel` |
 | `manage` | Changing what's installed, through the manifest and lock (v2) | `server_info` |
 | `develop` | Custom node development, on a sandboxed dev instance only | `server_info` |
 
 `server_info` is in every profile. An enabled profile with nothing else logs a warning at
-startup, and `server_info` lists it under `profiles.without_tools`. In this skeleton that
-includes `read`, whose tools come in #132.
+startup, and `server_info` lists it under `profiles.without_tools`: today that is `manage` and
+`develop`.
 
 ## Tools
 
@@ -136,6 +136,44 @@ prefix, then JSON:
 ```json
 {"error": {"code": "comfyui_unreachable", "message": "...", "retryable": true}}
 ```
+
+## Introspection tools
+
+The `read` profile (#133), in `comfyrelay/tools_introspection.py`. All five are read-only
+(annotated so) and only ever send GETs to `COMFYUI_URL`. Every answer comes from the live
+instance, so custom nodes and the models actually on disk are included, and nothing is
+recalled from a bundled copy.
+
+| Tool | Reads | Returns |
+|---|---|---|
+| **`node_search`** | `/object_info` | Node classes matching a query by class name, display name, search alias, category or description. Each hit gives its `class_type`, display name, category, a one-line summary, its custom node `pack` (absent for built-ins), and `api_node` or `deprecated` when set. Exact name matches rank first, then prefixes, then name words, category and description, so `CheckpointLoader` and `CheckpointLoaderSimple` stay apart. Within a tier, partner-API and deprecated nodes come last. |
+| **`node_describe`** | `/object_info/<class>` | One class's full spec: each input (required first, in the node's order) with its type, default, min, max, step, tooltip and COMBO values; hidden inputs; outputs in socket order with names and list flags; `output_node` and `api_node`. COMBO lists are cut to `max_options` (default 50), with `options_total`. An unknown class fails with `unknown_node_class` and `suggestions`. |
+| **`model_list`** | `/models`, `/models/<folder>` | Files on disk per folder type, or for one `folder`, at most `max_files` each (default 200). `custom_nodes` and `download_model_base` (an `extra_model_paths.yaml` key that ComfyUI lists as a folder type, naming the whole models root) are left out. An unknown folder fails with `unknown_model_folder` and the known ones. Nothing is downloaded. |
+| **`template_search`** | `/templates/index.json`, then each hit's `/templates/<name>.json` | Workflow templates for a goal, ranked by how many query words match, weighted by field (title and name, then tags and model families, then description and category) and by how rare the word is across the index. Partner-API templates are left out unless `include_partner_api` is set; `hidden_partner_api` counts them. Each hit carries a runnability check. |
+| **`template_get`** | the same, for one template | Its metadata, the runnability check, and the workflow in the frontend's UI format (`include_workflow: false` leaves it out). An unknown name fails with `unknown_template` and `suggestions`. |
+
+**Where templates come from.** ComfyUI v0.37.0 pins `comfyui-workflow-templates==0.11.66` and
+serves it itself: `server.py` adds `GET /templates/{path}` through
+`FrontendManager.template_asset_handler()`, which maps the package's assets, and the frontend
+reads `/templates/index.json` from there. The relay reads the same route, so this image doesn't
+install the package. Results carry a `source` with the package version (from `/system_stats`),
+its MIT license and upstream URL. Custom node packs' example workflows (`/workflow_templates`)
+aren't searched.
+
+**The runnability check** follows comfy-mcp's `local_check` pattern. It looks at the nodes
+that run, top level and inside subgraphs; bypassed and muted nodes don't run, and `Note`,
+`MarkdownNote`, `Reroute` and `PrimitiveNode` exist only in the frontend. A template is
+`runnable` when:
+
+- every node class is in `/object_info` (a missing one is listed with the pack the template
+  names for it, its `cnr_id`);
+- every model it declares (`properties.models` on its nodes) is on disk in the declared folder,
+  matched by name or by the last path segment (a missing one is listed with its folder and
+  source URL, and `folder_known: false` when this ComfyUI has no such folder type); and
+- it uses no partner-API node. Those spend credits, and comfyrelay refuses to run them (#103).
+
+It doesn't check models that a template names only in widget values, or input files such as
+the images a template loads.
 
 ## Consent
 
