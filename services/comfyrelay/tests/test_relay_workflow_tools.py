@@ -12,9 +12,10 @@ import comfyrelay.tools_workflow as tw
 import httpx2
 import pytest
 from comfyrelay.comfyui import ComfyUIClient
+from comfyrelay.jobs import JobStore
 from comfyrelay.server import build_server
 from mcp import Client
-from relay_helpers import SYSTEM_STATS, assert_producer_honours_cancel, settings
+from relay_helpers import TOKEN, SYSTEM_STATS, assert_producer_honours_cancel, free_port, settings
 
 pytestmark = pytest.mark.anyio
 
@@ -44,10 +45,15 @@ SAVED = {"4": {"images": [{"filename": "t1__00001_.png", "subfolder": "", "type"
 
 
 class FakeComfyUI:
-    """Just enough of ComfyUI's HTTP API: /object_info, /prompt, /queue, /history, /interrupt, /upload/image, /view.
+    """Just enough of ComfyUI's HTTP API, as v0.37.0 behaves: /object_info, /prompt, /queue, /history,
+    /api/jobs/<id> and its atomic /cancel, /upload/image, /view. /interrupt is recorded but never acted on:
+    comfyrelay must not send it.
 
-    `auto` decides what happens to a submitted prompt: "success" finishes it at the next /queue poll, "error"
-    fails it at node 2, "hold" leaves it queued until the test calls start() or finish()."""
+    `auto` decides what happens to a submitted prompt: "success" finishes it at the next status poll, "error"
+    fails it at node 2, "hold" leaves it queued until the test calls start() or finish().
+    `delays` holds a path's answer back that many seconds; ComfyUI still does the work afterwards, as it does for
+    a client that hung up. `jobs_api=False` is a ComfyUI without /api/jobs. `stubborn` running prompts ignore a
+    cancel (a node that never reaches a boundary)."""
 
     def __init__(self, auto: str = "success") -> None:
         self.auto = auto
@@ -58,9 +64,13 @@ class FakeComfyUI:
         self.number = 0
         self.reject: dict | None = None
         self.accepted_node_errors: dict = {}
-        self.files = {"t1__00001_.png": PNG}
+        self.files = {"t1__00001_.png": PNG, "t1__00002_.png": PNG}
         self.stored: dict[str, bytes] = {}
-        self.slow: set[str] = set()  # paths that never answer
+        self.delays: dict[str, float] = {}
+        self.jobs_api = True
+        self.outputs = SAVED
+        self.stubborn = False
+        self.lost_interrupts = 0  # interrupts ComfyUI drops: one landing as a prompt starts is cleared by it
         self.down = False  # nothing answers at all
 
     def client(self) -> ComfyUIClient:
@@ -68,6 +78,9 @@ class FakeComfyUI:
 
     def posted(self, path: str) -> list:
         return [body for method, p, body in self.calls if method == "POST" and p == path]
+
+    def count(self, method: str, prefix: str) -> int:
+        return sum(1 for m, p, _ in self.calls if m == method and p.startswith(prefix))
 
     def start(self, prompt_id: str) -> None:
         item = next(i for i in self.pending if i[1] == prompt_id)
@@ -78,9 +91,28 @@ class FakeComfyUI:
         for queue in (self.running, self.pending):
             queue[:] = [i for i in queue if i[1] != prompt_id]
         self.history[prompt_id] = {
-            "outputs": SAVED if outputs is None else outputs,
+            "outputs": self.outputs if outputs is None else outputs,
             "status": {"status_str": status, "completed": status == "success", "messages": messages or []},
         }
+
+    def _advance(self) -> None:
+        for item in list(self.pending):
+            if self.auto == "success":
+                self.finish(item[1])
+            elif self.auto == "error":
+                self.finish(item[1], "error", [["execution_error", RUNTIME_ERROR]], outputs={})
+
+    def _status(self, prompt_id: str) -> str | None:
+        if prompt_id in self.history:
+            messages = [m[0] for m in self.history[prompt_id]["status"]["messages"]]
+            if self.history[prompt_id]["status"]["status_str"] == "success":
+                return "completed"
+            return "cancelled" if "execution_interrupted" in messages else "failed"
+        if any(i[1] == prompt_id for i in self.running):
+            return "in_progress"
+        if any(i[1] == prompt_id for i in self.pending):
+            return "pending"
+        return None
 
     async def handle(self, request: httpx2.Request) -> httpx2.Response:
         path, method = request.url.path, request.method
@@ -88,8 +120,8 @@ class FakeComfyUI:
         if self.down:
             raise httpx2.ConnectError("refused", request=request)
         self.calls.append((method, path, body))
-        if path in self.slow:
-            await asyncio.sleep(30)
+        if path in self.delays:
+            await asyncio.sleep(self.delays[path])
         if path == "/system_stats":
             return httpx2.Response(200, json=SYSTEM_STATS)
         if path == "/object_info":
@@ -103,22 +135,34 @@ class FakeComfyUI:
                 200,
                 json={"prompt_id": body["prompt_id"], "number": self.number, "node_errors": self.accepted_node_errors},
             )
+        if path.startswith("/api/jobs/") and not self.jobs_api:
+            return httpx2.Response(404, text="404: Not Found", headers={"content-type": "application/octet-stream"})
+        if method == "POST" and path.startswith("/api/jobs/") and path.endswith("/cancel"):
+            prompt_id = path.split("/")[3]
+            status = self._status(prompt_id)
+            if status == "pending":
+                self.pending[:] = [i for i in self.pending if i[1] != prompt_id]
+            elif status == "in_progress" and self.lost_interrupts:
+                self.lost_interrupts -= 1
+            elif status == "in_progress" and not self.stubborn:
+                self.finish(prompt_id, "error", [["execution_interrupted", {"node_id": "3", "node_type": "X"}]])
+            return httpx2.Response(200, json={"cancelled": status in ("pending", "in_progress")})
+        if method == "GET" and path.startswith("/api/jobs/"):
+            self._advance()
+            prompt_id = path.split("/")[3]
+            status = self._status(prompt_id)
+            if status is None:
+                return httpx2.Response(404, json={"error": "Job not found"})
+            return httpx2.Response(200, json={"id": prompt_id, "status": status})
         if (method, path) == ("GET", "/queue"):
-            for item in list(self.pending):
-                if self.auto == "success":
-                    self.finish(item[1])
-                elif self.auto == "error":
-                    self.finish(item[1], "error", [["execution_error", RUNTIME_ERROR]], outputs={})
+            self._advance()
             return httpx2.Response(200, json={"queue_running": self.running, "queue_pending": self.pending})
         if (method, path) == ("POST", "/queue"):
             for prompt_id in body.get("delete", []):
                 self.pending[:] = [i for i in self.pending if i[1] != prompt_id]
             return httpx2.Response(200)
         if (method, path) == ("POST", "/interrupt"):
-            for item in self.running:
-                if item[1] == body.get("prompt_id"):
-                    self.finish(item[1], "error", [["execution_interrupted", {"node_id": "3", "node_type": "X"}]])
-            return httpx2.Response(200)
+            return httpx2.Response(200)  # recorded above; tests assert it never comes
         if method == "GET" and path.startswith("/history/"):
             prompt_id = path.removeprefix("/history/")
             return httpx2.Response(200, json={prompt_id: self.history[prompt_id]} if prompt_id in self.history else {})
@@ -406,72 +450,169 @@ async def test_comfyui_blinking_out_is_ridden_out():
 # -- cancellation: the producer contract -----------------------------------------------------
 
 
-async def test_cancelling_a_queued_run_dequeues_it_and_interrupts_nothing():
-    fake = FakeComfyUI(auto="hold")
-    started = asyncio.Event()
-    progress = {"prompt_id": "p-queued"}
+def producer(fake: FakeComfyUI, progress: dict, started: asyncio.Event, then=None):
+    """The run producer, with `started` set once ComfyUI has answered the submission (after `then()`)."""
 
     async def work():
         submitted = asyncio.get_running_loop().create_future()
-        submitted.add_done_callback(lambda _f: started.set())
+        submitted.add_done_callback(lambda _f: ((then or (lambda: None))(), started.set()))
         return await tw.run_prompt(fake.client(), t1(), progress, submitted)
 
-    await assert_producer_honours_cancel(work, started=started)
-    assert fake.posted("/queue") == [{"delete": ["p-queued"]}]
-    assert fake.posted("/interrupt") == []
+    return work
+
+
+async def test_cancelling_a_queued_run_uses_the_atomic_cancel_and_confirms():
+    fake = FakeComfyUI(auto="hold")
+    started, progress = asyncio.Event(), {"prompt_id": "p-queued"}
+    await assert_producer_honours_cancel(producer(fake, progress, started), started=started)
+    assert fake.count("POST", "/api/jobs/p-queued/cancel") == 1
+    assert fake.posted("/interrupt") == [] and fake.posted("/queue") == []
     assert fake.pending == [] and "p-queued" not in fake.history
+    assert progress["stop"] == "confirmed"
 
 
-async def test_cancelling_a_running_run_interrupts_that_prompt_only():
+async def test_cancelling_a_running_run_stops_it_and_confirms():
     fake = FakeComfyUI(auto="hold")
-    started = asyncio.Event()
-    progress = {"prompt_id": "p-running"}
-
-    async def work():
-        submitted = asyncio.get_running_loop().create_future()
-        submitted.add_done_callback(lambda _f: (fake.start("p-running"), started.set()))
-        return await tw.run_prompt(fake.client(), t1(), progress, submitted)
-
-    await assert_producer_honours_cancel(work, started=started)
-    assert fake.posted("/interrupt") == [{"prompt_id": "p-running"}]
+    started, progress = asyncio.Event(), {"prompt_id": "p-running"}
+    await assert_producer_honours_cancel(
+        producer(fake, progress, started, then=lambda: fake.start("p-running")), started=started
+    )
+    assert fake.posted("/interrupt") == []
     assert fake.history["p-running"]["status"]["messages"][0][0] == "execution_interrupted"
+    assert progress["stop"] == "confirmed"
 
 
-async def test_a_run_elsewhere_is_never_interrupted():
+async def test_a_stop_comfyui_does_not_confirm_in_time_is_unconfirmed():
+    fake = FakeComfyUI(auto="hold")
+    fake.stubborn = True  # the running node never reaches a boundary
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    await assert_producer_honours_cancel(
+        producer(fake, progress, started, then=lambda: fake.start("p")), started=started
+    )
+    assert progress["stop"] == "unconfirmed" and "in_progress" in progress["stop_detail"]
+    assert fake.count("POST", "/api/jobs/p/cancel") > 3  # sent again at every check
+
+
+async def test_an_interrupt_comfyui_drops_is_sent_again():
+    """ComfyUI clears its interrupt flag as a prompt starts executing, so a cancel landing just then is lost."""
+    fake = FakeComfyUI(auto="hold")
+    fake.lost_interrupts = 1
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    await assert_producer_honours_cancel(
+        producer(fake, progress, started, then=lambda: fake.start("p")), started=started
+    )
+    assert fake.count("POST", "/api/jobs/p/cancel") == 2
+    assert progress["stop"] == "confirmed" and fake.running == []
+
+
+async def test_a_run_elsewhere_is_never_touched():
     fake = FakeComfyUI(auto="hold")
     fake.running.append([0, "someone-elses", {}, {}, []])
-    started = asyncio.Event()
-
-    async def work():
-        submitted = asyncio.get_running_loop().create_future()
-        submitted.add_done_callback(lambda _f: started.set())
-        return await tw.run_prompt(fake.client(), t1(), {"prompt_id": "mine"}, submitted)
-
-    await assert_producer_honours_cancel(work, started=started)
+    started, progress = asyncio.Event(), {"prompt_id": "mine"}
+    await assert_producer_honours_cancel(producer(fake, progress, started), started=started)
     assert fake.posted("/interrupt") == []
+    assert [c for c in fake.calls if "someone-elses" in c[1]] == []
     assert fake.running[0][1] == "someone-elses"
+
+
+async def test_without_the_jobs_api_a_queued_run_is_dequeued():
+    fake = FakeComfyUI(auto="hold")
+    fake.jobs_api = False
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    await assert_producer_honours_cancel(producer(fake, progress, started), started=started)
+    assert fake.posted("/queue") == [{"delete": ["p"]}] and fake.pending == []
+    assert progress["stop"] == "confirmed"
+
+
+async def test_without_the_jobs_api_a_running_run_is_never_interrupted():
+    """No atomic cancel: /interrupt could land on someone else's prompt, so the run is left, and said so."""
+    fake = FakeComfyUI(auto="hold")
+    fake.jobs_api = False
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    await assert_producer_honours_cancel(
+        producer(fake, progress, started, then=lambda: fake.start("p")), started=started
+    )
+    assert fake.posted("/interrupt") == []
+    assert fake.running[0][1] == "p"
+    assert progress["stop"] == "not_stopped" and "no atomic cancel" in progress["stop_detail"]
 
 
 async def test_cancelling_holds_its_budget_when_comfyui_hangs():
     fake = FakeComfyUI(auto="hold")
-    started = asyncio.Event()
-
-    async def work():
-        submitted = asyncio.get_running_loop().create_future()
-        submitted.add_done_callback(lambda _f: (fake.slow.add("/queue"), started.set()))
-        return await tw.run_prompt(fake.client(), t1(), {"prompt_id": "p"}, submitted)
-
-    await assert_producer_honours_cancel(work, started=started)  # within 3s, though ComfyUI never answers
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    hang = lambda: fake.delays.update({"/api/jobs/p/cancel": 30})  # noqa: E731
+    await assert_producer_honours_cancel(producer(fake, progress, started, then=hang), started=started)
+    assert progress["stop"] == "unconfirmed"
 
 
-async def test_cancelling_before_comfyui_answered_the_submission_still_cleans_up():
+async def test_a_cancel_during_submission_waits_for_the_answer_then_cancels():
+    """ComfyUI finishes a /prompt whose client hung up. The stop must come after it, or it misses the prompt."""
     fake = FakeComfyUI(auto="hold")
-    fake.slow.add("/prompt")
-    await assert_producer_honours_cancel(lambda: tw.run_prompt(fake.client(), t1(), {"prompt_id": "p-early"}))
-    assert fake.posted("/queue") == [{"delete": ["p-early"]}]
+    fake.delays["/prompt"] = 0.5
+    progress = {"prompt_id": "p-early"}
+    await assert_producer_honours_cancel(lambda: tw.run_prompt(fake.client(), t1(), progress))
+    order = [(m, p) for m, p, _ in fake.calls if p in ("/prompt", "/api/jobs/p-early/cancel")]
+    assert order == [("POST", "/prompt"), ("POST", "/api/jobs/p-early/cancel")]
+    assert fake.pending == [] and fake.running == [] and progress["stop"] == "confirmed"
 
 
-async def test_job_cancel_through_the_tools():
+async def test_a_submission_slower_than_the_budget_is_cancelled_when_it_answers():
+    fake = FakeComfyUI(auto="hold")
+    fake.delays["/prompt"] = 2.5  # past what the unwind may wait
+    progress = {"prompt_id": "p-late"}
+    await assert_producer_honours_cancel(lambda: tw.run_prompt(fake.client(), t1(), progress))
+    assert progress["stop"] == "unconfirmed" and "cancelled again" in progress["stop_detail"]
+    await asyncio.sleep(1.5)  # ComfyUI answers and queues it; the late cancel follows
+    assert fake.pending == [] and fake.count("POST", "/api/jobs/p-late/cancel") == 2
+
+
+async def test_a_second_cancel_does_not_abort_the_stop():
+    """R1: job_cancel twice. The second must not land a CancelledError inside the first one's cleanup."""
+    fake = FakeComfyUI(auto="hold")
+    fake.delays["/api/jobs/p/cancel"] = 0.3
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    store = JobStore()
+    job = store.submit(tw.RUN_KIND, producer(fake, progress, started, then=lambda: fake.start("p")))
+    await asyncio.wait_for(started.wait(), 5)
+    first = asyncio.ensure_future(store.cancel(job.id))
+    await asyncio.sleep(0.1)  # the first stop is under way
+    await store.cancel(job.id)
+    await first
+    assert job.state.value == "cancelled" and job.cancel_reason == "cancel"
+    assert fake.running == [] and fake.history["p"]["status"]["messages"][0][0] == "execution_interrupted"
+    assert progress["stop"] == "confirmed"
+
+
+async def test_a_shutdown_during_a_cancel_does_not_undo_it():
+    fake = FakeComfyUI(auto="hold")
+    fake.delays["/api/jobs/p/cancel"] = 0.3
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    store = JobStore()
+    job = store.submit(tw.RUN_KIND, producer(fake, progress, started, then=lambda: fake.start("p")))
+    await asyncio.wait_for(started.wait(), 5)
+    cancelling = asyncio.ensure_future(store.cancel(job.id))
+    await asyncio.sleep(0.1)
+    assert await store.shutdown() == []
+    await cancelling
+    assert job.cancel_reason == "cancel" and progress["stop"] == "confirmed"
+    assert fake.running == [] and "p" in fake.history
+
+
+async def test_a_shutdown_leaves_the_prompt_running():
+    """Owner decision on #145: a stopping relay does not stop its runs; a restarted one re-attaches (#146)."""
+    fake = FakeComfyUI(auto="hold")
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    store = JobStore()
+    job = store.submit(tw.RUN_KIND, producer(fake, progress, started, then=lambda: fake.start("p")))
+    await asyncio.wait_for(started.wait(), 5)
+    assert await asyncio.wait_for(store.shutdown(), 3.5) == []
+    assert job.state.value == "cancelled" and job.cancel_reason == "shutdown"
+    assert progress["stop"] == "left_running"
+    assert fake.count("POST", "/api/jobs/") == 0 and fake.posted("/queue") == [] and fake.posted("/interrupt") == []
+    assert fake.running[0][1] == "p"
+
+
+async def test_job_cancel_through_the_tools_reports_the_stop():
     fake = FakeComfyUI(auto="hold")
     server, _ = serve(fake)
     async with Client(server, mode="legacy") as client:
@@ -480,10 +621,65 @@ async def test_job_cancel_through_the_tools():
         await asyncio.sleep(0.05)
         cancelled = (await client.call_tool("job_cancel", {"job_id": started["job_id"]})).structured_content
     assert cancelled["state"] == "cancelled" and cancelled["result"] is None
-    assert fake.posted("/interrupt") == [{"prompt_id": started["prompt_id"]}]
+    assert cancelled["progress"]["stop"] == "confirmed"
+    assert fake.count("POST", f"/api/jobs/{started['prompt_id']}/cancel") == 1 and fake.posted("/interrupt") == []
+
+
+# -- polling: the jobs API, and one shared /queue ----------------------------------------------
+
+
+async def test_a_running_prompt_is_followed_through_the_jobs_api_not_queue():
+    fake = FakeComfyUI(auto="hold")
+    fake.pending.append([0.5, "p", {}, {}, []])
+    fake.start("p")
+    task = asyncio.ensure_future(tw._follow(fake.client(), {"prompt_id": "p"}))
+    await asyncio.sleep(0.2)
+    fake.finish("p")
+    assert (await asyncio.wait_for(task, 5))["status"] == "success"
+    assert fake.count("GET", "/queue") == 0 and fake.count("GET", "/api/jobs/p") > 3
+
+
+async def test_queue_position_comes_from_one_shared_throttled_queue_read():
+    fake = FakeComfyUI(auto="hold")
+    client = fake.client()
+    # ComfyUI's numbers are floats (front-of-queue ones negative); order them as numbers, not as strings.
+    fake.pending += [[10.0, "b", {}, {}, []], [9, "a", {}, {}, []], [-1.0, "front", {}, {}, []], [11, "c", {}, {}, []]]
+    pb, pc = {"prompt_id": "b"}, {"prompt_id": "c"}
+    runs = [asyncio.ensure_future(tw._follow(client, p)) for p in (pb, pc)]
+    await asyncio.sleep(0.3)  # about 30 polls each at the test's 0.01s
+    assert (pb["queue_position"], pc["queue_position"]) == (2, 3)
+    assert fake.count("GET", "/queue") == 1  # shared between both runs, and held for QUEUE_TTL_SECONDS
+    for run in runs:
+        run.cancel()
+    await asyncio.gather(*runs, return_exceptions=True)
+
+
+async def test_without_the_jobs_api_it_follows_through_queue_and_history():
+    fake = FakeComfyUI(auto="success")
+    fake.jobs_api = False
+    task = asyncio.ensure_future(tw.run_prompt(fake.client(), t1(), {"prompt_id": "p"}))
+    assert (await asyncio.wait_for(task, 5))["status"] == "success"
+    assert fake.count("GET", "/queue") >= 1
+
+
+# -- the spend backstop ---------------------------------------------------------------------------
+
+
+async def test_the_prompt_request_carries_no_extra_data():
+    """Partner-API nodes get the user's Comfy.org credentials only from /prompt's extra_data, which this server
+    never sends: a backstop behind the refusal."""
+    fake = FakeComfyUI()
+    await tw.run_prompt(fake.client(), t1(), {"prompt_id": "p"})
+    [body] = fake.posted("/prompt")
+    assert set(body) == {"prompt", "prompt_id"}
 
 
 # -- workflow_outputs ---------------------------------------------------------------------------
+
+
+TWO_SAVED = {
+    "4": {"images": [SAVED["4"]["images"][0], {"filename": "t1__00002_.png", "subfolder": "", "type": "output"}]}
+}
 
 
 async def finished_job(client) -> str:
@@ -515,12 +711,17 @@ async def test_outputs_lists_files_with_sizes_and_streams_nothing_by_default():
     assert ("GET", "/view") not in [c[:2] for c in fake.calls]
 
 
-async def test_outputs_fetches_one_file_inline():
+async def test_outputs_fetches_one_file_inline_and_sizes_only_that_one():
     fake = FakeComfyUI()
     server, _ = serve(fake)
     async with Client(server, mode="legacy") as client:
+        fake.outputs = TWO_SAVED
         job_id = await finished_job(client)
+        heads = fake.count("HEAD", "/view")
         got = await client.call_tool("workflow_outputs", {"job_id": job_id, "fetch": "t1__00001_.png"})
+    assert fake.count("HEAD", "/view") - heads == 1
+    assert [f["size_bytes"] for f in got.structured_content["files"]] == [len(PNG), None]
+    assert tw.MAX_INLINE_BYTES == 5_000_000
     assert got.structured_content["fetched"] == "t1__00001_.png"
     image = got.content[1]
     assert image.type == "image" and image.mime_type == "image/png"
@@ -624,12 +825,19 @@ async def test_upload_refuses_a_file_over_the_cap(monkeypatch):
     assert ("POST", "/upload/image") not in [c[:2] for c in fake.calls]
 
 
-async def test_upload_refuses_base64_past_the_schema_limit():
+async def test_upload_refuses_base64_past_the_cap_before_decoding_it():
     fake = FakeComfyUI()
-    too_long = "A" * ((tw.MAX_UPLOAD_BYTES + 2) // 3 * 4 + 104)
-    got = await upload(fake, "big.png", too_long)
-    assert got.is_error
+    too_long = "A" * (tw.MAX_UPLOAD_BASE64_CHARS + 4)
+    assert error_of(await upload(fake, "big.png", too_long))["code"] == "upload_too_large"
     assert ("POST", "/upload/image") not in [c[:2] for c in fake.calls]
+
+
+async def test_upload_accepts_line_wrapped_base64():
+    fake = FakeComfyUI()
+    encoded = base64.encodebytes(PNG * 4).decode()  # MIME style: a line break every 76 characters
+    assert "\n" in encoded
+    got = await upload(fake, "wrapped.png", " " + encoded.replace("\n", "\r\n\t"))
+    assert got.structured_content["size_bytes"] == len(PNG) * 4
 
 
 async def test_upload_accepts_a_data_url_and_refuses_bad_base64():
@@ -638,3 +846,69 @@ async def test_upload_accepts_a_data_url_and_refuses_bad_base64():
     assert ok.structured_content["size_bytes"] == len(PNG)
     assert error_of(await upload(fake, "p.png", "not base64!"))["code"] == "invalid_base64"
     assert error_of(await upload(fake, "p.png", ""))["code"] == "empty_upload"
+
+
+async def test_object_info_is_shared_briefly_and_dropped_after_an_upload():
+    fake = FakeComfyUI()
+    server, _ = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        for _ in range(3):
+            await client.call_tool("workflow_validate", {"workflow": t1()})
+        assert fake.count("GET", "/object_info") == 1
+        await client.call_tool(
+            "workflow_upload_input", {"filename": "new.png", "content_base64": base64.b64encode(PNG).decode()}
+        )
+        await client.call_tool("workflow_validate", {"workflow": t1()})
+    assert fake.count("GET", "/object_info") == 2  # LoadImage's file list changed
+
+
+# -- uploads over the real HTTP transport ---------------------------------------------------------
+
+
+@pytest.fixture
+def http_relay():
+    """comfyrelay over real HTTP (the transport's body limit applies), in front of a FakeComfyUI."""
+    import threading
+    import time
+
+    import uvicorn
+    from comfyrelay.server import http_app
+
+    fake = FakeComfyUI()
+    s = settings(port=free_port())
+    server, _ = build_server(s, comfyui=fake.client())
+    uv = uvicorn.Server(uvicorn.Config(http_app(server, s), host=s.host, port=s.port, log_config=None))
+    thread = threading.Thread(target=uv.run, daemon=True)
+    thread.start()
+    deadline = time.time() + 10
+    while not uv.started:
+        assert time.time() < deadline, "the test server did not start"
+        time.sleep(0.05)
+    yield f"http://{s.host}:{s.port}/mcp", fake
+    uv.should_exit = True
+    thread.join(10)
+
+
+@pytest.mark.parametrize(
+    ("size", "code"),
+    [
+        (3_300_000, None),  # past the SDK's default 4 MiB body once base64-encoded: refused with a bare 413 before
+        (tw.MAX_UPLOAD_BYTES, None),
+        (tw.MAX_UPLOAD_BYTES + 1, "upload_too_large"),
+    ],
+)
+async def test_upload_size_boundary_over_http(http_relay, size, code):
+    from mcp.client.streamable_http import streamable_http_client
+
+    url, fake = http_relay
+    content = base64.b64encode(b"\x00" * size).decode()
+    async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {TOKEN}"}, timeout=60) as http:
+        async with Client(streamable_http_client(url, http_client=http), mode="legacy") as client:
+            got = await client.call_tool("workflow_upload_input", {"filename": "big.png", "content_base64": content})
+    if code is None:
+        assert not got.is_error, got.content[0].text[:300]
+        assert got.structured_content["size_bytes"] == size
+    else:
+        error = error_of(got)
+        assert (error["code"], error["size_bytes"], error["limit"]) == (code, size, tw.MAX_UPLOAD_BYTES)
+        assert fake.count("POST", "/upload/image") == 0

@@ -7,7 +7,14 @@ import json
 from pathlib import Path
 
 import pytest
-from comfyrelay.workflow import expand_inputs, partner_api_nodes, types_compatible, validate
+from comfyrelay.workflow import (
+    MAX_NODES,
+    expand_inputs,
+    partner_api_nodes,
+    partner_signals,
+    types_compatible,
+    validate,
+)
 
 INFO = json.loads((Path(__file__).parent / "object_info_v0.37.0.json").read_text())
 
@@ -160,7 +167,7 @@ def test_a_link_to_an_output_the_node_does_not_have():
     assert (error["type"], error["expected"], error["got"]) == ("linked_output_missing", ["IMAGE"], ["2", 1])
 
 
-@pytest.mark.parametrize("link", [["2"], ["2", 0, 1], [2, 0]])
+@pytest.mark.parametrize("link", [["2"], ["2", 0, 1], [2, 0], ["2", "0"], ["2", True], ["a", "b"]])
 def test_a_malformed_link(link):
     graph = t1()
     graph["3"]["inputs"]["image"] = link
@@ -329,7 +336,7 @@ def test_type_compatibility_follows_comfyui(received, wanted, ok):
 # -- partner-API nodes --------------------------------------------------------------
 
 
-def test_partner_api_nodes_are_found_by_either_signal():
+def test_partner_api_nodes_are_found_by_any_signal():
     graph = {
         "1": {"class_type": "ClaudeNode", "inputs": {}},
         "2": {"class_type": "ByteDanceCreateImageAsset", "inputs": {}},
@@ -337,8 +344,42 @@ def test_partner_api_nodes_are_found_by_either_signal():
     }
     found = partner_api_nodes(graph, INFO)
     assert [(n["node_id"], n["class_type"], n["signals"]) for n in found] == [
-        ("1", "ClaudeNode", ["api_node", "comfy_org_credentials"]),
-        # api_node is false, but it asks for the Comfy.org credentials
-        ("2", "ByteDanceCreateImageAsset", ["comfy_org_credentials"]),
+        ("1", "ClaudeNode", ["api_node", "comfy_org_credentials", "comfy_api_nodes"]),
+        # api_node is false, but it asks for the Comfy.org credentials and lives in comfy_api_nodes
+        ("2", "ByteDanceCreateImageAsset", ["comfy_org_credentials", "comfy_api_nodes"]),
     ]
     assert validate(graph, INFO).partner_api_nodes == found
+
+
+@pytest.mark.parametrize(
+    ("spec", "signals"),
+    [
+        ({"api_node": 1}, ["api_node"]),  # truthy, not only True
+        ({"python_module": "comfy_api_nodes.nodes_openai"}, ["comfy_api_nodes"]),
+        ({"python_module": "custom_nodes.my_pack"}, []),
+        ({"input": {"hidden": {"key": ["API_KEY_COMFY_ORG"]}}}, ["comfy_org_credentials"]),
+        ({"input": {"hidden": {"odd": [{"a": 1}], "odder": {"b": 2}, "empty": []}}}, []),  # no TypeError
+        ({"input": "not an object"}, []),
+        (None, []),
+    ],
+)
+def test_partner_signals(spec, signals):
+    assert partner_signals(spec) == signals
+
+
+def test_a_graph_over_the_node_cap_is_refused():
+    graph = {str(i): {"class_type": "ImageInvert", "inputs": {}} for i in range(MAX_NODES + 1)}
+    [error] = errors(graph)
+    assert (error["type"], error["got"], error["expected"]) == (
+        "workflow_too_large",
+        MAX_NODES + 1,
+        {"max_nodes": 2000},
+    )
+
+
+def test_a_list_value_that_is_not_a_link_does_not_pull_in_a_node():
+    """_upstream follows only real links, so a stray list does not make an unrelated node 'needed'."""
+    graph = t1()
+    graph["9"] = {"class_type": "ImageInvert", "inputs": {}}
+    graph["4"]["inputs"]["filename_prefix"] = ["9", "x"]
+    assert ("not_connected_to_output", "9") in [(w["type"], w["node_id"]) for w in warnings(graph)]

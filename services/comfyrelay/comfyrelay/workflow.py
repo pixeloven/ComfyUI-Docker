@@ -33,7 +33,11 @@ node then fails when it runs (checked at v0.37.0: ResizeImageMaskNode without
 What this cannot see: a node's own VALIDATE_INPUTS (so a file-picker COMBO
 such as LoadImage's `image`, whose list is only what is on disk, gets a
 warning, not an error, and ComfyUI's check at submission decides), and
-anything that only fails while running.
+anything that only fails while running. Nor does it apply ComfyUI's node
+replacements (/node_replacements, which /prompt applies to a class that is
+no longer installed, rewiring its inputs): an old class name is
+`missing_node_type` here, and the class that replaced it is the one to use.
+A graph over MAX_NODES is `workflow_too_large`.
 
 Partner-API nodes are found here too (`partner_api_nodes`); the run tool
 refuses a graph that has any.

@@ -562,6 +562,10 @@ async def stop_prompt(
                 progress.update(stop="unconfirmed", stop_detail=f"ComfyUI still reports it {job['status']}")
                 return
             await asyncio.sleep(STOP_CHECK_SECONDS)
+            # ComfyUI clears its interrupt flag as a prompt starts executing (execution.py, execute_async), so an
+            # interrupt that lands just as the prompt leaves the queue is lost. The cancel is atomic and targeted,
+            # so sending it again is safe.
+            await comfyui.cancel_job(prompt_id)
     except RelayError as exc:
         progress.update(stop="unconfirmed", stop_detail=exc.message)
         log.warning("could not confirm prompt %s stopped on ComfyUI: %s", prompt_id, exc.message)
@@ -574,8 +578,14 @@ def _cancel_when_answered(comfyui: ComfyUIClient, post: asyncio.Future[Any]) -> 
 
 async def _cancel_late(comfyui: ComfyUIClient, prompt_id: str) -> None:
     try:
-        if await comfyui.cancel_job(prompt_id) is None:
-            await comfyui.delete_queued(prompt_id)
+        for _ in range(10):  # again while it runs: an interrupt as it starts is lost (see stop_prompt)
+            if await comfyui.cancel_job(prompt_id) is None:
+                await comfyui.delete_queued(prompt_id)
+                break
+            job = await comfyui.job(prompt_id, cancelling=True)
+            if job is None or job["status"] not in ("pending", "in_progress"):
+                break
+            await asyncio.sleep(STOP_CHECK_SECONDS)
         log.info("cancelled prompt %s, whose submission ComfyUI answered after its job was cancelled", prompt_id)
     except RelayError as exc:
         log.warning("could not cancel prompt %s after a late answer: %s", prompt_id, exc.message)

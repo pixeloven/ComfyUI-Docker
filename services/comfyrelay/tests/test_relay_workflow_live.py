@@ -21,10 +21,12 @@ import zlib
 
 import httpx2
 import pytest
+from comfyrelay import tools_workflow as tw
 from comfyrelay.comfyui import ComfyUIClient
+from comfyrelay.jobs import JobStore
 from comfyrelay.server import build_server
 from mcp import Client
-from relay_helpers import settings
+from relay_helpers import TOKEN, free_port, settings
 
 URL = os.environ.get("COMFYRELAY_LIVE_COMFYUI_URL", "")
 pytestmark = [
@@ -48,13 +50,13 @@ def gradient_png(width: int = 64, height: int = 48) -> bytes:
     )
 
 
-def slow_graph(nodes: int = 200) -> dict:
+def slow_graph(nodes: int = 200, size: int = 1024) -> dict:
     """A chain of blurs over a large image: about half a second per node on a CPU, and interruptible
     between nodes. A random colour keeps ComfyUI's cache from answering it instantly."""
     graph = {
         "1": {
             "class_type": "EmptyImage",
-            "inputs": {"width": 1024, "height": 1024, "batch_size": 1, "color": random.randrange(1 << 24)},
+            "inputs": {"width": size, "height": size, "batch_size": 1, "color": random.randrange(1 << 24)},
         }
     }
     previous = "1"
@@ -184,12 +186,14 @@ async def test_cancelling_stops_the_prompt_on_comfyui_running_and_queued(client)
     t0 = loop.time()
     cancelled = await client.call_tool("job_cancel", {"job_id": second["job_id"]})
     assert cancelled.structured_content["state"] == "cancelled"
+    assert cancelled.structured_content["progress"]["stop"] == "confirmed"
     assert loop.time() - t0 < 3.0
     assert await comfyui_state(second["prompt_id"]) == ("absent", None)  # dequeued, never ran
 
     t0 = loop.time()
     cancelled = await client.call_tool("job_cancel", {"job_id": first["job_id"]})
     assert cancelled.structured_content["state"] == "cancelled"
+    assert cancelled.structured_content["progress"]["stop"] == "confirmed"  # ComfyUI said so, within the budget
     assert loop.time() - t0 < 3.0
 
     async def first_stopped():
@@ -201,3 +205,122 @@ async def test_cancelling_stops_the_prompt_on_comfyui_running_and_queued(client)
     assert entry["status"]["status_str"] == "error"
     assert "execution_interrupted" in [m[0] for m in entry["status"]["messages"]]
     assert await comfyui_state(second["prompt_id"]) == ("absent", None)
+
+
+async def comfyui_cancel(prompt_id: str) -> None:
+    """Clean-up, straight to ComfyUI, whatever a test left behind."""
+    async with httpx2.AsyncClient(base_url=URL, timeout=10) as http:
+        await http.post(f"/api/jobs/{prompt_id}/cancel")
+
+
+async def test_a_double_cancel_still_stops_the_prompt(client):
+    """#145 R1, on ComfyUI itself: two job_cancels at once, the second landing during the first's unwind."""
+    run = (await client.call_tool("workflow_run", {"workflow": slow_graph()})).structured_content
+    try:
+
+        async def running():
+            return (await comfyui_state(run["prompt_id"]))[0] == "running"
+
+        await wait_for(running)
+        both = await asyncio.gather(
+            client.call_tool("job_cancel", {"job_id": run["job_id"]}),
+            client.call_tool("job_cancel", {"job_id": run["job_id"]}),
+        )
+        assert [b.structured_content["state"] for b in both] == ["cancelled", "cancelled"]
+        assert both[0].structured_content["progress"]["stop"] == "confirmed"
+
+        async def stopped():
+            return (await comfyui_state(run["prompt_id"]))[1] is not None
+
+        await wait_for(stopped, timeout=10)
+        where, entry = await comfyui_state(run["prompt_id"])
+        assert where == "absent" and "execution_interrupted" in [m[0] for m in entry["status"]["messages"]]
+    finally:
+        await comfyui_cancel(run["prompt_id"])
+
+
+async def test_a_cancel_during_submission_never_orphans_the_prompt():
+    """#145 R4, on ComfyUI itself: cancel while a large /prompt is still being processed, five times. ComfyUI
+    finishes a /prompt whose client hung up; the stop must not arrive before it and miss the prompt."""
+    comfyui = ComfyUIClient(URL)
+    # About 2 MB, which ComfyUI takes some 30 ms over. (A chain much deeper than 400 fails ComfyUI's recursive
+    # validation with RecursionError at v0.37.0.)
+    graph = slow_graph(nodes=400, size=512)
+    graph["2"] = {"class_type": "PrimitiveStringMultiline", "inputs": {"value": "x" * 1_500_000}}
+    outcomes = []
+    try:
+        for delay in (0.005, 0.01, 0.015, 0.02, 0.03):  # the cancel lands at points across the POST
+            graph["1"]["inputs"]["color"] = random.randrange(1 << 24)
+            progress = {"prompt_id": str(__import__("uuid").uuid4())}
+            store = JobStore()
+            job = store.submit(tw.RUN_KIND, lambda progress=progress: tw.run_prompt(comfyui, graph, progress))
+            await asyncio.sleep(delay)
+            t0 = asyncio.get_running_loop().time()
+            await store.cancel(job.id)
+            assert asyncio.get_running_loop().time() - t0 < 3.0
+            await asyncio.sleep(2.0)  # long enough for a missed prompt to be queued and start
+            where, entry = await comfyui_state(progress["prompt_id"])
+            await comfyui_cancel(progress["prompt_id"])
+            assert where == "absent", f"prompt {progress['prompt_id']} is {where} after its job was cancelled"
+            ran = entry is not None and "execution_interrupted" not in [m[0] for m in entry["status"]["messages"]]
+            assert not ran, "the prompt ran to an end of its own"
+            outcomes.append(progress.get("stop"))
+    finally:
+        await comfyui.aclose()
+    assert all(o in ("confirmed", "unconfirmed") for o in outcomes), outcomes
+
+
+async def test_a_relay_stopped_by_sigterm_leaves_its_prompt_running():
+    """Owner decision on #145: a relay that stops does not stop its runs; a restarted one re-attaches (#146)."""
+    import signal
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from mcp.client.streamable_http import streamable_http_client
+
+    port = free_port()
+    env = {
+        **os.environ,
+        "COMFYUI_MCP_HTTP_TOKEN": TOKEN,
+        "COMFYUI_URL": URL,
+        "MCP_HOST": "127.0.0.1",
+        "MCP_PORT": str(port),
+        "COMFYUI_MCP_INSTANCE_ID": "sigterm-test",
+    }
+    relay = subprocess.Popen(
+        [str(Path(sys.executable).parent / "comfyctl"), "relay", "serve"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    prompt_id = None
+    try:
+        url = f"http://127.0.0.1:{port}/mcp"
+        async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {TOKEN}"}, timeout=60) as http:
+            for _ in range(100):
+                try:
+                    await http.get(url)
+                    break
+                except httpx2.TransportError:
+                    await asyncio.sleep(0.1)
+            async with Client(streamable_http_client(url, http_client=http), mode="legacy") as mcp:
+                run = (await mcp.call_tool("workflow_run", {"workflow": slow_graph()})).structured_content
+        prompt_id = run["prompt_id"]
+
+        async def running():
+            return (await comfyui_state(prompt_id))[0] == "running"
+
+        await wait_for(running)
+        relay.send_signal(signal.SIGTERM)
+        output, _ = relay.communicate(timeout=10)
+        log = output.decode(errors="replace")
+        assert relay.returncode is not None
+        assert f"prompt {prompt_id} is left running on ComfyUI" in log, log[-2000:]
+        await asyncio.sleep(1.5)  # past any stop the relay might have sent
+        assert (await comfyui_state(prompt_id))[0] == "running"  # it carries on without the relay
+    finally:
+        if relay.poll() is None:
+            relay.kill()
+        if prompt_id is not None:
+            await comfyui_cancel(prompt_id)

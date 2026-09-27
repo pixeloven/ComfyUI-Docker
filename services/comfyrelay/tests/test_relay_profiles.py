@@ -54,7 +54,14 @@ async def listed(profiles: tuple[str, ...]) -> tuple[set[str], Client]:
 
 
 READ_TOOLS = {"node_search", "node_describe", "model_list", "template_search", "template_get"}
-RUN_TOOLS = {"job_status", "job_cancel", "workflow_validate", "workflow_run", "workflow_outputs", "workflow_upload_input"}
+RUN_TOOLS = {
+    "job_status",
+    "job_cancel",
+    "workflow_validate",
+    "workflow_run",
+    "workflow_outputs",
+    "workflow_upload_input",
+}
 
 
 async def test_default_profiles_register_server_info_the_run_tools_and_introspection():
