@@ -53,25 +53,29 @@ async def listed(profiles: tuple[str, ...]) -> tuple[set[str], Client]:
     return names, missing
 
 
-async def test_default_profiles_register_server_info_the_job_tools_and_the_workflow_tools():
+READ_TOOLS = {"node_search", "node_describe", "model_list", "template_search", "template_get"}
+RUN_TOOLS = {"job_status", "job_cancel", "workflow_validate", "workflow_run", "workflow_outputs", "workflow_upload_input"}
+
+
+async def test_default_profiles_register_server_info_the_run_tools_and_introspection():
     names, _ = await listed(("read", "run"))
-    assert names == {
-        "job_cancel",
-        "job_status",
-        "server_info",
-        "workflow_outputs",
-        "workflow_run",
-        "workflow_upload_input",
-        "workflow_validate",
-    }
+    assert names == {"server_info"} | RUN_TOOLS | READ_TOOLS
 
 
 async def test_a_tool_in_a_disabled_profile_is_absent_and_uncallable():
     names, call = await listed(("read",))
     assert "job_status" not in names
-    assert names == {"server_info"}
+    assert names == {"server_info"} | READ_TOOLS
     assert call.is_error
     assert "Unknown tool" in call.content[0].text
+
+
+async def test_introspection_is_the_read_profile_only(caplog):
+    caplog.set_level(logging.WARNING, logger="comfyrelay")
+    await listed(("read",))
+    assert "profile 'read' is enabled" not in caplog.text  # read has tools now
+    run_only, _ = await listed(("run",))
+    assert run_only == {"server_info"} | RUN_TOOLS
 
 
 @pytest.mark.parametrize("profile", ["manage", "develop"])

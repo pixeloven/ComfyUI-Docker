@@ -844,43 +844,41 @@ def _workflow_upload_input(relay: Relay) -> Callable[..., Any]:
 # -- registration --------------------------------------------------------------
 
 
-def workflow_tool_specs(spec: Callable[..., Any]) -> tuple[Any, ...]:
-    """The ToolSpecs for tools.py's registry. `spec` is ToolSpec, passed in to keep the import one-way.
+RUN = frozenset({"run"})
 
-    Annotations (MCP hints; clients may show them, gate on them, or ignore them):
-    - workflow_validate, workflow_outputs: read-only.
-    - workflow_run: not read-only (it queues work and ComfyUI writes new output files), but not destructive
-      either: it replaces and deletes nothing (SaveImage numbers files, never overwrites). Not idempotent: each
-      call is another run with new outputs.
-    - workflow_upload_input: not read-only (it adds a file to ComfyUI's input directory), not destructive (it
-      never overwrites: ComfyUI renames a clash), idempotent (the same bytes under the same name are stored once).
-    All are closed-world: they reach only the configured ComfyUI, and a graph with partner-API nodes, which
-    would reach further, is refused.
-    """
-    run = frozenset({"run"})
-    return (
-        spec(
-            "workflow_validate",
-            run,
-            _workflow_validate,
-            ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False),
-        ),
-        spec(
-            "workflow_run",
-            run,
-            _workflow_run,
-            ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False),
-        ),
-        spec(
-            "workflow_outputs",
-            run,
-            _workflow_outputs,
-            ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False),
-        ),
-        spec(
-            "workflow_upload_input",
-            run,
-            _workflow_upload_input,
-            ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False),
-        ),
-    )
+# (name, profiles, make, annotations), which tools.py wraps in its ToolSpec.
+# Annotations are MCP hints; clients may show them, gate on them, or ignore them:
+# - workflow_validate, workflow_outputs: read-only.
+# - workflow_run: not read-only (it queues work and ComfyUI writes new output files), but not destructive either:
+#   it replaces and deletes nothing (SaveImage numbers files, never overwrites). Not idempotent: each call is
+#   another run with new outputs.
+# - workflow_upload_input: not read-only (it adds a file to ComfyUI's input directory), not destructive (it never
+#   overwrites: ComfyUI renames a clash), idempotent (the same bytes under the same name are stored once).
+# All are closed-world as far as this server goes: they reach only the configured ComfyUI, and a graph with
+# partner-API nodes is refused. What a custom node inside ComfyUI does is ComfyUI's (workflow_run says so).
+WORKFLOW_TOOLS: tuple[tuple[str, frozenset[str], Callable[[Relay], Callable[..., Any]], ToolAnnotations], ...] = (
+    (
+        "workflow_validate",
+        RUN,
+        _workflow_validate,
+        ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False),
+    ),
+    (
+        "workflow_run",
+        RUN,
+        _workflow_run,
+        ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False),
+    ),
+    (
+        "workflow_outputs",
+        RUN,
+        _workflow_outputs,
+        ToolAnnotations(read_only_hint=True, idempotent_hint=True, open_world_hint=False),
+    ),
+    (
+        "workflow_upload_input",
+        RUN,
+        _workflow_upload_input,
+        ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False),
+    ),
+)

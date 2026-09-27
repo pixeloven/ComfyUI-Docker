@@ -46,7 +46,12 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 # ComfyUI's dynamic V3 inputs (comfy_api/latest/_io.py), which expand into
-# more inputs according to the values the graph gives them.
+# more inputs according to the values the graph gives them. Inside one, every
+# input's key is its path joined with dots (`qualified`, ComfyUI's
+# finalize_prefix): a DynamicCombo `resize_type` set to "scale dimensions" adds
+# `resize_type.width`, an Autogrow `images` with prefix "image" takes
+# `images.image0`, `images.image1` and so on. This module owns that naming;
+# node_describe (tools_introspection.py) renders it with the same helpers.
 AUTOGROW = "COMFY_AUTOGROW_V3"
 DYNAMIC_COMBO = "COMFY_DYNAMICCOMBO_V3"
 DYNAMIC_SLOT = "COMFY_DYNAMICSLOT_V3"
@@ -56,6 +61,12 @@ ANY_TYPE = "*"
 # The hidden inputs through which ComfyUI hands a node the user's Comfy.org
 # credentials, which pay for partner-API calls.
 COMFY_ORG_CREDENTIALS = frozenset({"AUTH_TOKEN_COMFY_ORG", "API_KEY_COMFY_ORG"})
+# The package ComfyUI's own partner-API nodes live in.
+API_NODES_MODULE = "comfy_api_nodes."
+
+# The most nodes workflow_run submits. ComfyUI walks a graph in one thread; a
+# 10,000-node graph wedged its worker past what an interrupt could stop.
+MAX_NODES = 2000
 
 # COMBO inputs whose options are files on disk. The node checks the value
 # itself (VALIDATE_INPUTS), so a value outside the list is only a warning.
@@ -98,7 +109,69 @@ def _node_order(node_id: str) -> tuple[int, int | str]:
 
 
 def _is_link(value: Any) -> bool:
-    return isinstance(value, list)
+    """A well-formed link: ["<node id>", <output index>]. ComfyUI treats any list as a link, so a list that is not
+    one is reported as a bad link, not taken as a value."""
+    return (
+        isinstance(value, list)
+        and len(value) == 2
+        and isinstance(value[0], str)
+        and isinstance(value[1], (int, float))
+        and not isinstance(value[1], bool)
+    )
+
+
+def qualified(path: list[str]) -> str:
+    """A dynamic input's key in a graph: its path joined with dots, as ComfyUI's finalize_prefix joins it."""
+    return ".".join(path)
+
+
+def autogrow_names(template: dict[str, Any]) -> list[str] | None:
+    """The inputs an Autogrow takes, unqualified and in order: its `names`, or `prefix` plus 0 to max - 1."""
+    if isinstance(template.get("names"), list):
+        return [str(n) for n in template["names"]]
+    if isinstance(template.get("prefix"), str) and isinstance(template.get("max"), int):
+        return [f"{template['prefix']}{i}" for i in range(template["max"])]
+    return None
+
+
+def autogrow_item(template: dict[str, Any]) -> tuple[Any, bool] | None:
+    """What each of an Autogrow's inputs takes, and whether it sits in `required` (then its first `min` are)."""
+    sections = template.get("input") if isinstance(template.get("input"), dict) else {}
+    for section, specs in sections.items():
+        if isinstance(specs, dict) and specs:
+            return next(iter(specs.values())), section == "required"
+    return None
+
+
+def autogrow_min(template: dict[str, Any]) -> int:
+    return template["min"] if isinstance(template.get("min"), int) else 1
+
+
+def partner_signals(spec: Any) -> list[str]:
+    """Why a node class spends partner-API credits, as /object_info shows it; [] when it does not.
+
+        api_node               the class's API_NODE flag (what --disable-api-nodes and the editor's badge use)
+        comfy_org_credentials  it asks for the user's Comfy.org credentials through a hidden input: how it pays
+        comfy_api_nodes        it comes from ComfyUI's own partner-API package
+
+    workflow_run refuses a graph with any; template runnability and node search flag the same classes.
+    """
+    if not isinstance(spec, dict):
+        return []
+    signals = []
+    if spec.get("api_node"):
+        signals.append("api_node")
+    hidden = (spec.get("input") or {}).get("hidden") if isinstance(spec.get("input"), dict) else None
+    types = set()
+    for value in hidden.values() if isinstance(hidden, dict) else ():
+        first = value[0] if isinstance(value, list) and value else value
+        if isinstance(first, str):
+            types.add(first)
+    if types & COMFY_ORG_CREDENTIALS:
+        signals.append("comfy_org_credentials")
+    if str(spec.get("python_module") or "").startswith(API_NODES_MODULE):
+        signals.append("comfy_api_nodes")
+    return signals
 
 
 def _suggest(word: str, choices: Any, n: int = 3) -> list[str]:
@@ -154,31 +227,22 @@ def _parse(out: dict[str, dict[str, Any]], live: dict[str, Any], section: dict[s
             elif io_type == DYNAMIC_COMBO:
                 _dynamic_combo(out, live, extra, category, path)
             elif io_type == DYNAMIC_SLOT:
-                if ".".join(path) in live:
+                if qualified(path) in live:
                     _parse(out, live, extra.get("inputs") or {}, path)
-                    out[category][".".join(path)] = [extra.get("slotType", ANY_TYPE), extra]
+                    out[category][qualified(path)] = [extra.get("slotType", ANY_TYPE), extra]
             else:
-                out[category][".".join(path)] = value
+                out[category][qualified(path)] = value
 
 
 def _autogrow(out: dict[str, dict[str, Any]], extra: dict[str, Any], path: list[str]) -> None:
-    template = extra.get("template") or {}
-    if "names" in template:
-        names = list(template["names"])
-    else:
-        names = [f"{template.get('prefix', '')}{i}" for i in range(int(template.get("max", 0)))]
-    minimum = int(template.get("min", 1))
-    template_input, template_required = None, True
-    for category, inputs in (template.get("input") or {}).items():
-        if inputs:
-            template_input = next(iter(inputs.values()))
-            template_required = category == "required"
-            break
-    if template_input is None:
+    template = extra.get("template") if isinstance(extra.get("template"), dict) else {}
+    names, item = autogrow_names(template), autogrow_item(template)
+    if names is None or item is None:
         return
+    spec, required = item
+    minimum = autogrow_min(template)
     for i, name in enumerate(names):
-        category = "required" if i < minimum and template_required else "optional"
-        out[category][".".join([*path, name])] = template_input
+        out["required" if i < minimum and required else "optional"][qualified([*path, name])] = spec
 
 
 def _dynamic_combo(
@@ -188,7 +252,7 @@ def _dynamic_combo(
     category: str,
     path: list[str],
 ) -> None:
-    key = ".".join(path)
+    key = qualified(path)
     options = [o for o in extra.get("options") or [] if isinstance(o, dict)]
     out[category][key] = ["COMBO", {"options": [o.get("key") for o in options]}]
     if key in live:
@@ -226,6 +290,15 @@ def shape_problems(graph: Any) -> list[Problem]:
                 'this is a /prompt request body. Send the workflow itself: the value of its "prompt" key',
             )
         ]
+    if len(graph) > MAX_NODES:
+        return [
+            Problem(
+                "workflow_too_large",
+                f"the workflow has {len(graph)} nodes; this server runs at most {MAX_NODES}",
+                expected={"max_nodes": MAX_NODES},
+                got=len(graph),
+            )
+        ]
     problems = []
     for node_id, node in graph.items():
         if not isinstance(node, dict):
@@ -254,25 +327,12 @@ def shape_problems(graph: Any) -> list[Problem]:
 
 
 def partner_api_nodes(graph: dict[str, Any], info: dict[str, Any]) -> list[dict[str, Any]]:
-    """Nodes that call a paid partner API, as /object_info marks them.
-
-    Two signals: `api_node: true` (ComfyUI sets it from a node's API_NODE
-    flag; it is what --disable-api-nodes and the editor's badge go by), and
-    asking for the user's Comfy.org credentials through a hidden input, which
-    is how such a node pays. Either one is enough.
-    """
+    """Nodes that call a paid partner API, as /object_info marks them (`partner_signals`). Any one signal is
+    enough."""
     found = []
     for node_id, node in graph.items():
         spec = info.get(node.get("class_type")) if isinstance(node, dict) else None
-        if not isinstance(spec, dict):
-            continue
-        signals = []
-        if spec.get("api_node") is True:
-            signals.append("api_node")
-        hidden = (spec.get("input") or {}).get("hidden") or {}
-        hidden_types = {v[0] if isinstance(v, list) and v else v for v in hidden.values()}
-        if hidden_types & COMFY_ORG_CREDENTIALS:
-            signals.append("comfy_org_credentials")
+        signals = partner_signals(spec)
         if signals:
             found.append(
                 {
@@ -355,7 +415,7 @@ def _upstream(graph: dict[str, Any], roots: list[str]) -> set[str]:
             continue
         seen.add(node_id)
         for value in (graph[node_id].get("inputs") or {}).values():
-            if _is_link(value) and len(value) == 2 and isinstance(value[0], str):
+            if _is_link(value):
                 stack.append(value[0])
     return seen
 
@@ -407,7 +467,7 @@ def _check_node(
         input_type = input_spec[0] if isinstance(input_spec, list) and input_spec else None
         extra = input_spec[1] if isinstance(input_spec, list) and len(input_spec) > 1 else {}
         extra = extra if isinstance(extra, dict) else {}
-        if _is_link(value):
+        if isinstance(value, list):  # ComfyUI takes every list for a link; _check_link reports a malformed one
             found = _check_link(name, value, input_type, graph, info)
             if found is not None:
                 errors.append(problem(*found[:2], name, **found[2]))
@@ -426,10 +486,10 @@ def _check_link(
             {"details": name, "got": value},
         )
     source, slot = value
-    if not isinstance(source, str):
+    if not isinstance(source, str) or not _is_link(value):
         return (
             "bad_linked_input",
-            f'a link names its node by id as a string, such as ["{source}", {slot}]',
+            f'a link is ["<node id, a string>", <output index, a number>], such as ["{source}", 0]',
             {"details": name, "got": value},
         )
     if source not in graph:

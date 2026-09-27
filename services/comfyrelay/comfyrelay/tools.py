@@ -34,7 +34,8 @@ from .comfyui import ComfyUIClient, ComfyUIError
 from .consent import ConsentGate
 from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
-from .tools_workflow import workflow_tool_specs
+from .tools_introspection import INTROSPECTION_TOOLS
+from .tools_workflow import WORKFLOW_TOOLS
 
 log = logging.getLogger("comfyrelay")
 
@@ -225,9 +226,11 @@ TOOLS: tuple[ToolSpec, ...] = (
         _job_cancel,
         ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False),
     ),
-    # workflow_* (#132): tools_workflow.py
-    *workflow_tool_specs(ToolSpec),
 )
+# The read profile's introspection tools (#133) and the run profile's workflow
+# tools (#132) live in their own modules, each as (name, profiles, make,
+# annotations) entries.
+TOOLS += tuple(ToolSpec(*spec) for spec in (*INTROSPECTION_TOOLS, *WORKFLOW_TOOLS))
 
 
 def profiles_without_tools(active: tuple[str, ...], specs: tuple[ToolSpec, ...] = TOOLS) -> list[str]:

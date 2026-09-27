@@ -74,38 +74,88 @@ class ComfyUIClient:
             "comfyui_bad_response", f"ComfyUI answered {self._shown_url}{path} with JSON that is not {expected}"
         )
 
-    async def _get_json(self, path: str) -> dict[str, Any]:
-        """The JSON object at `path`. Every endpoint this client reads answers with an object."""
-        url = f"{self._shown_url}{path}"
+    async def _get_json(self, path: str, *, expect: type[dict | list] = dict) -> Any:
+        """The JSON at `path`: an object, or an array for the few endpoints that answer with one (`expect=list`)."""
+        response = await self._send("GET", path)
+        self._raise_for_status(response, path)
+        return self._json_object(response, path, expect=expect)
+
+    # Every request goes through these three, whatever the method: one mapping
+    # of what can go wrong to the codes in this module's docstring.
+
+    async def _send(self, method: str, path: str, **kwargs: Any) -> httpx2.Response:
+        """One request. A transport failure becomes a ComfyUIError; the caller judges the status."""
         try:
-            response = await self._http.get(path)
-        except httpx2.TimeoutException as exc:
-            raise ComfyUIError("comfyui_timeout", f"ComfyUI did not answer {url} in time", retryable=True) from exc
-        except httpx2.TransportError as exc:
-            raise ComfyUIError(
-                "comfyui_unreachable",
-                f"could not reach ComfyUI at {self._shown_url}: {exc}",
-                retryable=True,
-            ) from exc
-        except httpx2.RequestError as exc:  # the rest: a body that will not decode, say
-            raise ComfyUIError(
-                "comfyui_bad_response", f"ComfyUI answered {url} with a body that could not be read: {exc}"
-            ) from exc
+            return await self._http.request(method, path, **kwargs)
+        except httpx2.RequestError as exc:
+            raise self._transport_error(exc, path) from exc
+
+    def _transport_error(self, exc: httpx2.RequestError, path: str) -> ComfyUIError:
+        url = f"{self._shown_url}{path}"
+        if isinstance(exc, httpx2.TimeoutException):
+            return ComfyUIError("comfyui_timeout", f"ComfyUI did not answer {url} in time", retryable=True)
+        if isinstance(exc, httpx2.TransportError):
+            return ComfyUIError(
+                "comfyui_unreachable", f"could not reach ComfyUI at {self._shown_url}: {exc}", retryable=True
+            )
+        # the rest: a body that will not decode, say
+        return ComfyUIError("comfyui_bad_response", f"ComfyUI answered {url} with a body that could not be read: {exc}")
+
+    def _raise_for_status(self, response: httpx2.Response, path: str) -> None:
         if response.status_code >= 400:
             raise ComfyUIError(
                 "comfyui_http_error",
-                f"ComfyUI answered {url} with HTTP {response.status_code}",
+                f"ComfyUI answered {self._shown_url}{path} with HTTP {response.status_code}",
                 retryable=response.status_code >= 500,
                 status=response.status_code,
             )
+
+    def _json_object(self, response: httpx2.Response, path: str, *, expect: type[dict | list] = dict) -> Any:
+        """The response's JSON, which must be an object (or, with `expect=list`, an array)."""
         try:
             data = response.json()
         except ValueError as exc:
             raise ComfyUIError(
-                "comfyui_bad_response", f"ComfyUI answered {url} with something that is not JSON"
+                "comfyui_bad_response", f"ComfyUI answered {self._shown_url}{path} with something that is not JSON"
             ) from exc
-        if not isinstance(data, dict):
-            raise self._bad_shape(path, "an object")
+        if not isinstance(data, expect):
+            raise self._bad_shape(path, "an object" if expect is dict else "an array")
+        return data
+
+    # -- introspection (#133): model folders and workflow templates ------------
+    #
+    # Templates come from the running ComfyUI, not from a package in this
+    # image: ComfyUI v0.37.0 serves the comfyui-workflow-templates package it
+    # pins at /templates/{path} (server.py, FrontendManager.template_asset_handler),
+    # and the frontend reads /templates/index.json from there.
+
+    async def model_folders(self) -> list[str]:
+        """GET /models: the model folder types ComfyUI knows (checkpoints, loras, vae, ...)."""
+        return self._strings("/models", await self._get_json("/models", expect=list))
+
+    async def model_files(self, folder: str) -> list[str]:
+        """GET /models/<folder>: the files ComfyUI finds for one folder type. HTTP 404 for a folder it doesn't know."""
+        path = f"/models/{quote(folder, safe='')}"
+        return self._strings(path, await self._get_json(path, expect=list))
+
+    async def templates_index(self) -> list[dict[str, Any]]:
+        """GET /templates/index.json: the template categories, each with its `templates`, as the frontend reads them."""
+        data = await self._get_json("/templates/index.json", expect=list)
+        if not all(isinstance(c, dict) and isinstance(c.get("templates", []), list) for c in data):
+            raise self._bad_shape("/templates/index.json", "an array of categories with a templates array")
+        return data
+
+    async def template(self, name: str) -> dict[str, Any]:
+        """GET /templates/<name>.json: one template's workflow, in the frontend's (UI) format."""
+        path = f"/templates/{quote(name, safe='')}.json"
+        data = await self._get_json(path)
+        if not isinstance(data.get("nodes"), list):
+            raise self._bad_shape(path, 'a workflow with a "nodes" array')
+        return data
+
+    def _strings(self, path: str, data: list[Any]) -> list[str]:
+        if not all(isinstance(x, str) for x in data):
+            raise self._bad_shape(path, "an array of strings")
         return data
 
     # -- workflow runs (#132) -------------------------------------------------
@@ -255,40 +305,3 @@ class ComfyUIClient:
                 return b"".join(chunks), response.headers.get("content-type", "application/octet-stream")
         except httpx2.RequestError as exc:
             raise self._transport_error(exc, "/view") from exc
-
-    async def _send(self, method: str, path: str, **kwargs: Any) -> httpx2.Response:
-        """One request. A transport failure becomes a ComfyUIError; the caller judges the status."""
-        try:
-            return await self._http.request(method, path, **kwargs)
-        except httpx2.RequestError as exc:
-            raise self._transport_error(exc, path) from exc
-
-    def _transport_error(self, exc: httpx2.RequestError, path: str) -> ComfyUIError:
-        url = f"{self._shown_url}{path}"
-        if isinstance(exc, httpx2.TimeoutException):
-            return ComfyUIError("comfyui_timeout", f"ComfyUI did not answer {url} in time", retryable=True)
-        if isinstance(exc, httpx2.TransportError):
-            return ComfyUIError(
-                "comfyui_unreachable", f"could not reach ComfyUI at {self._shown_url}: {exc}", retryable=True
-            )
-        return ComfyUIError("comfyui_bad_response", f"ComfyUI answered {url} with a body that could not be read: {exc}")
-
-    def _raise_for_status(self, response: httpx2.Response, path: str) -> None:
-        if response.status_code >= 400:
-            raise ComfyUIError(
-                "comfyui_http_error",
-                f"ComfyUI answered {self._shown_url}{path} with HTTP {response.status_code}",
-                retryable=response.status_code >= 500,
-                status=response.status_code,
-            )
-
-    def _json_object(self, response: httpx2.Response, path: str) -> dict[str, Any]:
-        try:
-            data = response.json()
-        except ValueError as exc:
-            raise ComfyUIError(
-                "comfyui_bad_response", f"ComfyUI answered {self._shown_url}{path} with something that is not JSON"
-            ) from exc
-        if not isinstance(data, dict):
-            raise self._bad_shape(path, "an object")
-        return data

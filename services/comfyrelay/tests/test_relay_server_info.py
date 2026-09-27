@@ -42,7 +42,7 @@ async def test_identity_and_profiles():
     assert got["profiles"] == {
         "active": ["read", "run"],
         "available": ["read", "run", "manage", "develop"],
-        "without_tools": ["read"],
+        "without_tools": [],
     }
 
 
@@ -51,7 +51,12 @@ async def test_capabilities():
     assert got["capabilities"]["tools"] == [
         "job_cancel",
         "job_status",
+        "model_list",
+        "node_describe",
+        "node_search",
         "server_info",
+        "template_get",
+        "template_search",
         "workflow_outputs",
         "workflow_run",
         "workflow_upload_input",

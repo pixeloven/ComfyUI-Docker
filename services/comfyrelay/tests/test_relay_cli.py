@@ -69,7 +69,12 @@ def test_probe_passes_against_a_running_server(live_server, monkeypatch):
     assert report["tools"] == [
         "job_cancel",
         "job_status",
+        "model_list",
+        "node_describe",
+        "node_search",
         "server_info",
+        "template_get",
+        "template_search",
         "workflow_outputs",
         "workflow_run",
         "workflow_upload_input",
