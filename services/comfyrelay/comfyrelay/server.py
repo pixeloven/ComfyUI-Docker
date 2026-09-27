@@ -4,14 +4,18 @@ The token check is ASGI middleware around the whole app, so it runs before
 the MCP layer parses anything: no route, and no MCP method, is reachable
 without the token. It accepts `Authorization: Bearer <token>` or
 `X-API-Key: <token>`, the two forms the `mcp` image accepts today, and compares
-in constant time. Anything else gets 401.
+in constant time. Anything else gets 401. Only two ASGI scopes exist here:
+`http`, behind the token, and `lifespan`, which the server itself sends. Every
+other scope, a websocket included, is refused whatever it carries.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import logging
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
@@ -22,20 +26,25 @@ if TYPE_CHECKING:
 
 from . import __version__
 from .comfyui import ComfyUIClient
-from .settings import MCP_PATH, Settings
+from .jobs import SHUTDOWN_WAIT_SECONDS, JobStore
+from .settings import INSTANCE_ID_ENV, MCP_PATH, Settings, redact_url
 from .tools import SERVER_NAME, Relay, register
 
 log = logging.getLogger("comfyrelay")
 
 INSTRUCTIONS = """\
 comfyrelay drives one ComfyUI instance. Call server_info first: it names the instance, its active capability \
-profiles, and the ComfyUI version it serves. Work that outlasts one call returns a job_id; follow it with the job \
-tool. This server installs, updates and restarts nothing. A failed call's text ends in JSON: \
-{"error": {"code", "message", "retryable"}}."""
+profiles, and the ComfyUI version it serves. Work that outlasts one call returns a job_id; follow it with \
+job_status, and stop it with job_cancel. This server installs, updates and restarts nothing. A failed call's text \
+ends in JSON: {"error": {"code", "message", "retryable"}}."""
 
 
 def build_server(settings: Settings, *, comfyui: ComfyUIClient | None = None) -> tuple[MCPServer, Relay]:
-    relay = Relay(settings=settings, comfyui=comfyui or ComfyUIClient(settings.comfyui_url))
+    relay = Relay(
+        settings=settings,
+        comfyui=comfyui or ComfyUIClient(settings.comfyui_url),
+        jobs=JobStore(max_in_flight=settings.max_jobs),
+    )
     server = MCPServer(SERVER_NAME, version=__version__, instructions=INSTRUCTIONS)
     register(server, relay)
     return server, relay
@@ -47,10 +56,19 @@ class TokenAuth:
         self._token = token.encode()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or self._authorized(scope):
+        if scope["type"] == "lifespan" or (scope["type"] == "http" and self._authorized(scope)):
             await self.app(scope, receive, send)
             return
         client = scope.get("client") or ("?", 0)
+        if scope["type"] == "websocket":
+            # Closing before accepting refuses the handshake (HTTP 403).
+            log.warning("refused a websocket to %s from %s: this server has none", scope.get("path"), client[0])
+            await receive()  # websocket.connect
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        if scope["type"] != "http":
+            log.warning("refused an ASGI %r scope: only http is served", scope["type"])
+            return
         log.warning("401 for %s %s from %s: missing or wrong token", scope["method"], scope["path"], client[0])
         body = json.dumps({"error": "unauthorized", "message": "send the server's token as a Bearer token"})
         await send(
@@ -91,9 +109,16 @@ def serve(settings: Settings) -> None:
         settings.instance_id,
         ",".join(settings.profiles),
         ",".join(relay.tools),
-        settings.comfyui_url,
+        redact_url(settings.comfyui_url),
         settings.comfyui_pin or "unknown",
     )
+    if settings.instance_id_source == "hostname":
+        log.warning(
+            "%s is not set, so the instance id is the hostname %r, which can change when the container or pod "
+            "is recreated. Set it to a stable name if a gateway federates this sidecar.",
+            INSTANCE_ID_ENV,
+            settings.instance_id,
+        )
     config = uvicorn.Config(
         http_app(server, settings),
         host=settings.host,
@@ -104,4 +129,66 @@ def serve(settings: Settings) -> None:
         # A stop must not wait on open SSE streams for long.
         timeout_graceful_shutdown=3,
     )
-    uvicorn.Server(config).run()
+    run_until_stopped(
+        RelayServer(config, relay.jobs).serve(),
+        relay.jobs,
+        wait=SHUTDOWN_WAIT_SECONDS,
+        loop_factory=config.get_loop_factory(),
+    )
+
+
+class RelayServer(uvicorn.Server):
+    """uvicorn's server, which also stops the jobs as part of its own shutdown.
+
+    It has to be here. uvicorn catches SIGTERM and SIGINT while it serves; once
+    it has shut down it restores the original handlers and raises the signal
+    again, still inside `serve()`. For SIGTERM the original handler is the
+    default one, so the process dies right there: code after `serve()` never
+    runs on a SIGTERM, which is how a container is stopped. `shutdown()` runs
+    before that.
+    """
+
+    def __init__(self, config: uvicorn.Config, jobs: JobStore) -> None:
+        super().__init__(config)
+        self._jobs = jobs
+
+    async def shutdown(self, sockets: Any = None) -> None:
+        await super().shutdown(sockets)
+        await self._jobs.shutdown(SHUTDOWN_WAIT_SECONDS)
+
+
+def run_until_stopped(
+    main: Coroutine[Any, Any, None],
+    jobs: JobStore,
+    *,
+    wait: float = SHUTDOWN_WAIT_SECONDS,
+    loop_factory: Callable[[], asyncio.AbstractEventLoop] | None = None,
+) -> None:
+    """Run `main` (the server) to completion, then stop every job, with every wait bounded.
+
+    This replaces `asyncio.run`, which uvicorn's `Server.run` uses: its cleanup
+    cancels every remaining task and then waits for all of them WITHOUT a
+    limit, so one job whose producer swallows CancelledError in a loop would
+    keep the process alive until `docker stop` escalates to SIGKILL.
+
+    It covers a plain return and SIGINT, which uvicorn re-raises as
+    KeyboardInterrupt. SIGTERM kills the process inside `main`, so for that
+    RelayServer.shutdown has already stopped the jobs; here that first
+    shutdown's result is reused, with no second wait. Then every other task
+    gets `wait` seconds (jobs that already overran are not waited on again),
+    and the loop closes regardless.
+    """
+    loop = (loop_factory or asyncio.new_event_loop)()
+    try:
+        loop.run_until_complete(main)
+    finally:
+        try:
+            stuck = {j.task for j in loop.run_until_complete(jobs.shutdown(wait))}
+            rest = [t for t in asyncio.all_tasks(loop) if not t.done() and t not in stuck]
+            for task in rest:
+                task.cancel()
+            if rest:
+                loop.run_until_complete(asyncio.wait(rest, timeout=wait))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        finally:
+            loop.close()

@@ -3,13 +3,17 @@ versions, and the corpus placeholder."""
 
 from __future__ import annotations
 
+import logging
+import socket
+
 import httpx2
 import pytest
+import uvicorn
 from comfyrelay import __version__
-from comfyrelay.server import build_server
+from comfyrelay.server import build_server, serve
 from comfyrelay.settings import Settings
 from mcp import Client
-from relay_helpers import comfyui_answering, comfyui_raising, settings
+from relay_helpers import comfyui_answering, comfyui_raising, serve_nothing, settings
 
 pytestmark = pytest.mark.anyio
 
@@ -34,6 +38,7 @@ async def test_identity_and_profiles():
     assert got["name"] == "comfyrelay"
     assert got["version"] == __version__
     assert got["instance_id"] == "pod-7"
+    assert got["instance_id_source"] == "env"
     assert got["profiles"] == {
         "active": ["read", "run"],
         "available": ["read", "run", "manage", "develop"],
@@ -43,9 +48,10 @@ async def test_identity_and_profiles():
 
 async def test_capabilities():
     got = await info()
-    assert got["capabilities"]["tools"] == ["job", "server_info"]
+    assert got["capabilities"]["tools"] == ["job_cancel", "job_status", "server_info"]
     assert got["capabilities"]["consent"] == {"policy": "refuse-all", "client_can_elicit": False}
-    assert got["capabilities"]["jobs"] == {"store": "memory", "max_wait_seconds": 300.0}
+    assert got["capabilities"]["jobs"] == {"store": "memory", "max_wait_seconds": 300.0, "max_in_flight": 16}
+    assert (await info(settings(max_jobs=3)))["capabilities"]["jobs"]["max_in_flight"] == 3
     assert (await info(elicitation=True))["capabilities"]["consent"]["client_can_elicit"] is True
 
 
@@ -91,9 +97,38 @@ def test_instance_id_and_pin_come_from_the_environment(monkeypatch):
         "COMFYUI_VERSION": "v0.37.0",
     }
     s = Settings.load(comfyui_url="http://x", host="0.0.0.0", port=9000, profiles="read", env=env)
-    assert (s.instance_id, s.comfyui_pin) == ("comfy-a", "v0.37.0")
+    assert (s.instance_id, s.instance_id_source, s.comfyui_pin) == ("comfy-a", "env", "v0.37.0")
     s = Settings.load(
         comfyui_url="http://x", host="0.0.0.0", port=9000, profiles="read", env={"COMFYUI_MCP_HTTP_TOKEN": "t"}
     )
-    assert s.instance_id  # the hostname
+    assert s.instance_id == socket.gethostname()
+    assert s.instance_id_source == "hostname"
     assert s.comfyui_pin is None
+
+
+async def test_a_hostname_instance_id_is_reported_as_such():
+    assert (await info(settings(instance_id_source="hostname")))["instance_id_source"] == "hostname"
+
+
+def test_startup_warns_when_the_instance_id_is_the_hostname(monkeypatch, caplog):
+    """A federating gateway needs stable ids; a hostname is not one."""
+    monkeypatch.setattr(uvicorn.Server, "serve", serve_nothing)
+    caplog.set_level(logging.INFO, logger="comfyrelay")
+    serve(settings(instance_id="abc123", instance_id_source="hostname"))
+    assert "COMFYUI_MCP_INSTANCE_ID is not set, so the instance id is the hostname 'abc123'" in caplog.text
+    caplog.clear()
+    serve(settings())
+    assert "COMFYUI_MCP_INSTANCE_ID" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "body",
+    [[], {"system": None}, {"system": "0.37.0"}, {"devices": []}, "0.37.0"],
+    ids=["a-list", "null-system", "string-system", "no-system", "a-string"],
+)
+async def test_a_misshapen_system_stats_is_reported_not_raised(body):
+    got = await info(comfyui=comfyui_answering({"/system_stats": httpx2.Response(200, json=body)}))
+    assert got["comfyui"]["reachable"] is False
+    assert got["comfyui"]["live_version"] is None
+    assert got["comfyui"]["error"]["code"] == "comfyui_bad_response"
+    assert got["comfyui"]["error"]["retryable"] is False

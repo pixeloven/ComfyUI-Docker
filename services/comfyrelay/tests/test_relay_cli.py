@@ -66,7 +66,7 @@ def test_probe_passes_against_a_running_server(live_server, monkeypatch):
         "server_info",
         "comfyui",
     ]
-    assert report["tools"] == ["job", "server_info"]
+    assert report["tools"] == ["job_cancel", "job_status", "server_info"]
     assert report["server_info"]["comfyui"]["live_version"] == "0.37.0"
 
 

@@ -37,6 +37,7 @@ from .settings import (
     TOKEN_ENV,
     ConfigError,
     Settings,
+    check_token,
 )
 
 # The server and the probe import the MCP SDK, so each command imports its own
@@ -49,6 +50,9 @@ app = typer.Typer(
     help=__doc__,
     no_args_is_help=True,
     rich_markup_mode="rich",
+    # A crash must not print local variables: they hold tokens. Set explicitly,
+    # so it holds on any Typer version the dependency floor allows.
+    pretty_exceptions_show_locals=False,
 )
 
 
@@ -123,6 +127,11 @@ def probe(
     if not token:
         typer.echo(f"{TOKEN_ENV} is not set: the probe needs the server's token", err=True)
         raise typer.Exit(2)
+    try:
+        check_token(token)
+    except ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
     from .probe import probe as run_probe
 
     report = asyncio.run(run_probe(url, token, timeout=timeout, require_comfyui=not no_comfyui))
@@ -132,5 +141,5 @@ def probe(
     else:
         for check in report.checks:
             typer.echo(f"{'ok  ' if check.ok else 'FAIL'}  {check.name:<11} {check.detail}")
-        typer.echo(f"probe: {'PASS' if report.ok else 'FAIL'} {url}")
+        typer.echo(f"probe: {'PASS' if report.ok else 'FAIL'} {report.url}")
     raise typer.Exit(0 if report.ok else 1)

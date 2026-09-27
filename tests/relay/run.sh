@@ -23,6 +23,8 @@
 #      401 without the token, initialize, tools/list, server_info, and ComfyUI
 #      reachable. The live and pinned ComfyUI versions are reported; a
 #      mismatch (a pin bump against an older ComfyUI image) is not a failure.
+#      The tools listed are exactly the default profiles' (read,run):
+#      job_cancel, job_status and server_info.
 #   5. `docker stop` ends it within 2 seconds: tini passes SIGTERM on.
 #   6. On any failure, print both containers' logs and exit 1.
 #
@@ -146,6 +148,10 @@ live="$(docker exec -i "$comfy" jq -r '.server_info.comfyui.live_version' < "$ou
 pinned="$(docker exec -i "$comfy" jq -r '.server_info.comfyui.pinned_version' < "$out/probe.json")"
 matches="$(docker exec -i "$comfy" jq -r '.server_info.comfyui.matches_pin' < "$out/probe.json")"
 echo "relay: probe passed; ComfyUI live $live, image pinned $pinned, matches: $matches"
+tools="$(docker exec -i "$comfy" jq -r '.tools | join(",")' < "$out/probe.json")"
+want_tools="job_cancel,job_status,server_info"
+[ "$tools" = "$want_tools" ] || fail "the default profiles list tools $tools, not $want_tools"
+echo "relay: tools $tools"
 
 # 5. SIGTERM, through tini.
 t0="$(date +%s%N)"
