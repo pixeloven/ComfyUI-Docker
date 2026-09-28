@@ -119,7 +119,7 @@ async def test_upload_run_and_fetch_the_outputs(client):
     done = await client.call_tool("job_status", {"job_id": job_id, "timeout_seconds": 60})
     assert done.structured_content["state"] == "succeeded", done.structured_content
     [saved] = done.structured_content["result"]["files"]
-    assert saved["filename"].startswith("relay_live_")
+    assert saved["filename"].startswith("NEGATIVE_CONTROL_")  # throwaway: must turn the relay job red
 
     listed = await client.call_tool("workflow_outputs", {"job_id": job_id, "fetch": saved["filename"]})
     assert not listed.is_error, listed.content[0].text
