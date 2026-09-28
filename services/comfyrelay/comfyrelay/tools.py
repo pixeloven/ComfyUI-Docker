@@ -35,7 +35,7 @@ from .consent import ConsentGate
 from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
 from .tools_introspection import INTROSPECTION_TOOLS
-from .tools_workflow import WORKFLOW_TOOLS
+from .tools_workflow import WORKFLOW_TOOLS, reattach_cancel, reattach_status
 
 log = logging.getLogger("comfyrelay")
 
@@ -159,7 +159,7 @@ class JobView(BaseModel):
     summary: str
     state: Literal["queued", "running", "cancelling", "succeeded", "failed", "cancelled"]
     finished: bool
-    created_at: float
+    created_at: float | None = Field(description="Unix seconds; null only if ComfyUI does not say (source comfyui)")
     started_at: float | None
     finished_at: float | None
     result: Any = None
@@ -168,6 +168,11 @@ class JobView(BaseModel):
         default=None,
         description="What the job reports while it works. A workflow run: prompt_id, comfyui_state (submitting, "
         "queued, running, finished) and, while queued, queue_position (0 is next)",
+    )
+    source: Literal["relay", "comfyui"] = Field(
+        default="relay",
+        description="relay: a job this server holds. comfyui: a workflow run it does not hold (it restarted, or "
+        "dropped the finished job), looked up on ComfyUI by its id, which is the run's prompt_id",
     )
 
 
@@ -187,8 +192,11 @@ def _job_status(relay: Relay) -> Callable[..., Any]:
         Tools that start work lasting longer than one call return a job_id; poll or wait on it here. A wait
         returns when the job finishes or after timeout_seconds (the job keeps running; call again). Keep each
         wait under your own client's tool-call timeout, often about 60s, and wait again rather than longer.
-        To stop a job, use job_cancel.
+        A workflow run's job_id is its ComfyUI prompt_id: if this server no longer holds the job (it restarted),
+        the run is looked up on ComfyUI and reported with source "comfyui". To stop a job, use job_cancel.
         """
+        if relay.jobs.find(job_id) is None:  # not held here: a workflow run is looked up on ComfyUI (#146)
+            return JobView(**await reattach_status(relay.comfyui, job_id, timeout_seconds))
         found = await relay.jobs.wait(job_id, timeout_seconds) if timeout_seconds > 0 else relay.jobs.get(job_id)
         return JobView(**found.snapshot())
 
@@ -200,8 +208,11 @@ def _job_cancel(relay: Relay) -> Callable[..., Any]:
         """Cancel a running job by its id, and report its state. Cancelling a finished job changes nothing.
 
         It waits briefly for the job to stop. A job that is still unwinding reports `cancelling`; follow it with
-        job_status until it reports `cancelled`.
+        job_status until it reports `cancelled`. A workflow run this server no longer holds (it restarted) is
+        not cancelled: that is refused with job_not_owned, since the prompt could be another client's.
         """
+        if relay.jobs.find(job_id) is None:  # not held here: see reattach_cancel (#146)
+            return JobView(**await reattach_cancel(relay, job_id))
         return JobView(**(await relay.jobs.cancel(job_id)).snapshot())
 
     return job_cancel

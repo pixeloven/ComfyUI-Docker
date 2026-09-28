@@ -93,15 +93,21 @@ the `job_*` group are the cross-cutting names.
 - **`job_status`** reads a long-running job by `job_id`, and changes nothing (it's annotated
   read-only). With `timeout_seconds` above 0 it waits up to that long (at most 300) for the job
   to finish; the job keeps running when a wait times out. Keep each wait under your client's
-  own tool-call timeout (often about 60 seconds), and wait again rather than longer.
+  own tool-call timeout (often about 60 seconds), and wait again rather than longer. A workflow
+  run this server no longer holds is looked up on ComfyUI (`source: "comfyui"`; see
+  *Re-attaching after a restart*).
 - **`job_cancel`** stops a job (it's annotated destructive and idempotent). It waits up to 10
   seconds for the job to unwind; a job still unwinding after that reports `cancelling`, and
   `job_status` shows it reach `cancelled`. A cancelled job ends `cancelled`, with no `result`,
   even if its work swallows the cancellation and returns something. Cancelling a finished job
-  changes nothing.
+  changes nothing. An unfinished workflow run this server no longer holds is refused
+  (`job_not_owned`; see *Re-attaching after a restart*).
 
-Jobs live in memory, so they don't survive a restart. At most `COMFYUI_MCP_MAX_JOBS` run at
-once. Workflow runs are the only jobs so far (see *Workflow tools*).
+Jobs live in memory, so they don't survive a restart. A workflow run's `job_id` is its ComfyUI
+`prompt_id`, though, so a restarted relay can still find the run on ComfyUI. At most
+`COMFYUI_MCP_MAX_JOBS` run at once. Workflow runs are the only jobs so far (see *Workflow
+tools*). The IDs the store makes for other jobs are 32 hex digits, which never look like a
+prompt ID (a UUID with hyphens), so the two can't collide.
 
 **The producer contract** (written out in `comfyrelay/jobs.py`). Code that runs as a job must:
 
@@ -259,7 +265,7 @@ returns, is refused with directions to export the API format. The code is
   those errors (`workflow_invalid`). It refuses any graph with a **partner-API node**
   (`partner_api_nodes_refused`, naming the nodes; see below). Otherwise it submits the graph
   to `/prompt`, where ComfyUI checks input types and values, and returns `job_id` and
-  `prompt_id` at once.
+  `prompt_id` at once. They're the same ID, which the relay chooses.
 
   When ComfyUI refuses the graph, `workflow_run` fails at once with `workflow_rejected`. The
   error carries ComfyUI's own error and its per-node errors, also flattened into the same shape
@@ -295,7 +301,8 @@ returns, is refused with directions to export the API format. The code is
   sizes only that file: an image as MCP image content the model can see, audio as audio
   content, anything else as an embedded resource. A larger file is refused
   (`output_too_large`) with its `/view` path, which a person or tool with direct access to
-  ComfyUI can use. Read-only.
+  ComfyUI can use. After a restart it finds the run on ComfyUI by its ID
+  (`source: "comfyui"`). Read-only.
 - **`workflow_upload_input`** puts a file into ComfyUI's input directory through
   `POST /upload/image` (`type=input`) and returns the name ComfyUI stored it under, to put in
   LoadImage's `image` input.
@@ -385,9 +392,42 @@ shutdown, while a cancel is unwinding doesn't interrupt that unwind.
 
 **A stopping relay leaves its runs running** (owner decision on #145). A shutdown cancels
 every job with the reason `shutdown`, and a workflow run then ends at once with `progress.stop`
-set to `left_running`: the prompt carries on in ComfyUI. Re-attaching to it from a restarted
-relay is #146. Until then, its outputs are in ComfyUI's output directory and `/history`, not
-in any job.
+set to `left_running`: the prompt carries on in ComfyUI, and a restarted relay re-attaches to
+it.
+
+**Re-attaching after a restart** (#146). ComfyUI is the source of truth for a run. A run's
+`job_id` is the `prompt_id` the relay chose when it submitted it, so when `job_status`,
+`workflow_outputs` or `job_cancel` get an ID this server doesn't hold (it restarted, or dropped
+the finished job), the run is looked up with ComfyUI's `GET /api/jobs/<id>`. Nothing about it is
+kept in the relay. ComfyUI's status maps to the states a held run reports: `pending` and
+`in_progress` are `running` (with `progress.comfyui_state` `queued`, and its `queue_position`,
+or `running`), and `completed`, `failed` and `cancelled` are `succeeded`, `failed` and
+`cancelled`. The result or error comes from the same mapping as a held run's, so a
+`workflow_execution_failed` error names the node the same way, and the view says
+`source: "comfyui"`. `job_status` with `timeout_seconds` waits by polling ComfyUI twice a
+second. `created_at`, `started_at` and `finished_at` are ComfyUI's times; `summary` is generic,
+because the graph isn't read back.
+
+Limits, all ComfyUI's:
+- A prompt cancelled before it ran leaves no record, so it's `unknown_job`, like any ID
+  ComfyUI doesn't know. So is every prompt after ComfyUI itself restarts, since it keeps its
+  history in memory.
+- Who cancelled an interrupted run isn't recorded: it's `cancelled`, with no error.
+
+**Cancelling is refused** (`job_not_owned`) for an unfinished run this server doesn't hold.
+After a restart the relay doesn't know which prompts it submitted, and cancelling by ID alone
+would let an agent stop another client's prompt. A finished one has nothing to cancel, so
+`job_cancel` just reports it.
+
+**Privacy.** `job_status` and `workflow_outputs` read any prompt on the ComfyUI by its ID,
+including another client's: its status, its error, and its output files. That's by design and
+bounded. The ID has to be known already: prompt IDs are random UUIDs (the relay's own, and the
+ones ComfyUI mints for other clients), so they can't be guessed, and no relay tool lists
+ComfyUI's queue or history. The relay is token-gated with one principal (see *Job access is
+per token*), so this adds no reader who couldn't already follow the relay's own runs. What
+comes back is mapped: the graph and its `extra_data` aren't returned. A deployment that must
+keep other clients' runs from the relay's agents entirely should give the relay its own
+ComfyUI.
 
 ## Consent
 

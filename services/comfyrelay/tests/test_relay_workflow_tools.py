@@ -7,6 +7,7 @@ import asyncio
 import base64
 import json
 import logging
+import uuid
 
 import comfyrelay.tools_workflow as tw
 import httpx2
@@ -104,11 +105,30 @@ class FakeComfyUI:
         self.running.append(item)
 
     def finish(self, prompt_id: str, status: str = "success", messages: list | None = None, outputs=None) -> None:
+        item = next((i for i in (*self.running, *self.pending) if i[1] == prompt_id), [0, prompt_id, {}, {}, []])
         for queue in (self.running, self.pending):
             queue[:] = [i for i in queue if i[1] != prompt_id]
         self.history[prompt_id] = {
+            "prompt": item[:5],
             "outputs": self.outputs if outputs is None else outputs,
             "status": {"status_str": status, "completed": status == "success", "messages": messages or []},
+        }
+
+    def job(self, prompt_id: str, status: str) -> dict:
+        """GET /api/jobs/<id>'s answer (v0.37.0 get_job): small while live, the full entry once it has ended."""
+        if status in ("pending", "in_progress"):
+            item = next(i for i in (*self.running, *self.pending) if i[1] == prompt_id)
+            return {"id": prompt_id, "status": status, "create_time": item[3].get("create_time")}
+        entry = self.history[prompt_id]
+        return {
+            "id": prompt_id,
+            "status": status,
+            "create_time": entry["prompt"][3].get("create_time"),
+            "execution_start_time": 1_790_000_001_000,
+            "execution_end_time": 1_790_000_002_000,
+            "outputs": entry["outputs"],
+            "execution_status": entry["status"],
+            "workflow": {"prompt": entry["prompt"][2], "extra_data": entry["prompt"][3]},
         }
 
     def _advance(self) -> None:
@@ -152,7 +172,9 @@ class FakeComfyUI:
                 return httpx2.Response(400, json=self.reject)
             self.number += 1
             prompt_id = f"minted-{self.number}" if self.mint_ids else body["prompt_id"]
-            self.pending.append([self.number, prompt_id, body["prompt"], {}, []])
+            extra_data = {"client_id": body["client_id"]} if "client_id" in body else {}
+            extra_data["create_time"] = 1_790_000_000_000 + self.number
+            self.pending.append([self.number, prompt_id, body["prompt"], extra_data, []])
             return httpx2.Response(
                 200,
                 json={"prompt_id": prompt_id, "number": self.number, "node_errors": self.accepted_node_errors},
@@ -181,7 +203,7 @@ class FakeComfyUI:
             self.job_polls += 1
             if status is None or self.job_polls in self.absent_polls:
                 return httpx2.Response(404, json={"error": "Job not found"})
-            return httpx2.Response(200, json={"id": prompt_id, "status": status})
+            return httpx2.Response(200, json=self.job(prompt_id, status))
         if (method, path) == ("GET", "/queue"):
             self._advance()
             return httpx2.Response(200, json={"queue_running": self.running, "queue_pending": self.pending})
@@ -1188,3 +1210,149 @@ async def test_an_unconfirmed_stop_catches_up_with_how_the_prompt_ended():
     await asyncio.sleep(tw.SETTLE_SECONDS * 2 + 0.2)
     assert (progress["stop"], progress["comfyui_state"]) == ("already_finished", "finished")
     assert "stop_detail" not in progress
+
+
+# -- re-attach after a restart (#146) ------------------------------------------------------------------------------
+
+
+async def run_and_restart(fake: FakeComfyUI, *, wait: bool = False) -> tuple[dict, dict | None, object]:
+    """workflow_run on one relay, which then stops the way SIGTERM stops it (its prompt is left running on ComfyUI),
+    and a fresh relay on the same ComfyUI. Returns the run as started, the first relay's own final view of the job
+    (with `wait`), and the restarted server."""
+    server, relay = serve(fake)
+    held = None
+    async with Client(server, mode="legacy") as client:
+        started = (await client.call_tool("workflow_run", {"workflow": t1()})).structured_content
+        if wait:
+            held = (
+                await client.call_tool("job_status", {"job_id": started["job_id"], "timeout_seconds": 5})
+            ).structured_content
+    await relay.jobs.shutdown()
+    restarted, _ = serve(fake)
+    return started, held, restarted
+
+
+async def test_a_runs_job_id_is_its_prompt_id_and_other_ids_cannot_collide():
+    fake = FakeComfyUI()
+    server, relay = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        started = (await client.call_tool("workflow_run", {"workflow": t1()})).structured_content
+    other = relay.jobs.submit("test.other", lambda: asyncio.sleep(0))
+    assert started["job_id"] == started["prompt_id"] == str(uuid.UUID(started["job_id"]))  # canonical, hyphenated
+    assert len(other.id) == 32 and "-" not in other.id  # what the store mints never looks like a prompt id
+    await relay.jobs.shutdown()
+
+
+async def test_a_held_run_takes_the_in_memory_path_and_asks_comfyui_nothing():
+    fake = FakeComfyUI()
+    server, _ = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        job_id = await finished_job(client)
+        polls = fake.count("GET", "/api/jobs/")
+        view = (await client.call_tool("job_status", {"job_id": job_id})).structured_content
+    assert fake.count("GET", "/api/jobs/") == polls
+    assert (view["source"], view["state"]) == ("relay", "succeeded")
+    assert view["summary"].startswith("workflow run: 4 nodes")
+
+
+async def test_a_restarted_relay_follows_a_run_on_comfyui_by_its_job_id():
+    fake = FakeComfyUI(auto="hold")
+    fake.pending.append([0, "someone-elses", {}, {}, []])
+    started, _, restarted = await run_and_restart(fake)
+    prompt_id = started["prompt_id"]
+    async with Client(restarted, mode="legacy") as client:
+        queued = (await client.call_tool("job_status", {"job_id": started["job_id"]})).structured_content
+        fake.start(prompt_id)
+        running = (await client.call_tool("job_status", {"job_id": started["job_id"]})).structured_content
+        asyncio.get_running_loop().call_later(0.1, fake.finish, prompt_id)
+        done = (
+            await client.call_tool("job_status", {"job_id": started["job_id"], "timeout_seconds": 5})
+        ).structured_content
+    assert (queued["source"], queued["job_id"], queued["kind"]) == ("comfyui", prompt_id, "workflow.run")
+    assert (queued["state"], queued["finished"]) == ("running", False)  # live, as a held run reports it
+    assert queued["progress"] == {"prompt_id": prompt_id, "comfyui_state": "queued", "queue_position": 1}
+    assert queued["created_at"] == 1_790_000_000.001
+    assert running["progress"] == {"prompt_id": prompt_id, "comfyui_state": "running"}
+    assert (done["state"], done["finished"], done["source"]) == ("succeeded", True, "comfyui")
+    assert done["result"] == {
+        "prompt_id": prompt_id,
+        "status": "success",
+        "files": [{"node_id": "4", "filename": "t1__00001_.png", "subfolder": "", "type": "output"}],
+    }
+    assert (done["started_at"], done["finished_at"]) == (1_790_000_001.0, 1_790_000_002.0)
+
+
+@pytest.mark.parametrize("auto", ["success", "error"])
+async def test_a_reattached_run_ends_as_the_held_one_did(auto):
+    """The same finish() maps both: what a restarted relay reports is what the first one did."""
+    fake = FakeComfyUI(auto=auto)
+    started, held, restarted = await run_and_restart(fake, wait=True)
+    async with Client(restarted, mode="legacy") as client:
+        found = (await client.call_tool("job_status", {"job_id": started["job_id"]})).structured_content
+    assert held["source"] == "relay" and found["source"] == "comfyui"
+    assert (found["state"], found["result"], found["error"]) == (held["state"], held["result"], held["error"])
+    assert found["state"] == ("succeeded" if auto == "success" else "failed")
+
+
+async def test_a_reattached_run_that_was_interrupted_is_cancelled():
+    fake = FakeComfyUI(auto="hold")
+    started, _, restarted = await run_and_restart(fake)
+    fake.start(started["prompt_id"])
+    fake.finish(started["prompt_id"], "error", [["execution_interrupted", {"node_id": "3", "node_type": "X"}]])
+    async with Client(restarted, mode="legacy") as client:
+        found = (await client.call_tool("job_status", {"job_id": started["job_id"]})).structured_content
+    assert (found["state"], found["finished"], found["result"], found["error"]) == ("cancelled", True, None, None)
+
+
+async def test_outputs_after_a_restart_are_listed_and_fetched_from_comfyui():
+    fake = FakeComfyUI()
+    started, _, restarted = await run_and_restart(fake, wait=True)
+    async with Client(restarted, mode="legacy") as client:
+        listed = (await client.call_tool("workflow_outputs", {"job_id": started["job_id"]})).structured_content
+        fetched = await client.call_tool("workflow_outputs", {"job_id": started["job_id"], "fetch": "t1__00001_.png"})
+    assert (listed["source"], listed["job_state"]) == ("comfyui", "succeeded")
+    assert listed["prompt_id"] == started["prompt_id"]
+    assert [(f["filename"], f["size_bytes"]) for f in listed["files"]] == [("t1__00001_.png", len(PNG))]
+    assert fetched.content[1].type == "image" and base64.b64decode(fetched.content[1].data) == PNG
+
+
+async def test_outputs_of_an_unfinished_reattached_run_says_to_wait():
+    fake = FakeComfyUI(auto="hold")
+    started, _, restarted = await run_and_restart(fake)
+    async with Client(restarted, mode="legacy") as client:
+        error = error_of(await client.call_tool("workflow_outputs", {"job_id": started["job_id"]}))
+    assert (error["code"], error["retryable"], error["state"]) == ("job_not_finished", True, "running")
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [("job_status", {}), ("job_status", {"timeout_seconds": 1}), ("workflow_outputs", {}), ("job_cancel", {})],
+)
+async def test_an_id_neither_held_nor_on_comfyui_is_unknown_job(tool, args):
+    fake = FakeComfyUI()
+    server, _ = serve(fake)
+    missing = str(uuid.uuid4())
+    async with Client(server, mode="legacy") as client:
+        error = error_of(await client.call_tool(tool, {"job_id": missing, **args}))
+    assert (error["code"], error["retryable"], error["job_id"]) == ("unknown_job", False, missing)
+    assert "ComfyUI has no prompt by that id" in error["message"]
+    assert fake.count("GET", f"/api/jobs/{missing}") == 1
+
+
+async def test_cancel_of_a_reattached_run_is_refused_and_touches_nothing():
+    fake = FakeComfyUI(auto="hold")
+    started, _, restarted = await run_and_restart(fake)
+    async with Client(restarted, mode="legacy") as client:
+        error = error_of(await client.call_tool("job_cancel", {"job_id": started["job_id"]}))
+    assert (error["code"], error["retryable"], error["comfyui_status"]) == ("job_not_owned", False, "pending")
+    assert fake.count("POST", "/api/jobs/") == 0 and fake.posted("/queue") == [] and fake.posted("/interrupt") == []
+    assert [i[1] for i in fake.pending] == [started["prompt_id"]]
+
+
+async def test_cancel_of_a_finished_reattached_run_reports_it_and_sends_nothing():
+    fake = FakeComfyUI()
+    started, held, restarted = await run_and_restart(fake, wait=True)
+    async with Client(restarted, mode="legacy") as client:
+        found = (await client.call_tool("job_cancel", {"job_id": started["job_id"]})).structured_content
+    assert (found["state"], found["source"], found["result"]) == ("succeeded", "comfyui", held["result"])
+    assert fake.count("POST", "/api/jobs/") == 0
