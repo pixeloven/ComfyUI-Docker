@@ -173,13 +173,22 @@ class ComfyUIClient:
     # the calls it makes then together at 2.5s.
     CANCEL_TIMEOUT = httpx2.Timeout(1.0)
 
-    async def queue_prompt(self, graph: dict[str, Any], prompt_id: str) -> dict[str, Any]:
-        """POST /prompt with our own prompt_id. Returns ComfyUI's answer: prompt_id, number, node_errors.
+    async def queue_prompt(self, graph: dict[str, Any], prompt_id: str, client_id: str | None = None) -> dict[str, Any]:
+        """POST /prompt with our own prompt_id, and `client_id` when given. Returns ComfyUI's answer: prompt_id,
+        number, node_errors.
+
+        ComfyUI keeps `client_id` in the prompt's extra_data, which /queue and
+        (once it has finished) /api/jobs/<id> and /history show: how a relay
+        recognises its own prompt after a restart (tools_workflow.py). Never
+        extra_data itself, which is how ComfyUI hands credentials to nodes.
 
         A 400 is ComfyUI refusing the graph: `workflow_rejected`, carrying
         ComfyUI's own error and its per-node errors.
         """
-        response = await self._send("POST", "/prompt", json={"prompt": graph, "prompt_id": prompt_id})
+        body: dict[str, Any] = {"prompt": graph, "prompt_id": prompt_id}
+        if client_id is not None:
+            body["client_id"] = client_id
+        response = await self._send("POST", "/prompt", json=body)
         if response.status_code == 400:
             body = self._json_object(response, "/prompt")
             error = body.get("error")

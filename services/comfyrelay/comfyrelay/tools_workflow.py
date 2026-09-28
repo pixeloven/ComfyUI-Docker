@@ -319,7 +319,7 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
         outputs = ", ".join(f"{n} ({workflow[n]['class_type']})" for n in report.output_nodes)
         job = relay.jobs.submit(
             RUN_KIND,
-            lambda: run_prompt(relay.comfyui, workflow, progress, submitted),
+            lambda: run_prompt(relay.comfyui, workflow, progress, submitted, client_id=relay_client_id(relay)),
             summary=f"workflow run: {report.node_count} nodes, outputs {outputs}",
             job_id=prompt_id,  # a restarted relay finds the run on ComfyUI by this id (#146)
         )
@@ -375,14 +375,17 @@ async def run_prompt(
     graph: dict[str, Any],
     progress: dict[str, Any],
     submitted: asyncio.Future[dict[str, Any]] | None = None,
+    *,
+    client_id: str | None = None,
 ) -> dict[str, Any]:
-    """The producer: submit `graph` as progress["prompt_id"], follow it to the end, and return its outputs.
+    """The producer: submit `graph` as progress["prompt_id"], with `client_id` (relay_client_id) when given, follow
+    it to the end, and return its outputs.
 
     The submission runs as its own task and is awaited through a shield: a
     cancel must not cut the POST short, because ComfyUI goes on queueing a
     prompt whose client hung up, and a stop sent first would miss it.
     """
-    post = _keep(asyncio.ensure_future(comfyui.queue_prompt(graph, progress["prompt_id"])))
+    post = _keep(asyncio.ensure_future(comfyui.queue_prompt(graph, progress["prompt_id"], client_id)))
     post.add_done_callback(lambda f: f.cancelled() or f.exception())
     try:
         answer = await asyncio.shield(post)
@@ -803,20 +806,59 @@ async def reattach_status(comfyui: ComfyUIClient, prompt_id: str, timeout: float
     return await reattached(comfyui, prompt_id, job)
 
 
+def relay_client_id(relay: Relay) -> str:
+    """The client_id this relay sends with every /prompt: "comfyrelay:" and its instance id (COMFYUI_MCP_INSTANCE_ID,
+    or the hostname). ComfyUI keeps it with the prompt, so after a restart the relay can tell its own prompts from
+    other clients'. It carries no credential, and ComfyUI uses it only to address websocket events, which go to no
+    one since no socket has that id."""
+    return f"comfyrelay:{relay.settings.instance_id}"
+
+
+async def submitted_by(comfyui: ComfyUIClient, prompt_id: str, job: dict[str, Any]) -> str | None:
+    """The client_id ComfyUI keeps with a prompt (in its extra_data), or None if it has none. GET /api/jobs/<id>
+    carries extra_data once the prompt has ended; while it waits or runs only /queue does."""
+    for _ in range(2):
+        workflow = job.get("workflow")
+        if isinstance(workflow, dict):
+            extra = workflow.get("extra_data")
+            return extra.get("client_id") if isinstance(extra, dict) else None
+        queue = await comfyui.queue()
+        for item in (*queue["queue_running"], *queue["queue_pending"]):
+            if isinstance(item, list) and len(item) > 3 and item[1] == prompt_id:
+                return item[3].get("client_id") if isinstance(item[3], dict) else None
+        job = await comfyui_job(comfyui, prompt_id)  # it left the queue between the two reads
+    return None
+
+
 async def reattach_cancel(relay: Relay, prompt_id: str) -> dict[str, Any]:
     """job_cancel for an id this server does not hold. A finished run has nothing to cancel and is reported as it
-    ended. An unfinished one is refused: this server cannot tell whether it submitted the prompt, and cancelling by
-    id alone would let an agent stop another client's prompt."""
-    job = await comfyui_job(relay.comfyui, prompt_id)
+    ended. An unfinished one is cancelled only if ComfyUI records this relay's client_id with it; any other prompt
+    is refused, since cancelling by id alone would let an agent stop another client's work. The stop is the one a
+    held run's cancel makes (stop_prompt), within the same budget, and progress.stop says how it went."""
+    comfyui = relay.comfyui
+    job = await comfyui_job(comfyui, prompt_id)
     if job["status"] in FINISHED_STATUSES:
-        return await reattached(relay.comfyui, prompt_id, job)
-    raise RelayError(
-        "job_not_owned",
-        f"refused: this server does not hold job {prompt_id}, so it cannot tell whether it submitted that prompt, "
-        "and cancelling it could stop another client's work. job_status and workflow_outputs still follow it",
-        job_id=prompt_id,
-        comfyui_status=job["status"],
-    )
+        return await reattached(comfyui, prompt_id, job)
+    mine = relay_client_id(relay)
+    if await submitted_by(comfyui, prompt_id, job) != mine:
+        raise RelayError(
+            "job_not_owned",
+            f"refused: this server does not hold job {prompt_id}, and ComfyUI does not record the prompt as "
+            f"submitted by this relay (client_id {mine!r}), so it may be another client's, whose work this server "
+            "never cancels. A relay whose COMFYUI_MCP_INSTANCE_ID changed across its restart (it defaults to the "
+            "hostname) cannot prove its own prompts either. job_status and workflow_outputs still follow it",
+            job_id=prompt_id,
+            comfyui_status=job["status"],
+        )
+    loop = asyncio.get_running_loop()
+    post, progress = loop.create_future(), {"prompt_id": prompt_id}
+    post.set_result({"prompt_id": prompt_id})  # submitted long ago: stop_prompt goes straight to the cancel
+    await stop_prompt(comfyui, progress, post, loop.time() + STOP_BUDGET_SECONDS)
+    after = await comfyui.job(prompt_id)
+    # A prompt dequeued before it ran leaves no record on ComfyUI.
+    view = await reattached(comfyui, prompt_id, after or {"status": "cancelled", "create_time": job.get("create_time")})
+    view["progress"].update({k: progress[k] for k in ("stop", "stop_detail") if k in progress})
+    return view
 
 
 # -- workflow_outputs ---------------------------------------------------------

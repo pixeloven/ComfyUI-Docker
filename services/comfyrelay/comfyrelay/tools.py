@@ -209,9 +209,10 @@ def _job_cancel(relay: Relay) -> Callable[..., Any]:
 
         It waits briefly for the job to stop. A job that is still unwinding reports `cancelling`; follow it with
         job_status until it reports `cancelled`. A workflow run this server no longer holds (it restarted) is
-        not cancelled: that is refused with job_not_owned, since the prompt could be another client's.
+        cancelled only if ComfyUI records that this relay submitted it; any other prompt is refused with
+        job_not_owned, since it could be another client's.
         """
-        if relay.jobs.find(job_id) is None:  # not held here: see reattach_cancel (#146)
+        if relay.jobs.find(job_id) is None:  # not held here: only a prompt ComfyUI says is ours (#146)
             return JobView(**await reattach_cancel(relay, job_id))
         return JobView(**(await relay.jobs.cancel(job_id)).snapshot())
 
