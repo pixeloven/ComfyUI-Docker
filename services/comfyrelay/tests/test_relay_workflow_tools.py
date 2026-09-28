@@ -73,6 +73,7 @@ class FakeComfyUI:
         self.stubborn = False
         self.lost_interrupts = 0  # interrupts ComfyUI drops: one landing as a prompt starts is cleared by it
         self.finish_on_cancel = False  # a running prompt completes before the interrupt reaches a node boundary
+        self.before_cancel = None  # called with the prompt id as a cancel reaches ComfyUI: it gets there first
         self.fail_once: set[str] = set()  # paths whose next request fails with a reset connection
         self.fail_status: dict[str, int] = {}  # paths answered with this HTTP status, for as long as they are set
         self.mint_ids = False  # answer /prompt with an id of ComfyUI's own, as older ComfyUIs do
@@ -154,6 +155,8 @@ class FakeComfyUI:
             return httpx2.Response(404, text="404: Not Found", headers={"content-type": "application/octet-stream"})
         if method == "POST" and path.startswith("/api/jobs/") and path.endswith("/cancel"):
             prompt_id = path.split("/")[3]
+            if self.before_cancel is not None and self._status(prompt_id) in ("pending", "in_progress"):
+                self.before_cancel(prompt_id)
             status = self._status(prompt_id)
             if status == "pending":
                 self.pending[:] = [i for i in self.pending if i[1] != prompt_id]
@@ -957,7 +960,8 @@ async def test_a_cancel_after_the_prompt_succeeded_keeps_its_result():
     """R1: ComfyUI finished it before the cancel. Say so, and keep what it produced."""
     fake = FakeComfyUI(auto="hold")
     progress = {"prompt_id": "p"}
-    store, job = await run_job(fake, progress, then=lambda: fake.finish("p"))
+    fake.before_cancel = fake.finish  # it completes just before the cancel reaches ComfyUI
+    store, job = await run_job(fake, progress)
     await store.cancel(job.id)
     assert fake.count("POST", "/api/jobs/p/cancel") == 1
     assert job.state.value == "succeeded" and job.cancel_reason == "cancel"
@@ -982,8 +986,8 @@ async def test_a_prompt_that_completes_before_the_interrupt_lands_is_already_fin
 async def test_a_cancel_after_the_prompt_failed_reports_its_failure():
     fake = FakeComfyUI(auto="hold")
     progress = {"prompt_id": "p"}
-    failed = lambda: fake.finish("p", "error", [["execution_error", RUNTIME_ERROR]], outputs={})  # noqa: E731
-    store, job = await run_job(fake, progress, then=failed)
+    fake.before_cancel = lambda p: fake.finish(p, "error", [["execution_error", RUNTIME_ERROR]], outputs={})
+    store, job = await run_job(fake, progress)
     await store.cancel(job.id)
     assert job.state.value == "failed" and job.error["code"] == "workflow_execution_failed"
     assert progress["stop"] == "already_finished"
@@ -994,7 +998,7 @@ async def test_job_cancel_of_a_finished_prompt_says_so_and_outputs_still_work():
     server, _ = serve(fake)
     async with Client(server, mode="legacy") as client:
         started = (await client.call_tool("workflow_run", {"workflow": t1()})).structured_content
-        fake.finish(started["prompt_id"])  # ComfyUI finished it before the relay polled again
+        fake.before_cancel = fake.finish  # it completes just before the cancel reaches ComfyUI
         cancelled = (await client.call_tool("job_cancel", {"job_id": started["job_id"]})).structured_content
         outputs = await client.call_tool("workflow_outputs", {"job_id": started["job_id"]})
     assert cancelled["state"] == "succeeded" and cancelled["result"]["status"] == "success"
