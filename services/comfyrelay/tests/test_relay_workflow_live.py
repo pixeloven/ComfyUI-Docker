@@ -391,3 +391,111 @@ async def test_a_cancel_racing_a_tiny_prompt_reports_what_comfyui_did(client):
             assert comfy in (None, "cancelled"), seen
             assert (job["state"], job["progress"]["stop"]) == ("cancelled", "confirmed"), seen
     print("delay, ComfyUI, job, stop:", seen)
+
+
+def serve_relay(port: int, instance_id: str, log):
+    """`comfyctl relay serve` as its own process, pointed at the live ComfyUI, logging to `log`."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    env = {
+        **os.environ,
+        "COMFYUI_MCP_HTTP_TOKEN": TOKEN,
+        "COMFYUI_URL": URL,
+        "MCP_HOST": "127.0.0.1",
+        "MCP_PORT": str(port),
+        "COMFYUI_MCP_INSTANCE_ID": instance_id,
+    }
+    command = [str(Path(sys.executable).parent / "comfyctl"), "relay", "serve"]
+    return subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT)
+
+
+async def call(mcp, tool: str, args: dict) -> dict:
+    result = await mcp.call_tool(tool, args)
+    text = result.content[0].text
+    return json.loads(text[text.index("{") :])["error"] if result.is_error else result.structured_content
+
+
+async def test_a_restarted_relay_reattaches_to_its_run(tmp_path):
+    """#146 on ComfyUI itself: start a run through `comfyctl relay serve`, SIGTERM that relay, start a new one with
+    the same instance id, and follow the same job_id there: running, then finished with its files. Across the
+    restart, job_cancel stops the relay's own queued run and refuses another client's."""
+    import contextlib
+    import signal
+
+    from mcp.client.streamable_http import streamable_http_client
+
+    @contextlib.asynccontextmanager
+    async def session(port: int):
+        url = f"http://127.0.0.1:{port}/mcp"
+        async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {TOKEN}"}, timeout=90) as http:
+            for _ in range(100):
+                try:
+                    await http.get(url)
+                    break
+                except httpx2.TransportError:
+                    await asyncio.sleep(0.1)
+            async with Client(streamable_http_client(url, http_client=http), mode="legacy") as mcp:
+                yield mcp
+
+    instance = f"reattach-{random.randrange(1 << 32):08x}"
+    graph = slow_graph(nodes=30)  # about 15s on a CPU
+    graph["9"] = {
+        "class_type": "SaveImage",
+        "inputs": {"images": graph["9"]["inputs"]["images"], "filename_prefix": "relay_reattach_"},
+    }
+    relays, prompts = [], []
+    try:
+        port = free_port()
+        relays.append(serve_relay(port, instance, (tmp_path / "first.log").open("wb")))
+        async with session(port) as mcp:
+            run = await call(mcp, "workflow_run", {"workflow": graph})
+            spare = await call(mcp, "workflow_run", {"workflow": slow_graph()})  # queued behind it
+        prompts += [run["prompt_id"], spare["prompt_id"]]
+        assert run["job_id"] == run["prompt_id"]
+
+        async def running():
+            return (await comfyui_state(run["prompt_id"]))[0] == "running"
+
+        await wait_for(running)
+        relays[0].send_signal(signal.SIGTERM)
+        relays[0].wait(timeout=10)
+        log = (tmp_path / "first.log").read_text(errors="replace")
+        assert f"prompt {run['prompt_id']} is left running on ComfyUI" in log, log[-2000:]
+
+        async with httpx2.AsyncClient(base_url=URL, timeout=10) as http:  # another client, straight to ComfyUI
+            theirs = (await http.post("/prompt", json={"prompt": slow_graph()})).json()["prompt_id"]
+        prompts.append(theirs)
+
+        port = free_port()
+        relays.append(serve_relay(port, instance, (tmp_path / "second.log").open("wb")))
+        async with session(port) as mcp:
+            status = await call(mcp, "job_status", {"job_id": run["job_id"]})
+            assert (status["source"], status["state"], status["finished"]) == ("comfyui", "running", False), status
+            assert status["progress"]["comfyui_state"] == "running"
+
+            refused = await call(mcp, "job_cancel", {"job_id": theirs})
+            assert refused["code"] == "job_not_owned", refused
+            assert (await comfyui_state(theirs))[0] == "pending"
+
+            cancelled = await call(mcp, "job_cancel", {"job_id": spare["job_id"]})
+            assert (cancelled["state"], cancelled["progress"]["stop"]) == ("cancelled", "confirmed"), cancelled
+            assert await comfyui_state(spare["prompt_id"]) == ("absent", None)  # dequeued, never ran
+
+            done = await call(mcp, "job_status", {"job_id": run["job_id"], "timeout_seconds": 60})
+            assert (done["source"], done["state"]) == ("comfyui", "succeeded"), done
+            [saved] = done["result"]["files"]
+            assert saved["filename"].startswith("relay_reattach_") and saved["type"] == "output"
+
+            outputs = await call(mcp, "workflow_outputs", {"job_id": run["job_id"]})
+            assert (outputs["source"], outputs["job_state"]) == ("comfyui", "succeeded"), outputs
+            [listed] = outputs["files"]
+            assert listed["filename"] == saved["filename"] and listed["size_bytes"] > 0
+        print("re-attached:", {"job_id": run["job_id"], "running": status["progress"], "done": done["result"]})
+    finally:
+        for relay in relays:
+            if relay.poll() is None:
+                relay.kill()
+        for prompt_id in prompts:
+            await comfyui_cancel(prompt_id)
