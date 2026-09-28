@@ -35,6 +35,7 @@ from .consent import ConsentGate
 from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
 from .tools_introspection import INTROSPECTION_TOOLS
+from .tools_workflow import WORKFLOW_TOOLS
 
 log = logging.getLogger("comfyrelay")
 
@@ -163,6 +164,11 @@ class JobView(BaseModel):
     finished_at: float | None
     result: Any = None
     error: dict[str, Any] | None = None
+    progress: dict[str, Any] | None = Field(
+        default=None,
+        description="What the job reports while it works. A workflow run: prompt_id, comfyui_state (submitting, "
+        "queued, running, finished) and, while queued, queue_position (0 is next)",
+    )
 
 
 def _job_status(relay: Relay) -> Callable[..., Any]:
@@ -221,8 +227,10 @@ TOOLS: tuple[ToolSpec, ...] = (
         ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False),
     ),
 )
-# The read profile's introspection tools (#133) live in tools_introspection.py.
-TOOLS += tuple(ToolSpec(*spec) for spec in INTROSPECTION_TOOLS)
+# The read profile's introspection tools (#133) and the run profile's workflow
+# tools (#132) live in their own modules, each as (name, profiles, make,
+# annotations) entries.
+TOOLS += tuple(ToolSpec(*spec) for spec in (*INTROSPECTION_TOOLS, *WORKFLOW_TOOLS))
 
 
 def profiles_without_tools(active: tuple[str, ...], specs: tuple[ToolSpec, ...] = TOOLS) -> list[str]:

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "comfyrelay": {
+      "type": "http",
+      "url": "http://127.0.0.1:${COMFYRELAY_PORT:-9200}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${COMFYRELAY_MCP_TOKEN}"
+      }
+    }
+  }
+}

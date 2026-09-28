@@ -9,6 +9,7 @@ Each server runs in the best reasonable configuration, the owner's call on #102.
 | [Comfy-Org/comfy-mcp](https://github.com/Comfy-Org/comfy-mcp) | stdio, `uv run` with `comfy-mcp==0.10.0`, `comfy-cli==1.21.0` and `mcp==2.0.0`, so real errors come through (finding 2) | `servers/comfy-mcp.json` |
 | [artokun/comfyui-mcp](https://github.com/artokun/comfyui-mcp) | streamable HTTP on `127.0.0.1:9100/mcp`, `npx comfyui-mcp@0.52.203`, full tool surface. The bearer token stays required, and auto-update and panel auto-install stay off. | `servers/artokun.json` and `artokun.sh` |
 | [joenorton/comfyui-mcp-server](https://github.com/joenorton/comfyui-mcp-server) | streamable HTTP on `:9000/mcp`, from `ghcr.io/pixeloven/comfyui/mcp:2.4.1`, pinned by digest | `servers/joenorton.json` and `joenorton.sh` |
+| comfyrelay, this repo's own ([#103](https://github.com/pixeloven/ComfyUI-Docker/issues/103)) | streamable HTTP on `127.0.0.1:9200/mcp` with a bearer token, from a local image (`COMFYRELAY_IMAGE`, default `comfyrelay:latest`, built from the checkout by `docker buildx bake comfyrelay --load`), run read-only as UID 12345. Not in `run-all.sh`, which is the Phase 1 evaluation. | `servers/comfyrelay.json` and `comfyrelay.sh` |
 
 Nothing is installed globally. uv, npm and comfy-cli keep their caches, `HOME` and config under the scratch directory.
 

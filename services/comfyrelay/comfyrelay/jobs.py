@@ -16,6 +16,19 @@ cancelling a job cancels that task. A producer MUST:
    `job_cancel` waits longer (CANCEL_WAIT_SECONDS, 10s) before it reports
    `cancelling` and logs an overrun, as a margin for a slow ComfyUI, but a
    producer that needs that margin is cut off when the server stops.
+   A cancel is delivered once. A second `job_cancel`, or a shutdown that
+   comes while a job is already unwinding, waits for that unwind; it does
+   not cancel the task again, so it cannot cut a producer's cleanup short.
+   A producer can read why it was cancelled from `current_job().cancel_reason`:
+   "cancel" (job_cancel) or "shutdown" (the server is stopping). At shutdown
+   a producer may leave its outside work running instead of undoing it; a
+   workflow run does, so its prompt carries on in ComfyUI for a restarted
+   relay to find (#146). It still re-raises within the 3s.
+   One exception to re-raising: a producer that finds its work had already
+   finished before the cancel could take effect (a ComfyUI prompt that
+   completed first) raises `AlreadyFinished` with that outcome instead. The
+   job then ends as the work did, `succeeded` with its result or `failed`
+   with its error, because nothing was cut short.
 2. Keep any work it hands to a thread (`asyncio.to_thread`, an executor)
    interruptible, for example with a timeout or a stop flag the thread
    checks. Cancelling the await returns at once while the thread keeps
@@ -52,6 +65,7 @@ does not grow without bound.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import enum
 import logging
 import time
@@ -64,6 +78,15 @@ from .errors import RelayError
 from .settings import DEFAULT_MAX_JOBS
 
 log = logging.getLogger("comfyrelay.jobs")
+
+# The job whose producer is running in this task (set by JobStore._run).
+_current_job: contextvars.ContextVar[Job] = contextvars.ContextVar("comfyrelay_current_job")
+
+
+def current_job() -> Job | None:
+    """The job this code runs as, from inside a producer; None outside one."""
+    return _current_job.get(None)
+
 
 # How long one `wait` may hold a tool call open. MCP clients time calls out on
 # their own, and an agent that needs longer calls `wait` again.
@@ -103,8 +126,13 @@ class Job:
     finished_at: float | None = None
     result: Any = None
     error: dict[str, Any] | None = None
+    # What the producer reports while it works, if anything: a dict it keeps
+    # up to date (a workflow run: its prompt id, and where ComfyUI has it).
+    progress: dict[str, Any] | None = None
     # When a cancel was first requested (time.monotonic()), or None.
     cancel_requested_at: float | None = None
+    # Why: "cancel" (job_cancel) or "shutdown" (the server is stopping). The first request decides.
+    cancel_reason: str | None = None
     overrun_logged: bool = field(default=False, repr=False)
     task: asyncio.Task[None] | None = field(default=None, repr=False)
 
@@ -139,7 +167,18 @@ class Job:
             "finished_at": self.finished_at,
             "result": self.result,
             "error": self.error,
+            "progress": dict(self.progress) if self.progress is not None else None,
         }
+
+
+class AlreadyFinished(Exception):
+    """Raised by a cancelled producer whose work had finished before the cancel took effect: the job ends as the
+    work did (the producer contract in this module's docstring)."""
+
+    def __init__(self, result: Any = None, error: RelayError | None = None) -> None:
+        super().__init__("the work had finished before the cancel took effect")
+        self.result = result
+        self.error = error
 
 
 def unknown_job(job_id: str) -> RelayError:
@@ -226,7 +265,7 @@ class JobStore:
         breaking the producer contract; it ends `cancelled` when it stops.
         """
         job = self.get(job_id)
-        if self._request_cancel(job):
+        if self._request_cancel(job, "cancel"):
             await asyncio.wait({job.task}, timeout=self._cancel_wait)
             if not job.task.done():
                 self._log_overrun(job)
@@ -241,7 +280,7 @@ class JobStore:
         """
         if self._stuck_at_shutdown is not None:
             return [j for j in self._stuck_at_shutdown if not j.task.done()]
-        live = [j for j in self._jobs.values() if self._request_cancel(j)]
+        live = [j for j in self._jobs.values() if self._request_cancel(j, "shutdown")]
         self._stuck_at_shutdown = []
         if live:
             log.info("shutting down: cancelling %d job(s)", len(live))
@@ -251,13 +290,19 @@ class JobStore:
             self._log_overrun(job)
         return list(self._stuck_at_shutdown)
 
-    def _request_cancel(self, job: Job) -> bool:
-        """Cancel the job's task if it is still running. True if it was."""
+    def _request_cancel(self, job: Job, reason: str) -> bool:
+        """Cancel the job's task if it is still running. True if it was.
+
+        Only the first request cancels the task. A later one (a second
+        job_cancel, or a shutdown during the unwind) leaves it alone: another
+        CancelledError would land inside the producer's cleanup and abort it.
+        """
         if job.task is None or job.task.done():
             return False
         if job.cancel_requested_at is None:
             job.cancel_requested_at = time.monotonic()
-        job.task.cancel()
+            job.cancel_reason = reason
+            job.task.cancel()
         return True
 
     @staticmethod
@@ -282,6 +327,7 @@ class JobStore:
             job.finished_at = time.time()
 
     async def _run(self, job: Job, work: Callable[[], Awaitable[Any]]) -> None:
+        _current_job.set(job)
         job.state = JobState.running
         job.started_at = time.time()
         try:
@@ -290,6 +336,12 @@ class JobStore:
         except asyncio.CancelledError:
             job.state = JobState.cancelled
             raise
+        except AlreadyFinished as done:
+            job.state = JobState.failed if done.error is not None else JobState.succeeded
+            job.result = done.result
+            job.error = done.error.as_dict() if done.error is not None else None
+            job.finished_at = time.time()
+            return  # not cut short: the finally below leaves it as it is
         except RelayError as exc:
             job.state = JobState.failed
             job.error = exc.as_dict()
@@ -300,10 +352,10 @@ class JobStore:
             # A producer may swallow the CancelledError and return, or fail while
             # unwinding. Either way it stopped because it was asked to, and what
             # it returned is not a complete result.
-            if job.cancel_requested:
+            if job.cancel_requested and job.finished_at is None:
                 job.state = JobState.cancelled
                 job.result = None
-            job.finished_at = time.time()
+            job.finished_at = job.finished_at or time.time()
 
     def _prune(self) -> None:
         finished = [j for j in self._jobs.values() if j.state.finished]

@@ -71,7 +71,7 @@ as an unknown tool.
 | Profile | For | Tools in this version |
 |---|---|---|
 | `read` | Introspection: nodes, models, templates, docs | `server_info`, `node_search`, `node_describe`, `model_list`, `template_search`, `template_get` |
-| `run` | Validating and running workflows | `server_info`, `job_status`, `job_cancel` |
+| `run` | Validating and running workflows | `server_info`, `job_status`, `job_cancel`, `workflow_validate`, `workflow_run`, `workflow_outputs`, `workflow_upload_input` |
 | `manage` | Changing what's installed, through the manifest and lock (v2) | `server_info` |
 | `develop` | Custom node development, on a sandboxed dev instance only | `server_info` |
 
@@ -101,7 +101,7 @@ the `job_*` group are the cross-cutting names.
   changes nothing.
 
 Jobs live in memory, so they don't survive a restart. At most `COMFYUI_MCP_MAX_JOBS` run at
-once. Nothing produces jobs yet; workflow runs will (#132).
+once. Workflow runs are the only jobs so far (see *Workflow tools*).
 
 **The producer contract** (written out in `comfyrelay/jobs.py`). Code that runs as a job must:
 
@@ -109,7 +109,14 @@ once. Nothing produces jobs yet; workflow runs will (#132).
    when the server stops, so it's the contract. `job_cancel` waits up to 10 seconds before it
    reports `cancelling`, as a margin, but a producer that needs the margin is cut off at
    shutdown. Every producer's tests call `assert_producer_honours_cancel`
-   (`tests/relay_helpers.py`), which checks the 3-second budget.
+   (`tests/relay_helpers.py`), which checks the 3-second budget. A cancel is delivered once:
+   a second `job_cancel`, or a shutdown during the unwind, waits for it rather than cutting
+   the cleanup short. A producer reads why it was cancelled from
+   `current_job().cancel_reason`: `cancel` (`job_cancel`) or `shutdown`. At shutdown it may
+   leave its outside work running instead of undoing it. A workflow run does: its prompt
+   carries on in ComfyUI. Other producers undo what they started, as before. A producer that
+   finds its work had already finished before the cancel took effect raises `AlreadyFinished`
+   instead of re-raising: the job then ends as the work did, with its result or its error.
 2. Keep any work it hands to a thread interruptible, with a timeout or a stop flag the thread
    checks. Cancelling the await returns at once, but the thread keeps running. On SIGINT or a
    normal exit Python waits for it with no time limit (a job in a 20-second thread held a
@@ -118,7 +125,7 @@ once. Nothing produces jobs yet; workflow runs will (#132).
 
 A job that overruns its cancel is logged as an error, once, and keeps its slot until it
 stops. On a stop (SIGTERM, which is how `docker stop` and Kubernetes stop a container, or
-SIGINT) every job is cancelled during the server's own shutdown and each wait is bounded:
+SIGINT) every job is cancelled, with the reason `shutdown`, during the server's own shutdown, and each wait is bounded:
 about 3 seconds for the jobs and 3 for anything else, after uvicorn's 3-second graceful
 shutdown. So a coroutine that never stops can't hold the server past the default 10-second
 grace period. A thread that never stops can, on SIGINT (rule 2).
@@ -203,6 +210,184 @@ that run, top level and inside subgraphs; bypassed and muted nodes don't run, an
 `runnable: true` doesn't mean the graph validates or will finish. The check doesn't look at
 links, types or other widget values, models a template names only in widget values, files other
 nodes read, or whether the machine has the memory for it.
+
+## Workflow tools
+
+The `run` profile's tools for ComfyUI workflows in **API format**
+(`{"<node id>": {"class_type": ..., "inputs": {...}}}`, where an input is a constant or a link
+`["<node id>", <output index>]`). The editor's UI-format save file, which `template_get`
+returns, is refused with directions to export the API format. The code is
+`comfyrelay/tools_workflow.py`, with the checks in `comfyrelay/workflow.py` (#132).
+
+- **`workflow_validate`** checks what can be known about a graph without submitting it, against
+  the live `/object_info`. ComfyUI (v0.37.0) has no dry run: `/prompt` is its only complete check,
+  and it queues the graph when it passes. `/object_info` can't show a node's own
+  `validate_inputs` either. So **input types and values are ComfyUI's to check**, when
+  `workflow_run` submits the graph: required inputs, what a link carries, COMBO choices, and
+  number conversions and bounds. An earlier copy of those checks refused graphs ComfyUI
+  accepts. A `CustomCombo` takes any value, though its options list is empty. A copy would
+  also drift with every ComfyUI pin.
+
+  What `workflow_validate` does check:
+  - **Errors:**
+    - `invalid_workflow`: not an API-format graph at all (a UI-format save file, a `/prompt`
+      body, or a node that isn't an object).
+    - `workflow_too_large`: past **2,000 nodes**. A 10,000-node graph wedged ComfyUI's worker
+      past what an interrupt could stop.
+    - `missing_node_type`: a class this instance doesn't have, with near names. `/prompt`
+      reports this without saying which node.
+    - `prompt_no_outputs`: nothing in the graph is an output node.
+    - `bad_linked_input`, `linked_node_missing` and `linked_output_missing`: a link that isn't
+      `["<node id>", <output index>]`, or points at a node or output the graph doesn't have.
+      ComfyUI raises an exception on these instead of a clean error.
+  - **Partner-API nodes**, which `workflow_run` refuses (see below).
+  - **A warning, `not_connected_to_output`**, for a node no output depends on, because ComfyUI
+    won't run it. It doesn't stop a run.
+
+  Each problem names the `node_id`, `class_type` and `input`. Like ComfyUI, links are checked
+  only on nodes an output depends on. One `/object_info` read (1.8 MB at v0.37.0) is shared for
+  10 seconds, and an upload drops it, so the check is never older than that.
+
+  It doesn't apply ComfyUI's node replacements (`/node_replacements`, which `/prompt` applies to
+  a class that's no longer installed). An old class name is therefore `missing_node_type`: use
+  the class that replaced it.
+
+  The V3 dynamic-input naming (`images.image0` for an Autogrow, `resize_type.width` for a
+  DynamicCombo's chosen option) lives in `workflow.py`, and `node_describe` renders it with the
+  same helpers. Read-only.
+- **`workflow_run`** runs `workflow_validate`'s check first, and refuses an invalid graph with
+  those errors (`workflow_invalid`). It refuses any graph with a **partner-API node**
+  (`partner_api_nodes_refused`, naming the nodes; see below). Otherwise it submits the graph
+  to `/prompt`, where ComfyUI checks input types and values, and returns `job_id` and
+  `prompt_id` at once.
+
+  When ComfyUI refuses the graph, `workflow_run` fails at once with `workflow_rejected`. The
+  error carries ComfyUI's own error and its per-node errors, also flattened into the same shape
+  as `workflow_validate`'s problems (`type`, `node_id`, `class_type`, `input`, `details`,
+  `expected`, `got`). So a MASK wired into SaveImage's IMAGE input comes back as
+  `return_type_mismatch` on that node's `images`, in ComfyUI's words.
+
+  ComfyUI accepts a graph when any output passes its checks, and drops the outputs that fail.
+  The dropped ones come back as warnings.
+
+  Follow the job with `job_status`. Its `progress` says where ComfyUI has the prompt:
+  `comfyui_state` is `submitting`, `queued` (with `queue_position`, where 0 is next), `running`
+  or `finished`. The run polls `GET /api/jobs/<id>` twice a second, which is about 150 bytes
+  while the prompt waits or runs. Only `queue_position` needs `/queue`, which carries every
+  queued graph: one read is shared by all runs for 2 seconds, and only while a run is queued.
+  A ComfyUI without the jobs API is followed through `/queue` and `/history/<id>` instead. The
+  executing node isn't reported, since that needs ComfyUI's websocket.
+
+  A finished job's `result` lists the saved files. A failure is a structured `error`:
+  - `workflow_execution_failed`: the node id and type, the exception type and message, and
+    the last traceback lines;
+  - `workflow_interrupted`: something other than this job stopped it;
+  - `workflow_vanished`: ComfyUI lost it (another client dequeued it, or ComfyUI restarted).
+
+  If ComfyUI stops answering, a run waits up to 60 seconds for it to come back. What the graph
+  does is up to its nodes: this server reaches only ComfyUI, but a custom node installed there
+  may write anywhere ComfyUI can, or reach the network.
+- **`workflow_outputs`** lists a finished run's files: node, `kind` (images, gifs, audio,
+  ...), filename, subfolder, `type` (output or temp), MIME type, and size from a `HEAD /view`
+  for the first 32 files. It also lists non-file outputs such as text. Failed and cancelled
+  runs are listed too, since they may have saved something. **It streams nothing unless
+  asked.** `fetch=<filename>` returns that one file inline, up to **5,000,000 bytes**, and
+  sizes only that file: an image as MCP image content the model can see, audio as audio
+  content, anything else as an embedded resource. A larger file is refused
+  (`output_too_large`) with its `/view` path, which a person or tool with direct access to
+  ComfyUI can use. Read-only.
+- **`workflow_upload_input`** puts a file into ComfyUI's input directory through
+  `POST /upload/image` (`type=input`) and returns the name ComfyUI stored it under, to put in
+  LoadImage's `image` input.
+  - The file arrives base64-encoded, at most **10 MiB** decoded. A `data:` URL is fine, and so
+    are line breaks and other whitespace (MIME-style wrapped base64).
+  - With the `run` profile enabled, the HTTP transport accepts a request body of up to 10 MiB's
+    base64 plus 1 MiB. The SDK's default is 4 MiB, which refused a 3 MiB file before the tool
+    ran. So an upload a little over the cap gets `upload_too_large`; only one over about
+    10.75 MiB meets the transport's bare 413. Without `run` the SDK's 4 MiB default stands. The
+    token is checked before any body is read.
+  - Uploads decode and send one at a time. **Memory:** a `run`-profile sidecar idles at about
+    75 MB RSS. One maximum-size upload peaks at about 140 MB, and six at once at about 340 MB
+    (measured at v0.37.0). Most of that is the request bodies, which the transport reads and
+    parses before the tool runs: about 45 MB each for a maximum-size upload, however the tool
+    queues them. Without the one-at-a-time limit, six peaked at about 390 MB. Give a
+    `run`-profile sidecar that takes large uploads 512 MiB.
+  - The name is sanitised: directories are dropped, anything outside `A-Z a-z 0-9 . _ ( ) + -`
+    and space becomes `_`, and leading dots go. A name with nothing left is refused.
+  - It never overwrites: a different file under a taken name is stored as `name (1).ext`
+    (`renamed: true`), and the same bytes again reuse the file that's there. It writes nowhere
+    else. There's no mask variant: `/upload/mask` edits the alpha of an image that's already
+    there.
+
+**Annotations.** `workflow_validate` and `workflow_outputs` are read-only. `workflow_run` isn't
+read-only, since it queues work and ComfyUI writes new output files. It isn't destructive
+either: it replaces or deletes nothing, and SaveImage numbers its files rather than
+overwriting them. It isn't idempotent, since every call is a new run. `workflow_upload_input`
+isn't read-only, since it adds a file to the input directory, and isn't destructive, since it
+never overwrites. It is idempotent, because the same bytes under the same name are stored
+once. All four are closed-world as far as this server goes: they reach only `COMFYUI_URL`.
+
+**Partner-API nodes** call paid external services with the user's Comfy.org credentials, and
+v1 never runs them (#103). `workflow.partner_signals` decides, from `/object_info`, and the
+refusal names each node and its signals:
+- `api_node`: the class's `api_node` is truthy. ComfyUI sets it from `API_NODE`, and
+  `--disable-api-nodes` and the editor's badge use the same flag. At v0.37.0, 271 of 959
+  classes have it.
+- `comfy_org_credentials`: a hidden input of type `AUTH_TOKEN_COMFY_ORG` or `API_KEY_COMFY_ORG`,
+  which is how such a node is handed the credentials that pay. This adds three classes that
+  aren't flagged: `ByteDanceCreateImageAsset`, `ByteDanceCreateVideoAsset` and
+  `Krea2StyleReferenceNode`.
+- `comfy_api_nodes`: the class comes from ComfyUI's own partner-API package
+  (`python_module` starts with `comfy_api_nodes.`).
+
+Template runnability and node search use the same function. **The backstop:** at v0.37.0 a
+partner-API node gets the user's Comfy.org credentials only from `/prompt`'s `extra_data`
+(`execution.py`: `extra_data.get("auth_token_comfy_org")`), and this server never sends
+`extra_data`. Its `/prompt` body is exactly `{prompt, prompt_id}`, and a test holds it to that.
+So even a partner node that escaped detection would run without the credentials that pay. A
+custom node that spends money by some other route shows no signal and can't be detected.
+
+**Cancelling.** `job_cancel` on a run stops its prompt with ComfyUI's atomic cancel,
+`POST /api/jobs/<id>/cancel`. Under ComfyUI's queue lock, that dequeues the prompt if it's
+waiting and interrupts it only if it's the prompt running. It never sends `/interrupt`, which
+at v0.37.0 checks the running prompt outside the lock, and without a prompt id stops whatever
+is running. The stop then checks `GET /api/jobs/<id>` until the prompt is no longer pending or
+in progress. It sends the cancel again at each check, because ComfyUI clears its interrupt
+flag as a prompt starts executing, so an interrupt that lands at that moment is lost. A
+timeout or a reset connection is retried the same way. Only a non-retryable answer, or the
+deadline, ends the stop early. The whole unwind takes at most 2.5 seconds, inside the producer
+contract's 3, and each call has a 1-second timeout. ComfyUI's own terminal status decides what
+happened: `cancelled` means the stop worked, and `completed` or `failed` means the prompt got
+to the end first.
+
+`job_status` and `job_cancel` report the outcome in `progress.stop`:
+- `confirmed`: ComfyUI shows it cancelled, either dequeued before it ran or interrupted.
+- `already_finished`: it had finished before the cancel took effect, so the cancel changed
+  nothing. The job then ends as the prompt did: `succeeded` with its `result`, or `failed` with
+  ComfyUI's error. `progress.comfyui_state` is `finished`, and `workflow_outputs` lists what it
+  saved. Keeping the result is deliberate. The work was done and its files exist, so dropping
+  them would report a cancel that didn't happen. If ComfyUI only says so after the stop's
+  budget has run out, the job has already ended `cancelled`. `progress.stop` still becomes
+  `already_finished`, and `workflow_outputs` lists the files.
+- `unconfirmed`: it couldn't be checked in time, and `stop_detail` says why. The stop carries
+  on in the background for up to 30 seconds, re-sending the cancel while ComfyUI still has the
+  prompt. Once ComfyUI says how the prompt ended, `stop` changes to match and `stop_detail` goes.
+- `not_stopped`: it's running, and this ComfyUI has no atomic cancel. The prompt is left to
+  finish rather than risk interrupting someone else's.
+- `not_needed`: ComfyUI refused the submission, so nothing was queued.
+- `left_running`: see below.
+
+A cancel that arrives while the submission is still in flight doesn't abandon it. ComfyUI
+goes on queueing a prompt whose client hung up, so the stop waits for ComfyUI's answer and then
+cancels by id. If there's no answer within the budget, it cancels by the prompt id it chose,
+records `unconfirmed`, and cancels again once ComfyUI answers. A second `job_cancel`, or a
+shutdown, while a cancel is unwinding doesn't interrupt that unwind.
+
+**A stopping relay leaves its runs running** (owner decision on #145). A shutdown cancels
+every job with the reason `shutdown`, and a workflow run then ends at once with `progress.stop`
+set to `left_running`: the prompt carries on in ComfyUI. Re-attaching to it from a restarted
+relay is #146. Until then, its outputs are in ComfyUI's output directory and `/history`, not
+in any job.
 
 ## Consent
 

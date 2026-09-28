@@ -57,6 +57,10 @@ async def test_capabilities():
         "server_info",
         "template_get",
         "template_search",
+        "workflow_outputs",
+        "workflow_run",
+        "workflow_upload_input",
+        "workflow_validate",
     ]
     assert got["capabilities"]["consent"] == {"policy": "refuse-all", "client_can_elicit": False}
     assert got["capabilities"]["jobs"] == {"store": "memory", "max_wait_seconds": 300.0, "max_in_flight": 16}

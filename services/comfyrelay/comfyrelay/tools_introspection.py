@@ -41,6 +41,17 @@ from pydantic import BaseModel, Field, model_serializer
 
 from .comfyui import ComfyUIClient, ComfyUIError
 from .errors import RelayError
+from .workflow import (
+    AUTOGROW,
+    DYNAMIC_COMBO,
+    DYNAMIC_SLOT,
+    MATCH_TYPE,
+    autogrow_item,
+    autogrow_min,
+    autogrow_names,
+    partner_signals,
+    qualified,
+)
 
 if TYPE_CHECKING:
     from .tools import Relay
@@ -184,7 +195,7 @@ def _node_search(relay: Relay) -> Callable[..., Any]:
         for class_type, node in info.items():
             tier = _match_tier(query, words, class_type, node)
             if tier is not None:
-                key = (tier, bool(node.get("deprecated")), bool(node.get("api_node")), len(class_type), class_type)
+                key = (tier, bool(node.get("deprecated")), bool(partner_signals(node)), len(class_type), class_type)
                 ranked.append((key, class_type, node))
         ranked.sort(key=lambda r: r[0])
         return NodeSearchResult(
@@ -199,7 +210,7 @@ def _node_search(relay: Relay) -> Callable[..., Any]:
                     summary=_one_line(node.get("description")),
                     pack=_pack(node),
                     match=_TIERS[key[0]],
-                    api_node=True if node.get("api_node") else None,
+                    api_node=True if partner_signals(node) else None,
                     deprecated=True if node.get("deprecated") else None,
                 )
                 for key, class_type, node in ranked[:limit]
@@ -211,15 +222,9 @@ def _node_search(relay: Relay) -> Callable[..., Any]:
 
 # -- node_describe ------------------------------------------------------------
 
-# ComfyUI's dynamic V3 inputs (comfy_api/latest/_io.py). Inside one, every
-# input's name is fully qualified with dots (finalize_prefix): a DynamicCombo
-# `resize_type` set to "scale dimensions" adds `resize_type.width`, and an
-# Autogrow `images` with prefix "image" takes `images.image0`, `images.image1`
-# and so on. Those qualified names are the keys a graph's inputs must use.
-AUTOGROW = "COMFY_AUTOGROW_V3"
-DYNAMIC_COMBO = "COMFY_DYNAMICCOMBO_V3"
-DYNAMIC_SLOT = "COMFY_DYNAMICSLOT_V3"
-MATCH_TYPE = "COMFY_MATCHTYPE_V3"
+# ComfyUI's dynamic V3 inputs, and how the inputs inside one are named
+# (`resize_type.width`, `images.image0`), come from workflow.py, which
+# workflow_validate checks graphs with: one naming rule for both.
 # Keys rendered as fields of their own, not repeated under `other`.
 _SPEC_KEYS = frozenset({"default", "min", "max", "step", "tooltip", "options"})
 _DYNAMIC_KEYS = frozenset({"template", "inputs", "slotType"})
@@ -315,23 +320,13 @@ def _cut(values: list[Any], limit: int) -> tuple[list[Any], int, bool | None]:
 def _autogrow(qname: str, template: dict[str, Any], required: bool, max_options: int) -> AutogrowSpec | None:
     """ComfyUI's Autogrow._expand_schema_for_dynamic, as a naming rule: `<qname>.<name>` for each name."""
     prefix = template.get("prefix") if isinstance(template.get("prefix"), str) else None
-    if isinstance(template.get("names"), list):
-        names = [str(n) for n in template["names"]]
-    elif prefix is not None and isinstance(template.get("max"), int):
-        names = [f"{prefix}{i}" for i in range(template["max"])]
-    else:
+    names, each = autogrow_names(template), autogrow_item(template)
+    if names is None or each is None:
         return None
-    item = None
-    sections = template.get("input") if isinstance(template.get("input"), dict) else {}
-    for section, specs in sections.items():
-        if isinstance(specs, dict) and specs:
-            label = f"{qname}.{prefix}<n>" if prefix is not None else f"{qname}.<name>"
-            item = _input([], label, next(iter(specs.values())), required and section == "required", max_options)
-            break
-    if item is None:
-        return None
-    shown, total, truncated = _cut([f"{qname}.{n}" for n in names], max_options)
-    minimum = template.get("min") if isinstance(template.get("min"), int) else 1
+    label = f"{qname}.{prefix}<n>" if prefix is not None else f"{qname}.<name>"
+    item = _input([], label, each[0], required and each[1], max_options)
+    shown, total, truncated = _cut([qualified([qname, n]) for n in names], max_options)
+    minimum = autogrow_min(template)
     return AutogrowSpec(
         names=shown,
         names_total=total,
@@ -352,7 +347,7 @@ def _option(value: Any, path: list[str], max_options: int) -> Any:
 
 
 def _input(path: list[str], name: str, spec: Any, required: bool, max_options: int) -> InputSpec:
-    qname = ".".join([*path, name])
+    qname = qualified([*path, name])
     if isinstance(spec, str):
         spec = [spec]
     if not isinstance(spec, list) or not spec:
@@ -442,7 +437,7 @@ def _spec(class_type: str, info: dict[str, Any], max_options: int) -> NodeSpec:
         pack=_pack(info),
         python_module=info.get("python_module"),
         output_node=bool(info.get("output_node")),
-        api_node=bool(info.get("api_node")),
+        api_node=bool(partner_signals(info)),
         deprecated=True if info.get("deprecated") else None,
         experimental=True if info.get("experimental") else None,
         inputs=inputs,
@@ -770,7 +765,7 @@ def _runnability(
     missing_nodes = [
         MissingNode(class_type=t, pack=packs.get(t), count=c) for t, c in uses.items() if t not in object_info
     ]
-    api_nodes = sorted(t for t in uses if object_info.get(t, {}).get("api_node"))
+    api_nodes = sorted(t for t in uses if partner_signals(object_info.get(t)))
     models = _declared_models(nodes)
     missing_models, misplaced = [], []
     for m in models:

@@ -111,6 +111,34 @@ async def test_an_unknown_scope_is_not_forwarded():
 
 
 @pytest.mark.anyio
+async def test_a_large_body_without_the_token_is_refused_before_it_is_read():
+    """The run profile raises the body limit to fit uploads; without the token not one byte of the body is read."""
+    size = 20 * 1024 * 1024  # past the SDK's 4 MiB and the run profile's limit alike
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "headers": [(b"content-length", str(size).encode()), (b"content-type", b"application/json")],
+        "client": ("10.0.0.9", 5000),
+    }
+    reads, sent = [], []
+
+    async def receive():
+        reads.append(1)
+        return {"type": "http.request", "body": b"x" * 65536, "more_body": True}
+
+    async def send(message):
+        sent.append(message)
+
+    async def inner(*_):
+        raise AssertionError("the app must not be reached")
+
+    await TokenAuth(inner, TOKEN)(scope, receive, send)
+    assert reads == []
+    assert sent[0]["type"] == "http.response.start" and sent[0]["status"] == 401
+
+
+@pytest.mark.anyio
 async def test_http_with_the_token_is_forwarded():
     scope = {"type": "http", "method": "POST", "path": "/mcp", "headers": [(b"x-api-key", TOKEN.encode())]}
     reached, _ = await _through(scope)

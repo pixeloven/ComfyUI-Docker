@@ -83,3 +83,39 @@ async def assert_producer_honours_cancel(
     assert job.task.done(), f"the producer did not stop within {within}s of being cancelled"
     assert job.task.cancelled(), "the producer swallowed CancelledError; it must re-raise it"
     assert job.state is JobState.cancelled
+
+
+def node_spec(outputs: tuple[str, ...] = (), *, output_node: bool = False, **fields: object) -> dict:
+    """An /object_info entry with only what the workflow checks read: outputs, output_node, partner signals."""
+    return {"input": {"required": {}}, "output": list(outputs), "output_node": output_node, **fields}
+
+
+CREDENTIAL_INPUTS = {"auth_token_comfy_org": ["AUTH_TOKEN_COMFY_ORG"], "api_key_comfy_org": ["API_KEY_COMFY_ORG"]}
+
+# The classes the workflow tests use, as v0.37.0's /object_info shapes them (output lists and the partner-API
+# signals are copied from a real one; input specs are left out, since ComfyUI checks inputs, not the relay).
+WORKFLOW_OBJECT_INFO = {
+    "LoadImage": node_spec(("IMAGE", "MASK")),
+    "ImageScale": node_spec(("IMAGE",)),
+    "ImageInvert": node_spec(("IMAGE",)),
+    "ImageToMask": node_spec(("MASK",)),
+    "EmptyImage": node_spec(("IMAGE",)),
+    "CustomCombo": node_spec(("STRING", "INT")),
+    "SaveImage": node_spec(("IMAGE",), output_node=True),
+    "PreviewImage": node_spec(("IMAGE",), output_node=True),
+    "PreviewAny": node_spec(("STRING",), output_node=True),
+    "ClaudeNode": node_spec(
+        ("STRING",),
+        api_node=True,
+        python_module="comfy_api_nodes.nodes_anthropic",
+        category="partner/text/Anthropic",
+        input={"required": {}, "hidden": CREDENTIAL_INPUTS},
+    ),
+    "ByteDanceCreateImageAsset": node_spec(
+        ("STRING", "STRING"),
+        api_node=False,
+        python_module="comfy_api_nodes.nodes_bytedance",
+        category="partner/image/ByteDance",
+        input={"required": {}, "hidden": CREDENTIAL_INPUTS},
+    ),
+}

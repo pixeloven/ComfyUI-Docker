@@ -435,3 +435,60 @@ async def test_job_status_rejects_a_wait_over_the_cap():
     async with Client(server, mode="legacy") as client:
         result = await client.call_tool("job_status", {"job_id": "x", "timeout_seconds": 10_000})
     assert result.is_error
+
+
+# -- a cancel is delivered once, and says why --------------------------------
+
+
+async def test_a_cancel_is_delivered_once_so_a_second_cannot_abort_the_cleanup():
+    """#145 R1: a second job_cancel, or a shutdown, during the unwind used to cancel the task again, landing a
+    CancelledError inside the producer's cleanup."""
+    from comfyrelay.jobs import current_job
+
+    store = JobStore()
+    release = asyncio.Event()
+    seen = []
+
+    async def work():
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            seen.append(("cancelled", current_job().cancel_reason))
+            try:
+                await release.wait()  # cleanup that takes a moment
+            except asyncio.CancelledError:
+                seen.append("cleanup aborted")
+                raise
+            seen.append("cleaned up")
+            raise
+
+    job = store.submit("t", work)
+    await asyncio.sleep(0)
+    first = asyncio.ensure_future(store.cancel(job.id))
+    await asyncio.sleep(0.05)
+    second = asyncio.ensure_future(store.cancel(job.id))
+    stopping = asyncio.ensure_future(store.shutdown(1))
+    await asyncio.sleep(0.05)
+    release.set()
+    await asyncio.gather(first, second, stopping)
+    assert seen == [("cancelled", "cancel"), "cleaned up"]
+    assert job.state is JobState.cancelled and job.cancel_reason == "cancel"
+
+
+async def test_a_shutdown_cancel_says_so():
+    from comfyrelay.jobs import current_job
+
+    store = JobStore()
+    reasons = []
+
+    async def work():
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            reasons.append(current_job().cancel_reason)
+            raise
+
+    job = store.submit("t", work)
+    await asyncio.sleep(0)
+    await store.shutdown(1)
+    assert reasons == ["shutdown"] and job.cancel_reason == "shutdown"
