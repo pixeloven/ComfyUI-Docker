@@ -1,6 +1,6 @@
 """The workflow tools (#132), all in the `run` profile.
 
-    workflow_validate      type-check a graph against the live /object_info
+    workflow_validate      check a graph's structure, classes and partner-API nodes against /object_info
     workflow_run           submit it; returns a job id at once (follow it with job_status)
     workflow_outputs       a finished run's files, and one file's bytes on request
     workflow_upload_input  put a file into ComfyUI's input directory
@@ -101,7 +101,10 @@ MAX_FILENAME_CHARS = 120
 
 
 class WorkflowProblem(BaseModel):
-    type: str = Field(description="ComfyUI's own error type where it has one, e.g. return_type_mismatch")
+    type: str = Field(
+        description="An error type: ComfyUI's own (return_type_mismatch, value_not_in_list, ...) when ComfyUI "
+        "rejected the graph, or this server's structural ones (missing_node_type, linked_node_missing, ...)"
+    )
     message: str
     node_id: str | None = None
     class_type: str | None = None
@@ -122,7 +125,10 @@ class PartnerApiNode(BaseModel):
 
 
 class ValidationResult(BaseModel):
-    valid: bool = Field(description="No errors. Warnings do not stop a run")
+    valid: bool = Field(
+        description="No structural errors. Input types and values are not checked here: ComfyUI checks them when "
+        "workflow_run submits the graph"
+    )
     runnable: bool = Field(description="Valid, and no partner-API nodes: workflow_run would submit it")
     errors: list[WorkflowProblem]
     warnings: list[WorkflowProblem]
@@ -204,13 +210,14 @@ async def _validate(relay: Relay, workflow: dict[str, Any]) -> Report:
 
 def _workflow_validate(relay: Relay) -> Callable[..., Any]:
     async def workflow_validate(workflow: WorkflowArg) -> ValidationResult:
-        """Check a ComfyUI workflow (API format) against the live instance's node definitions, without running it.
+        """Check a ComfyUI workflow (API format) for what can be known without submitting it; runs nothing.
 
-        Finds unknown node classes, missing required inputs, links to nodes or outputs that do not exist, linked
-        types that do not match, and constants out of range or not among a COMBO's options. Each problem names the
-        node id, the input, and what was expected versus what the graph gave; types follow ComfyUI's own
-        (return_type_mismatch, value_not_in_list, ...). Also lists partner-API nodes, which workflow_run refuses.
-        Changes nothing. workflow_run runs this same check first.
+        Finds a graph that is not in API format, node classes this instance does not have (with near names),
+        links to nodes or outputs that do not exist, and a graph with no output node, each naming the node id and
+        input. Lists partner-API nodes, which workflow_run refuses. It does not check input types or values
+        (required inputs, COMBO choices, number ranges): ComfyUI has no dry run, so those are checked by ComfyUI
+        itself when workflow_run submits the graph, and come back as its errors. Changes nothing. workflow_run
+        runs this same check first.
         """
         return _result(await _validate(relay, workflow))
 
@@ -282,9 +289,10 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
     async def workflow_run(workflow: WorkflowArg) -> RunStarted:
         """Run a ComfyUI workflow (API format) and return a job id straight away; the run continues in ComfyUI.
 
-        It validates first, as workflow_validate does, and refuses an invalid graph with those errors. It refuses
-        any graph with a partner-API node (a paid external service) outright. A graph ComfyUI itself rejects fails
-        with ComfyUI's per-node errors. Then follow the job with job_status: it reports queued or running, and at
+        It runs workflow_validate's check first, and refuses a graph that fails it. It refuses any graph with a
+        partner-API node (a paid external service) outright. ComfyUI then checks input types and values as it
+        accepts the graph: one it rejects fails at once with workflow_rejected, carrying ComfyUI's per-node errors
+        (type, node id, input, details). Then follow the job with job_status: it reports queued or running, and at
         the end the saved files, or ComfyUI's error naming the node that failed. List or fetch the files with
         workflow_outputs. Each call is a new run with new outputs. job_cancel stops it on ComfyUI.
 

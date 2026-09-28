@@ -1,22 +1,11 @@
-"""The static workflow check (comfyrelay/workflow.py), against node definitions taken from a real v0.37.0
-/object_info (object_info_v0.37.0.json beside this file; LoadImage's file list is replaced by two names)."""
+"""The pre-submission workflow check (comfyrelay/workflow.py): structure, classes, links, and partner-API nodes.
+Input types and values are ComfyUI's to check at /prompt, so nothing here tests them."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
-from comfyrelay.workflow import (
-    MAX_NODES,
-    expand_inputs,
-    partner_api_nodes,
-    partner_signals,
-    types_compatible,
-    validate,
-)
-
-INFO = json.loads((Path(__file__).parent / "object_info_v0.37.0.json").read_text())
+from comfyrelay.workflow import MAX_NODES, partner_api_nodes, partner_signals, validate
+from relay_helpers import WORKFLOW_OBJECT_INFO as INFO
 
 
 def t1() -> dict:
@@ -51,6 +40,17 @@ def test_a_good_graph_is_valid():
     assert report.output_nodes == ["4"] and report.node_count == 4 and report.partner_api_nodes == []
 
 
+def test_values_and_types_are_left_to_comfyui():
+    """A free-form COMBO value, a wrong-typed link, a missing input: /prompt decides all of these (a CustomCombo
+    takes any value though its options list is empty, which a copied check refused)."""
+    graph = {
+        "1": {"class_type": "CustomCombo", "inputs": {"choice": "my own option"}},
+        "2": {"class_type": "PreviewAny", "inputs": {"source": ["1", 0]}},
+        "3": {"class_type": "SaveImage", "inputs": {"images": ["1", 1]}},  # INT into IMAGE, no prefix
+    }
+    assert validate(graph, INFO).valid
+
+
 def test_unknown_node_class_suggests_the_near_names():
     graph = t1()
     graph["3"]["class_type"] = "ImageInvertt"
@@ -59,93 +59,6 @@ def test_unknown_node_class_suggests_the_near_names():
     assert (error["node_id"], error["class_type"]) == ("3", "ImageInvertt")
     assert error["message"] == "Node 'ImageInvertt' not found. The custom node may not be installed."
     assert "ImageInvert" in error["expected"]
-
-
-def test_missing_required_input():
-    graph = t1()
-    del graph["2"]["inputs"]["width"]
-    [error] = errors(graph)
-    assert error == {
-        "type": "required_input_missing",
-        "message": "Required input is missing",
-        "node_id": "2",
-        "class_type": "ImageScale",
-        "input": "width",
-        "details": "width",
-        "expected": "INT",
-    }
-
-
-def test_type_mismatch_uses_comfyuis_wording():
-    """The harness's T4 graph: LoadImage's MASK output wired into SaveImage's IMAGE input."""
-    graph = {
-        "1": {"class_type": "LoadImage", "inputs": {"image": "harness-input.png"}},
-        "2": {"class_type": "SaveImage", "inputs": {"images": ["1", 1], "filename_prefix": "t4_"}},
-    }
-    [error] = errors(graph)
-    assert error == {
-        "type": "return_type_mismatch",
-        "message": "Return type mismatch between linked nodes",
-        "node_id": "2",
-        "class_type": "SaveImage",
-        "input": "images",
-        "details": "images, received_type(MASK) mismatch input_type(IMAGE)",
-        "expected": "IMAGE",
-        "got": "MASK",
-    }
-
-
-def test_a_string_linked_into_an_int_is_a_mismatch():
-    graph = {
-        "1": {"class_type": "PrimitiveString", "inputs": {"value": "64"}},
-        "2": {"class_type": "EmptyImage", "inputs": {"width": ["1", 0], "height": 64, "batch_size": 1, "color": 0}},
-        "3": {"class_type": "PreviewImage", "inputs": {"images": ["2", 0]}},
-    }
-    [error] = errors(graph)
-    assert (error["type"], error["expected"], error["got"]) == ("return_type_mismatch", "INT", "STRING")
-    graph["1"] = {"class_type": "PrimitiveInt", "inputs": {"value": 64}}
-    assert errors(graph) == []
-
-
-def test_a_combo_value_not_in_the_list():
-    graph = t1()
-    graph["2"]["inputs"]["upscale_method"] = "nearest"
-    [error] = errors(graph)
-    assert (error["type"], error["message"], error["input"]) == (
-        "value_not_in_list",
-        "Value not in list",
-        "upscale_method",
-    )
-    assert error["expected"] == ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
-    assert error["got"] == "nearest"
-    assert "did you mean 'nearest-exact'" in error["details"]
-
-
-def test_a_file_picker_value_not_listed_is_only_a_warning():
-    """LoadImage checks its file itself when ComfyUI gets the graph, and may accept what /object_info does not
-    list (a subfolder, an annotated path), so this is ComfyUI's call."""
-    graph = t1()
-    graph["1"]["inputs"]["image"] = "sub/elsewhere.png"
-    assert errors(graph) == []
-    [warning] = warnings(graph)
-    assert (warning["type"], warning["node_id"], warning["input"]) == ("value_not_in_list", "1", "image")
-
-
-@pytest.mark.parametrize(
-    ("value", "kind"),
-    [("wide", "invalid_input_type"), (-1, "value_smaller_than_min"), (99_999, "value_bigger_than_max")],
-)
-def test_numbers_are_converted_and_bounded(value, kind):
-    graph = t1()
-    graph["2"]["inputs"]["width"] = value
-    [error] = errors(graph)
-    assert (error["type"], error["input"]) == (kind, "width")
-
-
-def test_a_number_as_a_string_converts_as_comfyui_does():
-    graph = t1()
-    graph["2"]["inputs"]["width"] = "256"
-    assert errors(graph) == []
 
 
 def test_a_link_to_a_node_that_is_not_there():
@@ -183,37 +96,41 @@ def test_a_graph_with_no_output_node():
 
 def test_nodes_no_output_needs_get_a_warning_not_an_error():
     graph = t1()
-    graph["9"] = {"class_type": "ImageInvert", "inputs": {}}  # missing its input, but nothing uses it
+    graph["9"] = {"class_type": "ImageInvert", "inputs": {"image": ["404", 0]}}  # a bad link, but nothing uses it
     assert errors(graph) == []
     assert [(w["type"], w["node_id"]) for w in warnings(graph)] == [("not_connected_to_output", "9")]
 
 
-def test_an_unknown_input_name_is_a_warning_with_suggestions():
-    graph = t1()
-    graph["2"]["inputs"]["widht"] = 10
-    [warning] = warnings(graph)
-    assert (warning["type"], warning["input"], warning["expected"]) == ("unknown_input", "widht", ["width"])
-
-
-def test_a_constant_for_a_socket_is_a_warning():
-    graph = t1()
-    graph["3"]["inputs"]["image"] = "picture.png"
-    found = warnings(graph)
-    assert ("constant_for_link", "3", "IMAGE") in [(w["type"], w["node_id"], w.get("expected")) for w in found]
-    # and nodes 1 and 2 now feed nothing
-    assert [w["node_id"] for w in found if w["type"] == "not_connected_to_output"] == ["1", "2"]
-
-
 def test_every_problem_is_reported_at_once():
     graph = t1()
-    graph["2"]["inputs"]["upscale_method"] = "nope"
-    del graph["2"]["inputs"]["height"]
-    del graph["4"]["inputs"]["filename_prefix"]
+    graph["2"]["class_type"] = "ImageScaler"
+    graph["3"]["inputs"]["image"] = ["1", 5]
+    graph["5"] = {"class_type": "PreviewImage", "inputs": {"images": ["9", 0]}}
+    graph["6"] = {"class_type": "PreviewImage", "inputs": {"images": ["3"]}}
     assert sorted((e["node_id"], e["type"]) for e in errors(graph)) == [
-        ("2", "required_input_missing"),
-        ("2", "value_not_in_list"),
-        ("4", "required_input_missing"),
+        ("2", "missing_node_type"),
+        ("3", "linked_output_missing"),
+        ("5", "linked_node_missing"),
+        ("6", "bad_linked_input"),
     ]
+
+
+def test_a_graph_over_the_node_cap_is_refused():
+    graph = {str(i): {"class_type": "ImageInvert", "inputs": {}} for i in range(MAX_NODES + 1)}
+    [error] = errors(graph)
+    assert (error["type"], error["got"], error["expected"]) == (
+        "workflow_too_large",
+        MAX_NODES + 1,
+        {"max_nodes": 2000},
+    )
+
+
+def test_a_list_value_that_is_not_a_link_does_not_pull_in_a_node():
+    """_upstream follows only real links, so a stray list does not make an unrelated node 'needed'."""
+    graph = t1()
+    graph["9"] = {"class_type": "ImageInvert", "inputs": {}}
+    graph["4"]["inputs"]["filename_prefix"] = ["9", "x"]
+    assert ("not_connected_to_output", "9") in [(w["type"], w["node_id"]) for w in warnings(graph)]
 
 
 # -- what is not an API-format graph --------------------------------------------
@@ -240,97 +157,6 @@ def test_a_prompt_request_body_is_refused_with_directions():
 )
 def test_malformed_graphs(graph, kind):
     assert [e["type"] for e in errors(graph)] == [kind]
-
-
-# -- ComfyUI's dynamic V3 inputs ---------------------------------------------------
-
-
-def test_a_dynamic_combo_adds_the_chosen_options_inputs():
-    spec = INFO["ResizeImageMaskNode"]["input"]
-    expanded = expand_inputs(spec, {"resize_type": "scale dimensions"})
-    assert {"resize_type", "resize_type.width", "resize_type.height", "resize_type.crop"} <= set(expanded["required"])
-    graph = {
-        "1": {"class_type": "LoadImage", "inputs": {"image": "harness-input.png"}},
-        "2": {
-            "class_type": "ResizeImageMaskNode",
-            "inputs": {
-                "input": ["1", 0],
-                "resize_type": "scale dimensions",
-                "resize_type.width": 64,
-                "resize_type.height": 64,
-                "resize_type.crop": "center",
-                "scale_method": "area",
-            },
-        },
-        "3": {"class_type": "PreviewImage", "inputs": {"images": ["2", 0]}},
-    }
-    assert errors(graph) == []
-    del graph["2"]["inputs"]["resize_type.height"]
-    assert [(e["type"], e["input"]) for e in errors(graph)] == [("required_input_missing", "resize_type.height")]
-    graph["2"]["inputs"]["resize_type"] = "sideways"
-    [error] = errors(graph)
-    assert (error["type"], error["input"]) == ("value_not_in_list", "resize_type")
-    assert "scale dimensions" in error["expected"]
-
-
-def test_a_left_out_dynamic_combo_is_an_error_here():
-    """ComfyUI's check lets this through, and the node then raises TypeError when it runs."""
-    graph = {
-        "1": {"class_type": "LoadImage", "inputs": {"image": "harness-input.png"}},
-        "2": {"class_type": "ResizeImageMaskNode", "inputs": {"input": ["1", 0], "scale_method": "area"}},
-        "3": {"class_type": "PreviewImage", "inputs": {"images": ["2", 0]}},
-    }
-    assert [(e["type"], e["input"]) for e in errors(graph)] == [("required_input_missing", "resize_type")]
-
-
-def test_an_autogrow_input_takes_numbered_inputs():
-    graph = {
-        "1": {"class_type": "LoadImage", "inputs": {"image": "harness-input.png"}},
-        "2": {"class_type": "BatchImagesNode", "inputs": {"images.image0": ["1", 0], "images.image1": ["1", 0]}},
-        "3": {"class_type": "PreviewImage", "inputs": {"images": ["2", 0]}},
-    }
-    assert errors(graph) == [] and warnings(graph) == []
-    graph["2"]["inputs"] = {"images.image1": ["1", 0]}
-    assert [(e["type"], e["input"]) for e in errors(graph)] == [("required_input_missing", "images.image0")]
-    graph["2"]["inputs"] = {"images.image0": ["1", 1]}
-    assert [(e["type"], e["input"], e["got"]) for e in errors(graph)] == [
-        ("return_type_mismatch", "images.image0", "MASK")
-    ]
-
-
-def test_matchtype_takes_either_of_its_types():
-    graph = {
-        "1": {"class_type": "LoadImage", "inputs": {"image": "harness-input.png"}},
-        "2": {
-            "class_type": "ResizeImageMaskNode",
-            "inputs": {
-                "input": ["1", 1],
-                "resize_type": "scale by multiplier",
-                "resize_type.multiplier": 0.5,
-                "scale_method": "area",
-            },
-        },
-        "3": {"class_type": "MaskPreview", "inputs": {"mask": ["2", 0]}},
-    }
-    assert errors(graph) == []
-
-
-@pytest.mark.parametrize(
-    ("received", "wanted", "ok"),
-    [
-        ("IMAGE", "IMAGE", True),
-        ("MASK", "IMAGE", False),
-        ("*", "IMAGE", True),
-        ("IMAGE", "*", True),
-        ("INT", "FLOAT,INT", True),
-        ("STRING,BOOLEAN", "STRING,INT", True),
-        ("COMFY_MATCHTYPE_V3", "LATENT", True),
-        (["a", "b"], "COMBO", True),
-        ("STRING", ["a", "b"], False),
-    ],
-)
-def test_type_compatibility_follows_comfyui(received, wanted, ok):
-    assert types_compatible(received, wanted) is ok
 
 
 # -- partner-API nodes --------------------------------------------------------------
@@ -365,21 +191,3 @@ def test_partner_api_nodes_are_found_by_any_signal():
 )
 def test_partner_signals(spec, signals):
     assert partner_signals(spec) == signals
-
-
-def test_a_graph_over_the_node_cap_is_refused():
-    graph = {str(i): {"class_type": "ImageInvert", "inputs": {}} for i in range(MAX_NODES + 1)}
-    [error] = errors(graph)
-    assert (error["type"], error["got"], error["expected"]) == (
-        "workflow_too_large",
-        MAX_NODES + 1,
-        {"max_nodes": 2000},
-    )
-
-
-def test_a_list_value_that_is_not_a_link_does_not_pull_in_a_node():
-    """_upstream follows only real links, so a stray list does not make an unrelated node 'needed'."""
-    graph = t1()
-    graph["9"] = {"class_type": "ImageInvert", "inputs": {}}
-    graph["4"]["inputs"]["filename_prefix"] = ["9", "x"]
-    assert ("not_connected_to_output", "9") in [(w["type"], w["node_id"]) for w in warnings(graph)]

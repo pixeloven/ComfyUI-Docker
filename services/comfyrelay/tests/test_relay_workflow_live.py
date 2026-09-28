@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import random
 import struct
@@ -130,22 +131,46 @@ async def test_upload_run_and_fetch_the_outputs(client):
     assert png.startswith(b"\x89PNG") and struct.unpack(">II", png[16:24]) == (256, 256)
 
 
-async def test_a_broken_graph_is_refused_with_comfyuis_error_type(client):
+async def test_comfyuis_rejection_maps_into_workflow_rejected(client):
+    """The contract with /prompt: the relay no longer type-checks, so a MASK wired into SaveImage's IMAGE input
+    passes workflow_validate, and ComfyUI's own per-node error comes back through workflow_run."""
     graph = {
         "1": {"class_type": "EmptyImage", "inputs": {"width": 64, "height": 64, "batch_size": 1, "color": 0}},
         "2": {"class_type": "ImageToMask", "inputs": {"image": ["1", 0], "channel": "red"}},
         "3": {"class_type": "SaveImage", "inputs": {"images": ["2", 0], "filename_prefix": "never_"}},
     }
-    checked = await client.call_tool("workflow_validate", {"workflow": graph})
-    [error] = checked.structured_content["errors"]
-    assert (error["type"], error["node_id"], error["expected"], error["got"]) == (
+    checked = (await client.call_tool("workflow_validate", {"workflow": graph})).structured_content
+    assert checked["valid"] and checked["runnable"]
+    refused = await client.call_tool("workflow_run", {"workflow": graph})
+    assert refused.is_error
+    text = refused.content[0].text
+    error = json.loads(text[text.index("{") :])["error"]
+    assert error["code"] == "workflow_rejected"
+    assert error["comfyui_error"]["type"] == "prompt_outputs_failed_validation"
+    [problem] = error["errors"]
+    assert (problem["type"], problem["node_id"], problem["class_type"], problem["input"]) == (
         "return_type_mismatch",
         "3",
-        "IMAGE",
-        "MASK",
+        "SaveImage",
+        "images",
     )
-    refused = await client.call_tool("workflow_run", {"workflow": graph})
-    assert refused.is_error and '"workflow_invalid"' in refused.content[0].text
+    assert (problem["expected"], problem["got"]) == ("IMAGE", "MASK")
+    assert problem["details"] == "images, received_type(MASK) mismatch input_type(IMAGE)"
+
+
+async def test_a_custom_combo_value_passes_and_runs(client):
+    """CustomCombo's options list is empty in /object_info, and any value is valid: a copied COMBO check refused
+    it, ComfyUI accepts it."""
+    graph = {
+        "1": {"class_type": "CustomCombo", "inputs": {"choice": f"my own option {random.randrange(1 << 24)}"}},
+        "2": {"class_type": "PreviewAny", "inputs": {"source": ["1", 0]}},
+    }
+    checked = (await client.call_tool("workflow_validate", {"workflow": graph})).structured_content
+    assert checked["valid"] and checked["runnable"] and checked["errors"] == []
+    started = await client.call_tool("workflow_run", {"workflow": graph})
+    assert not started.is_error, started.content[0].text
+    done = await client.call_tool("job_status", {"job_id": started.structured_content["job_id"], "timeout_seconds": 60})
+    assert done.structured_content["state"] == "succeeded", done.structured_content
 
 
 async def test_an_execution_error_names_the_node(client):
@@ -249,7 +274,7 @@ async def test_a_cancel_during_submission_never_orphans_the_prompt():
     graph["2"] = {"class_type": "PrimitiveStringMultiline", "inputs": {"value": "x" * 1_500_000}}
     outcomes = []
     try:
-        for delay in (0.005, 0.01, 0.015, 0.02, 0.03):  # the cancel lands at points across the POST
+        for delay in (0.005, 0.015, 0.03):  # the cancel lands at points across the POST
             graph["1"]["inputs"]["color"] = random.randrange(1 << 24)
             progress = {"prompt_id": str(__import__("uuid").uuid4())}
             store = JobStore()

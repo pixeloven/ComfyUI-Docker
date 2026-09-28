@@ -7,7 +7,6 @@ import asyncio
 import base64
 import json
 import logging
-from pathlib import Path
 
 import comfyrelay.tools_workflow as tw
 import httpx2
@@ -16,11 +15,18 @@ from comfyrelay.comfyui import ComfyUIClient
 from comfyrelay.jobs import JobStore
 from comfyrelay.server import build_server
 from mcp import Client
-from relay_helpers import TOKEN, SYSTEM_STATS, assert_producer_honours_cancel, free_port, settings
+from relay_helpers import (
+    SYSTEM_STATS,
+    TOKEN,
+    WORKFLOW_OBJECT_INFO,
+    assert_producer_honours_cancel,
+    free_port,
+    settings,
+)
 
 pytestmark = pytest.mark.anyio
 
-INFO = json.loads((Path(__file__).parent / "object_info_v0.37.0.json").read_text())
+INFO = WORKFLOW_OBJECT_INFO
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 
 
@@ -239,6 +245,16 @@ def fast_polls(monkeypatch):
     monkeypatch.setattr(tw, "POLL_SECONDS", 0.01)
 
 
+@pytest.fixture
+def quick_stop(monkeypatch):
+    """The stop's timings at a third or less, for the tests that wait them out: a 0.8s budget with 0.3s of it
+    kept for the cancel, and checks and settling every 0.05s. The delays those tests set scale with them."""
+    monkeypatch.setattr(tw, "STOP_BUDGET_SECONDS", 0.8)
+    monkeypatch.setattr(tw, "CANCEL_RESERVE_SECONDS", 0.3)
+    monkeypatch.setattr(tw, "STOP_CHECK_SECONDS", 0.05)
+    monkeypatch.setattr(tw, "SETTLE_SECONDS", 0.05)
+
+
 def serve(fake: FakeComfyUI):
     return build_server(settings(), comfyui=fake.client())
 
@@ -279,12 +295,12 @@ async def test_validate_reports_errors_and_changes_nothing():
     fake = FakeComfyUI()
     server, _ = serve(fake)
     graph = t1()
-    graph["4"]["inputs"]["images"] = ["1", 1]
+    graph["3"]["class_type"] = "ImageInvertt"
     async with Client(server, mode="legacy") as client:
         got = (await client.call_tool("workflow_validate", {"workflow": graph})).structured_content
     assert (got["valid"], got["runnable"]) == (False, False)
-    assert [(e["node_id"], e["input"], e["type"], e["expected"], e["got"]) for e in got["errors"]] == [
-        ("4", "images", "return_type_mismatch", "IMAGE", "MASK")
+    assert [(e["node_id"], e["class_type"], e["type"], e["expected"]) for e in got["errors"]] == [
+        ("3", "ImageInvertt", "missing_node_type", ["ImageInvert"])
     ]
     assert [c[:2] for c in fake.calls] == [("GET", "/object_info")]
 
@@ -321,13 +337,13 @@ async def test_run_refuses_an_invalid_graph_with_the_validation_errors():
     fake = FakeComfyUI()
     server, relay = serve(fake)
     graph = t1()
-    graph["4"]["inputs"]["images"] = ["1", 1]
+    graph["3"]["class_type"] = "ImageInvertt"
     async with Client(server, mode="legacy") as client:
         error = error_of(await client.call_tool("workflow_run", {"workflow": graph}))
         validated = (await client.call_tool("workflow_validate", {"workflow": graph})).structured_content
     assert error["code"] == "workflow_invalid"
     assert [{k: v for k, v in e.items() if v is not None} for e in validated["errors"]] == error["errors"]
-    assert "node 4 (SaveImage), input 'images': return_type_mismatch" in error["message"]
+    assert "node 3 (ImageInvertt): missing_node_type" in error["message"]
     assert fake.posted("/prompt") == [] and relay.jobs._jobs == {}
 
 
@@ -508,6 +524,7 @@ async def test_cancelling_a_running_run_stops_it_and_confirms():
     assert progress["stop"] == "confirmed"
 
 
+@pytest.mark.usefixtures("quick_stop")
 async def test_a_stop_comfyui_does_not_confirm_in_time_is_unconfirmed():
     fake = FakeComfyUI(auto="hold")
     fake.stubborn = True  # the running node never reaches a boundary
@@ -563,6 +580,7 @@ async def test_without_the_jobs_api_a_running_run_is_never_interrupted():
     assert progress["stop"] == "not_stopped" and "no atomic cancel" in progress["stop_detail"]
 
 
+@pytest.mark.usefixtures("quick_stop")
 async def test_cancelling_holds_its_budget_when_comfyui_hangs():
     fake = FakeComfyUI(auto="hold")
     started, progress = asyncio.Event(), {"prompt_id": "p"}
@@ -582,14 +600,15 @@ async def test_a_cancel_during_submission_waits_for_the_answer_then_cancels():
     assert fake.pending == [] and fake.running == [] and progress["stop"] == "confirmed"
 
 
+@pytest.mark.usefixtures("quick_stop")
 async def test_a_submission_slower_than_the_budget_is_cancelled_when_it_answers(caplog):
     caplog.set_level(logging.INFO, logger="comfyrelay.workflow")
     fake = FakeComfyUI(auto="hold")
-    fake.delays["/prompt"] = 2.5  # past what the unwind may wait
+    fake.delays["/prompt"] = 1.0  # past what the unwind may wait (0.8s budget less the 0.3s reserve)
     progress = {"prompt_id": "p-late"}
     await assert_producer_honours_cancel(lambda: tw.run_prompt(fake.client(), t1(), progress))
     assert progress["stop"] == "unconfirmed" and "cancelled again" in progress["stop_detail"]
-    await asyncio.sleep(1.5)  # ComfyUI answers and queues it; the late cancel follows
+    await asyncio.sleep(0.8)  # ComfyUI answers and queues it; the late cancel follows
     assert fake.pending == [] and fake.count("POST", "/api/jobs/p-late/cancel") == 2
     assert "stop of prompt p-late, carried on because its submission was answered" in caplog.text
     assert "p-late" in caplog.text and ": stopped" in caplog.text
@@ -1038,12 +1057,13 @@ async def test_a_5xx_during_the_stop_is_retried():
     assert progress["stop"] == "confirmed" and fake.count("POST", "/api/jobs/p/cancel") > 1
 
 
+@pytest.mark.usefixtures("quick_stop")
 async def test_a_submission_answering_during_the_first_cancel_is_cancelled_by_its_own_id():
     """Note: the answer arrives while the first cancel (by our id) is in flight, carrying an id ComfyUI minted."""
     fake = FakeComfyUI(auto="hold")
     fake.mint_ids = True
-    fake.delays["/prompt"] = 1.6  # past what the unwind waits for it (2.5s less the 1s reserve)...
-    fake.delays["/api/jobs/p-ours/cancel"] = 0.3  # ...and answered while this is in flight
+    fake.delays["/prompt"] = 0.6  # past what the unwind waits for it (0.8s budget less the 0.3s reserve)...
+    fake.delays["/api/jobs/p-ours/cancel"] = 0.2  # ...and answered while this is in flight
     progress = {"prompt_id": "p-ours"}
     await assert_producer_honours_cancel(lambda: tw.run_prompt(fake.client(), t1(), progress))
     assert progress["prompt_id"] == "minted-1"
@@ -1051,14 +1071,15 @@ async def test_a_submission_answering_during_the_first_cancel_is_cancelled_by_it
     assert fake.pending == [] and progress["stop"] == "confirmed"
 
 
+@pytest.mark.usefixtures("quick_stop")
 async def test_a_late_confirmation_replaces_the_timeout_detail():
     """Note: the stop outlives the budget (unconfirmed, with why), then confirms: the why goes with it."""
     fake = FakeComfyUI(auto="hold")
     started, progress = asyncio.Event(), {"prompt_id": "p"}
-    slow_checks = lambda: (fake.start("p"), fake.delays.update({"/api/jobs/p": 2.8}))  # noqa: E731
+    slow_checks = lambda: (fake.start("p"), fake.delays.update({"/api/jobs/p": 1.0}))  # noqa: E731
     await assert_producer_honours_cancel(producer(fake, progress, started, then=slow_checks), started=started)
-    assert progress["stop"] == "unconfirmed" and "within 2.5s" in progress["stop_detail"]
-    await asyncio.sleep(3.2)  # the check that was in flight answers: cancelled
+    assert progress["stop"] == "unconfirmed" and "within 0.8s" in progress["stop_detail"]
+    await asyncio.sleep(0.6)  # the check that was in flight answers: cancelled
     assert progress["stop"] == "confirmed" and "stop_detail" not in progress
 
 
@@ -1153,6 +1174,7 @@ async def test_the_larger_body_limit_comes_with_the_run_profile_only(profiles, l
     assert (response.status_code == 413) is limited
 
 
+@pytest.mark.usefixtures("quick_stop")
 async def test_an_unconfirmed_stop_catches_up_with_how_the_prompt_ended():
     """The budget ran out with the prompt still running; it then completed. job_status must end up saying so."""
     fake = FakeComfyUI(auto="hold")

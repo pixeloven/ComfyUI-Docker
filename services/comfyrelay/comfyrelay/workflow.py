@@ -1,46 +1,34 @@
-"""Check an API-format workflow against the live /object_info, without running it.
+"""The checks a workflow gets before it is submitted, and only those ComfyUI cannot make for us.
 
 An API-format workflow maps node ids to `{"class_type": ..., "inputs": {...}}`.
 An input's value is a constant, or a link `["<node id>", <output index>]`.
 
-The checks follow what ComfyUI's own `/prompt` validation does at the pinned
-version (`execution.py`: `validate_prompt` and `validate_inputs`), and a
-problem ComfyUI also reports carries ComfyUI's `type` and message, so an agent
-sees the same words either way:
+ComfyUI (v0.37.0) has no dry run: its only complete check is `/prompt`, which
+queues the graph when it passes. And /object_info cannot show a node's own
+validate_inputs, so a copy of ComfyUI's type, COMBO and bounds checks refuses
+graphs ComfyUI accepts (a CustomCombo's value is free-form, though its
+options list is empty) and drifts with every pin. So those checks are
+ComfyUI's, made when the graph is submitted (workflow_run maps its per-node
+errors). What stays here:
 
-    missing_node_type        the class is not installed (or a node has none)
-    prompt_no_outputs        nothing in the graph is an output node
-    required_input_missing   a required input has no value and no link
-    bad_linked_input         a link is not a [node id, output index] pair
-    return_type_mismatch     a link carries a type the input does not take
-    invalid_input_type       a constant will not convert (INT, FLOAT)
-    value_smaller_than_min   a number is under the input's min
-    value_bigger_than_max    ... or over its max
-    value_not_in_list        a COMBO value is not one of its options
+    invalid_workflow        not an API-format graph at all (a UI-format save,
+                            a /prompt body, a node that is not an object)
+    workflow_too_large      more than MAX_NODES nodes
+    missing_node_type       a class not in /object_info, with near names
+                            (/prompt reports this without saying which node)
+    prompt_no_outputs       nothing in the graph is an output node
+    bad_linked_input        a link that is not ["<node id>", <output index>]
+    linked_node_missing     a link to a node the graph does not have
+    linked_output_missing   a link to an output its node does not have
+                            (ComfyUI raises on these three, not a clean error)
 
-Faults ComfyUI only trips over (an exception, not a clean error) get their
-own types: `invalid_workflow` (not an API-format graph at all),
-`linked_node_missing` and `linked_output_missing`.
+plus partner-API detection (`partner_api_nodes`), which workflow_run refuses
+on, and a warning for nodes no output depends on (ComfyUI will not run them).
+Like ComfyUI, links are checked on the nodes an output depends on.
 
-Like ComfyUI, inputs are checked on the nodes an output node depends on; a
-node nothing depends on does not run, so it gets a warning instead. Unlike
-ComfyUI, one bad output fails the whole graph: ComfyUI would run the outputs
-that pass and drop the rest. And a required DynamicCombo left out is
-`required_input_missing` here, where ComfyUI's check lets it through and the
-node then fails when it runs (checked at v0.37.0: ResizeImageMaskNode without
-`resize_type` raises TypeError in execute).
-
-What this cannot see: a node's own VALIDATE_INPUTS (so a file-picker COMBO
-such as LoadImage's `image`, whose list is only what is on disk, gets a
-warning, not an error, and ComfyUI's check at submission decides), and
-anything that only fails while running. Nor does it apply ComfyUI's node
-replacements (/node_replacements, which /prompt applies to a class that is
-no longer installed, rewiring its inputs): an old class name is
-`missing_node_type` here, and the class that replaced it is the one to use.
-A graph over MAX_NODES is `workflow_too_large`.
-
-Partner-API nodes are found here too (`partner_api_nodes`); the run tool
-refuses a graph that has any.
+What this does not do: apply ComfyUI's node replacements (/node_replacements,
+which /prompt applies to a class that is no longer installed). An old class
+name is `missing_node_type` here; the class that replaced it is the one to use.
 """
 
 from __future__ import annotations
@@ -60,7 +48,6 @@ AUTOGROW = "COMFY_AUTOGROW_V3"
 DYNAMIC_COMBO = "COMFY_DYNAMICCOMBO_V3"
 DYNAMIC_SLOT = "COMFY_DYNAMICSLOT_V3"
 MATCH_TYPE = "COMFY_MATCHTYPE_V3"
-ANY_TYPE = "*"
 
 # The hidden inputs through which ComfyUI hands a node the user's Comfy.org
 # credentials, which pay for partner-API calls.
@@ -72,12 +59,7 @@ API_NODES_MODULE = "comfy_api_nodes."
 # 10,000-node graph wedged its worker past what an interrupt could stop.
 MAX_NODES = 2000
 
-# COMBO inputs whose options are files on disk. The node checks the value
-# itself (VALIDATE_INPUTS), so a value outside the list is only a warning.
-FILE_PICKER_KEYS = ("image_upload", "video_upload", "audio_upload", "upload", "remote")
-
 MAX_PROBLEMS = 100
-MAX_OPTIONS_SHOWN = 50
 
 
 @dataclass
@@ -182,90 +164,6 @@ def _suggest(word: str, choices: Any, n: int = 3) -> list[str]:
     return difflib.get_close_matches(str(word), [str(c) for c in choices], n=n, cutoff=0.6)
 
 
-def _type_name(input_type: Any) -> Any:
-    """How to show an input type: a legacy COMBO is a list of options."""
-    return "COMBO" if isinstance(input_type, list) else input_type
-
-
-def types_compatible(received: Any, wanted: Any) -> bool:
-    """ComfyUI's comfy_execution.validation.validate_node_input, non-strict."""
-    if received == wanted:
-        return True
-    if ANY_TYPE in (received, wanted) or MATCH_TYPE in (received, wanted):
-        return True
-    if isinstance(received, list) and wanted == "COMBO":
-        return True
-    if not isinstance(received, str) or not isinstance(wanted, str):
-        return False
-    got = {t.strip() for t in received.split(",")}
-    want = {t.strip() for t in wanted.split(",")}
-    return ANY_TYPE in got or ANY_TYPE in want or bool(got & want)
-
-
-# -- the input spec, expanded against the graph's values ----------------------
-
-
-def expand_inputs(spec: dict[str, Any], live: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """The node's required and optional inputs, with dynamic ones expanded against `live` (the graph's values).
-
-    A port of ComfyUI's get_finalized_class_inputs: an Autogrow input becomes
-    `<id>.<prefix><n>` inputs, and a DynamicCombo adds the inputs of the
-    option it is set to, as `<id>.<name>`. A DynamicCombo itself is checked as
-    an ordinary COMBO of its option keys.
-    """
-    out: dict[str, dict[str, Any]] = {"required": {}, "optional": {}}
-    _parse(out, live, {k: spec.get(k) for k in ("required", "optional")}, [])
-    return out
-
-
-def _parse(out: dict[str, dict[str, Any]], live: dict[str, Any], section: dict[str, Any], prefix: list[str]) -> None:
-    for category, inputs in section.items():
-        if category not in out or not isinstance(inputs, dict):
-            continue
-        for name, value in inputs.items():
-            io_type = value[0] if isinstance(value, list) and value else None
-            path = [*prefix, name]
-            extra = value[1] if isinstance(value, list) and len(value) > 1 and isinstance(value[1], dict) else {}
-            if io_type == AUTOGROW:
-                _autogrow(out, extra, path)
-            elif io_type == DYNAMIC_COMBO:
-                _dynamic_combo(out, live, extra, category, path)
-            elif io_type == DYNAMIC_SLOT:
-                if qualified(path) in live:
-                    _parse(out, live, extra.get("inputs") or {}, path)
-                    out[category][qualified(path)] = [extra.get("slotType", ANY_TYPE), extra]
-            else:
-                out[category][qualified(path)] = value
-
-
-def _autogrow(out: dict[str, dict[str, Any]], extra: dict[str, Any], path: list[str]) -> None:
-    template = extra.get("template") if isinstance(extra.get("template"), dict) else {}
-    names, item = autogrow_names(template), autogrow_item(template)
-    if names is None or item is None:
-        return
-    spec, required = item
-    minimum = autogrow_min(template)
-    for i, name in enumerate(names):
-        out["required" if i < minimum and required else "optional"][qualified([*path, name])] = spec
-
-
-def _dynamic_combo(
-    out: dict[str, dict[str, Any]],
-    live: dict[str, Any],
-    extra: dict[str, Any],
-    category: str,
-    path: list[str],
-) -> None:
-    key = qualified(path)
-    options = [o for o in extra.get("options") or [] if isinstance(o, dict)]
-    out[category][key] = ["COMBO", {"options": [o.get("key") for o in options]}]
-    if key in live:
-        for option in options:
-            if option.get("key") == live[key]:
-                _parse(out, live, option.get("inputs") or {}, path)
-                break
-
-
 # -- the checks ---------------------------------------------------------------
 
 
@@ -350,7 +248,7 @@ def partner_api_nodes(graph: dict[str, Any], info: dict[str, Any]) -> list[dict[
 
 
 def validate(graph: dict[str, Any], info: dict[str, Any]) -> Report:
-    """Every problem in `graph` that /object_info (`info`) can show, without running it."""
+    """The structural problems in `graph`, the classes /object_info (`info`) lacks, and its partner-API nodes."""
     errors = shape_problems(graph)
     if errors:
         return Report(errors, [], [], [], len(graph) if isinstance(graph, dict) else 0)
@@ -385,9 +283,8 @@ def validate(graph: dict[str, Any], info: dict[str, Any]) -> Report:
     needed = _upstream(graph, outputs)
     for node_id in sorted(graph, key=_node_order):
         node = graph[node_id]
-        spec = info.get(node["class_type"])
-        if spec is None:
-            continue
+        if node["class_type"] not in info:
+            continue  # its missing_node_type says it
         if node_id not in needed:
             if outputs:
                 warnings.append(
@@ -399,7 +296,14 @@ def validate(graph: dict[str, Any], info: dict[str, Any]) -> Report:
                     )
                 )
             continue
-        _check_node(node_id, node, spec, graph, info, errors, warnings)
+        for name, value in (node.get("inputs") or {}).items():
+            if isinstance(value, list):  # ComfyUI takes every list for a link
+                found = _check_link(name, value, graph, info)
+                if found is not None:
+                    kind, message, fields = found
+                    errors.append(
+                        Problem(kind, message, node_id=node_id, class_type=node["class_type"], input=name, **fields)
+                    )
 
     return Report(
         errors[:MAX_PROBLEMS],
@@ -424,65 +328,10 @@ def _upstream(graph: dict[str, Any], roots: list[str]) -> set[str]:
     return seen
 
 
-def _check_node(
-    node_id: str,
-    node: dict[str, Any],
-    spec: dict[str, Any],
-    graph: dict[str, Any],
-    info: dict[str, Any],
-    errors: list[Problem],
-    warnings: list[Problem],
-) -> None:
-    class_type = node["class_type"]
-    inputs = node.get("inputs") or {}
-    expanded = expand_inputs(spec.get("input") or {}, inputs)
-    known = {**expanded["optional"], **expanded["required"]}
-
-    def problem(kind: str, message: str, name: str | None, **kw: Any) -> Problem:
-        return Problem(kind, message, node_id=node_id, class_type=class_type, input=name, **kw)
-
-    for name in expanded["required"]:
-        if name not in inputs:
-            errors.append(
-                problem(
-                    "required_input_missing",
-                    "Required input is missing",
-                    name,
-                    details=name,
-                    expected=_type_name(expanded["required"][name][0]),
-                )
-            )
-
-    hidden = (spec.get("input") or {}).get("hidden") or {}
-    for name in sorted(set(inputs) - set(known) - set(hidden)):
-        warnings.append(
-            problem(
-                "unknown_input",
-                f"{class_type} has no input {name!r}; ComfyUI ignores it",
-                name,
-                expected=_suggest(name, known) or None,
-            )
-        )
-
-    for name, input_spec in known.items():
-        if name not in inputs:
-            continue
-        value = inputs[name]
-        input_type = input_spec[0] if isinstance(input_spec, list) and input_spec else None
-        extra = input_spec[1] if isinstance(input_spec, list) and len(input_spec) > 1 else {}
-        extra = extra if isinstance(extra, dict) else {}
-        if isinstance(value, list):  # ComfyUI takes every list for a link; _check_link reports a malformed one
-            found = _check_link(name, value, input_type, graph, info)
-            if found is not None:
-                errors.append(problem(*found[:2], name, **found[2]))
-            continue
-        for kind, message, level, kw in _check_constant(name, value, input_type, extra):
-            (errors if level == "error" else warnings).append(problem(kind, message, name, **kw))
-
-
 def _check_link(
-    name: str, value: list[Any], input_type: Any, graph: dict[str, Any], info: dict[str, Any]
+    name: str, value: list[Any], graph: dict[str, Any], info: dict[str, Any]
 ) -> tuple[str, str, dict[str, Any]] | None:
+    """Whether a link points at a node and an output that exist; what it carries is ComfyUI's to judge."""
     if len(value) != 2:
         return (
             "bad_linked_input",
@@ -515,104 +364,4 @@ def _check_link(
             ),
             {"got": value, "expected": list(produced)},
         )
-    received = produced[slot]
-    if not types_compatible(received, input_type):
-        return (
-            "return_type_mismatch",
-            "Return type mismatch between linked nodes",
-            {
-                "details": f"{name}, received_type({received}) mismatch input_type({_type_name(input_type)})",
-                "expected": _type_name(input_type),
-                "got": received,
-            },
-        )
     return None
-
-
-def _check_constant(
-    name: str, value: Any, input_type: Any, extra: dict[str, Any]
-) -> list[tuple[str, str, str, dict[str, Any]]]:
-    """(type, message, "error" or "warning", fields) for each problem with a constant value."""
-    if isinstance(value, dict) and "__value__" in value:
-        value = value["__value__"]
-    convert = {"INT": int, "FLOAT": float}.get(input_type) if isinstance(input_type, str) else None
-    if convert is not None:
-        try:
-            value = convert(value)
-        except (TypeError, ValueError, OverflowError) as exc:
-            return [
-                (
-                    "invalid_input_type",
-                    f"Failed to convert an input value to a {input_type} value",
-                    "error",
-                    {"details": f"{name}, {value}, {exc}", "expected": input_type, "got": value},
-                )
-            ]
-        if "min" in extra and isinstance(extra["min"], (int, float)) and value < extra["min"]:
-            return [
-                (
-                    "value_smaller_than_min",
-                    f"Value {value} smaller than min of {extra['min']}",
-                    "error",
-                    {"details": name, "expected": {"min": extra["min"]}, "got": value},
-                )
-            ]
-        if "max" in extra and isinstance(extra["max"], (int, float)) and value > extra["max"]:
-            return [
-                (
-                    "value_bigger_than_max",
-                    f"Value {value} bigger than max of {extra['max']}",
-                    "error",
-                    {"details": name, "expected": {"max": extra["max"]}, "got": value},
-                )
-            ]
-        return []
-    if isinstance(input_type, list) or input_type == "COMBO":
-        options = input_type if isinstance(input_type, list) else extra.get("options") or []
-        values = value if extra.get("multiselect") and isinstance(value, list) else [value]
-        bad = [v for v in values if v not in options]
-        if not bad:
-            return []
-        file_picker = any(k in extra for k in FILE_PICKER_KEYS)
-        shown = options[:MAX_OPTIONS_SHOWN]
-        fields = {
-            "details": f"{name}: {', '.join(repr(v) for v in bad)} not in "
-            + (str(shown) if len(options) <= MAX_OPTIONS_SHOWN else f"(list of length {len(options)})"),
-            "expected": shown,
-            "got": value,
-        }
-        close = _suggest(bad[0], options)
-        if close:
-            fields["details"] += f"; did you mean {', '.join(repr(c) for c in close)}?"
-        if file_picker:
-            return [
-                (
-                    "value_not_in_list",
-                    (
-                        "Value not in list: this input picks a file, and the file is not among those ComfyUI "
-                        "lists. ComfyUI checks the file itself when the workflow is submitted"
-                    ),
-                    "warning",
-                    fields,
-                )
-            ]
-        return [("value_not_in_list", "Value not in list", "error", fields)]
-    if isinstance(input_type, str) and input_type not in ("STRING", "BOOLEAN") and _is_socket_type(input_type):
-        return [
-            (
-                "constant_for_link",
-                f"input {name!r} takes a {input_type} from another node's output, and got a constant",
-                "warning",
-                {"expected": input_type, "got": value},
-            )
-        ]
-    return []
-
-
-def _is_socket_type(input_type: str) -> bool:
-    """A type that only a link supplies: IMAGE, MODEL, LATENT and the like, not a widget's value."""
-    return (
-        input_type.isupper()
-        and not input_type.startswith("COMFY_")
-        and input_type not in ("INT", "FLOAT", "STRING", "BOOLEAN", "COMBO")
-    )

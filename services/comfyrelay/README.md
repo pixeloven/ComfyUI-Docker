@@ -219,38 +219,56 @@ The `run` profile's tools for ComfyUI workflows in **API format**
 returns, is refused with directions to export the API format. The code is
 `comfyrelay/tools_workflow.py`, with the checks in `comfyrelay/workflow.py` (#132).
 
-- **`workflow_validate`** type-checks a graph against the live `/object_info` without running
-  it. One `/object_info` read (1.8 MB at v0.37.0) is shared for 10 seconds, and an upload drops
-  it, so a new input file counts at once. Each problem names `node_id`, `class_type`, `input`,
-  `expected` and `got`, and uses ComfyUI's own `type` and message wherever ComfyUI reports the
-  same fault. So a MASK wired into an IMAGE input is `return_type_mismatch`, "Return type
-  mismatch between linked nodes", as `/prompt` would say. It reports:
-  - errors: `missing_node_type` (with near names), `required_input_missing`,
-    `bad_linked_input`, `linked_node_missing`, `linked_output_missing`,
-    `return_type_mismatch`, `invalid_input_type`, `value_smaller_than_min`,
-    `value_bigger_than_max`, `value_not_in_list` (with near values), `prompt_no_outputs`,
-    `invalid_workflow`, and `workflow_too_large` past **2,000 nodes** (a 10,000-node graph
-    wedged ComfyUI's worker past what an interrupt could stop);
-  - warnings, which don't stop a run: `not_connected_to_output`, `unknown_input`,
-    `constant_for_link`, and a file-picker COMBO (LoadImage's `image`) set to a file that
-    isn't listed. ComfyUI checks that file itself on submission.
+- **`workflow_validate`** checks what can be known about a graph without submitting it, against
+  the live `/object_info`. ComfyUI (v0.37.0) has no dry run: `/prompt` is its only complete check,
+  and it queues the graph when it passes. `/object_info` can't show a node's own
+  `validate_inputs` either. So **input types and values are ComfyUI's to check**, when
+  `workflow_run` submits the graph: required inputs, what a link carries, COMBO choices, and
+  number conversions and bounds. An earlier copy of those checks refused graphs ComfyUI
+  accepts. A `CustomCombo` takes any value, though its options list is empty. A copy would
+  also drift with every ComfyUI pin.
 
-  It expands ComfyUI's dynamic V3 inputs as ComfyUI does: `images.image0` for an Autogrow,
-  `resize_type.width` for a DynamicCombo's chosen option. The naming lives in `workflow.py`,
-  and `node_describe` renders it with the same helpers. It's stricter than ComfyUI in two
-  places. One failing output fails the graph, where ComfyUI would run the outputs that pass.
-  A required DynamicCombo that's left out is an error, where ComfyUI accepts it and the node
-  then fails when it runs. It can't see a node's own `VALIDATE_INPUTS` or anything that fails
-  only while running. It doesn't apply ComfyUI's node replacements (`/node_replacements`,
-  which `/prompt` applies to a class that's no longer installed), so an old class name is
-  `missing_node_type`: use the class that replaced it. Read-only.
+  What `workflow_validate` does check:
+  - **Errors:**
+    - `invalid_workflow`: not an API-format graph at all (a UI-format save file, a `/prompt`
+      body, or a node that isn't an object).
+    - `workflow_too_large`: past **2,000 nodes**. A 10,000-node graph wedged ComfyUI's worker
+      past what an interrupt could stop.
+    - `missing_node_type`: a class this instance doesn't have, with near names. `/prompt`
+      reports this without saying which node.
+    - `prompt_no_outputs`: nothing in the graph is an output node.
+    - `bad_linked_input`, `linked_node_missing` and `linked_output_missing`: a link that isn't
+      `["<node id>", <output index>]`, or points at a node or output the graph doesn't have.
+      ComfyUI raises an exception on these instead of a clean error.
+  - **Partner-API nodes**, which `workflow_run` refuses (see below).
+  - **A warning, `not_connected_to_output`**, for a node no output depends on, because ComfyUI
+    won't run it. It doesn't stop a run.
+
+  Each problem names the `node_id`, `class_type` and `input`. Like ComfyUI, links are checked
+  only on nodes an output depends on. One `/object_info` read (1.8 MB at v0.37.0) is shared for
+  10 seconds, and an upload drops it, so the check is never older than that.
+
+  It doesn't apply ComfyUI's node replacements (`/node_replacements`, which `/prompt` applies to
+  a class that's no longer installed). An old class name is therefore `missing_node_type`: use
+  the class that replaced it.
+
+  The V3 dynamic-input naming (`images.image0` for an Autogrow, `resize_type.width` for a
+  DynamicCombo's chosen option) lives in `workflow.py`, and `node_describe` renders it with the
+  same helpers. Read-only.
 - **`workflow_run`** runs `workflow_validate`'s check first, and refuses an invalid graph with
   those errors (`workflow_invalid`). It refuses any graph with a **partner-API node**
   (`partner_api_nodes_refused`, naming the nodes; see below). Otherwise it submits the graph
-  to `/prompt` and returns `job_id` and `prompt_id` at once. When ComfyUI refuses the graph
-  anyway (`workflow_rejected`), the error carries ComfyUI's own error and its per-node errors,
-  also flattened into the same shape as `workflow_validate`'s. ComfyUI drops any output that
-  fails its checks and runs the rest; the dropped ones come back as warnings.
+  to `/prompt`, where ComfyUI checks input types and values, and returns `job_id` and
+  `prompt_id` at once.
+
+  When ComfyUI refuses the graph, `workflow_run` fails at once with `workflow_rejected`. The
+  error carries ComfyUI's own error and its per-node errors, also flattened into the same shape
+  as `workflow_validate`'s problems (`type`, `node_id`, `class_type`, `input`, `details`,
+  `expected`, `got`). So a MASK wired into SaveImage's IMAGE input comes back as
+  `return_type_mismatch` on that node's `images`, in ComfyUI's words.
+
+  ComfyUI accepts a graph when any output passes its checks, and drops the outputs that fail.
+  The dropped ones come back as warnings.
 
   Follow the job with `job_status`. Its `progress` says where ComfyUI has the prompt:
   `comfyui_state` is `submitting`, `queued` (with `queue_position`, where 0 is next), `running`
