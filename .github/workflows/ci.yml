@@ -919,17 +919,25 @@ jobs:
   # pushed: it is not published until #136 moves it into the mcp image, which
   # is also why `release` does not need this job. The image's own build already
   # checks that it refuses to start without a token and passes a probe with no
-  # ComfyUI. This boots the core-cpu main published beside it and probes it for
-  # real, as UID 12345 on a read-only root filesystem, then times its SIGTERM
-  # stop. `tests/relay/run.sh` is the same script locally.
+  # ComfyUI. This boots a core-cpu and probes the image against it for real, as
+  # UID 12345 on a read-only root filesystem, then times its SIGTERM stop
+  # (`tests/relay/run.sh`, the same script locally). Then it runs the live
+  # tests (*_live.py) against a fresh core-cpu: the only check that the relay
+  # and a real ComfyUI agree (cancel, SIGTERM survival, /prompt errors), and
+  # that the unit tests' FakeComfyUI behaves like the real one (#147).
   relay:
     name: comfyrelay probes a booted core-cpu
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [context, test-bake-targets]
     if: needs.context.outputs.build_relay == 'true'
+    # Reads the repo and pulls public images; nothing here writes (#121).
+    permissions:
+      contents: read
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
@@ -948,15 +956,117 @@ jobs:
         IMAGE_LABEL: ci
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
 
-    # The ComfyUI main already published, not one built here: this job tests
-    # the sidecar, and smoke-cpu tests core-cpu. After a pin bump the two
-    # versions differ, which the probe reports and does not fail on.
+    # Which ComfyUI to test against: the core-cpu main already published, when
+    # it holds the ComfyUI this commit pins. That is every run but a pin bump
+    # (or a push to main that races build-cpu publishing one), and it costs one
+    # manifest read. Otherwise the relay would meet the new ComfyUI only after
+    # merge, so build core-cpu here from this commit, from the registry cache
+    # the bake target declares: the runtime layers hit, and ComfyUI rebuilds.
+    # Not smoke-cpu's image: handing ~5 GB between jobs costs more than the
+    # build, and would put smoke-cpu on this job's critical path on every run.
+    - name: Pick the core-cpu
+      id: comfyui
+      env:
+        LATEST: ${{ needs.context.outputs.registry_url }}core:cpu-latest
+        OWN: ${{ needs.context.outputs.registry_url }}core:cpu-relay
+        PIN: ${{ needs.context.outputs.comfyui_version }}
+      run: |
+        set -euo pipefail
+        published="$(docker buildx imagetools inspect "${LATEST}" \
+          --format '{{index .Image.Config.Labels "org.opencontainers.image.version"}}')"
+        if [ "${published}" = "${PIN}" ]; then
+          echo "cpu-latest holds ComfyUI ${published}, the pin: testing against it"
+          { echo "image=${LATEST}"; echo "build=false"; } >> "${GITHUB_OUTPUT}"
+        else
+          echo "::notice::cpu-latest holds ComfyUI ${published:-<no version label>} but this commit pins ${PIN}: building core-cpu here"
+          { echo "image=${OWN}"; echo "build=true"; } >> "${GITHUB_OUTPUT}"
+        fi
+
+    # Never pushed, like smoke-cpu's: `push: false`, and `relay` is not a label
+    # CI publishes.
+    - name: Build core-cpu at this commit's pin
+      if: steps.comfyui.outputs.build == 'true'
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: core-cpu
+        load: true
+        push: false
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
+        IMAGE_LABEL: relay
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
+
     - name: Probe it against a booted core-cpu
       env:
-        COMFYUI_IMAGE: ${{ needs.context.outputs.registry_url }}core:cpu-latest
+        COMFYUI_IMAGE: ${{ steps.comfyui.outputs.image }}
       run: |
-        docker pull -q "${COMFYUI_IMAGE}"
+        docker image inspect "${COMFYUI_IMAGE}" >/dev/null 2>&1 || docker pull -q "${COMFYUI_IMAGE}"
         tests/relay/run.sh --comfyui "${COMFYUI_IMAGE}" comfyrelay:ci
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10.0.1
+
+    # On the runner, from the uv environment, as a contributor runs them: the
+    # SIGTERM test starts `comfyctl relay serve` from it on a free loopback
+    # port. ComfyUI is a fresh container, a scratch instance the tests may
+    # write into, on the host network and bound to loopback, as
+    # `run.sh --network host` boots it. No model or input file is needed: the
+    # tests upload their own images. A skipped test fails the step, because
+    # every test skipping (a lost URL) would otherwise pass green.
+    - name: Run the live tests against a booted core-cpu
+      timeout-minutes: 10
+      working-directory: services
+      env:
+        COMFYUI_IMAGE: ${{ steps.comfyui.outputs.image }}
+        LIVE_CONTAINER: comfyrelay-live-comfyui
+        LIVE_PORT: 8188
+        LIVE_OUT: ${{ github.workspace }}/tests/relay/results/live
+      run: |
+        set -euo pipefail
+        mkdir -p "${LIVE_OUT}"
+        docker run -d --name "${LIVE_CONTAINER}" --network host --security-opt no-new-privileges:true \
+          -e COMFY_PORT="${LIVE_PORT}" -e COMFY_ENABLE_MANAGER=false -e "CLI_ARGS=--listen 127.0.0.1" \
+          "${COMFYUI_IMAGE}" >/dev/null
+        url="http://127.0.0.1:${LIVE_PORT}"
+        start="$(date +%s)"
+        until curl -fsS --max-time 10 "${url}/system_stats" >/dev/null 2>&1; do
+          [ "$(docker inspect -f '{{.State.Running}}' "${LIVE_CONTAINER}")" = true ] \
+            || { echo "::error::ComfyUI exited before /system_stats answered"; exit 1; }
+          [ $(( $(date +%s) - start )) -lt 300 ] \
+            || { echo "::error::ComfyUI did not answer /system_stats within 300s"; exit 1; }
+          sleep 2
+        done
+        echo "ComfyUI (${COMFYUI_IMAGE}) answered after $(( $(date +%s) - start ))s"
+        COMFYRELAY_LIVE_COMFYUI_URL="${url}" uv run --locked pytest -v -rs -o log_level=INFO \
+          --junitxml "${LIVE_OUT}/junit.xml" comfyrelay/tests/test_*_live.py 2>&1 | tee "${LIVE_OUT}/pytest.log"
+        python3 - "${LIVE_OUT}/junit.xml" <<'PY'
+        import sys
+        import xml.etree.ElementTree as ET
+
+        suite = ET.parse(sys.argv[1]).getroot()
+        suite = suite if suite.tag == "testsuite" else suite.find("testsuite")
+        ran, skipped = int(suite.get("tests")), int(suite.get("skipped"))
+        if ran == 0 or skipped:
+            sys.exit(f"::error::{skipped} of {ran} live tests skipped; every one must run against the booted ComfyUI")
+        print(f"live tests: {ran} ran, none skipped")
+        PY
+
+    # The relay's own log is in pytest.log: captured at INFO for a failing
+    # test, and the SIGTERM test puts its relay subprocess's output in its
+    # assertion.
+    - name: Keep the live ComfyUI's log
+      if: always()
+      env:
+        LIVE_CONTAINER: comfyrelay-live-comfyui
+        LIVE_OUT: tests/relay/results/live
+      run: |
+        docker container inspect "${LIVE_CONTAINER}" >/dev/null 2>&1 || exit 0
+        mkdir -p "${LIVE_OUT}"
+        docker logs "${LIVE_CONTAINER}" > "${LIVE_OUT}/comfyui.log" 2>&1 || true
+        docker rm -f "${LIVE_CONTAINER}" >/dev/null 2>&1 || true
 
     - name: Record the probe
       if: always()
@@ -965,6 +1075,8 @@ jobs:
           { echo '### comfyrelay probe'; echo '```json'; cat tests/relay/results/summary.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
         fi
 
+    # With the live tests' in live/: ComfyUI's log, pytest's output (the
+    # relay's log with it) and the JUnit report.
     - name: Upload the probe report and logs
       if: always()
       uses: actions/upload-artifact@v7.0.1
