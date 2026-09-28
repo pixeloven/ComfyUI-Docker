@@ -114,7 +114,9 @@ once. Workflow runs are the only jobs so far (see *Workflow tools*).
    the cleanup short. A producer reads why it was cancelled from
    `current_job().cancel_reason`: `cancel` (`job_cancel`) or `shutdown`. At shutdown it may
    leave its outside work running instead of undoing it. A workflow run does: its prompt
-   carries on in ComfyUI. Other producers undo what they started, as before.
+   carries on in ComfyUI. Other producers undo what they started, as before. A producer that
+   finds its work had already finished before the cancel took effect raises `AlreadyFinished`
+   instead of re-raising: the job then ends as the work did, with its result or its error.
 2. Keep any work it hands to a thread interruptible, with a timeout or a stop flag the thread
    checks. Cancelling the await returns at once, but the thread keeps running. On SIGINT or a
    normal exit Python waits for it with no time limit (a job in a 20-second thread held a
@@ -281,10 +283,17 @@ returns, is refused with directions to export the API format. The code is
   LoadImage's `image` input.
   - The file arrives base64-encoded, at most **10 MiB** decoded. A `data:` URL is fine, and so
     are line breaks and other whitespace (MIME-style wrapped base64).
-  - The HTTP transport accepts a request body of up to 10 MiB's base64 plus 1 MiB (the SDK's
-    default is 4 MiB, which refused a 3 MiB file before the tool ran). So an upload a little
-    over the cap gets `upload_too_large`; only one over about 10.75 MiB meets the transport's
-    bare 413. The token is checked before any body is read.
+  - With the `run` profile enabled, the HTTP transport accepts a request body of up to 10 MiB's
+    base64 plus 1 MiB. The SDK's default is 4 MiB, which refused a 3 MiB file before the tool
+    ran. So an upload a little over the cap gets `upload_too_large`; only one over about
+    10.75 MiB meets the transport's bare 413. Without `run` the SDK's 4 MiB default stands. The
+    token is checked before any body is read.
+  - Uploads decode and send one at a time. **Memory:** a `run`-profile sidecar idles at about
+    75 MB RSS. One maximum-size upload peaks at about 140 MB, and six at once at about 340 MB
+    (measured at v0.37.0). Most of that is the request bodies, which the transport reads and
+    parses before the tool runs: about 45 MB each for a maximum-size upload, however the tool
+    queues them. Without the one-at-a-time limit, six peaked at about 390 MB. Give a
+    `run`-profile sidecar that takes large uploads 512 MiB.
   - The name is sanitised: directories are dropped, anything outside `A-Z a-z 0-9 . _ ( ) + -`
     and space becomes `_`, and leading dots go. A name with nothing left is refused.
   - It never overwrites: a different file under a taken name is stored as `name (1).ext`
@@ -326,13 +335,25 @@ waiting and interrupts it only if it's the prompt running. It never sends `/inte
 at v0.37.0 checks the running prompt outside the lock, and without a prompt id stops whatever
 is running. The stop then checks `GET /api/jobs/<id>` until the prompt is no longer pending or
 in progress. It sends the cancel again at each check, because ComfyUI clears its interrupt
-flag as a prompt starts executing, so an interrupt that lands at that moment is lost. The
-whole unwind takes at most 2.5 seconds, inside the producer contract's 3, and each call has a
-1-second timeout.
+flag as a prompt starts executing, so an interrupt that lands at that moment is lost. A
+timeout or a reset connection is retried the same way. Only a non-retryable answer, or the
+deadline, ends the stop early. The whole unwind takes at most 2.5 seconds, inside the producer
+contract's 3, and each call has a 1-second timeout. ComfyUI's own terminal status decides what
+happened: `cancelled` means the stop worked, and `completed` or `failed` means the prompt got
+to the end first.
 
 `job_status` and `job_cancel` report the outcome in `progress.stop`:
-- `confirmed`: ComfyUI shows it's no longer queued or running.
-- `unconfirmed`: it couldn't be checked in time, and `stop_detail` says why.
+- `confirmed`: ComfyUI shows it cancelled, either dequeued before it ran or interrupted.
+- `already_finished`: it had finished before the cancel took effect, so the cancel changed
+  nothing. The job then ends as the prompt did: `succeeded` with its `result`, or `failed` with
+  ComfyUI's error. `progress.comfyui_state` is `finished`, and `workflow_outputs` lists what it
+  saved. Keeping the result is deliberate. The work was done and its files exist, so dropping
+  them would report a cancel that didn't happen. If ComfyUI only says so after the stop's
+  budget has run out, the job has already ended `cancelled`. `progress.stop` still becomes
+  `already_finished`, and `workflow_outputs` lists the files.
+- `unconfirmed`: it couldn't be checked in time, and `stop_detail` says why. The stop carries
+  on in the background for up to 30 seconds, re-sending the cancel while ComfyUI still has the
+  prompt. Once ComfyUI says how the prompt ended, `stop` changes to match and `stop_detail` goes.
 - `not_stopped`: it's running, and this ComfyUI has no atomic cancel. The prompt is left to
   finish rather than risk interrupting someone else's.
 - `not_needed`: ComfyUI refused the submission, so nothing was queued.

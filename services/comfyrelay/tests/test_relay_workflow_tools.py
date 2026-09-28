@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 from pathlib import Path
 
 import comfyrelay.tools_workflow as tw
@@ -71,6 +72,14 @@ class FakeComfyUI:
         self.outputs = SAVED
         self.stubborn = False
         self.lost_interrupts = 0  # interrupts ComfyUI drops: one landing as a prompt starts is cleared by it
+        self.finish_on_cancel = False  # a running prompt completes before the interrupt reaches a node boundary
+        self.fail_once: set[str] = set()  # paths whose next request fails with a reset connection
+        self.fail_status: dict[str, int] = {}  # paths answered with this HTTP status, for as long as they are set
+        self.mint_ids = False  # answer /prompt with an id of ComfyUI's own, as older ComfyUIs do
+        self.job_polls = 0
+        self.absent_polls: set[int] = set()  # GET /api/jobs/<id> calls (1-based) answered "Job not found"
+        self.uploading = 0
+        self.max_uploading = 0
         self.down = False  # nothing answers at all
 
     def client(self) -> ComfyUIClient:
@@ -119,7 +128,12 @@ class FakeComfyUI:
         body = json.loads(request.content) if request.headers.get("content-type") == "application/json" else None
         if self.down:
             raise httpx2.ConnectError("refused", request=request)
+        if path in self.fail_once:
+            self.fail_once.discard(path)
+            raise httpx2.RemoteProtocolError("connection reset", request=request)
         self.calls.append((method, path, body))
+        if path in self.fail_status:
+            return httpx2.Response(self.fail_status[path])
         if path in self.delays:
             await asyncio.sleep(self.delays[path])
         if path == "/system_stats":
@@ -130,10 +144,11 @@ class FakeComfyUI:
             if self.reject is not None:
                 return httpx2.Response(400, json=self.reject)
             self.number += 1
-            self.pending.append([self.number, body["prompt_id"], body["prompt"], {}, []])
+            prompt_id = f"minted-{self.number}" if self.mint_ids else body["prompt_id"]
+            self.pending.append([self.number, prompt_id, body["prompt"], {}, []])
             return httpx2.Response(
                 200,
-                json={"prompt_id": body["prompt_id"], "number": self.number, "node_errors": self.accepted_node_errors},
+                json={"prompt_id": prompt_id, "number": self.number, "node_errors": self.accepted_node_errors},
             )
         if path.startswith("/api/jobs/") and not self.jobs_api:
             return httpx2.Response(404, text="404: Not Found", headers={"content-type": "application/octet-stream"})
@@ -144,6 +159,9 @@ class FakeComfyUI:
                 self.pending[:] = [i for i in self.pending if i[1] != prompt_id]
             elif status == "in_progress" and self.lost_interrupts:
                 self.lost_interrupts -= 1
+            elif status == "in_progress" and self.finish_on_cancel:
+                self.finish(prompt_id)  # it got there first
+                return httpx2.Response(200, json={"cancelled": True})
             elif status == "in_progress" and not self.stubborn:
                 self.finish(prompt_id, "error", [["execution_interrupted", {"node_id": "3", "node_type": "X"}]])
             return httpx2.Response(200, json={"cancelled": status in ("pending", "in_progress")})
@@ -151,7 +169,8 @@ class FakeComfyUI:
             self._advance()
             prompt_id = path.split("/")[3]
             status = self._status(prompt_id)
-            if status is None:
+            self.job_polls += 1
+            if status is None or self.job_polls in self.absent_polls:
                 return httpx2.Response(404, json={"error": "Job not found"})
             return httpx2.Response(200, json={"id": prompt_id, "status": status})
         if (method, path) == ("GET", "/queue"):
@@ -173,6 +192,10 @@ class FakeComfyUI:
             headers = {"content-type": "image/png", "content-length": str(len(data))}
             return httpx2.Response(200, headers=headers, content=b"" if method == "HEAD" else data)
         if (method, path) == ("POST", "/upload/image"):
+            self.uploading += 1
+            self.max_uploading = max(self.max_uploading, self.uploading)
+            await asyncio.sleep(self.delays.get("upload", 0))
+            self.uploading -= 1
             text = request.content
             name = text.split(b'filename="', 1)[1].split(b'"', 1)[0].decode()
             assert b'name="type"\r\n\r\ninput' in text and b'name="overwrite"\r\n\r\nfalse' in text
@@ -556,7 +579,8 @@ async def test_a_cancel_during_submission_waits_for_the_answer_then_cancels():
     assert fake.pending == [] and fake.running == [] and progress["stop"] == "confirmed"
 
 
-async def test_a_submission_slower_than_the_budget_is_cancelled_when_it_answers():
+async def test_a_submission_slower_than_the_budget_is_cancelled_when_it_answers(caplog):
+    caplog.set_level(logging.INFO, logger="comfyrelay.workflow")
     fake = FakeComfyUI(auto="hold")
     fake.delays["/prompt"] = 2.5  # past what the unwind may wait
     progress = {"prompt_id": "p-late"}
@@ -564,6 +588,9 @@ async def test_a_submission_slower_than_the_budget_is_cancelled_when_it_answers(
     assert progress["stop"] == "unconfirmed" and "cancelled again" in progress["stop_detail"]
     await asyncio.sleep(1.5)  # ComfyUI answers and queues it; the late cancel follows
     assert fake.pending == [] and fake.count("POST", "/api/jobs/p-late/cancel") == 2
+    assert "stop of prompt p-late, carried on because its submission was answered" in caplog.text
+    assert "p-late" in caplog.text and ": stopped" in caplog.text
+    assert progress["stop"] == "confirmed" and "stop_detail" not in progress  # job_status caught up
 
 
 async def test_a_second_cancel_does_not_abort_the_stop():
@@ -912,3 +939,226 @@ async def test_upload_size_boundary_over_http(http_relay, size, code):
         error = error_of(got)
         assert (error["code"], error["size_bytes"], error["limit"]) == (code, size, tw.MAX_UPLOAD_BYTES)
         assert fake.count("POST", "/upload/image") == 0
+
+
+# -- #145 second review ------------------------------------------------------------------------
+
+
+async def run_job(fake: FakeComfyUI, progress: dict, then=None):
+    """A workflow run as a job in a store, with its submission answered (then `then()`)."""
+    started = asyncio.Event()
+    store = JobStore()
+    job = store.submit(tw.RUN_KIND, producer(fake, progress, started, then=then))
+    await asyncio.wait_for(started.wait(), 5)
+    return store, job
+
+
+async def test_a_cancel_after_the_prompt_succeeded_keeps_its_result():
+    """R1: ComfyUI finished it before the cancel. Say so, and keep what it produced."""
+    fake = FakeComfyUI(auto="hold")
+    progress = {"prompt_id": "p"}
+    store, job = await run_job(fake, progress, then=lambda: fake.finish("p"))
+    await store.cancel(job.id)
+    assert fake.count("POST", "/api/jobs/p/cancel") == 1
+    assert job.state.value == "succeeded" and job.cancel_reason == "cancel"
+    assert job.result == {
+        "prompt_id": "p",
+        "status": "success",
+        "files": [{"node_id": "4", "filename": "t1__00001_.png", "subfolder": "", "type": "output"}],
+    }
+    assert progress["stop"] == "already_finished" and progress["comfyui_state"] == "finished"
+    assert "stop_detail" not in progress
+
+
+async def test_a_prompt_that_completes_before_the_interrupt_lands_is_already_finished():
+    fake = FakeComfyUI(auto="hold")
+    fake.finish_on_cancel = True  # the interrupt was sent, but the last node finished first
+    progress = {"prompt_id": "p"}
+    store, job = await run_job(fake, progress, then=lambda: fake.start("p"))
+    await store.cancel(job.id)
+    assert job.state.value == "succeeded" and progress["stop"] == "already_finished"
+
+
+async def test_a_cancel_after_the_prompt_failed_reports_its_failure():
+    fake = FakeComfyUI(auto="hold")
+    progress = {"prompt_id": "p"}
+    failed = lambda: fake.finish("p", "error", [["execution_error", RUNTIME_ERROR]], outputs={})  # noqa: E731
+    store, job = await run_job(fake, progress, then=failed)
+    await store.cancel(job.id)
+    assert job.state.value == "failed" and job.error["code"] == "workflow_execution_failed"
+    assert progress["stop"] == "already_finished"
+
+
+async def test_job_cancel_of_a_finished_prompt_says_so_and_outputs_still_work():
+    fake = FakeComfyUI(auto="hold")
+    server, _ = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        started = (await client.call_tool("workflow_run", {"workflow": t1()})).structured_content
+        fake.finish(started["prompt_id"])  # ComfyUI finished it before the relay polled again
+        cancelled = (await client.call_tool("job_cancel", {"job_id": started["job_id"]})).structured_content
+        outputs = await client.call_tool("workflow_outputs", {"job_id": started["job_id"]})
+    assert cancelled["state"] == "succeeded" and cancelled["result"]["status"] == "success"
+    assert cancelled["progress"]["stop"] == "already_finished"
+    assert cancelled["progress"]["comfyui_state"] == "finished"
+    assert [f["filename"] for f in outputs.structured_content["files"]] == ["t1__00001_.png"]
+
+
+async def test_a_reset_connection_during_the_stop_is_retried():
+    """R2: one failed request no longer ends the stop as unconfirmed."""
+    fake = FakeComfyUI(auto="hold")
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    reset = lambda: (fake.start("p"), fake.fail_once.add("/api/jobs/p/cancel"))  # noqa: E731
+    await assert_producer_honours_cancel(producer(fake, progress, started, then=reset), started=started)
+    assert progress["stop"] == "confirmed" and "stop_detail" not in progress
+    assert fake.running == [] and fake.history["p"]["status"]["messages"][0][0] == "execution_interrupted"
+
+
+async def test_a_non_retryable_error_ends_the_stop_at_once():
+    fake = FakeComfyUI(auto="hold")
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    refuse = lambda: fake.fail_status.update({"/api/jobs/p/cancel": 400})  # noqa: E731
+    await assert_producer_honours_cancel(producer(fake, progress, started, then=refuse), started=started)
+    assert progress["stop"] == "unconfirmed" and "HTTP 400" in progress["stop_detail"]
+    assert fake.count("POST", "/api/jobs/p/cancel") == 1  # not retried: it would fail the same way
+
+
+async def test_a_5xx_during_the_stop_is_retried():
+    fake = FakeComfyUI(auto="hold")
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    flaky = lambda: fake.fail_status.update({"/api/jobs/p/cancel": 503})  # noqa: E731
+    store = JobStore()
+    job = store.submit(tw.RUN_KIND, producer(fake, progress, started, then=flaky))
+    await asyncio.wait_for(started.wait(), 5)
+    asyncio.get_running_loop().call_later(0.5, fake.fail_status.clear)  # ComfyUI recovers inside the budget
+    await store.cancel(job.id)
+    assert progress["stop"] == "confirmed" and fake.count("POST", "/api/jobs/p/cancel") > 1
+
+
+async def test_a_submission_answering_during_the_first_cancel_is_cancelled_by_its_own_id():
+    """Note: the answer arrives while the first cancel (by our id) is in flight, carrying an id ComfyUI minted."""
+    fake = FakeComfyUI(auto="hold")
+    fake.mint_ids = True
+    fake.delays["/prompt"] = 1.6  # past what the unwind waits for it (2.5s less the 1s reserve)...
+    fake.delays["/api/jobs/p-ours/cancel"] = 0.3  # ...and answered while this is in flight
+    progress = {"prompt_id": "p-ours"}
+    await assert_producer_honours_cancel(lambda: tw.run_prompt(fake.client(), t1(), progress))
+    assert progress["prompt_id"] == "minted-1"
+    assert fake.count("POST", "/api/jobs/minted-1/cancel") >= 1
+    assert fake.pending == [] and progress["stop"] == "confirmed"
+
+
+async def test_a_late_confirmation_replaces_the_timeout_detail():
+    """Note: the stop outlives the budget (unconfirmed, with why), then confirms: the why goes with it."""
+    fake = FakeComfyUI(auto="hold")
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    slow_checks = lambda: (fake.start("p"), fake.delays.update({"/api/jobs/p": 2.8}))  # noqa: E731
+    await assert_producer_honours_cancel(producer(fake, progress, started, then=slow_checks), started=started)
+    assert progress["stop"] == "unconfirmed" and "within 2.5s" in progress["stop_detail"]
+    await asyncio.sleep(3.2)  # the check that was in flight answers: cancelled
+    assert progress["stop"] == "confirmed" and "stop_detail" not in progress
+
+
+async def test_vanished_counts_consecutive_absences_only():
+    fake = FakeComfyUI(auto="hold")
+    fake.pending.append([1, "p", {}, {}, []])
+    fake.absent_polls = {1, 2, 4, 5, 7, 8}  # never three in a row
+    task = asyncio.ensure_future(tw._follow(fake.client(), {"prompt_id": "p"}))
+    await asyncio.sleep(0.3)
+    assert not task.done()
+    fake.finish("p")
+    assert (await asyncio.wait_for(task, 5))["status"] == "success"
+
+
+async def test_a_json_404_that_is_not_comfyuis_is_an_error_not_a_missing_job():
+    """R4: a proxy's JSON 404 must not read as 'no such job', which would end in workflow_vanished."""
+
+    def proxy(_request):
+        return httpx2.Response(404, json={"error": "no route to upstream"})
+
+    client = ComfyUIClient("http://comfyui.test:8188", transport=httpx2.MockTransport(proxy))
+    with pytest.raises(tw.ComfyUIError) as info:
+        await client.job("p")
+    assert (info.value.code, info.value.detail["status"]) == ("comfyui_http_error", 404)
+    ok = ComfyUIClient(
+        "http://comfyui.test:8188",
+        transport=httpx2.MockTransport(lambda _r: httpx2.Response(404, json={"error": "Job not found"})),
+    )
+    assert await ok.job("p") is None
+    with pytest.raises(tw.ComfyUIError):
+        await tw._follow(client, {"prompt_id": "p"})
+
+
+async def test_a_shared_read_lives_from_when_it_completed(monkeypatch):
+    monkeypatch.setattr(tw, "OBJECT_INFO_TTL_SECONDS", 0.2)
+    fake = FakeComfyUI()
+    fake.delays["/object_info"] = 0.3  # slower than the TTL
+    server, _ = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        await client.call_tool("workflow_validate", {"workflow": t1()})
+        await client.call_tool("workflow_validate", {"workflow": t1()})
+    assert fake.count("GET", "/object_info") == 1
+
+
+async def test_a_cancelled_shared_read_is_not_kept():
+    future = asyncio.get_running_loop().create_future()
+    read = tw._Read(future)
+    future.cancel()
+    await asyncio.sleep(0)
+    assert read.fresh(10) is False  # and no CancelledError from .exception()
+
+
+async def test_uploads_decode_and_send_one_at_a_time():
+    fake = FakeComfyUI()
+    fake.delays["upload"] = 0.1
+    server, _ = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        await asyncio.gather(
+            *(
+                client.call_tool(
+                    "workflow_upload_input",
+                    {"filename": f"f{i}.png", "content_base64": base64.b64encode(PNG + bytes([i])).decode()},
+                )
+                for i in range(4)
+            )
+        )
+    assert fake.count("POST", "/upload/image") == 4 and fake.max_uploading == tw.UPLOAD_CONCURRENCY == 1
+
+
+@pytest.mark.parametrize(("profiles", "limited"), [(("read",), True), (("read", "run"), False)])
+async def test_the_larger_body_limit_comes_with_the_run_profile_only(profiles, limited):
+    from comfyrelay.server import http_app
+
+    s = settings(profiles=profiles)
+    server, _ = build_server(s, comfyui=FakeComfyUI().client())
+    app = http_app(server, s)
+    body = b"{" + b" " * (5 * 1024 * 1024) + b"}"  # 5 MiB: over the SDK's 4 MiB, under the run profile's limit
+    starlette = app.app  # inside TokenAuth; its lifespan starts the MCP session manager
+    async with (
+        starlette.router.lifespan_context(starlette),
+        httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://127.0.0.1") as http,
+    ):
+        response = await http.post(
+            "/mcp",
+            content=body,
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
+        )
+    assert (response.status_code == 413) is limited
+
+
+async def test_an_unconfirmed_stop_catches_up_with_how_the_prompt_ended():
+    """The budget ran out with the prompt still running; it then completed. job_status must end up saying so."""
+    fake = FakeComfyUI(auto="hold")
+    fake.stubborn = True
+    started, progress = asyncio.Event(), {"prompt_id": "p"}
+    await assert_producer_honours_cancel(
+        producer(fake, progress, started, then=lambda: fake.start("p")), started=started
+    )
+    assert progress["stop"] == "unconfirmed"
+    fake.finish("p")  # the last node finished
+    await asyncio.sleep(tw.SETTLE_SECONDS * 2 + 0.2)
+    assert (progress["stop"], progress["comfyui_state"]) == ("already_finished", "finished")
+    assert "stop_detail" not in progress

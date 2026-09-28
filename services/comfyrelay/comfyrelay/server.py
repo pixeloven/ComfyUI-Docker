@@ -101,11 +101,11 @@ class TokenAuth:
 
 
 def http_app(server: MCPServer, settings: Settings) -> Any:
-    # The body limit fits workflow_upload_input's largest file (tools_workflow.MAX_REQUEST_BODY_BYTES); TokenAuth
-    # answers 401 before any body is read.
-    app = server.streamable_http_app(
-        streamable_http_path=MCP_PATH, host=settings.host, max_request_body_size=MAX_REQUEST_BODY_BYTES
-    )
+    # With the run profile, the body limit fits workflow_upload_input's largest file
+    # (tools_workflow.MAX_REQUEST_BODY_BYTES); otherwise it stays the SDK's. TokenAuth answers 401 before any body
+    # is read.
+    limit = {"max_request_body_size": MAX_REQUEST_BODY_BYTES} if "run" in settings.profiles else {}
+    app = server.streamable_http_app(streamable_http_path=MCP_PATH, host=settings.host, **limit)
     return TokenAuth(app, settings.token)
 
 

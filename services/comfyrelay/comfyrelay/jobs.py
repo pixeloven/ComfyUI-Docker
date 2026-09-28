@@ -24,6 +24,11 @@ cancelling a job cancels that task. A producer MUST:
    a producer may leave its outside work running instead of undoing it; a
    workflow run does, so its prompt carries on in ComfyUI for a restarted
    relay to find (#146). It still re-raises within the 3s.
+   One exception to re-raising: a producer that finds its work had already
+   finished before the cancel could take effect (a ComfyUI prompt that
+   completed first) raises `AlreadyFinished` with that outcome instead. The
+   job then ends as the work did, `succeeded` with its result or `failed`
+   with its error, because nothing was cut short.
 2. Keep any work it hands to a thread (`asyncio.to_thread`, an executor)
    interruptible, for example with a timeout or a stop flag the thread
    checks. Cancelling the await returns at once while the thread keeps
@@ -164,6 +169,16 @@ class Job:
             "error": self.error,
             "progress": dict(self.progress) if self.progress is not None else None,
         }
+
+
+class AlreadyFinished(Exception):
+    """Raised by a cancelled producer whose work had finished before the cancel took effect: the job ends as the
+    work did (the producer contract in this module's docstring)."""
+
+    def __init__(self, result: Any = None, error: RelayError | None = None) -> None:
+        super().__init__("the work had finished before the cancel took effect")
+        self.result = result
+        self.error = error
 
 
 def unknown_job(job_id: str) -> RelayError:
@@ -321,6 +336,12 @@ class JobStore:
         except asyncio.CancelledError:
             job.state = JobState.cancelled
             raise
+        except AlreadyFinished as done:
+            job.state = JobState.failed if done.error is not None else JobState.succeeded
+            job.result = done.result
+            job.error = done.error.as_dict() if done.error is not None else None
+            job.finished_at = time.time()
+            return  # not cut short: the finally below leaves it as it is
         except RelayError as exc:
             job.state = JobState.failed
             job.error = exc.as_dict()
@@ -331,10 +352,10 @@ class JobStore:
             # A producer may swallow the CancelledError and return, or fail while
             # unwinding. Either way it stopped because it was asked to, and what
             # it returned is not a complete result.
-            if job.cancel_requested:
+            if job.cancel_requested and job.finished_at is None:
                 job.state = JobState.cancelled
                 job.result = None
-            job.finished_at = time.time()
+            job.finished_at = job.finished_at or time.time()
 
     def _prune(self) -> None:
         finished = [j for j in self._jobs.values() if j.state.finished]

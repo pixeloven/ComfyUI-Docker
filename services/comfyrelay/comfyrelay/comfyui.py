@@ -36,6 +36,10 @@ class ComfyUIError(RelayError):
     pass
 
 
+# What GET /api/jobs/<id> answers, with HTTP 404, for an id it does not know (v0.37.0, server.py get_job_by_id).
+JOB_NOT_FOUND = {"error": "Job not found"}
+
+
 class ComfyUIClient:
     def __init__(
         self,
@@ -246,12 +250,26 @@ class ComfyUIClient:
         if self._no_route(response):
             raise ComfyUIError("jobs_api_unavailable", f"ComfyUI at {self._shown_url} has no /api/jobs")
         if response.status_code == 404:
-            return None  # {"error": "Job not found"}
+            if self._json_or_none(response) == JOB_NOT_FOUND:
+                return None
+            # A JSON 404 that is not ComfyUI's: a proxy, a gateway, something else answering for it.
+            raise ComfyUIError(
+                "comfyui_http_error",
+                f"{self._shown_url}{path} answered HTTP 404 with a body that is not ComfyUI's job-not-found",
+                status=404,
+            )
         self._raise_for_status(response, path)
         data = self._json_object(response, path)
         if not isinstance(data.get("status"), str):
             raise self._bad_shape(path, 'an object with a "status" string')
         return data
+
+    @staticmethod
+    def _json_or_none(response: httpx2.Response) -> Any:
+        try:
+            return response.json()
+        except ValueError:
+            return None
 
     @staticmethod
     def _no_route(response: httpx2.Response) -> bool:

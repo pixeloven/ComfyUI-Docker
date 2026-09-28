@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field
 
 from .comfyui import ComfyUIClient, ComfyUIError
 from .errors import RelayError
-from .jobs import current_job
+from .jobs import AlreadyFinished, current_job
 from .workflow import Problem, Report, validate
 
 if TYPE_CHECKING:
@@ -67,6 +67,10 @@ STOP_BUDGET_SECONDS = 2.5
 CANCEL_RESERVE_SECONDS = 1.0
 # How often the unwind asks ComfyUI whether the prompt has stopped.
 STOP_CHECK_SECONDS = 0.2
+# A stop still unsettled when the budget runs out carries on in the background,
+# so job_status catches up with how the prompt ended: up to 60 checks, 0.5s apart.
+SETTLE_CHECKS = 60
+SETTLE_SECONDS = 0.5
 # How long one /object_info (1.8 MB at v0.37.0, more with custom nodes) and one
 # /queue (it carries every queued graph) are shared between callers.
 OBJECT_INFO_TTL_SECONDS = 10.0
@@ -84,6 +88,9 @@ MAX_UPLOAD_BASE64_CHARS = (MAX_UPLOAD_BYTES + 2) // 3 * 4
 # `upload_too_large`; only one over about 10.75 MiB meets the transport's 413.
 # The body is read only after the token check (server.TokenAuth).
 MAX_REQUEST_BODY_BYTES = MAX_UPLOAD_BASE64_CHARS + 1024 * 1024
+# How many uploads decode and send at once: each holds its decoded bytes and a
+# multipart copy while it does (README: the memory a run-profile sidecar needs).
+UPLOAD_CONCURRENCY = 1
 # The most workflow_outputs returns inline, and how many files it sizes.
 MAX_INLINE_BYTES = 5_000_000
 MAX_SIZED_FILES = 32
@@ -149,25 +156,43 @@ def _result(report: Report) -> ValidationResult:
     )
 
 
-_object_info: weakref.WeakKeyDictionary[ComfyUIClient, tuple[float, asyncio.Future[Any]]] = weakref.WeakKeyDictionary()
-_queue: weakref.WeakKeyDictionary[ComfyUIClient, tuple[float, asyncio.Future[Any]]] = weakref.WeakKeyDictionary()
+class _Read:
+    """One read of ComfyUI, shared: its future, and when it completed (None while in flight)."""
+
+    def __init__(self, future: asyncio.Future[Any]) -> None:
+        self.future = future
+        self.done_at: float | None = None
+        future.add_done_callback(self._done)
+
+    def _done(self, future: asyncio.Future[Any]) -> None:
+        self.done_at = time.monotonic()
+        if not future.cancelled():
+            future.exception()  # retrieved, so asyncio does not log it
+
+    def fresh(self, ttl: float) -> bool:
+        if not self.future.done():
+            return True  # in flight: wait for it rather than send another
+        if self.future.cancelled() or self.future.exception() is not None:
+            return False  # a failed read is not kept
+        return time.monotonic() - (self.done_at or 0.0) <= ttl
+
+
+_object_info: weakref.WeakKeyDictionary[ComfyUIClient, _Read] = weakref.WeakKeyDictionary()
+_queue: weakref.WeakKeyDictionary[ComfyUIClient, _Read] = weakref.WeakKeyDictionary()
 
 
 async def _shared(
-    cache: weakref.WeakKeyDictionary[ComfyUIClient, tuple[float, asyncio.Future[Any]]],
+    cache: weakref.WeakKeyDictionary[ComfyUIClient, _Read],
     comfyui: ComfyUIClient,
     ttl: float,
     fetch: Callable[[], Awaitable[Any]],
 ) -> Any:
-    """One read shared by every caller for `ttl` seconds, and one request in flight at a time. A failed read is
-    not kept."""
+    """One read shared by every caller until `ttl` seconds after it completed, and one request in flight at a
+    time. A failed or cancelled read is not kept."""
     held = cache.get(comfyui)
-    now = time.monotonic()
-    if held is None or now - held[0] > ttl or (held[1].done() and held[1].exception() is not None):
-        held = (now, asyncio.ensure_future(fetch()))
-        held[1].add_done_callback(lambda f: f.cancelled() or f.exception())
-        cache[comfyui] = held
-    return await asyncio.shield(held[1])
+    if held is None or not held.fresh(ttl):
+        held = cache[comfyui] = _Read(asyncio.ensure_future(fetch()))
+    return await asyncio.shield(held.future)
 
 
 async def _validate(relay: Relay, workflow: dict[str, Any]) -> Report:
@@ -352,7 +377,9 @@ async def run_prompt(
         return await _follow(comfyui, progress)
     except asyncio.CancelledError as exc:
         _resolve(submitted, exc=exc)
-        await _unwind(comfyui, progress, post)
+        finished = await _unwind(comfyui, progress, post)
+        if finished is not None:
+            raise finished from None
         raise
     except BaseException as exc:
         _resolve(submitted, exc=exc)
@@ -408,8 +435,8 @@ async def _follow(comfyui: ComfyUIClient, progress: dict[str, Any]) -> dict[str,
             if where == "finished":
                 progress.update(comfyui_state="finished", queue_position=None)
                 return finish(prompt_id, entry)
+            absent = absent + 1 if where == "absent" else 0  # consecutive polls only
             if where == "absent":
-                absent += 1
                 if absent >= VANISHED_POLLS:
                     raise RelayError(
                         "workflow_vanished",
@@ -479,18 +506,22 @@ def finish(prompt_id: str, entry: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-async def _unwind(comfyui: ComfyUIClient, progress: dict[str, Any], post: asyncio.Future[Any]) -> None:
+async def _unwind(
+    comfyui: ComfyUIClient, progress: dict[str, Any], post: asyncio.Future[Any]
+) -> AlreadyFinished | None:
     """After a cancel: stop the prompt on ComfyUI (job_cancel), or leave it running (the relay is stopping).
 
     The stop runs as its own task, so a second cancel cannot abort it half
     way (jobs.py delivers one; this holds even if something else sends
-    another). It is waited on for STOP_BUDGET_SECONDS at most.
+    another). It is waited on for STOP_BUDGET_SECONDS at most. Returns
+    AlreadyFinished when the prompt had finished before the cancel took
+    effect, for the producer to raise.
     """
     job = current_job()
     if job is not None and job.cancel_reason == "shutdown":
         progress["stop"] = "left_running"
         log.info("relay stopping: prompt %s is left running on ComfyUI", progress["prompt_id"])
-        return
+        return None
     loop = asyncio.get_running_loop()
     deadline = loop.time() + STOP_BUDGET_SECONDS
     stopping = _keep(asyncio.ensure_future(stop_prompt(comfyui, progress, post, deadline)))
@@ -500,95 +531,170 @@ async def _unwind(comfyui: ComfyUIClient, progress: dict[str, Any], post: asynci
         except asyncio.CancelledError:
             continue  # cancelled again: the stop goes on, inside the same deadline
     if not stopping.done():
-        progress.update(
-            stop="unconfirmed", stop_detail=f"ComfyUI did not confirm the stop within {STOP_BUDGET_SECONDS}s"
-        )
+        _stop(progress, "unconfirmed", f"ComfyUI did not confirm the stop within {STOP_BUDGET_SECONDS}s")
+        return None
+    return stopping.result()
+
+
+def _stop(progress: dict[str, Any], outcome: str, detail: str | None = None) -> None:
+    """Record how the stop went; a later, better answer replaces an earlier one's detail too."""
+    progress["stop"] = outcome
+    if detail is None:
+        progress.pop("stop_detail", None)
+    else:
+        progress["stop_detail"] = detail
 
 
 async def stop_prompt(
     comfyui: ComfyUIClient, progress: dict[str, Any], post: asyncio.Future[Any], deadline: float
-) -> None:
+) -> AlreadyFinished | None:
     """Stop our prompt on ComfyUI, and record in progress["stop"] what is known about it:
 
-        confirmed    ComfyUI shows it no longer queued or running
-        unconfirmed  it could not be checked in time (stop_detail says why)
-        not_stopped  it is running, and this ComfyUI has no atomic cancel
-        not_needed   ComfyUI refused the submission, so nothing was queued
+        confirmed         ComfyUI shows it cancelled: dequeued before it ran, or interrupted
+        already_finished  it had finished before the cancel took effect; its outputs, if any, are in
+                          ComfyUI, and the job ends as the prompt did (succeeded with its result, or failed)
+        unconfirmed       it could not be checked in time (stop_detail says why); the stop carries on in
+                          the background, and replaces this with how the prompt ended once ComfyUI says
+        not_stopped       it is running, and this ComfyUI has no atomic cancel
+        not_needed        ComfyUI refused the submission, so nothing was queued
+
+    ComfyUI's own terminal status decides between the first two: "cancelled"
+    is our stop, "completed" or "failed" means the prompt got there first.
 
     A submission still in flight is waited for first, leaving
     CANCEL_RESERVE_SECONDS for the cancel. One that does not answer in time
-    is cancelled by id anyway, and again when it answers.
+    is cancelled by id anyway, and again when it answers. Retryable errors
+    (a timeout, a reset connection) are retried until the deadline.
     """
     loop = asyncio.get_running_loop()
-    prompt_id = progress["prompt_id"]
-    try:
-        if not post.done():
-            await asyncio.wait({post}, timeout=max(0.0, deadline - loop.time() - CANCEL_RESERVE_SECONDS))
-        if post.done() and not post.cancelled() and post.exception() is None:
-            prompt_id = post.result()["prompt_id"]
-            progress["prompt_id"] = prompt_id
-        elif post.done() and getattr(post.exception(), "code", None) == "workflow_rejected":
-            progress["stop"] = "not_needed"
-            return
-        cancelled = await comfyui.cancel_job(prompt_id)
-        if not post.done():
-            post.add_done_callback(lambda f: _cancel_when_answered(comfyui, f))
-            progress.update(
-                stop="unconfirmed",
-                stop_detail="ComfyUI had not answered the submission; it was cancelled by id, and is cancelled again "
-                "if ComfyUI answers",
-            )
-            return
-        if cancelled is None:
-            # No atomic cancel on this ComfyUI: dequeue it, and never send /interrupt, which could stop someone
-            # else's prompt.
-            await comfyui.delete_queued(prompt_id)
-            queue = await comfyui.queue(cancelling=True)
-            if prompt_id in [pid for _, pid in _ids(queue["queue_running"])]:
-                progress.update(
-                    stop="not_stopped",
-                    stop_detail="it is running, and this ComfyUI has no atomic cancel (/api/jobs/<id>/cancel); an "
-                    "/interrupt could stop another client's prompt, so it is left to finish",
+    if not post.done():
+        await asyncio.wait({post}, timeout=max(0.0, deadline - loop.time() - CANCEL_RESERVE_SECONDS))
+    if post.done() and not post.cancelled() and getattr(post.exception(), "code", None) == "workflow_rejected":
+        _stop(progress, "not_needed")
+        return None
+    last = "no answer from ComfyUI"
+    while True:
+        prompt_id = _answered_id(post) or progress["prompt_id"]
+        progress["prompt_id"] = prompt_id
+        try:
+            cancelled = await comfyui.cancel_job(prompt_id)
+            if not post.done():
+                post.add_done_callback(lambda f: _cancel_when_answered(comfyui, progress, f))
+                _stop(
+                    progress,
+                    "unconfirmed",
+                    "ComfyUI had not answered the submission; it was cancelled by id, and is cancelled again if "
+                    "ComfyUI answers",
                 )
-            else:
-                progress["stop"] = "confirmed"
-            return
-        while True:
+                return None
+            if _answered_id(post) not in (None, prompt_id):
+                continue  # the submission answered during that cancel, with an id of ComfyUI's own: cancel that
+            if cancelled is None:
+                return await _stop_without_jobs_api(comfyui, progress, prompt_id)
             job = await comfyui.job(prompt_id, cancelling=True)
-            if job is None or job["status"] not in ("pending", "in_progress"):
-                progress["stop"] = "confirmed"
-                return
-            if loop.time() + STOP_CHECK_SECONDS > deadline:
-                progress.update(stop="unconfirmed", stop_detail=f"ComfyUI still reports it {job['status']}")
-                return
-            await asyncio.sleep(STOP_CHECK_SECONDS)
+            status = None if job is None else job["status"]
+            if status in (None, "cancelled"):
+                _stop(progress, "confirmed")
+                return None
+            if status in ("completed", "failed"):
+                return await _already_finished(comfyui, progress, prompt_id)
+            last = f"ComfyUI still reports it {status}"
             # ComfyUI clears its interrupt flag as a prompt starts executing (execution.py, execute_async), so an
             # interrupt that lands just as the prompt leaves the queue is lost. The cancel is atomic and targeted,
-            # so sending it again is safe.
-            await comfyui.cancel_job(prompt_id)
-    except RelayError as exc:
-        progress.update(stop="unconfirmed", stop_detail=exc.message)
-        log.warning("could not confirm prompt %s stopped on ComfyUI: %s", prompt_id, exc.message)
+            # so the loop sends it again.
+        except ComfyUIError as exc:
+            if not exc.retryable:
+                _stop(progress, "unconfirmed", exc.message)
+                log.warning("could not confirm prompt %s stopped on ComfyUI: %s", prompt_id, exc.message)
+                return None
+            last = exc.message
+        if loop.time() + STOP_CHECK_SECONDS > deadline:
+            _stop(progress, "unconfirmed", last)
+            _keep(asyncio.ensure_future(_settle(comfyui, progress, prompt_id, "the stop's budget ran out")))
+            return None
+        await asyncio.sleep(STOP_CHECK_SECONDS)
 
 
-def _cancel_when_answered(comfyui: ComfyUIClient, post: asyncio.Future[Any]) -> None:
-    if not post.cancelled() and post.exception() is None:
-        _keep(asyncio.ensure_future(_cancel_late(comfyui, post.result()["prompt_id"])))
+def _answered_id(post: asyncio.Future[Any]) -> str | None:
+    if post.done() and not post.cancelled() and post.exception() is None:
+        return post.result()["prompt_id"]
+    return None
 
 
-async def _cancel_late(comfyui: ComfyUIClient, prompt_id: str) -> None:
+async def _stop_without_jobs_api(
+    comfyui: ComfyUIClient, progress: dict[str, Any], prompt_id: str
+) -> AlreadyFinished | None:
+    """No atomic cancel on this ComfyUI: dequeue it, and never send /interrupt, which could stop someone else's
+    prompt."""
+    await comfyui.delete_queued(prompt_id)
+    queue = await comfyui.queue(cancelling=True)
+    if prompt_id in [pid for _, pid in _ids(queue["queue_running"])]:
+        _stop(
+            progress,
+            "not_stopped",
+            "it is running, and this ComfyUI has no atomic cancel (/api/jobs/<id>/cancel); an /interrupt could stop "
+            "another client's prompt, so it is left to finish",
+        )
+        return None
+    if await comfyui.history(prompt_id) is not None:
+        return await _already_finished(comfyui, progress, prompt_id)
+    _stop(progress, "confirmed")
+    return None
+
+
+async def _already_finished(comfyui: ComfyUIClient, progress: dict[str, Any], prompt_id: str) -> AlreadyFinished:
+    """The prompt got to the end before the cancel: the job ends as it did, and its outputs stay reachable."""
+    entry = await comfyui.history(prompt_id)
+    progress.update(comfyui_state="finished", queue_position=None)
+    _stop(progress, "already_finished")
+    if entry is None:
+        return AlreadyFinished(error=RelayError("workflow_vanished", f"ComfyUI has no history for {prompt_id}"))
     try:
-        for _ in range(10):  # again while it runs: an interrupt as it starts is lost (see stop_prompt)
+        return AlreadyFinished(result=finish(prompt_id, entry))
+    except RelayError as exc:
+        return AlreadyFinished(error=exc)
+
+
+def _cancel_when_answered(comfyui: ComfyUIClient, progress: dict[str, Any], post: asyncio.Future[Any]) -> None:
+    if not post.cancelled() and post.exception() is None:
+        progress["prompt_id"] = post.result()["prompt_id"]
+        why = "its submission was answered after its job was cancelled"
+        _keep(asyncio.ensure_future(_settle(comfyui, progress, progress["prompt_id"], why)))
+
+
+async def _settle(comfyui: ComfyUIClient, progress: dict[str, Any], prompt_id: str, why: str) -> None:
+    """Carry a stop on in the background: cancel again while ComfyUI still has the prompt queued or running, and
+    record how it ended (confirmed, or already_finished), so job_status catches up. Logs what happened."""
+    outcome = f"still queued or running after {SETTLE_CHECKS} checks"
+    for _ in range(SETTLE_CHECKS):
+        try:
             if await comfyui.cancel_job(prompt_id) is None:
                 await comfyui.delete_queued(prompt_id)
+                outcome = "dequeued; this ComfyUI has no atomic cancel, so a running prompt could not be stopped"
                 break
             job = await comfyui.job(prompt_id, cancelling=True)
-            if job is None or job["status"] not in ("pending", "in_progress"):
+            status = None if job is None else job["status"]
+            if status in (None, "cancelled"):
+                _stop(progress, "confirmed")
+                outcome = "stopped"
                 break
-            await asyncio.sleep(STOP_CHECK_SECONDS)
-        log.info("cancelled prompt %s, whose submission ComfyUI answered after its job was cancelled", prompt_id)
-    except RelayError as exc:
-        log.warning("could not cancel prompt %s after a late answer: %s", prompt_id, exc.message)
+            if status in ("completed", "failed"):
+                await _already_finished(comfyui, progress, prompt_id)
+                outcome = f"it had already {status}"
+                break
+        except ComfyUIError as exc:
+            if not exc.retryable:
+                outcome = f"not confirmed: {exc.message}"
+                break
+        await asyncio.sleep(SETTLE_SECONDS)
+    unsettled = outcome.startswith(("still", "not", "dequeued"))
+    log.log(
+        logging.WARNING if unsettled else logging.INFO,
+        "stop of prompt %s, carried on because %s: %s",
+        prompt_id,
+        why,
+        outcome,
+    )
 
 
 # -- workflow_outputs ---------------------------------------------------------
@@ -808,6 +914,8 @@ def _too_large(size: int) -> RelayError:
 
 
 def _workflow_upload_input(relay: Relay) -> Callable[..., Any]:
+    uploads = asyncio.Semaphore(UPLOAD_CONCURRENCY)
+
     async def workflow_upload_input(
         filename: str = Field(description="The file name to store it as, such as photo.png. Directories are dropped"),
         content_base64: str = Field(
@@ -828,22 +936,25 @@ def _workflow_upload_input(relay: Relay) -> Callable[..., Any]:
         payload = "".join(payload.split())  # base64 is often wrapped at 76 or 64 columns
         if len(payload) > MAX_UPLOAD_BASE64_CHARS:
             raise _too_large(len(payload) // 4 * 3)
-        try:
-            data = base64.b64decode(payload, validate=True)
-        except (binascii.Error, ValueError) as exc:
-            raise RelayError("invalid_base64", f"content_base64 is not valid base64: {exc}") from None
-        if not data:
-            raise RelayError("empty_upload", "the file is empty")
-        if len(data) > MAX_UPLOAD_BYTES:
-            raise _too_large(len(data))
         content_type = mimetypes.guess_type(clean)[0] or "application/octet-stream"
-        stored = await relay.comfyui.upload_input(clean, data, content_type)
+        async with uploads:  # the decoded bytes and their multipart copy exist for one upload at a time
+            try:
+                data = base64.b64decode(payload, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise RelayError("invalid_base64", f"content_base64 is not valid base64: {exc}") from None
+            if not data:
+                raise RelayError("empty_upload", "the file is empty")
+            if len(data) > MAX_UPLOAD_BYTES:
+                raise _too_large(len(data))
+            stored = await relay.comfyui.upload_input(clean, data, content_type)
+            size = len(data)
+            del data
         _object_info.pop(relay.comfyui, None)  # LoadImage's file list just changed
         return Uploaded(
             name=stored["name"],
             subfolder=str(stored.get("subfolder") or ""),
             type=str(stored.get("type") or "input"),
-            size_bytes=len(data),
+            size_bytes=size,
             requested_name=clean,
             renamed=stored["name"] != clean,
         )

@@ -324,3 +324,45 @@ async def test_a_relay_stopped_by_sigterm_leaves_its_prompt_running():
             relay.kill()
         if prompt_id is not None:
             await comfyui_cancel(prompt_id)
+
+
+async def comfyui_job(prompt_id: str) -> dict | None:
+    async with httpx2.AsyncClient(base_url=URL, timeout=10) as http:
+        response = await http.get(f"/api/jobs/{prompt_id}")
+    return response.json() if response.status_code == 200 else None
+
+
+async def test_a_cancel_racing_a_tiny_prompt_reports_what_comfyui_did(client):
+    """#145 second review, R1: cancel a 2-node graph 0.05 to 0.5s after submitting it. Whichever wins, the job
+    must agree with ComfyUI: finished there means succeeded here, with its result; cancelled there means
+    cancelled here."""
+    seen = []
+    for delay in (0.05, 0.1, 0.2, 0.3, 0.4, 0.5):
+        color = random.randrange(1 << 24)
+        graph = {
+            "1": {"class_type": "EmptyImage", "inputs": {"width": 8, "height": 8, "batch_size": 1, "color": color}},
+            "2": {"class_type": "PreviewImage", "inputs": {"images": ["1", 0]}},
+        }
+        run = (await client.call_tool("workflow_run", {"workflow": graph})).structured_content
+        await asyncio.sleep(delay)
+        job = (await client.call_tool("job_cancel", {"job_id": run["job_id"]})).structured_content
+        for _ in range(40):  # an unconfirmed stop carries on in the background; let it catch up
+            if job["progress"].get("stop") != "unconfirmed":
+                break
+            await asyncio.sleep(0.25)
+            job = (await client.call_tool("job_status", {"job_id": run["job_id"]})).structured_content
+        there = await comfyui_job(run["prompt_id"])
+        comfy = None if there is None else there["status"]
+        seen.append((delay, comfy, job["state"], job["progress"].get("stop")))
+        if comfy == "completed":
+            assert (job["progress"]["stop"], job["progress"]["comfyui_state"]) == ("already_finished", "finished"), seen
+            # Settled within the cancel, the job keeps the result; settled after it, the job had ended cancelled.
+            assert job["state"] in ("succeeded", "cancelled"), seen
+            if job["state"] == "succeeded":
+                assert job["result"]["status"] == "success"
+            outputs = await client.call_tool("workflow_outputs", {"job_id": run["job_id"]})
+            assert outputs.structured_content["files"], seen
+        else:
+            assert comfy in (None, "cancelled"), seen
+            assert (job["state"], job["progress"]["stop"]) == ("cancelled", "confirmed"), seen
+    print("delay, ComfyUI, job, stop:", seen)
