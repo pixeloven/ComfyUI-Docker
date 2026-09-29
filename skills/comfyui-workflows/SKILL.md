@@ -9,7 +9,12 @@ Short guides for an agent that drives a ComfyUI instance, especially one this
 repository's images run. Each topic is its own file; read the one the task
 needs. The comfyrelay MCP sidecar serves the same files through its
 `docs_guide` tool, and `docs_search` searches them together with
-[docs.comfy.org](https://docs.comfy.org).
+[docs.comfy.org](https://docs.comfy.org). *(needs the comfyrelay sidecar)*
+
+**The marker.** A passage marked *(needs the comfyrelay sidecar)*, or a section headed
+*Needs the comfyrelay sidecar.*, describes a tool or behaviour of comfyrelay, the MCP server
+this repository runs beside ComfyUI. Without it, skip that passage: the
+unmarked guidance holds for any ComfyUI, through its HTTP API and editor.
 
 ## Topics
 
@@ -21,7 +26,7 @@ needs. The comfyrelay MCP sidecar serves the same files through its
 - [errors-and-validation](references/errors-and-validation.md): which check
   catches what, and how to read ComfyUI's per-node errors.
 - [relay-limits](references/relay-limits.md): the comfyrelay sidecar's
-  profiles, refusals, jobs and re-attaching. Needs the comfyrelay sidecar.
+  profiles, refusals, jobs and re-attaching. *(needs the comfyrelay sidecar)*
 - [comfy-manifest](../comfy-manifest/SKILL.md): authoring `comfy.yaml` and
   generating its locks.
 
@@ -29,8 +34,8 @@ needs. The comfyrelay MCP sidecar serves the same files through its
 
 - **Look things up; don't recall them.** Node inputs, defaults and allowed
   values change between ComfyUI versions. Ask the running instance
-  (`/object_info`, or the relay's `node_describe`) rather than memory or a
-  web page.
+  (`/object_info`, or the relay's `node_describe` *(needs the comfyrelay sidecar)*) rather than
+  memory or a web page.
 - **docs.comfy.org describes the latest ComfyUI.** The instance you drive may
   be older. Where the site and the instance disagree, the instance wins.
 - **Change the deployment, not the instance.** Models and node packs come from

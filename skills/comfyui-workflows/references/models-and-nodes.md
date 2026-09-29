@@ -8,10 +8,10 @@ agent's job is to propose the change to those files.
 ## What to do instead
 
 1. **Find out exactly what's missing.** Check node classes against the live
-   instance (`/object_info`, or the relay's `node_search` and `node_describe`)
-   and models against what's on disk (`/models/<folder>`, or `model_list`). For
-   a template, the relay's `template_get` reports `missing_nodes`,
-   `missing_models` and `missing_inputs` directly.
+   instance (`/object_info`) and models against what's on disk
+   (`/models/<folder>`). With the relay, `node_search`, `node_describe` and
+   `model_list` do the same, and for a template `template_get` reports
+   `missing_nodes`, `missing_models` and `missing_inputs` directly. *(needs the comfyrelay sidecar)*
 2. **Propose the change**, for a human to apply:
    - **A model** goes in the deployment's `comfy.yaml`, followed by a
      regenerated lock (`comfyctl fetch resolve`). Give its source (`hf:`,
@@ -29,7 +29,7 @@ Never suggest installing through ComfyUI-Manager, `git clone` into
 `custom_nodes`, `comfy node install`, `pip install`, or a direct download into
 the models directory. Each works once, on one instance, and the next rebuild
 or replica loses it. The comfyrelay sidecar refuses to install anything
-(see the `relay-limits` topic).
+(see the `relay-limits` topic). *(needs the comfyrelay sidecar)*
 
 ## The subfolder gotcha
 
@@ -43,10 +43,11 @@ the file is on disk. ComfyUI rejects the loader's input with
 is to change the loader's value to the listed path, not to move or copy the
 file.
 
-- The relay's template check reports this case separately, as
-  `models_need_value_change`, with `found_at` giving the path to use.
-- `model_list` shows files the same way the loaders list them, with the
+- `/models/<folder>` lists files the same way the loaders do, with the
   subfolder included.
+- The relay's template check reports this case separately, as
+  `models_need_value_change`, with `found_at` giving the path to use, and
+  `model_list` lists files as the loaders do. *(needs the comfyrelay sidecar)*
 - When you propose a manifest entry, the folder in `install:` decides the
   path. `install: models/checkpoints/` gives the bare name, and
   `install: models/checkpoints/sdxl/` gives `sdxl/<file>`.
@@ -56,5 +57,5 @@ file.
 The folder a model goes in decides which loaders offer it: `checkpoints` for
 full checkpoints, `diffusion_models` for a bare diffusion model, `loras`,
 `vae`, `text_encoders`, `clip_vision`, `controlnet`, `upscale_models`, and
-more. `/models` on the instance (or `model_list`) lists the folder types that
-instance knows. A template's model entries name their folder in `directory`.
+more. `/models` on the instance (or `model_list` *(needs the comfyrelay sidecar)*) lists the
+folder types that instance knows. A template's model entries name their folder in `directory`.

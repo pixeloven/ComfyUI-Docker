@@ -1,8 +1,7 @@
 # comfyrelay: what the sidecar will and won't do
 
-**Needs the comfyrelay sidecar.** This topic is about the MCP server this
-repository ships beside a ComfyUI instance. Skip it if you reach ComfyUI some
-other way.
+*Needs the comfyrelay sidecar.* This whole topic is about the MCP server this repository
+ships beside a ComfyUI instance. Skip it if you reach ComfyUI some other way.
 
 comfyrelay is one MCP server per ComfyUI instance, reached over HTTP with a
 bearer token. It talks to its own ComfyUI and nothing else. Call `server_info`

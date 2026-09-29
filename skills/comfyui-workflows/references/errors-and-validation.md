@@ -6,6 +6,8 @@ knowing which one spoke tells you where to look.
 
 ## 1. Before submitting: `workflow_validate` (comfyrelay)
 
+*Needs the comfyrelay sidecar.* Without it, a graph's first check is ComfyUI's own, on submit.
+
 ComfyUI has no dry run, so the relay checks only what can be known without
 submitting the graph, against the live `/object_info`:
 
@@ -30,30 +32,32 @@ When `/prompt` refuses a graph it answers HTTP 400 with an `error` and a
 with a `type`, a `message`, `details` and `extra_info` (often the input name).
 The relay's `workflow_run` passes this on as `workflow_rejected`, and flattens
 it into `type`, `node_id`, `class_type`, `input`, `details`, `expected` and
-`got`.
+`got`. *(needs the comfyrelay sidecar)*
 
 The error types you'll meet most:
 
 | `type` | Means | Usually fix by |
 |---|---|---|
-| `required_input_missing` | a required input has no value or link | adding it; `node_describe` marks required inputs |
+| `required_input_missing` | a required input has no value or link | adding it; the node's definition (`/object_info/<class>`) marks required inputs |
 | `value_not_in_list` | a COMBO value isn't among the allowed ones | using a listed value. For a model, check the subfolder path (see `models-and-nodes`) |
 | `return_type_mismatch` | a link carries the wrong type, such as a MASK into an IMAGE input | linking the right output index |
-| `value_smaller_than_min` / `value_bigger_than_max` | a number is out of range | using the min, max and step from `node_describe` |
+| `value_smaller_than_min` / `value_bigger_than_max` | a number is out of range | using the min, max and step from the node's definition |
 | `invalid_input_type` | a value can't be converted to the input's type | sending a number, string or boolean as the input declares |
 | `prompt_no_outputs` / `prompt_outputs_failed_validation` | no output node, or every output's branch failed | reading the per-node errors; the top-level message alone is generic |
 
 ComfyUI accepts a graph when **any** output passes, and drops the outputs
-that fail. The relay reports those dropped outputs as warnings, so a run can
-succeed with less than you asked for.
+that fail, so a run can succeed with less than you asked for. The relay
+reports those dropped outputs as warnings. *(needs the comfyrelay sidecar)*
 
 ## 3. While running: execution errors
 
 A node can still fail at run time: out of memory, a corrupt model file, a
-custom node's own exception. The relay's `job_status` then reports `failed`
-with `workflow_execution_failed`, naming the node id and class, the exception
-type and message, and the last lines of the traceback. `workflow_interrupted`
-means something other than this job stopped it (a person, or another client).
+custom node's own exception. ComfyUI records it in the prompt's `/history`
+entry. The relay's `job_status` then reports `failed` with
+`workflow_execution_failed`, naming the node id and class, the exception type
+and message, and the last lines of the traceback. `workflow_interrupted` means
+something other than this job stopped it (a person, or another client).
+*(needs the comfyrelay sidecar)*
 
 ## Reading errors well
 
@@ -62,7 +66,8 @@ means something other than this job stopped it (a person, or another client).
 - **Fix one node at a time and resubmit.** ComfyUI reports every failing node
   at once, but one bad link often causes errors further down the graph.
 - **Check against the instance, not the docs.** An input the docs mention may
-  not exist on an older ComfyUI. `node_describe` shows what this one accepts.
+  not exist on an older ComfyUI. `/object_info/<class>` shows what this one
+  accepts, as does `node_describe` *(needs the comfyrelay sidecar)*.
 
 ComfyUI's own description of the execution flow is on docs.comfy.org under
 *Development → Server* (<https://docs.comfy.org/development/comfyui-server/comms_overview>).
