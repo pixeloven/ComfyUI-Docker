@@ -100,8 +100,8 @@ the `job_*` group are the cross-cutting names.
   seconds for the job to unwind; a job still unwinding after that reports `cancelling`, and
   `job_status` shows it reach `cancelled`. A cancelled job ends `cancelled`, with no `result`,
   even if its work swallows the cancellation and returns something. Cancelling a finished job
-  changes nothing. An unfinished workflow run this server no longer holds is refused
-  (`job_not_owned`; see *Re-attaching after a restart*).
+  changes nothing. It cancels only jobs this server holds: any other ID is refused with
+  `job_not_held`, and nothing is sent to ComfyUI (see *Re-attaching after a restart*).
 
 Jobs live in memory, so they don't survive a restart. A workflow run's `job_id` is its ComfyUI
 `prompt_id`, though, so a restarted relay can still find the run on ComfyUI. At most
@@ -265,7 +265,9 @@ returns, is refused with directions to export the API format. The code is
   those errors (`workflow_invalid`). It refuses any graph with a **partner-API node**
   (`partner_api_nodes_refused`, naming the nodes; see below). Otherwise it submits the graph
   to `/prompt`, where ComfyUI checks input types and values, and returns `job_id` and
-  `prompt_id` at once. They're the same ID, which the relay chooses.
+  `prompt_id` at once. The relay chooses the ID, and on ComfyUI v0.37.0 they're the same. An
+  older ComfyUI that mints its own `prompt_id` answers with a different one, and the `job_id`
+  then finds the run only while this relay holds it.
 
   When ComfyUI refuses the graph, `workflow_run` fails at once with `workflow_rejected`. The
   error carries ComfyUI's own error and its per-node errors, also flattened into the same shape
@@ -395,29 +397,40 @@ every job with the reason `shutdown`, and a workflow run then ends at once with 
 set to `left_running`: the prompt carries on in ComfyUI, and a restarted relay re-attaches to
 it.
 
-**Re-attaching after a restart** (#146). ComfyUI is the source of truth for a run. A run's
-`job_id` is the `prompt_id` the relay chose when it submitted it, so when `job_status`,
-`workflow_outputs` or `job_cancel` get an ID this server doesn't hold (it restarted, or dropped
-the finished job), the run is looked up with ComfyUI's `GET /api/jobs/<id>`. Nothing about it is
-kept in the relay. ComfyUI's status maps to the states a held run reports: `pending` and
-`in_progress` are `running` (with `progress.comfyui_state` `queued`, and its `queue_position`,
-or `running`), and `completed`, `failed` and `cancelled` are `succeeded`, `failed` and
-`cancelled`. The result or error comes from the same mapping as a held run's, so a
-`workflow_execution_failed` error names the node the same way, and the view says
-`source: "comfyui"`. `job_status` with `timeout_seconds` waits by polling ComfyUI twice a
-second. `created_at`, `started_at` and `finished_at` are ComfyUI's times; `summary` is generic,
-because the graph isn't read back.
+**Re-attaching after a restart** (#146). ComfyUI is the source of truth for a run, and
+re-attaching is read-only. A run's `job_id` is the `prompt_id` the relay chose when it
+submitted it, so when `job_status` or `workflow_outputs` get an ID this server doesn't hold (it
+restarted, or dropped the finished job), the run is looked up on ComfyUI. Nothing about it is
+kept in the relay.
+- **Where the prompt is** comes from `GET /api/jobs/<id>`. A prompt that is `pending` or
+  `in_progress` is `running`, as a held run is, with `progress.comfyui_state` of `queued` (and
+  its `queue_position`) or `running`.
+- **How a finished one ended** comes from its `/history/<id>` entry, through the same mapping a
+  held run's result goes through. So a re-attached run reports exactly what the relay that held
+  it would have: `succeeded` with its files, or `failed` with the same structured error
+  (`workflow_execution_failed` naming the node, or `workflow_interrupted`). `/api/jobs`'s own
+  outputs aren't used, because ComfyUI normalises them (a 3D file name becomes a file, `None`
+  entries are dropped), and they would differ from `workflow_outputs`.
+- The view says `source: "comfyui"`. `created_at`, `started_at` and `finished_at` are ComfyUI's
+  times. `summary` is generic, because the graph isn't read back.
+- `job_status` with `timeout_seconds` polls ComfyUI twice a second, and rides out ComfyUI not
+  answering for up to 60 seconds, as a held run does. Concurrent waits on one ID aren't
+  shared: each poll is about 150 bytes, and each wait ends within 300 seconds.
+- Only a canonical UUID (lowercase, hyphenated) can be a run's ID. Any other ID this server
+  doesn't hold is `unknown_job` at once, and never reaches ComfyUI.
 
 Limits, all ComfyUI's:
 - A prompt cancelled before it ran leaves no record, so it's `unknown_job`, like any ID
   ComfyUI doesn't know. So is every prompt after ComfyUI itself restarts, since it keeps its
   history in memory.
-- Who cancelled an interrupted run isn't recorded: it's `cancelled`, with no error.
+- ComfyUI doesn't record who interrupted a run. A re-attached run that was interrupted is
+  `failed` with `workflow_interrupted`, whose message says something else stopped it, even if
+  the relay cancelled it before restarting.
 
-**Cancelling is refused** (`job_not_owned`) for an unfinished run this server doesn't hold.
-After a restart the relay doesn't know which prompts it submitted, and cancelling by ID alone
-would let an agent stop another client's prompt. A finished one has nothing to cancel, so
-`job_cancel` just reports it.
+**Cancelling is refused** for any job this server doesn't hold (`job_not_held`), and nothing
+is sent to ComfyUI. After a restart the relay can't tell its own prompts from other clients',
+and cancelling by ID alone would let an agent stop someone else's work. **A person can cancel
+an orphaned run from ComfyUI's queue panel.**
 
 **Privacy.** `job_status` and `workflow_outputs` read any prompt on the ComfyUI by its ID,
 including another client's: its status, its error, and its output files. That's by design and

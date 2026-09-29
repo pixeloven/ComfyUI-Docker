@@ -114,6 +114,27 @@ class FakeComfyUI:
             "status": {"status_str": status, "completed": status == "success", "messages": messages or []},
         }
 
+    @staticmethod
+    def normalised(outputs: dict) -> dict:
+        """What GET /api/jobs/<id> makes of a history entry's outputs (v0.37.0, comfy_execution/jobs.py
+        normalize_outputs): a 3D file name becomes a file, and None entries are dropped. /history keeps them as
+        they are."""
+        return {
+            node: {
+                kind: [
+                    {"filename": i, "type": "output", "subfolder": "", "mediaType": "3d"}
+                    if isinstance(i, str) and i.endswith((".obj", ".fbx", ".gltf", ".glb", ".usdz"))
+                    else i
+                    for i in items
+                    if i is not None
+                ]
+                if isinstance(items, list) and kind != "animated"
+                else items
+                for kind, items in produced.items()
+            }
+            for node, produced in outputs.items()
+        }
+
     def job(self, prompt_id: str, status: str) -> dict:
         """GET /api/jobs/<id>'s answer (v0.37.0 get_job): small while live, the full entry once it has ended."""
         if status in ("pending", "in_progress"):
@@ -126,7 +147,7 @@ class FakeComfyUI:
             "create_time": entry["prompt"][3].get("create_time"),
             "execution_start_time": 1_790_000_001_000,
             "execution_end_time": 1_790_000_002_000,
-            "outputs": entry["outputs"],
+            "outputs": self.normalised(entry["outputs"]),
             "execution_status": entry["status"],
             "workflow": {"prompt": entry["prompt"][2], "extra_data": entry["prompt"][3]},
         }
@@ -172,8 +193,7 @@ class FakeComfyUI:
                 return httpx2.Response(400, json=self.reject)
             self.number += 1
             prompt_id = f"minted-{self.number}" if self.mint_ids else body["prompt_id"]
-            extra_data = {"client_id": body["client_id"]} if "client_id" in body else {}
-            extra_data["create_time"] = 1_790_000_000_000 + self.number
+            extra_data = {"create_time": 1_790_000_000_000 + self.number}
             self.pending.append([self.number, prompt_id, body["prompt"], extra_data, []])
             return httpx2.Response(
                 200,
@@ -1282,26 +1302,48 @@ async def test_a_restarted_relay_follows_a_run_on_comfyui_by_its_job_id():
     assert (done["started_at"], done["finished_at"]) == (1_790_000_001.0, 1_790_000_002.0)
 
 
-@pytest.mark.parametrize("auto", ["success", "error"])
-async def test_a_reattached_run_ends_as_the_held_one_did(auto):
-    """The same finish() maps both: what a restarted relay reports is what the first one did."""
-    fake = FakeComfyUI(auto=auto)
-    started, held, restarted = await run_and_restart(fake, wait=True)
-    async with Client(restarted, mode="legacy") as client:
-        found = (await client.call_tool("job_status", {"job_id": started["job_id"]})).structured_content
-    assert held["source"] == "relay" and found["source"] == "comfyui"
-    assert (found["state"], found["result"], found["error"]) == (held["state"], held["result"], held["error"])
-    assert found["state"] == ("succeeded" if auto == "success" else "failed")
+PREVIEW_3D = {"7": {"result": ["preview3d_ab12.glb", None, None]}}  # Preview3D's ui: model file, camera, background
+ENDINGS = {
+    "success": lambda fake, pid: fake.finish(pid),
+    "execution_error": lambda fake, pid: fake.finish(pid, "error", [["execution_error", RUNTIME_ERROR]], outputs={}),
+    "interrupted": lambda fake, pid: fake.finish(
+        pid, "error", [["execution_interrupted", {"node_id": "3", "node_type": "ImageInvert"}]]
+    ),
+    "a_3d_output": lambda fake, pid: fake.finish(pid, outputs={**SAVED, **PREVIEW_3D}),
+}
 
 
-async def test_a_reattached_run_that_was_interrupted_is_cancelled():
+@pytest.mark.parametrize("ending", list(ENDINGS))
+async def test_a_reattached_run_ends_as_the_held_one_did(ending):
+    """One mapping for both, fed from /history: what a restarted relay reports, in job_status and in
+    workflow_outputs, is what the relay that held the run reported. That includes an interrupt (failed,
+    workflow_interrupted) and a non-image output, which /api/jobs would have normalised into a file."""
     fake = FakeComfyUI(auto="hold")
-    started, _, restarted = await run_and_restart(fake)
-    fake.start(started["prompt_id"])
-    fake.finish(started["prompt_id"], "error", [["execution_interrupted", {"node_id": "3", "node_type": "X"}]])
-    async with Client(restarted, mode="legacy") as client:
+    server, relay = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        started = (await client.call_tool("workflow_run", {"workflow": t1()})).structured_content
+        ENDINGS[ending](fake, started["prompt_id"])
+        held = (
+            await client.call_tool("job_status", {"job_id": started["job_id"], "timeout_seconds": 5})
+        ).structured_content
+        held_outputs = (await client.call_tool("workflow_outputs", {"job_id": started["job_id"]})).structured_content
+    await relay.jobs.shutdown()
+    async with Client(serve(fake)[0], mode="legacy") as client:
         found = (await client.call_tool("job_status", {"job_id": started["job_id"]})).structured_content
-    assert (found["state"], found["finished"], found["result"], found["error"]) == ("cancelled", True, None, None)
+        found_outputs = (await client.call_tool("workflow_outputs", {"job_id": started["job_id"]})).structured_content
+    assert (held["source"], found["source"], found_outputs["source"]) == ("relay", "comfyui", "comfyui")
+    assert (found["state"], found["result"], found["error"]) == (held["state"], held["result"], held["error"])
+    assert {k: v for k, v in found_outputs.items() if k != "source"} == {
+        k: v for k, v in held_outputs.items() if k != "source"
+    }
+    if ending == "interrupted":
+        assert (found["state"], found["error"]["code"]) == ("failed", "workflow_interrupted")
+    if ending == "a_3d_output":
+        assert [f["filename"] for f in found["result"]["files"]] == ["t1__00001_.png"]
+        assert found_outputs["other_outputs"] == {"7": {"result": ["preview3d_ab12.glb", None, None]}}
+        # The case bites: /api/jobs's own outputs would have added the model file as a saved file.
+        normalised, _ = tw.collect_outputs(fake.normalised(fake.history[started["prompt_id"]]["outputs"]))
+        assert [f["filename"] for f in normalised] == ["t1__00001_.png", "preview3d_ab12.glb"]
 
 
 async def test_outputs_after_a_restart_are_listed_and_fetched_from_comfyui():
@@ -1325,8 +1367,7 @@ async def test_outputs_of_an_unfinished_reattached_run_says_to_wait():
 
 
 @pytest.mark.parametrize(
-    ("tool", "args"),
-    [("job_status", {}), ("job_status", {"timeout_seconds": 1}), ("workflow_outputs", {}), ("job_cancel", {})],
+    ("tool", "args"), [("job_status", {}), ("job_status", {"timeout_seconds": 1}), ("workflow_outputs", {})]
 )
 async def test_an_id_neither_held_nor_on_comfyui_is_unknown_job(tool, args):
     fake = FakeComfyUI()
@@ -1339,20 +1380,91 @@ async def test_an_id_neither_held_nor_on_comfyui_is_unknown_job(tool, args):
     assert fake.count("GET", f"/api/jobs/{missing}") == 1
 
 
-async def test_cancel_of_a_reattached_run_is_refused_and_touches_nothing():
+NOT_PROMPT_IDS = [".", "..", "", "not-a-uuid", uuid.uuid4().hex, str(uuid.uuid4()).upper(), "../queue"]
+
+
+@pytest.mark.parametrize("job_id", NOT_PROMPT_IDS)
+@pytest.mark.parametrize("tool", ["job_status", "workflow_outputs", "job_cancel"])
+async def test_an_id_that_is_not_a_prompt_id_is_unknown_job_before_any_request(tool, job_id):
+    """Only a canonical hyphenated UUID can be a run's id; nothing else this server does not hold reaches ComfyUI
+    (".." or "" would otherwise address another /api/jobs route)."""
+    fake = FakeComfyUI()
+    server, _ = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        error = error_of(await client.call_tool(tool, {"job_id": job_id}))
+    assert (error["code"], error["retryable"]) == ("unknown_job", False)
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("where", ["pending", "running", "finished", "unknown"])
+async def test_cancel_of_a_job_not_held_is_refused_before_any_request(where):
+    """Owner decision on #150: re-attach is read-only. job_cancel acts only on jobs this server holds; for any other
+    id it sends ComfyUI nothing at all, and says a person can cancel the run from ComfyUI's queue panel."""
     fake = FakeComfyUI(auto="hold")
     started, _, restarted = await run_and_restart(fake)
+    prompt_id = started["prompt_id"] if where != "unknown" else str(uuid.uuid4())
+    if where == "running":
+        fake.start(prompt_id)
+    if where == "finished":
+        fake.finish(prompt_id)
+    calls = len(fake.calls)
     async with Client(restarted, mode="legacy") as client:
-        error = error_of(await client.call_tool("job_cancel", {"job_id": started["job_id"]}))
-    assert (error["code"], error["retryable"], error["comfyui_status"]) == ("job_not_owned", False, "pending")
-    assert fake.count("POST", "/api/jobs/") == 0 and fake.posted("/queue") == [] and fake.posted("/interrupt") == []
-    assert [i[1] for i in fake.pending] == [started["prompt_id"]]
+        first = error_of(await client.call_tool("job_cancel", {"job_id": prompt_id}))
+        again = error_of(await client.call_tool("job_cancel", {"job_id": prompt_id}))
+    assert first == again  # idempotent: the same answer every time
+    assert (first["code"], first["retryable"], first["job_id"]) == ("job_not_held", False, prompt_id)
+    assert "queue panel" in first["message"]
+    assert len(fake.calls) == calls
+    if where in ("pending", "running"):
+        assert prompt_id in [i[1] for i in (*fake.pending, *fake.running)]
 
 
-async def test_cancel_of_a_finished_reattached_run_reports_it_and_sends_nothing():
-    fake = FakeComfyUI()
-    started, held, restarted = await run_and_restart(fake, wait=True)
+async def test_job_cancel_of_a_held_run_is_idempotent():
+    """job_cancel is annotated idempotent: a second cancel of a held run changes nothing and sends nothing."""
+    fake = FakeComfyUI(auto="hold")
+    server, _ = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        started = (await client.call_tool("workflow_run", {"workflow": t1()})).structured_content
+        fake.start(started["prompt_id"])
+        await asyncio.sleep(0.05)
+        first = (await client.call_tool("job_cancel", {"job_id": started["job_id"]})).structured_content
+        calls = len(fake.calls)
+        again = (await client.call_tool("job_cancel", {"job_id": started["job_id"]})).structured_content
+        tools = {t.name: t.annotations for t in (await client.list_tools()).tools}
+    assert first == again and first["state"] == "cancelled"
+    assert len(fake.calls) == calls
+    assert tools["job_cancel"].idempotent_hint is True
+
+
+async def test_a_reattached_wait_rides_out_a_transient_comfyui_error():
+    fake = FakeComfyUI(auto="hold")
+    started, _, restarted = await run_and_restart(fake)
+    fake.fail_once.add(f"/api/jobs/{started['prompt_id']}")  # the wait's first poll: a reset connection
+    asyncio.get_running_loop().call_later(0.1, fake.finish, started["prompt_id"])
     async with Client(restarted, mode="legacy") as client:
-        found = (await client.call_tool("job_cancel", {"job_id": started["job_id"]})).structured_content
-    assert (found["state"], found["source"], found["result"]) == ("succeeded", "comfyui", held["result"])
-    assert fake.count("POST", "/api/jobs/") == 0
+        done = (
+            await client.call_tool("job_status", {"job_id": started["job_id"], "timeout_seconds": 5})
+        ).structured_content
+    assert (done["state"], done["source"]) == ("succeeded", "comfyui")
+
+
+async def test_a_reattached_read_without_a_wait_reports_a_transient_error_as_retryable():
+    fake = FakeComfyUI(auto="hold")
+    started, _, restarted = await run_and_restart(fake)
+    fake.fail_once.add(f"/api/jobs/{started['prompt_id']}")
+    async with Client(restarted, mode="legacy") as client:
+        error = error_of(await client.call_tool("job_status", {"job_id": started["job_id"]}))
+    assert (error["code"], error["retryable"]) == ("comfyui_unreachable", True)
+
+
+async def test_a_reattached_wait_gives_up_after_the_grace_period(monkeypatch):
+    monkeypatch.setattr(tw, "UNREACHABLE_GRACE_SECONDS", 0.1)
+    fake = FakeComfyUI(auto="hold")
+    started, _, restarted = await run_and_restart(fake)
+    fake.down = True
+    loop = asyncio.get_running_loop()
+    async with Client(restarted, mode="legacy") as client:
+        t0 = loop.time()
+        error = error_of(await client.call_tool("job_status", {"job_id": started["job_id"], "timeout_seconds": 5}))
+    assert (error["code"], error["retryable"]) == ("comfyui_unreachable", True)
+    assert loop.time() - t0 < 2  # the grace, not the whole wait

@@ -35,7 +35,7 @@ from .consent import ConsentGate
 from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
 from .tools_introspection import INTROSPECTION_TOOLS
-from .tools_workflow import WORKFLOW_TOOLS, reattach_cancel, reattach_status
+from .tools_workflow import WORKFLOW_TOOLS, reattach_refuse_cancel, reattach_status
 
 log = logging.getLogger("comfyrelay")
 
@@ -208,11 +208,12 @@ def _job_cancel(relay: Relay) -> Callable[..., Any]:
         """Cancel a running job by its id, and report its state. Cancelling a finished job changes nothing.
 
         It waits briefly for the job to stop. A job that is still unwinding reports `cancelling`; follow it with
-        job_status until it reports `cancelled`. A workflow run this server no longer holds (it restarted) is
-        not cancelled: that is refused with job_not_owned, since the prompt could be another client's.
+        job_status until it reports `cancelled`. It cancels only jobs this server holds: a workflow run from
+        before it restarted is refused with job_not_held, and nothing is sent to ComfyUI, since a prompt it does not
+        hold could be another client's. A person can cancel such a run from ComfyUI's queue panel.
         """
-        if relay.jobs.find(job_id) is None:  # not held here: see reattach_cancel (#146)
-            return JobView(**await reattach_cancel(relay, job_id))
+        if relay.jobs.find(job_id) is None:  # not held here: refused before any request to ComfyUI (#146)
+            raise reattach_refuse_cancel(job_id)
         return JobView(**(await relay.jobs.cancel(job_id)).snapshot())
 
     return job_cancel
