@@ -15,6 +15,7 @@ decision B): nothing here merges results with /object_info or /templates.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
@@ -30,6 +31,9 @@ if TYPE_CHECKING:
     from .tools import Relay
 
 MAX_TEXT_CHARS = 1500
+MAX_QUERY_CHARS = 500
+# The distinct words a query searches for, at most. More only slow the FTS query and the excerpting.
+MAX_QUERY_WORDS = 16
 # Question words that would otherwise have to match too: "how do I add a lora" searches for "add lora".
 _STOPWORDS = frozenset(
     "a an and are as at be by can do does for from how i if in is it its me my of on or should the this that "
@@ -39,7 +43,8 @@ _STOPWORDS = frozenset(
 
 def _query_words(query: str) -> list[str]:
     words = re.findall(r"[a-z0-9]+(?:[._][a-z0-9]+)*", query.lower())  # keeps sd1.5 and value_not_in_list whole
-    return [w for w in words if w not in _STOPWORDS] or words
+    words = list(dict.fromkeys(words))  # each word once: repeating one adds nothing but work
+    return ([w for w in words if w not in _STOPWORDS] or words)[:MAX_QUERY_WORDS]
 
 
 def _corpus(relay: Relay) -> Corpus:
@@ -61,21 +66,29 @@ class DocHit(_Compact):
     title: str = Field(description="The page's title")
     section: str = Field(description="The headings above this section, outermost first; empty for a page's opening")
     text: str = Field(description="The section's markdown, or an excerpt around the match when it is long")
-    note: str | None = Field(default=None, description="Set on docs.comfy.org results: which ComfyUI they describe")
+    topic: str | None = Field(default=None, description="A guide's topic: docs_guide(topic) returns all of it")
 
 
-class DocsSearchResult(BaseModel):
+class DocsSearchResult(_Compact):
     query: str
     match: Literal["all", "any"] = Field(
         description="all: every result has every query word. any: none did, so these have at least one"
     )
     total_matches: int
     results: list[DocHit]
+    note: str | None = Field(
+        default=None, description="When any result is from docs.comfy.org: which ComfyUI it describes"
+    )
+    hint: str | None = Field(default=None, description="When match is any: how to narrow the query")
 
 
 def _docs_search(relay: Relay) -> Callable[..., Any]:
     async def docs_search(
-        query: str = Field(min_length=1, description="Words to find: 'websocket executing message', 'lora strength'"),
+        query: str = Field(
+            min_length=1,
+            max_length=MAX_QUERY_CHARS,
+            description="Words to find: 'websocket executing message', 'lora strength'",
+        ),
         limit: int = Field(default=5, ge=1, le=20),
     ) -> DocsSearchResult:
         """Search the documentation built into this server: docs.comfy.org (Comfy Org's ComfyUI docs: the workflow
@@ -83,14 +96,16 @@ def _docs_search(relay: Relay) -> Callable[..., Any]:
         troubleshooting pages, built-in node pages) and this project's own guides (docs_guide).
 
         Results are sections of pages, best match first, each with its source, version, path, license and upstream
-        url. docs.comfy.org describes the latest ComfyUI, which may not match the version this server serves: for
-        a node's inputs, defaults and outputs use node_describe, which reads the running instance. Words match
-        across word forms (run, running); every word must match unless none do.
+        url, and a guide's with its docs_guide topic. docs.comfy.org describes the latest ComfyUI, which may not
+        match the version this server serves: for a node's inputs, defaults and outputs use node_describe, which
+        reads the running instance. Words match across word forms (run, running); every word must match unless
+        none do.
         """
         words = _query_words(query)
         if not words:
             raise _invalid_query(query)
-        hits, total, mode = _corpus(relay).search(words, limit, MAX_TEXT_CHARS)
+        # SQLite blocks while it works: in a thread, so a slow query never stalls the other tools.
+        hits, total, mode = await asyncio.to_thread(_corpus(relay).search, words, limit, MAX_TEXT_CHARS)
         pin = relay.settings.comfyui_pin
         note = (
             "docs.comfy.org describes the latest ComfyUI, which may not match the ComfyUI this server serves"
@@ -101,7 +116,12 @@ def _docs_search(relay: Relay) -> Callable[..., Any]:
             query=query,
             match=mode,
             total_matches=total,
-            results=[DocHit(**hit.__dict__, note=note if hit.source == DOCS_SOURCE else None) for hit in hits],
+            results=[DocHit(**hit.__dict__) for hit in hits],
+            note=note if any(hit.source == DOCS_SOURCE for hit in hits) else None,
+            hint="no section has every word, so these have some of them; search again with fewer, more "
+            "distinctive words"
+            if mode == "any" and hits
+            else None,
         )
 
     return docs_search
@@ -143,13 +163,14 @@ def _docs_guide(relay: Relay) -> Callable[..., Any]:
         same text. docs_search searches them together with docs.comfy.org.
         """
         corpus = _corpus(relay)
+        listed = await asyncio.to_thread(corpus.topics)
         if topic is None:
             return DocsGuideResult(
-                topics=[GuideTopic(**{k: t[k] for k in ("topic", "title", "summary")}) for t in corpus.topics()]
+                topics=[GuideTopic(**{k: t[k] for k in ("topic", "title", "summary")}) for t in listed]
             )
-        found = corpus.guide(topic.strip().lower())
+        found = await asyncio.to_thread(corpus.guide, topic.strip().lower())
         if found is None:
-            names = [t["topic"] for t in corpus.topics()]
+            names = [t["topic"] for t in listed]
             raise RelayError(
                 "unknown_topic", f"there is no guide {topic!r}; the topics are: {', '.join(names)}", topics=names
             )

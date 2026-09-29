@@ -172,7 +172,7 @@ recalled from a bundled copy.
 | Tool | Reads | Returns |
 |---|---|---|
 | **`node_search`** | `/object_info` | Node classes matching a query by class name, display name, search alias, category or description. Each hit gives its `class_type`, display name, category, a one-line summary, its custom node `pack` (absent for built-ins), and `api_node` or `deprecated` when set. Exact name matches rank first, then prefixes, then name words, category and description, so `CheckpointLoader` and `CheckpointLoaderSimple` stay apart. Within a tier, partner-API and deprecated nodes come last. A query with no letters or digits fails with `invalid_query`. |
-| **`node_describe`** | `/object_info/<class>`, and the node's help page | One class's full spec: each input (required first, in the node's order) with its type, default, min, max, step, tooltip and COMBO values; hidden inputs; outputs in socket order with names and list flags; `output_node` and `api_node`. Dynamic inputs are named as a graph must name them (below). COMBO values and Autogrow names are cut to `max_options` (default 20), with a total. An unknown class fails with `unknown_node_class` and `suggestions`; `.` and `..` are never sent to ComfyUI. `help` is the node's help page, the English markdown the editor shows, fetched live where the editor fetches it (frontend 1.52): `/docs/<class>/en.md` for ComfyUI's own nodes, which ComfyUI serves from its pinned `comfyui-embedded-docs`, and a custom node pack's own `/extensions/<pack>/docs/<class>/en.md`, then `<class>.md`. It's absent when ComfyUI answers 404 or with an HTML page. |
+| **`node_describe`** | `/object_info/<class>`, and the node's help page | One class's full spec: each input (required first, in the node's order) with its type, default, min, max, step, tooltip and COMBO values; hidden inputs; outputs in socket order with names and list flags; `output_node` and `api_node`. Dynamic inputs are named as a graph must name them (below). COMBO values and Autogrow names are cut to `max_options` (default 20), with a total. An unknown class fails with `unknown_node_class` and `suggestions`; `.` and `..` are never sent to ComfyUI. `help` is the node's help page, the English markdown the editor shows, fetched live where the editor fetches it (frontend 1.52): `/docs/<class>/en.md` for ComfyUI's own nodes, which ComfyUI serves from its pinned `comfyui-embedded-docs`, and a custom node pack's own `/extensions/<pack>/docs/<class>/en.md`, then `<class>.md`. At most 64 KB of it is read; a longer page is cut there, with `help_truncated: true`. It's absent when ComfyUI has none (a 404, or an HTML page in its place) or can't serve it (any other error or a timeout): the help never fails the call. |
 | **`model_list`** | `/models`, `/models/<folder>` | Files on disk per folder type, or for one `folder`: at most `max_files` per folder (default 50) and 400 in all, with the full `count` and `truncated`. `custom_nodes` and `download_model_base` (an `extra_model_paths.yaml` key that ComfyUI lists as a folder type, naming the whole models root) are left out. An unknown folder fails with `unknown_model_folder` and the known ones. Nothing is downloaded. |
 | **`template_search`** | `/templates/index.json`, then each hit's `/templates/<name>.json` | Workflow templates for a goal, ranked by how many query words match, weighted by field (title and name, then tags and model families, then description and category) and by how rare the word is across the index. Partner-API templates are left out unless `include_partner_api` is set: those the index marks `openSource: false`, and any hit whose own check finds a partner-API node. `hidden_partner_api` counts both. Each hit carries a runnability check. |
 | **`template_get`** | the same, for one template | Its metadata, the runnability check, and the workflow in the frontend's UI format (`include_workflow: false` leaves it out). A workflow over 80,000 characters as JSON fails with `workflow_too_large` (`size`, `limit`); `include_workflow: false` still answers. An unknown name fails with `unknown_template` and `suggestions`. |
@@ -465,15 +465,20 @@ merge results with the live node and template tools.
     `docs.json` lists, at the `COMFY_DOCS_SHA` bake pin. That's the workflow JSON spec, the
     server's routes and websocket messages, custom node development, tutorials, the
     interface, troubleshooting and the built-in node pages. The site describes the latest
-    ComfyUI, not the pinned one, so every result from it carries a `note` saying so.
+    ComfyUI, not the pinned one, so a response with any result from it carries a `note`
+    saying so.
   - **guides**: this project's own, the published skill
     [`skills/comfyui-workflows/`](../../skills/comfyui-workflows/SKILL.md).
 
   Every result gives its `source`, `version`, `path`, `license` and upstream `url`, the page
-  `title`, the `section` (its heading trail) and the section's text, cut to 1,500 characters
-  around the query's words when it's longer. Common question words are dropped from the
-  query. Every remaining word must match; when no section has them all, sections with any of
-  them are returned, and `match` says `any`.
+  `title`, the `section` (its heading trail) and the section's text. A section longer than
+  1,500 characters is cut to the stretch that holds the most query words, stems included,
+  with some text before the first of them. A guide's result also names its `docs_guide`
+  `topic`. Common question words are dropped from the query, each word counts once, and at
+  most 16 words and 500 characters are searched. Every remaining word must match; when no
+  section has them all, sections with any of them are returned, `match` says `any`, and a
+  `hint` suggests narrowing the query. The search runs in a worker thread, so a slow one
+  doesn't hold up the other tools.
 - **`docs_guide`** lists the guide topics with a summary each, or returns one topic's markdown.
   The topics are the files the skill's `SKILL.md` links to, including the separate
   `comfy-manifest` skill. An unknown topic fails with `unknown_topic` and the list.
@@ -492,15 +497,18 @@ step, fetch included, took about 6 seconds here. The image grows by about 31 MB:
 and 14 MB of markdown shipped beside it.
 
 **Licensing.** Comfy-Org/docs is GPL-3.0, so the index is a GPL-3.0 work, and the image
-ships what that needs: the English markdown it indexed and the snippets it used
-(`/opt/corpus/source/`), the GPL-3.0 text (`/licenses/GPL-3.0.txt`), and `/licenses/NOTICE`.
+ships what that needs: the English markdown it indexed, the snippets it used and the
+`docs.json` that chose the pages (`/opt/corpus/source/`), the GPL-3.0 text (`/licenses/GPL-3.0.txt`), and `/licenses/NOTICE`.
 The NOTICE names the docs repo and commit and the license, dates the modification, gives the
 build script's path at the release tag, and says "© Comfy Org. Not affiliated with or
 endorsed by Comfy Org." The relay's code stays MIT: it reads the corpus as a data file, an
 aggregate. The image is labelled `org.opencontainers.image.licenses="MIT AND GPL-3.0"`. The
 guides are our own words under MIT; they link to docs.comfy.org and copy none of it.
 
-**Bumping the docs** is a PR that changes `COMFY_DOCS_SHA` (a supply-chain pin). The build
+**Bumping the docs** is a PR that changes `COMFY_DOCS_SHA` (a supply-chain pin) to a commit
+on Comfy-Org/docs `main`. GitHub serves any commit in the repository's fork network by its
+SHA, so check the new one: `gh api repos/Comfy-Org/docs/compare/<sha>...main` must say
+`ahead` or `identical`. The build
 probe fails the image if the corpus is missing or `docs_search` finds nothing.
 
 ## Consent

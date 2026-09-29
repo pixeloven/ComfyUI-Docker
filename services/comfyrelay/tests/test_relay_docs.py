@@ -8,7 +8,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from comfyrelay.corpus import docs_pages, mdx_to_markdown, sections
+from comfyrelay.corpus import docs_pages, excerpt, mdx_to_markdown, sections
 from comfyrelay.server import build_server
 from mcp import Client
 from relay_helpers import DOCS_FILES, DOCS_SHA, comfyui_answering, settings
@@ -45,6 +45,20 @@ The id of the prompt.
 <Frame><img src="/images/c.png" /></Frame>
 Replace <your-api-key>, and see `<ComfyUI>/models` and <a href="/x">the models page</a>.
 {/* an MDX comment */}
+<ResponseField name="tool_choice" type="`none`, `auto` | object">
+How the model picks a tool.
+</ResponseField>
+<h1
+  style={{
+    fontSize: "18px",
+    textAlign: "center"
+  }}
+>Styled heading</h1>
+<Step title="Click `Code` then `Download ZIP`">
+  Unzip it.
+</Step>
+<Card title="Icons" icon={<svg viewBox="0 0 1 1"><path d="M0" /></svg>}>A card.</Card>
+<img src="/i.png" style={{maxWidth: '300px'}} />
 
 ```python
 import json
@@ -68,6 +82,16 @@ from x import y
         "<Frame",
         "comment",
         "<a ",
+        "<ResponseField",
+        "</ResponseField",
+        "style=",
+        "fontSize",
+        "<h1",
+        "<Step",
+        "<Card",
+        "<svg",
+        "<path",
+        "maxWidth",
     ):
         assert gone not in body, gone
     for kept in (
@@ -78,6 +102,13 @@ from x import y
         "Replace <your-api-key>",
         "`<ComfyUI>/models`",
         "the models page",
+        "tool_choice `none`, `auto` | object",
+        "How the model picks a tool.",
+        "Styled heading",
+        "Click `Code` then `Download ZIP`",
+        "Unzip it.",
+        "Icons",
+        "A card.",
         "```python\nimport json\nfrom x import y\n<not a tag>\n```",
     ):
         assert kept in body, kept
@@ -117,6 +148,13 @@ def test_sections_split_at_headings_outside_code_and_keep_the_trail():
         ("Run a node_id", "run-it"),  # an explicit anchor wins
     ]
     assert "# not a heading" in got[1].text
+
+
+def test_a_long_section_is_cut_around_its_matched_words_stems_included():
+    text = "filler " * 400 + "the grouping of nodes " + "tail " * 400
+    got = excerpt(text, ["group", "nodes"], 300)
+    assert "grouping of nodes" in got and got.startswith("…") and got.endswith("…") and len(got) <= 302
+    assert got.index("grouping") > 50  # context before it, not cut at the match
 
 
 def test_the_page_list_is_the_english_navigation_without_openapi_operations():
@@ -161,6 +199,7 @@ def test_the_build_ships_the_indexed_source_the_license_and_a_notice(corpus_path
     assert shipped == [
         "built-in-nodes/Video Slice.mdx",
         "development/server/messages.mdx",
+        "docs.json",
         "snippets/inner.mdx",
         "snippets/reminder.mdx",
     ]
@@ -210,15 +249,27 @@ async def test_docs_search_returns_attributed_sections_and_says_the_site_is_late
         "section": "Built in message types",
     }
     assert "`executing`" in hit["text"]
-    assert "latest ComfyUI" in hit["note"] and "v0.37.0" in hit["note"]
+    assert "latest ComfyUI" in got["note"] and "v0.37.0" in got["note"]  # once, for the whole response
+    assert "note" not in hit and "topic" not in hit and "hint" not in got
 
 
-async def test_a_guide_hit_has_no_latest_note_and_no_word_in_common_falls_back_to_any(corpus_path):
+async def test_a_guide_hit_names_its_topic_has_no_latest_note_and_any_comes_with_a_hint(corpus_path):
     ok, got = await call("docs_search", {"query": "how does template_get differ, zebra?"}, corpus_path)
     assert ok, got
     assert got["match"] == "any"
-    assert [(h["source"], h["license"]) for h in got["results"]] == [("guides", "MIT")]
-    assert "note" not in got["results"][0]
+    assert [(h["source"], h["license"], h["topic"]) for h in got["results"]] == [("guides", "MIT", "workflow-formats")]
+    assert "note" not in got
+    assert "fewer" in got["hint"]
+
+
+async def test_a_query_counts_each_word_once_and_has_a_length_limit(corpus_path):
+    ok, got = await call("docs_search", {"query": "websocket " * 45 + "executing"}, corpus_path)
+    assert ok and got["total_matches"] == 1
+    server, _ = build_server(settings(corpus_path=corpus_path), comfyui=comfyui_answering())
+    async with Client(server, mode="legacy") as client:
+        tool = next(t for t in (await client.list_tools()).tools if t.name == "docs_search")
+        assert tool.input_schema["properties"]["query"]["maxLength"] == 500
+        assert (await client.call_tool("docs_search", {"query": "x" * 501})).is_error
 
 
 async def test_docs_search_refuses_a_query_with_nothing_to_search(corpus_path):

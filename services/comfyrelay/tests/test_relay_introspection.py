@@ -567,13 +567,23 @@ async def test_describe_returns_the_help_page_comfyui_serves():
 
 @pytest.mark.parametrize(
     "answer",
-    [httpx2.Response(404, text="404: Not Found"), httpx2.Response(200, html="<!doctype html><title>ComfyUI</title>")],
-    ids=["404", "an-html-page"],
+    [
+        httpx2.Response(404, text="404: Not Found"),
+        httpx2.Response(200, html="<!doctype html><title>ComfyUI</title>"),
+        httpx2.Response(500, text="500: Internal Server Error"),
+    ],
+    ids=["404", "an-html-page", "a-500"],
 )
-async def test_describe_leaves_help_out_when_comfyui_has_none(answer):
+async def test_describe_leaves_help_out_when_comfyui_has_none_or_fails_to_serve_it(answer):
     got = await ok("node_describe", {"class_type": "KSampler"}, **{"/docs/KSampler/en.md": answer})
     assert "help" not in got and "help_path" not in got
     assert got["class_type"] == "KSampler"
+
+
+async def test_a_help_page_past_the_cap_is_cut_and_says_so():
+    long = httpx2.Response(200, content=b"x" * (tools_introspection.HELP_MAX_BYTES + 5000))
+    got = await ok("node_describe", {"class_type": "KSampler"}, **{"/docs/KSampler/en.md": long})
+    assert (len(got["help"]), got["help_truncated"]) == (tools_introspection.HELP_MAX_BYTES, True)
 
 
 async def test_a_custom_nodes_help_comes_from_its_pack_per_locale_then_without():

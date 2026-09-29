@@ -74,6 +74,8 @@ INACTIVE_MODES = frozenset({2, 4})
 # names the whole models root, so it would list every model a second time.
 NOT_MODEL_FOLDERS = frozenset({"custom_nodes", "download_model_base"})
 FETCH_CONCURRENCY = 8
+# A node's help page is read up to this many bytes. The longest in comfyui-embedded-docs 0.5.12 is about 11 KB.
+HELP_MAX_BYTES = 64 * 1024
 # Never sent as a path segment: /object_info/.. or /models/. would be
 # normalised to another route.
 DOT_SEGMENTS = frozenset({".", ".."})
@@ -313,6 +315,9 @@ class NodeSpec(_Compact):
         "has none",
     )
     help_path: str | None = Field(default=None, description="Where on ComfyUI the help page came from")
+    help_truncated: bool | None = Field(
+        default=None, description=f"true: the help page is longer than {HELP_MAX_BYTES} bytes, and help is its start"
+    )
 
 
 AutogrowSpec.model_rebuild()
@@ -332,12 +337,17 @@ def _help_paths(class_type: str, info: dict[str, Any]) -> list[str]:
     return [f"/docs/{name}/en.md"]
 
 
-async def _help(comfyui: ComfyUIClient, class_type: str, info: dict[str, Any]) -> tuple[str | None, str | None]:
+async def _help(comfyui: ComfyUIClient, class_type: str, info: dict[str, Any]) -> tuple[str, str, bool] | None:
+    """The first help page ComfyUI has for the node: (text, path, truncated). A page it can't serve, for whatever
+    reason, is no help page, as in the editor (tryFetchMarkdown): it never fails node_describe."""
     for path in _help_paths(class_type, info):
-        text = await comfyui.markdown(path)
-        if text is not None:
-            return text, path
-    return None, None
+        try:
+            found = await comfyui.markdown(path, HELP_MAX_BYTES)
+        except ComfyUIError:
+            continue
+        if found is not None:
+            return found[0], path, found[1]
+    return None
 
 
 def _number(value: Any) -> int | float | None:
@@ -520,7 +530,9 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
             if not isinstance(found[class_type], dict):
                 raise _bad(f"an /object_info/{class_type} that is not an object")
             spec = _spec(class_type, found[class_type], max_options)
-            spec.help, spec.help_path = await _help(relay.comfyui, class_type, found[class_type])
+            page = await _help(relay.comfyui, class_type, found[class_type])
+            if page:
+                spec.help, spec.help_path, spec.help_truncated = page[0], page[1], page[2] or None
             return spec
         if found:
             raise _bad(f"an /object_info/{class_type} that describes other classes")

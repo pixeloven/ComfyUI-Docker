@@ -51,6 +51,12 @@ variable "COMFY_DOCS_SHA" {
     // NOTICE and in the index. The repo has no tags, so it is pinned by full
     // commit SHA and bumped by PR, like any supply-chain pin. It tracks the
     // latest ComfyUI, not COMFYUI_VERSION, and docs_search says so.
+    //
+    // A bump must name a commit on Comfy-Org/docs `main` (an ancestor of its
+    // tip): GitHub serves any commit in the repo's fork network by SHA, so a
+    // SHA from someone's fork would fetch just as well. Check it with the
+    // compare API: gh api repos/Comfy-Org/docs/compare/<sha>...main reports
+    // "ahead" or "identical" for a commit on main.
     default = "efb8fdd3de17027da633eb9c12e80fbbeb993a19"
 }
 

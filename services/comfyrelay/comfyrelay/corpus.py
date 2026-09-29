@@ -22,7 +22,8 @@ The build writes, under --out:
 
     corpus.sqlite   the index, with a `meta` table saying what went in
     source/         the English markdown it indexed, unmodified, with the
-                    snippets it inlined (the GPL's Corresponding Source)
+                    snippets it inlined and the docs.json that listed the
+                    pages (the GPL's Corresponding Source)
     NOTICE          the docs repo and SHA, the license, the build date as a
                     modification notice, where this script is, and the
                     non-affiliation statement
@@ -41,6 +42,7 @@ import sqlite3
 import subprocess
 import time
 from collections.abc import Callable, Iterator
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -77,8 +79,15 @@ _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 _FRONT_MATTER = re.compile(r"\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n|\Z)", re.DOTALL)
 _IMPORT = re.compile(r"""^\s*import\s+(?:(\w+)\s+from\s+)?["']([^"']+)["'];?\s*$""")
 _ESM = re.compile(r"""^\s*(?:import\s.*\sfrom\s+["']|import\s+["']|export\s+(?:const|default|function|let)\b)""")
-_INLINE_CODE = re.compile(r"(`+)(?:.+?)\1", re.DOTALL)
-_TAG = re.compile(r"<(/?)([A-Za-z][\w.-]*)((?:\s(?:[^<>\"'{}]|\"[^\"]*\"|'[^']*'|\{[^{}]*\})*)?)\s*(/?)>", re.DOTALL)
+# Inline code or a tag, whichever starts first, so a tag's attribute may hold inline code
+# (type="`none` | object") and inline code may hold what looks like a tag (`<ComfyUI>/models`).
+# An attribute's {expression} may nest one level (style={{margin: 0}}) and hold tags (icon={<Icon />}).
+_TOKEN = re.compile(
+    r"(?P<code>(?P<ticks>`+)(?:(?!\n\s*\n).)+?(?P=ticks))"
+    r"|<(?P<closing>/?)(?P<name>[A-Za-z][\w.-]*)"
+    r"(?P<attrs>(?:\s(?:[^<>\"'{}]|\"[^\"]*\"|'[^']*'|\{(?:[^{}]|\{[^{}]*\})*\})*)?)\s*(?P<self>/?)>",
+    re.DOTALL,
+)
 _ATTR = re.compile(r"""([\w-]+)=(?:"([^"]*)"|'([^']*)'|\{["'`]([^"'`]*)["'`]\})""")
 _COMMENT = re.compile(r"<!--.*?-->|\{/\*.*?\*/\}", re.DOTALL)
 _MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
@@ -153,13 +162,7 @@ def _strip_prose(text: str, components: dict[str, str]) -> str:
     """Tags, media, comments and ESM lines out of prose that holds no fenced code. Inline code is left alone."""
     text = _COMMENT.sub("", text)
     text = "".join(line for line in text.splitlines(keepends=True) if not _ESM.match(line))
-    out, last = [], 0
-    for m in _INLINE_CODE.finditer(text):
-        out.append(_strip_tags(text[last : m.start()], components))
-        out.append(m.group(0))
-        last = m.end()
-    out.append(_strip_tags(text[last:], components))
-    return "".join(out)
+    return _strip_tags(text, components)
 
 
 def _strip_tags(text: str, components: dict[str, str]) -> str:
@@ -167,8 +170,10 @@ def _strip_tags(text: str, components: dict[str, str]) -> str:
     out: list[str] = []
     last = 0
     skip_until: str | None = None  # inside a media element: drop everything to its closing tag
-    for m in _TAG.finditer(text):
-        closing, name, attrs, selfclosing = m.group(1), m.group(2), m.group(3) or "", m.group(4)
+    for m in _TOKEN.finditer(text):
+        if m.group("code"):
+            continue  # inline code is text, whatever it holds
+        closing, name, attrs, selfclosing = m.group("closing"), m.group("name"), m.group("attrs") or "", m.group("self")
         lower = name.lower()
         if skip_until is not None:
             if closing and lower == skip_until:
@@ -412,7 +417,7 @@ def index_docs(db: sqlite3.Connection, checkout: Path, sha: str, source_out: Pat
         indexed += 1
         used |= {rel} | page.snippets
     if source_out is not None:
-        for rel in sorted(used):
+        for rel in sorted(used | {"docs.json"}):  # docs.json chose the pages, so it is part of the source
             (source_out / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(checkout / rel, source_out / rel)
     return {
@@ -521,7 +526,8 @@ Modified on {built}: the English pages listed in the repository's docs.json
 were converted to plain markdown (front matter, import lines, JSX and HTML
 tags, images and videos removed; /snippets/ content inlined; code kept), split
 at their headings, and indexed in corpus.sqlite. The unmodified pages that
-were indexed, and the snippets they include, are in /opt/corpus/source/.
+were indexed, the snippets they include, and the docs.json that chose them
+are in /opt/corpus/source/.
 
 The build script is {BUILD_SCRIPT}
 in {REPO}, at the tag v{version}:
@@ -579,27 +585,26 @@ class Hit:
     title: str
     section: str
     text: str
+    topic: str | None = None  # a guide's docs_guide topic
 
 
 class Corpus:
-    """The built index, opened read-only. One connection, used from the server's event loop thread."""
+    """The built index, read-only. Each call opens its own connection, so a search can run in a worker thread."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         if not self.path.is_file():
             raise CorpusError(f"no corpus at {self.path}")
         try:
-            self._db = sqlite3.connect(
-                f"{self.path.resolve().as_uri()}?mode=ro&immutable=1", uri=True, check_same_thread=False
-            )
-            self.meta = {k: json.loads(v) for k, v in self._db.execute("SELECT key, value FROM meta")}
+            with self._connect() as db:
+                self.meta = {k: json.loads(v) for k, v in db.execute("SELECT key, value FROM meta")}
         except sqlite3.Error as exc:
             raise CorpusError(f"{self.path} is not a corpus this server can read: {exc}") from exc
         if self.meta.get("schema") != SCHEMA:
             raise CorpusError(f"{self.path} has corpus schema {self.meta.get('schema')}, not {SCHEMA}")
 
-    def close(self) -> None:
-        self._db.close()
+    def _connect(self) -> closing[sqlite3.Connection]:
+        return closing(sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro&immutable=1", uri=True))
 
     def search(self, words: list[str], limit: int, max_chars: int) -> tuple[list[Hit], int, str]:
         """Sections matching every one of `words`, best first; failing that, any of them. (hits, total, "all"|"any").
@@ -608,28 +613,32 @@ class Corpus:
         words = [w.replace('"', "") for w in words if w.replace('"', "")]
         if not words:
             return [], 0, "any"
-        for mode, joiner in (("all", " "), ("any", " OR ")):
-            match = joiner.join(f'"{w}"' for w in words)
-            total = self._db.execute("SELECT count(*) FROM docs WHERE docs MATCH ?", (match,)).fetchone()[0]
-            if total:
-                break
-        if not total:
-            return [], 0, "any"
-        rows = self._db.execute(
-            "SELECT source, version, path, url, license, title, section, body FROM docs WHERE docs MATCH ? "
-            "ORDER BY bm25(docs, 8.0, 4.0, 2.0, 1.0) LIMIT ?",
-            (match, limit),
-        ).fetchall()
-        return [Hit(*row[:7], excerpt(row[7], words, max_chars)) for row in rows], total, mode
+        with self._connect() as db:
+            for mode, joiner in (("all", " "), ("any", " OR ")):
+                match = joiner.join(f'"{w}"' for w in words)
+                total = db.execute("SELECT count(*) FROM docs WHERE docs MATCH ?", (match,)).fetchone()[0]
+                if total:
+                    break
+            if not total:
+                return [], 0, "any"
+            rows = db.execute(
+                "SELECT docs.source, docs.version, docs.path, docs.url, docs.license, docs.title, docs.section, "
+                "docs.body, guides.topic FROM docs LEFT JOIN guides ON guides.path = docs.path WHERE docs MATCH ? "
+                "ORDER BY bm25(docs, 8.0, 4.0, 2.0, 1.0) LIMIT ?",
+                (match, limit),
+            ).fetchall()
+        return [Hit(*row[:7], excerpt(row[7], words, max_chars), row[8]) for row in rows], total, mode
 
     def topics(self) -> list[dict[str, str]]:
-        rows = self._db.execute("SELECT topic, title, summary, path, url FROM guides ORDER BY position")
+        with self._connect() as db:
+            rows = db.execute("SELECT topic, title, summary, path, url FROM guides ORDER BY position").fetchall()
         return [dict(zip(("topic", "title", "summary", "path", "url"), r, strict=True)) for r in rows]
 
     def guide(self, topic: str) -> dict[str, str] | None:
-        row = self._db.execute(
-            "SELECT topic, title, summary, path, url, license, version, text FROM guides WHERE topic = ?", (topic,)
-        ).fetchone()
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT topic, title, summary, path, url, license, version, text FROM guides WHERE topic = ?", (topic,)
+            ).fetchone()
         keys = ("topic", "title", "summary", "path", "url", "license", "version", "text")
         return dict(zip(keys, row, strict=True)) if row else None
 
@@ -646,18 +655,22 @@ class Corpus:
 
 
 def excerpt(text: str, words: list[str], limit: int) -> str:
-    """`text` if it fits in `limit` characters; otherwise the `limit` characters that hold the most distinct query
-    words, earliest first."""
+    """`text` if it fits in `limit` characters. Otherwise the `limit` characters around the stretch that holds the
+    most distinct query words (earliest first), with its first matched word a third of the way in. A word matches
+    at the start of a word in the text, by its stem as well (grouping finds group), as the stemmed index does."""
     if len(text) <= limit:
         return text
     lower = text.lower()
-    hits = sorted((m.start(), w) for w in set(words) for m in re.finditer(re.escape(w), lower))[:500]
-    span = limit * 3 // 4
+    stems = {w: w if len(w) <= 4 else w[: max(4, len(w) - 3)] for w in words}
+    hits = sorted(
+        (m.start(), w) for w, stem in stems.items() for m in re.finditer(rf"(?<![a-z0-9]){re.escape(stem)}", lower)
+    )[:500]
+    span = limit * 2 // 3
 
     def covered(at: int) -> int:
         return len({w for i, w in hits if at <= i < at + span})
 
     at = max((i for i, _ in hits), key=lambda i: (covered(i), -i), default=0)
-    start = max(0, min(at - limit // 4, len(text) - limit))
+    start = max(0, min(at - limit // 3, len(text) - limit))
     cut = text[start : start + limit].rstrip()
     return ("…" if start else "") + cut + ("…" if start + limit < len(text) else "")
