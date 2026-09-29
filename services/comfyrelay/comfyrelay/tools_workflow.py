@@ -12,8 +12,11 @@ structured error. Cancelled by job_cancel, it stops the prompt with ComfyUI's
 atomic cancel, /api/jobs/<id>/cancel, and checks that it stopped, before it
 re-raises: the producer contract in jobs.py, inside its 3s budget. What it
 could not confirm, it says in progress.stop. Cancelled because the relay is
-stopping, it leaves the prompt running on ComfyUI (owner decision on #145; a
-restarted relay re-attaches in #146).
+stopping, it leaves the prompt running on ComfyUI (owner decision on #145).
+
+A run's job id is its prompt id, so a restarted relay re-attaches to it: an id
+this server does not hold is looked up on ComfyUI, the source of truth (#146,
+"re-attach" below).
 
 Must-never (#103): a graph with a partner-API node is refused before anything
 is submitted, and nothing here talks to anything but COMFYUI_URL. The only
@@ -34,7 +37,7 @@ import unicodedata
 import uuid
 import weakref
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlencode
 
 from mcp_types import AudioContent, CallToolResult, ImageContent, TextContent, ToolAnnotations
@@ -42,7 +45,7 @@ from pydantic import BaseModel, Field
 
 from .comfyui import ComfyUIClient, ComfyUIError
 from .errors import RelayError
-from .jobs import AlreadyFinished, current_job
+from .jobs import MAX_WAIT_SECONDS, AlreadyFinished, current_job, unknown_job
 from .workflow import Problem, Report, validate
 
 if TYPE_CHECKING:
@@ -228,7 +231,12 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
 
 
 class RunStarted(BaseModel):
-    job_id: str = Field(description="Follow it with job_status (wait with timeout_seconds); stop it with job_cancel")
+    job_id: str = Field(
+        description="Follow it with job_status (wait with timeout_seconds); stop it with job_cancel. It is the prompt "
+        "id this server chose, and ComfyUI v0.37.0 keeps it, so it equals prompt_id and job_status and "
+        "workflow_outputs still find the run after this server restarts. An older ComfyUI that mints its own "
+        "prompt_id answers with a different one; the job_id then finds the run only while this server holds it"
+    )
     prompt_id: str = Field(description="ComfyUI's id for the run")
     comfyui_state: str = Field(
         description="Where ComfyUI has it as this call returns: queued, running or finished; submitting if ComfyUI "
@@ -315,6 +323,7 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
             RUN_KIND,
             lambda: run_prompt(relay.comfyui, workflow, progress, submitted),
             summary=f"workflow run: {report.node_count} nodes, outputs {outputs}",
+            job_id=prompt_id,  # a restarted relay finds the run on ComfyUI by this id (#146)
         )
         job.progress = progress
         await asyncio.wait({submitted, job.task}, timeout=SUBMIT_WAIT_SECONDS, return_when=asyncio.FIRST_COMPLETED)
@@ -705,6 +714,140 @@ async def _settle(comfyui: ComfyUIClient, progress: dict[str, Any], prompt_id: s
     )
 
 
+# -- re-attach (#146) ---------------------------------------------------------
+#
+# A run's job id is its prompt id. So when job_status or workflow_outputs get an id this server does not hold (it
+# restarted, or dropped the finished job), the run is looked up on ComfyUI, the source of truth. Where the prompt is
+# comes from GET /api/jobs/<id> (about 150 bytes while it waits or runs). How a finished one ended comes from its
+# /history entry, through the same finish() a held run's producer uses, so a re-attached run reports exactly what a
+# held one would: /api/jobs's own outputs are normalised (a 3D file name becomes a file, None entries go), and
+# would not match. The view is marked source "comfyui". Nothing about the run is kept here, and nothing is changed:
+# job_cancel refuses an id this server does not hold (reattach_refuse_cancel).
+
+FINISHED_STATUSES = frozenset({"completed", "failed", "cancelled"})  # v0.37.0, comfy_execution/jobs.py JobStatus
+REATTACHED_SUMMARY = "workflow run, found on ComfyUI: this server does not hold it (it restarted, or dropped the job)"
+
+
+def is_prompt_id(value: str) -> bool:
+    """A UUID in canonical lowercase hyphenated form: the only kind of id workflow_run gives a run. Anything else
+    this server does not hold is no job at all, and is never sent to ComfyUI."""
+    try:
+        return str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
+async def comfyui_job(comfyui: ComfyUIClient, prompt_id: str) -> dict[str, Any]:
+    """ComfyUI's record of a prompt this server does not hold, or `unknown_job` when ComfyUI has none either."""
+    if not is_prompt_id(prompt_id):
+        raise unknown_job(prompt_id)
+    try:
+        job = await comfyui.job(prompt_id)
+        why = (
+            "and ComfyUI has no prompt by that id: a prompt cancelled before it ran leaves no record there, and "
+            "ComfyUI forgets its history when it restarts"
+        )
+    except ComfyUIError as exc:
+        if exc.code != "jobs_api_unavailable":
+            raise
+        job, why = None, "and this ComfyUI has no /api/jobs to look it up in"
+    if job is None:
+        raise RelayError(
+            "unknown_job",
+            f"no job {prompt_id!r}: this server does not hold it (it never existed here, was dropped after "
+            f"finishing, or the server restarted), {why}",
+            job_id=prompt_id,
+        )
+    return job
+
+
+def ended(prompt_id: str, entry: dict[str, Any] | None) -> tuple[str, Any, dict[str, Any] | None]:
+    """(state, result, error) of a finished prompt from its /history entry, through finish(), as a held run ends."""
+    if entry is None:  # finished a moment ago per /api/jobs, and gone from the history since
+        return "failed", None, RelayError("workflow_vanished", f"ComfyUI has no history for {prompt_id}").as_dict()
+    try:
+        return "succeeded", finish(prompt_id, entry), None
+    except RelayError as exc:
+        return "failed", None, exc.as_dict()
+
+
+def _seconds(ms: Any) -> float | None:
+    return ms / 1000 if isinstance(ms, (int, float)) else None
+
+
+async def reattached(comfyui: ComfyUIClient, prompt_id: str, job: dict[str, Any]) -> dict[str, Any]:
+    """A job view (tools.JobView's fields) of a run found on ComfyUI; `job` is its GET /api/jobs/<id>."""
+    finished = job["status"] in FINISHED_STATUSES
+    progress: dict[str, Any] = {
+        "prompt_id": prompt_id,
+        "comfyui_state": "finished" if finished else "queued" if job["status"] == "pending" else "running",
+    }
+    if job["status"] == "pending":
+        progress["queue_position"] = await _queue_position(comfyui, prompt_id)
+    # A live run is "running" whether ComfyUI has it queued or running, as a held one is.
+    state, result, error = ended(prompt_id, await comfyui.history(prompt_id)) if finished else ("running", None, None)
+    return {
+        "job_id": prompt_id,
+        "kind": RUN_KIND,
+        "summary": REATTACHED_SUMMARY,
+        "state": state,
+        "finished": finished,
+        "created_at": _seconds(job.get("create_time")),
+        "started_at": _seconds(job.get("execution_start_time")),
+        "finished_at": _seconds(job.get("execution_end_time")),
+        "result": result,
+        "error": error,
+        "progress": progress,
+        "source": "comfyui",
+    }
+
+
+async def reattach_status(comfyui: ComfyUIClient, prompt_id: str, timeout: float) -> dict[str, Any]:
+    """job_status for an id this server does not hold: ComfyUI's view of the run, after waiting up to `timeout`
+    seconds for it to finish.
+
+    A wait polls /api/jobs/<id> every POLL_SECONDS and rides out ComfyUI not answering for up to
+    UNREACHABLE_GRACE_SECONDS, as a held run's producer does. Concurrent waits on one id are not shared: each poll
+    is about 150 bytes, each wait ends within MAX_WAIT_SECONDS, and sharing would let one caller's cancelled call
+    end another's wait.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + min(max(timeout, 0.0), MAX_WAIT_SECONDS)
+    unreachable_since: float | None = None
+    while True:
+        try:
+            job = await comfyui_job(comfyui, prompt_id)
+        except ComfyUIError as exc:
+            now = loop.time()
+            unreachable_since = now if unreachable_since is None else unreachable_since
+            if (
+                not exc.retryable
+                or now - unreachable_since > UNREACHABLE_GRACE_SECONDS
+                or now + POLL_SECONDS > deadline
+            ):
+                raise
+        else:
+            unreachable_since = None
+            if job["status"] in FINISHED_STATUSES or loop.time() + POLL_SECONDS > deadline:
+                return await reattached(comfyui, prompt_id, job)
+        await asyncio.sleep(POLL_SECONDS)
+
+
+def reattach_refuse_cancel(job_id: str) -> RelayError:
+    """job_cancel for an id this server does not hold, answered before any request to ComfyUI. The relay cancels only
+    the runs it holds: after a restart it cannot tell its own prompts from other clients', and cancelling by id alone
+    would let an agent stop someone else's work (owner decision on #150)."""
+    if not is_prompt_id(job_id):
+        return unknown_job(job_id)
+    return RelayError(
+        "job_not_held",
+        f"refused: this server does not hold job {job_id}, and it cancels only the jobs it holds, since a prompt it "
+        "does not hold may be another client's. If it is a workflow run from before this server restarted, "
+        "job_status and workflow_outputs still follow it; a person can cancel it from ComfyUI's queue panel",
+        job_id=job_id,
+    )
+
+
 # -- workflow_outputs ---------------------------------------------------------
 
 
@@ -728,6 +871,10 @@ class OutputsView(BaseModel):
     job_id: str
     prompt_id: str
     job_state: str
+    source: Literal["relay", "comfyui"] = Field(
+        description="relay: a run this server holds. comfyui: one it does not hold (it restarted), looked up on "
+        "ComfyUI by its id"
+    )
     comfyui_status: str | None = Field(description="ComfyUI's status_str: success, error, ...")
     files: list[OutputFile]
     other_outputs: dict[str, Any] = Field(description="Non-file outputs by node id, such as text; long values cut")
@@ -776,22 +923,29 @@ def _workflow_outputs(relay: Relay) -> Callable[..., Any]:
         """List the files a finished workflow_run job saved, with their sizes, and optionally return one inline.
 
         Takes the job_id from workflow_run. Lists each file (node, filename, subfolder, type, size) and any
-        non-file outputs such as text; works for failed or cancelled runs too, which may have saved some files.
-        Nothing is streamed unless asked: pass fetch=<filename> to get that one file's bytes, up to a size cap.
-        Changes nothing.
+        non-file outputs such as text; works for failed or cancelled runs too, which may have saved some files,
+        and after this server restarts (the run is then looked up on ComfyUI by its id, and marked source
+        "comfyui"). Nothing is streamed unless asked: pass fetch=<filename> to get that one file's bytes, up to a
+        size cap. Changes nothing.
         """
-        job = relay.jobs.get(job_id)
-        prompt_id = (job.progress or {}).get("prompt_id")
-        if job.kind != RUN_KIND or not prompt_id:
-            raise RelayError(
-                "not_a_workflow_job", f"job {job_id} is a {job.kind} job, not a workflow run", kind=job.kind
-            )
-        if not job.state.finished:
+        job = relay.jobs.find(job_id)
+        if job is None:  # not held here: look the run up on ComfyUI (#146); how it ended comes from /history below
+            found = await comfyui_job(relay.comfyui, job_id)
+            prompt_id, source = job_id, "comfyui"
+            state, finished = "running", found["status"] in FINISHED_STATUSES
+        else:
+            prompt_id = (job.progress or {}).get("prompt_id")
+            if job.kind != RUN_KIND or not prompt_id:
+                raise RelayError(
+                    "not_a_workflow_job", f"job {job_id} is a {job.kind} job, not a workflow run", kind=job.kind
+                )
+            state, finished, source = job.status.value, job.state.finished, "relay"
+        if not finished:
             raise RelayError(
                 "job_not_finished",
-                f"job {job_id} is still {job.status.value}; wait for it with job_status(timeout_seconds=...)",
+                f"job {job_id} is still {state}; wait for it with job_status(timeout_seconds=...)",
                 retryable=True,
-                state=job.status.value,
+                state=state,
             )
         entry = await relay.comfyui.history(prompt_id)
         if entry is None:
@@ -801,6 +955,8 @@ def _workflow_outputs(relay: Relay) -> Callable[..., Any]:
                 "was cleared or it restarted since",
                 prompt_id=prompt_id,
             )
+        if source == "comfyui":
+            state = ended(prompt_id, entry)[0]
         files, other = collect_outputs(entry.get("outputs"))
         # Fetching one file: size only that one. Listing: the first MAX_SIZED_FILES.
         sized = [
@@ -827,7 +983,8 @@ def _workflow_outputs(relay: Relay) -> Callable[..., Any]:
         view = OutputsView(
             job_id=job_id,
             prompt_id=prompt_id,
-            job_state=job.status.value,
+            job_state=state,
+            source=source,
             comfyui_status=status.get("status_str"),
             files=listed,
             other_outputs=other,

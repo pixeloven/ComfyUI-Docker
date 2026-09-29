@@ -59,7 +59,10 @@ only a restart helps.
 The store is in memory. Jobs do not survive a restart, and an MCP session
 ending does not cancel them: any session can follow any job by id. Finished
 jobs are kept up to a limit, oldest dropped first, so a long-lived sidecar
-does not grow without bound.
+does not grow without bound. A workflow run's job id is its ComfyUI prompt id
+(a UUID in canonical hyphenated form), so a run this store no longer holds is
+looked up on ComfyUI instead (#146, tools_workflow.py). Ids the store mints
+are 32 hex digits without hyphens, and never collide with one.
 """
 
 from __future__ import annotations
@@ -204,12 +207,18 @@ class JobStore:
         self._cancel_wait = cancel_wait
         self._stuck_at_shutdown: list[Job] | None = None
 
-    def submit(self, kind: str, work: Callable[[], Awaitable[Any]], *, summary: str = "") -> Job:
+    def submit(
+        self, kind: str, work: Callable[[], Awaitable[Any]], *, summary: str = "", job_id: str | None = None
+    ) -> Job:
         """Start `work()` as a job and return it at once. Needs a running event loop.
 
-        Raises `too_many_jobs` when `max_in_flight` jobs have not finished. It is
-        retryable unless every one of them overran its cancel deadline.
+        `job_id` names the job (a workflow run passes its prompt id); by default
+        the store mints one. Raises `too_many_jobs` when `max_in_flight` jobs
+        have not finished. It is retryable unless every one of them overran its
+        cancel deadline.
         """
+        if job_id is not None and job_id in self._jobs:
+            raise ValueError(f"job id {job_id!r} is already in use")
         live = [j for j in self._jobs.values() if not j.state.finished]
         if len(live) >= self.max_in_flight:
             cancelling = sum(1 for j in live if j.cancel_requested)
@@ -233,18 +242,22 @@ class JobStore:
                 cancelling=cancelling,
                 stuck=stuck,
             )
-        job = Job(id=uuid.uuid4().hex, kind=kind, summary=summary)
+        job = Job(id=job_id or uuid.uuid4().hex, kind=kind, summary=summary)
         self._jobs[job.id] = job
         job.task = asyncio.get_running_loop().create_task(self._run(job, work), name=f"job-{job.id}")
         job.task.add_done_callback(lambda _task: self._settle(job))
         self._prune()
         return job
 
+    def find(self, job_id: str) -> Job | None:
+        """The job, or None when this store does not hold it."""
+        return self._jobs.get(job_id)
+
     def get(self, job_id: str) -> Job:
-        try:
-            return self._jobs[job_id]
-        except KeyError:
-            raise unknown_job(job_id) from None
+        job = self.find(job_id)
+        if job is None:
+            raise unknown_job(job_id)
+        return job
 
     async def wait(self, job_id: str, timeout: float) -> Job:
         """Return when the job finishes or `timeout` seconds pass, whichever is first.
