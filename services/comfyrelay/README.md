@@ -53,7 +53,7 @@ environment when comfyrelay moves into that image.
 | `COMFYUI_URL` | `http://localhost:8188` | Where ComfyUI answers, from this container. It must be an `http://` or `https://` URL with a host, or the server exits 2 at startup. A `user:password@` in it is sent to ComfyUI but never shown: logs and errors print `***@`. Percent-encode any `/`, `?`, `#` or `@` in the credentials (`/` is `%2F`): unencoded, they end the host part early, and the server refuses the URL. |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `9000` | The listen address. The path is always `/mcp`. |
 | `COMFYUI_MCP_PROFILES` | `read,run` | The capability profiles to enable (below) |
-| `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar. In a container the hostname is the container ID or pod name, which can change when it's recreated, so set this when a gateway federates sidecars. `server_info` reports where the ID came from (`instance_id_source`: `env` or `hostname`), and startup logs a warning when it's the hostname. It's also in the `client_id` the relay sends with each workflow run, which is how a restarted relay proves a run is its own before it cancels it: set it to a stable name so that works across a recreated container. |
+| `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar. In a container the hostname is the container ID or pod name, which can change when it's recreated, so set this when a gateway federates sidecars. `server_info` reports where the ID came from (`instance_id_source`: `env` or `hostname`), and startup logs a warning when it's the hostname. |
 | `COMFYUI_MCP_MAX_JOBS` | `16` | How many jobs may be in flight at once. A submission past it is refused with `too_many_jobs`. It's retryable, unless every slot is held by a job that didn't stop when cancelled, since those may never free. |
 | `COMFYUI_VERSION` | set by the image | The ComfyUI version the image was built for, from the bake pin |
 
@@ -100,9 +100,8 @@ the `job_*` group are the cross-cutting names.
   seconds for the job to unwind; a job still unwinding after that reports `cancelling`, and
   `job_status` shows it reach `cancelled`. A cancelled job ends `cancelled`, with no `result`,
   even if its work swallows the cancellation and returns something. Cancelling a finished job
-  changes nothing. An unfinished workflow run this server no longer holds is cancelled only if
-  ComfyUI records this relay as its submitter, and refused otherwise (`job_not_owned`; see
-  *Re-attaching after a restart*).
+  changes nothing. An unfinished workflow run this server no longer holds is refused
+  (`job_not_owned`; see *Re-attaching after a restart*).
 
 Jobs live in memory, so they don't survive a restart. A workflow run's `job_id` is its ComfyUI
 `prompt_id`, though, so a restarted relay can still find the run on ComfyUI. At most
@@ -351,9 +350,7 @@ refusal names each node and its signals:
 Template runnability and node search use the same function. **The backstop:** at v0.37.0 a
 partner-API node gets the user's Comfy.org credentials only from `/prompt`'s `extra_data`
 (`execution.py`: `extra_data.get("auth_token_comfy_org")`), and this server never sends
-`extra_data`. Its `/prompt` body is exactly `{prompt, prompt_id, client_id}`, and a test holds
-it to that. `client_id` is `comfyrelay:<instance id>`, a name with no credential in it (see
-*Re-attaching after a restart*).
+`extra_data`. Its `/prompt` body is exactly `{prompt, prompt_id}`, and a test holds it to that.
 So even a partner node that escaped detection would run without the credentials that pay. A
 custom node that spends money by some other route shows no signal and can't be detected.
 
@@ -417,32 +414,10 @@ Limits, all ComfyUI's:
   history in memory.
 - Who cancelled an interrupted run isn't recorded: it's `cancelled`, with no error.
 
-**Cancelling proves ownership first.** After a restart the relay holds no record of which
-prompts it submitted, and cancelling by ID alone would let an agent stop another client's
-prompt. So every `/prompt` the relay sends carries `client_id: "comfyrelay:<instance id>"`
-(`COMFYUI_MCP_INSTANCE_ID`, or the hostname). ComfyUI v0.37.0 keeps it in the prompt's
-`extra_data`, which `/queue` shows while the prompt waits or runs, and `GET /api/jobs/<id>` and
-`/history` show once it has ended. `job_cancel` on an unfinished run this server doesn't hold
-reads it back, and cancels only when it matches this relay's own. The stop is the same as for
-a held run (the atomic cancel, confirmed, within 2.5 seconds), and `progress.stop` reports it.
-Anything else is refused with `job_not_owned` and left alone: a prompt with no `client_id`, the
-ComfyUI frontend's, or another relay's. A finished run has nothing to cancel, so `job_cancel`
-just reports it.
-
-What that proof is worth:
-- **It holds against the agent,** who is who it guards against. The agent reaches ComfyUI only
-  through the relay, and the relay sets `client_id` itself; nothing in a tool call can.
-- **It doesn't hold against a client of ComfyUI's own port,** which could send the same
-  `client_id`. That gains it nothing: it can already cancel any prompt through ComfyUI's API.
-- **The instance ID must be stable.** It defaults to the hostname, which changes when a
-  container or pod is recreated. A relay restarted under a new ID can't prove its old prompts,
-  so it refuses to cancel them. It never cancels a prompt it can't prove. Set
-  `COMFYUI_MCP_INSTANCE_ID` so that cancelling still works after a restart. Two relays with the
-  same ID on one ComfyUI can cancel each other's runs.
-- **A side effect in ComfyUI's UI.** ComfyUI also uses `client_id` to address a prompt's
-  websocket events. Without one, it broadcast the relay's progress and preview images to every
-  open ComfyUI tab. Now they go to a socket with that ID, and there is none. The queue and
-  history still show the relay's runs; a live progress bar doesn't.
+**Cancelling is refused** (`job_not_owned`) for an unfinished run this server doesn't hold.
+After a restart the relay doesn't know which prompts it submitted, and cancelling by ID alone
+would let an agent stop another client's prompt. A finished one has nothing to cancel, so
+`job_cancel` just reports it.
 
 **Privacy.** `job_status` and `workflow_outputs` read any prompt on the ComfyUI by its ID,
 including another client's: its status, its error, and its output files. That's by design and

@@ -126,8 +126,7 @@ def serve(settings: Settings) -> None:
     if settings.instance_id_source == "hostname":
         log.warning(
             "%s is not set, so the instance id is the hostname %r, which can change when the container or pod "
-            "is recreated. Set it to a stable name if a gateway federates this sidecar, and so that a recreated "
-            "relay can still prove its own workflow runs to cancel them.",
+            "is recreated. Set it to a stable name if a gateway federates this sidecar.",
             INSTANCE_ID_ENV,
             settings.instance_id,
         )

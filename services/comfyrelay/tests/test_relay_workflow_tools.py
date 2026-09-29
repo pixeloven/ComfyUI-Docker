@@ -738,16 +738,11 @@ async def test_without_the_jobs_api_it_follows_through_queue_and_history():
 
 async def test_the_prompt_request_carries_no_extra_data():
     """Partner-API nodes get the user's Comfy.org credentials only from /prompt's extra_data, which this server
-    never sends: a backstop behind the refusal. The body is exactly the graph, the relay's prompt id, and its
-    client_id, a plain name with no credential in it, which lets a restarted relay prove a prompt is its own (#146)."""
+    never sends: a backstop behind the refusal."""
     fake = FakeComfyUI()
-    server, _ = serve(fake)
-    async with Client(server, mode="legacy") as client:
-        await client.call_tool("workflow_run", {"workflow": t1()})
+    await tw.run_prompt(fake.client(), t1(), {"prompt_id": "p"})
     [body] = fake.posted("/prompt")
-    assert set(body) == {"prompt", "prompt_id", "client_id"}
-    assert "extra_data" not in body
-    assert body["client_id"] == "comfyrelay:test-instance"
+    assert set(body) == {"prompt", "prompt_id"}
 
 
 # -- workflow_outputs ---------------------------------------------------------------------------
@@ -1344,71 +1339,14 @@ async def test_an_id_neither_held_nor_on_comfyui_is_unknown_job(tool, args):
     assert fake.count("GET", f"/api/jobs/{missing}") == 1
 
 
-@pytest.mark.parametrize("extra_data", [{}, {"client_id": "a-browser-tab"}, {"client_id": "comfyrelay:another"}])
-@pytest.mark.parametrize("running", [False, True])
-async def test_cancel_of_another_clients_prompt_is_refused_and_touches_nothing(extra_data, running):
-    """No client_id, the ComfyUI frontend's, or a relay with another instance id: not provably this relay's."""
+async def test_cancel_of_a_reattached_run_is_refused_and_touches_nothing():
     fake = FakeComfyUI(auto="hold")
-    theirs = str(uuid.uuid4())
-    fake.pending.append([7, theirs, {}, extra_data, []])
-    if running:
-        fake.start(theirs)
-    server, _ = serve(fake)
-    async with Client(server, mode="legacy") as client:
-        error = error_of(await client.call_tool("job_cancel", {"job_id": theirs}))
-        status = (await client.call_tool("job_status", {"job_id": theirs})).structured_content
-    assert (error["code"], error["retryable"]) == ("job_not_owned", False)
-    assert error["comfyui_status"] == ("in_progress" if running else "pending")
-    assert "a-browser-tab" not in error["message"]  # another client's id is not echoed
-    assert fake.count("POST", "/api/jobs/") == 0 and fake.posted("/queue") == [] and fake.posted("/interrupt") == []
-    assert theirs in [i[1] for i in (*fake.pending, *fake.running)]
-    assert status["source"] == "comfyui"  # still readable by id
-
-
-async def test_cancel_after_a_restart_with_a_new_instance_id_is_refused():
-    """A relay whose COMFYUI_MCP_INSTANCE_ID changed (it defaults to the hostname) cannot prove its old prompts."""
-    fake = FakeComfyUI(auto="hold")
-    server, relay = build_server(settings(instance_id="before"), comfyui=fake.client())
-    async with Client(server, mode="legacy") as client:
-        started = (await client.call_tool("workflow_run", {"workflow": t1()})).structured_content
-    await relay.jobs.shutdown()
-    async with Client(serve(fake)[0], mode="legacy") as client:
+    started, _, restarted = await run_and_restart(fake)
+    async with Client(restarted, mode="legacy") as client:
         error = error_of(await client.call_tool("job_cancel", {"job_id": started["job_id"]}))
-    assert error["code"] == "job_not_owned" and "comfyrelay:test-instance" in error["message"]
-    assert fake.count("POST", "/api/jobs/") == 0
-
-
-async def test_cancel_after_a_restart_stops_a_queued_run_this_relay_submitted():
-    fake = FakeComfyUI(auto="hold")
-    started, _, restarted = await run_and_restart(fake)
-    async with Client(restarted, mode="legacy") as client:
-        cancelled = (await client.call_tool("job_cancel", {"job_id": started["job_id"]})).structured_content
-    assert (cancelled["state"], cancelled["finished"], cancelled["source"]) == ("cancelled", True, "comfyui")
-    assert cancelled["progress"]["stop"] == "confirmed"
-    assert fake.pending == [] and fake.count("POST", f"/api/jobs/{started['prompt_id']}/cancel") == 1
-    assert fake.posted("/interrupt") == []
-
-
-async def test_cancel_after_a_restart_stops_a_running_run_this_relay_submitted():
-    fake = FakeComfyUI(auto="hold")
-    started, _, restarted = await run_and_restart(fake)
-    fake.start(started["prompt_id"])
-    async with Client(restarted, mode="legacy") as client:
-        cancelled = (await client.call_tool("job_cancel", {"job_id": started["job_id"]})).structured_content
-    assert (cancelled["state"], cancelled["result"], cancelled["error"]) == ("cancelled", None, None)
-    assert (cancelled["progress"]["stop"], cancelled["progress"]["comfyui_state"]) == ("confirmed", "finished")
-    assert fake.running == [] and fake.posted("/interrupt") == []
-
-
-async def test_cancel_after_a_restart_of_a_run_that_got_there_first_reports_how_it_ended():
-    fake = FakeComfyUI(auto="hold")
-    started, _, restarted = await run_and_restart(fake)
-    fake.start(started["prompt_id"])
-    fake.finish_on_cancel = True
-    async with Client(restarted, mode="legacy") as client:
-        found = (await client.call_tool("job_cancel", {"job_id": started["job_id"]})).structured_content
-    assert (found["state"], found["progress"]["stop"]) == ("succeeded", "already_finished")
-    assert found["result"]["files"][0]["filename"] == "t1__00001_.png"
+    assert (error["code"], error["retryable"], error["comfyui_status"]) == ("job_not_owned", False, "pending")
+    assert fake.count("POST", "/api/jobs/") == 0 and fake.posted("/queue") == [] and fake.posted("/interrupt") == []
+    assert [i[1] for i in fake.pending] == [started["prompt_id"]]
 
 
 async def test_cancel_of_a_finished_reattached_run_reports_it_and_sends_nothing():
