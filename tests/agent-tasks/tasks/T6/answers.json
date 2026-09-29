@@ -1,6 +1,5 @@
 {
   "derived_from": {
-    "image_id": "sha256:89ccc775ac828e22e27b3f905d70d16c913652555a9e14f9c514cefdee3c1b84",
     "sources": {
       "docs.comfy.org": "efb8fdd3de17027da633eb9c12e80fbbeb993a19",
       "guides": "4.0.1"

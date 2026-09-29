@@ -552,10 +552,13 @@ def t6_pages(db: sqlite3.Connection, path: str) -> str | None:
     return "\n".join(r[0] for r in rows) if rows else None
 
 
-def t6_norm(value: object, case_sensitive: bool) -> str:
-    """An answer as compared: no backticks, quotes or surrounding punctuation, one space between words."""
+def t6_norm(value: object, q: dict) -> str:
+    """An answer as compared: no backticks, surrounding quotes or full stop, one space between words, lower case
+    unless the question says case matters, and without the question's optional prefix (a route's leading /)."""
     text = " ".join(str(value).replace("`", "").strip().strip("\"'.").split())
-    return text if case_sensitive else text.lower()
+    text = text if q.get("case_sensitive") else text.lower()
+    prefix = q.get("optional_prefix", "")
+    return text[len(prefix) :] if prefix and text.startswith(prefix) else text
 
 
 def cmd_derive_t6(image: str = "") -> None:
@@ -567,7 +570,6 @@ def cmd_derive_t6(image: str = "") -> None:
         subprocess.check_call(["docker", "cp", f"{cid}:/opt/corpus/corpus.sqlite", str(T6_CORPUS)])
     finally:
         subprocess.run(["docker", "rm", cid], capture_output=True, check=False)
-    image_id = json.loads(subprocess.check_output(["docker", "image", "inspect", image]))[0]["Id"]
     db = sqlite3.connect(T6_CORPUS)
     meta = {k: json.loads(v) for k, v in db.execute("SELECT key, value FROM meta")}
     answers = {}
@@ -579,13 +581,8 @@ def cmd_derive_t6(image: str = "") -> None:
         if not m:
             sys.exit(f"{q['id']}: {q['pattern']!r} matches nothing in {q['path']}")
         answers[q["id"]] = {"answer": m.group(1), "path": q["path"]}
-    out = {
-        "derived_from": {
-            "image_id": image_id,
-            "sources": {s["name"]: s["version"] for s in meta["sources"]},
-        },
-        "answers": answers,
-    }
+    # What the answers depend on: the sources' versions. Not the local image id, which changes on every build.
+    out = {"derived_from": {"sources": {s["name"]: s["version"] for s in meta["sources"]}}, "answers": answers}
     (T6_DIR / "answers.json").write_text(json.dumps(out, indent=2) + "\n")
     print(json.dumps(answers))
 
@@ -606,18 +603,21 @@ def check_t6() -> str:
     db = sqlite3.connect(f"file:{T6_CORPUS}?mode=ro", uri=True)
     wrong = []
     for qid, expected in want.items():
-        case = bool(questions[qid].get("case_sensitive"))
+        q = questions[qid]
         entry = got.get(qid) if isinstance(got.get(qid), dict) else {}
         answer, path = entry.get("answer"), entry.get("path")
-        target = t6_norm(expected["answer"], case).lstrip("/")  # a route is right with or without its slash
-        if answer is None or not re.search(rf"(?<!\w){re.escape(target)}(?!\w)", t6_norm(answer, case)):
+        target = t6_norm(expected["answer"], q)
+        # The whole answer, not a phrase that contains it: "either X or Y" is not X.
+        if answer is None or t6_norm(answer, q) != target:
             wrong.append(f"{qid} (want {expected['answer']!r}, got {answer!r})")
             continue
-        page = t6_pages(db, str(path)) if path else None
+        # The cited page must hold the answer where the question's own pattern finds it, as derive-t6 did.
+        page = t6_pages(db, str(path)) if isinstance(path, str) else None
+        found = re.search(q["pattern"], page) if page is not None else None
         if page is None:
             wrong.append(f"{qid} (cites {path!r}, which is not in the index)")
-        elif target not in t6_norm(page, case):
-            wrong.append(f"{qid} (cites {path!r}, which does not contain {expected['answer']!r})")
+        elif not found or t6_norm(found.group(1), q) != target:
+            wrong.append(f"{qid} (cites {path!r}, which does not give {expected['answer']!r})")
     score = len(want) - len(wrong)
     detail = f"{score}/{len(want)}" + (f"; wrong: {', '.join(wrong)}" if wrong else "")
     if wrong:
