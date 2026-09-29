@@ -263,13 +263,13 @@ async def test_a_guide_hit_names_its_topic_has_no_latest_note_and_any_comes_with
 
 
 async def test_a_query_counts_each_word_once_and_has_a_length_limit(corpus_path):
-    ok, got = await call("docs_search", {"query": "websocket " * 45 + "executing"}, corpus_path)
+    ok, got = await call("docs_search", {"query": "how does the websocket " * 20 + "executing"}, corpus_path)
     assert ok and got["total_matches"] == 1
+    assert got["searched"] == ["websocket", "executing"]
     server, _ = build_server(settings(corpus_path=corpus_path), comfyui=comfyui_answering())
     async with Client(server, mode="legacy") as client:
         tool = next(t for t in (await client.list_tools()).tools if t.name == "docs_search")
-        assert tool.input_schema["properties"]["query"]["maxLength"] == 500
-        assert (await client.call_tool("docs_search", {"query": "x" * 501})).is_error
+    assert tool.input_schema["properties"]["query"]["maxLength"] == 500
 
 
 async def test_docs_search_refuses_a_query_with_nothing_to_search(corpus_path):

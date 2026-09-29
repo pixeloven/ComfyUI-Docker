@@ -474,8 +474,9 @@ merge results with the live node and template tools.
   `title`, the `section` (its heading trail) and the section's text. A section longer than
   1,500 characters is cut to the stretch that holds the most query words, stems included,
   with some text before the first of them. A guide's result also names its `docs_guide`
-  `topic`. Common question words are dropped from the query, each word counts once, and at
-  most 16 words and 500 characters are searched. Every remaining word must match; when no
+  `topic`. A query longer than 500 characters is refused. Common question words are dropped
+  from it, each word counts once, and only the first 16 distinct words left are searched;
+  the response's `searched` lists them. Every one of them must match; when no
   section has them all, sections with any of them are returned, `match` says `any`, and a
   `hint` suggests narrowing the query. The search runs in a worker thread, so a slow one
   doesn't hold up the other tools.

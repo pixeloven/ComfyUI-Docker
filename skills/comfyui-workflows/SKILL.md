@@ -7,14 +7,17 @@ description: Build, run and debug ComfyUI workflows as an agent — UI vs API JS
 
 Short guides for an agent that drives a ComfyUI instance, especially one this
 repository's images run. Each topic is its own file; read the one the task
-needs. The comfyrelay MCP sidecar serves the same files through its
-`docs_guide` tool, and `docs_search` searches them together with
+needs.
+
+The comfyrelay MCP sidecar serves the same files through its `docs_guide`
+tool, and `docs_search` searches them together with
 [docs.comfy.org](https://docs.comfy.org). *(needs the comfyrelay sidecar)*
 
-**The marker.** A passage marked *(needs the comfyrelay sidecar)*, or a section headed
-*Needs the comfyrelay sidecar.*, describes a tool or behaviour of comfyrelay, the MCP server
-this repository runs beside ComfyUI. Without it, skip that passage: the
-unmarked guidance holds for any ComfyUI, through its HTTP API and editor.
+**The marker.** *(needs the comfyrelay sidecar)* ends each sentence that
+relies on comfyrelay, the MCP server this repository runs beside ComfyUI, and a
+section that relies on it opens with *Needs the comfyrelay sidecar.* Without
+the relay, skip just those sentences and sections: the rest holds for any
+ComfyUI, through its HTTP API and editor.
 
 ## Topics
 
@@ -26,7 +29,7 @@ unmarked guidance holds for any ComfyUI, through its HTTP API and editor.
 - [errors-and-validation](references/errors-and-validation.md): which check
   catches what, and how to read ComfyUI's per-node errors.
 - [relay-limits](references/relay-limits.md): the comfyrelay sidecar's
-  profiles, refusals, jobs and re-attaching. *(needs the comfyrelay sidecar)*
+  profiles, refusals, jobs and re-attaching. The whole topic needs the sidecar.
 - [comfy-manifest](../comfy-manifest/SKILL.md): authoring `comfy.yaml` and
   generating its locks.
 
@@ -34,8 +37,8 @@ unmarked guidance holds for any ComfyUI, through its HTTP API and editor.
 
 - **Look things up; don't recall them.** Node inputs, defaults and allowed
   values change between ComfyUI versions. Ask the running instance
-  (`/object_info`, or the relay's `node_describe` *(needs the comfyrelay sidecar)*) rather than
-  memory or a web page.
+  (`/object_info`) rather than memory or a web page. The relay's
+  `node_describe` asks it for you. *(needs the comfyrelay sidecar)*
 - **docs.comfy.org describes the latest ComfyUI.** The instance you drive may
   be older. Where the site and the instance disagree, the instance wins.
 - **Change the deployment, not the instance.** Models and node packs come from

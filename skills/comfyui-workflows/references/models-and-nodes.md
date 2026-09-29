@@ -9,8 +9,8 @@ agent's job is to propose the change to those files.
 
 1. **Find out exactly what's missing.** Check node classes against the live
    instance (`/object_info`) and models against what's on disk
-   (`/models/<folder>`). With the relay, `node_search`, `node_describe` and
-   `model_list` do the same, and for a template `template_get` reports
+   (`/models/<folder>`). The relay's `node_search`, `node_describe` and
+   `model_list` do the same, and its `template_get` reports a template's
    `missing_nodes`, `missing_models` and `missing_inputs` directly. *(needs the comfyrelay sidecar)*
 2. **Propose the change**, for a human to apply:
    - **A model** goes in the deployment's `comfy.yaml`, followed by a
@@ -28,8 +28,10 @@ agent's job is to propose the change to those files.
 Never suggest installing through ComfyUI-Manager, `git clone` into
 `custom_nodes`, `comfy node install`, `pip install`, or a direct download into
 the models directory. Each works once, on one instance, and the next rebuild
-or replica loses it. The comfyrelay sidecar refuses to install anything
-(see the `relay-limits` topic). *(needs the comfyrelay sidecar)*
+or replica loses it.
+
+The comfyrelay sidecar refuses to install anything (see the `relay-limits`
+topic). *(needs the comfyrelay sidecar)*
 
 ## The subfolder gotcha
 
@@ -46,8 +48,7 @@ file.
 - `/models/<folder>` lists files the same way the loaders do, with the
   subfolder included.
 - The relay's template check reports this case separately, as
-  `models_need_value_change`, with `found_at` giving the path to use, and
-  `model_list` lists files as the loaders do. *(needs the comfyrelay sidecar)*
+  `models_need_value_change`, with `found_at` giving the path to use. *(needs the comfyrelay sidecar)*
 - When you propose a manifest entry, the folder in `install:` decides the
   path. `install: models/checkpoints/` gives the bare name, and
   `install: models/checkpoints/sdxl/` gives `sdxl/<file>`.
@@ -57,5 +58,5 @@ file.
 The folder a model goes in decides which loaders offer it: `checkpoints` for
 full checkpoints, `diffusion_models` for a bare diffusion model, `loras`,
 `vae`, `text_encoders`, `clip_vision`, `controlnet`, `upscale_models`, and
-more. `/models` on the instance (or `model_list` *(needs the comfyrelay sidecar)*) lists the
-folder types that instance knows. A template's model entries name their folder in `directory`.
+more. `/models` on the instance lists the folder types that instance knows. A
+template's model entries name their folder in `directory`.

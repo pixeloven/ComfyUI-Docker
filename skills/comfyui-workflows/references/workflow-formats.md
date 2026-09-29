@@ -31,8 +31,7 @@ subgraphs, so its export is what `/prompt` expects.
 Converting by hand is possible but easy to get wrong:
 
 - `widgets_values` is positional. Map it to input names with the node's
-  definition (`/object_info/<class>`, or `node_describe` *(needs the comfyrelay sidecar)*), in
-  the order the inputs are declared.
+  definition (`/object_info/<class>`), in the order the inputs are declared.
 - A seed-like input with a "control after generate" widget has an extra value
   after it in `widgets_values` (`"fixed"`, `"randomize"` and so on). That value
   isn't an input, so skip it.
@@ -42,8 +41,9 @@ Converting by hand is possible but easy to get wrong:
   top level, with ids that stay unique.
 
 When a graph is small it's often quicker to build the API form directly from
-the node definitions (`/object_info/<class>`, or `node_describe` *(needs the comfyrelay sidecar)*):
-pick the classes, fill every required input, and wire outputs by index.
+the node definitions (`/object_info/<class>`): pick the classes, fill every
+required input, and wire outputs by index. The relay's `node_describe` gives
+each definition with its inputs named as a graph must name them. *(needs the comfyrelay sidecar)*
 
 ## The relay's tools and the two formats
 
@@ -73,5 +73,5 @@ pick the classes, fill every required input, and wire outputs by index.
 - A graph needs at least one output node (such as SaveImage or PreviewImage).
   ComfyUI runs only the nodes an output depends on.
 - Inputs added by a dynamic input use dotted names (`resize_type.width`,
-  `images.image0`). `node_describe` lists them as a graph must name them.
-  *(needs the comfyrelay sidecar)*
+  `images.image0`).
+- `node_describe` lists those inputs by the names a graph must use. *(needs the comfyrelay sidecar)*

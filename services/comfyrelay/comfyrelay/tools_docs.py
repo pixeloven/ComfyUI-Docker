@@ -71,6 +71,10 @@ class DocHit(_Compact):
 
 class DocsSearchResult(_Compact):
     query: str
+    searched: list[str] = Field(
+        description="The words actually searched for: question words dropped, each word once, at most "
+        f"{MAX_QUERY_WORDS}"
+    )
     match: Literal["all", "any"] = Field(
         description="all: every result has every query word. any: none did, so these have at least one"
     )
@@ -114,6 +118,7 @@ def _docs_search(relay: Relay) -> Callable[..., Any]:
         )
         return DocsSearchResult(
             query=query,
+            searched=words,
             match=mode,
             total_matches=total,
             results=[DocHit(**hit.__dict__) for hit in hits],

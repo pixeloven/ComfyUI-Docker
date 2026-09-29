@@ -1,12 +1,13 @@
 # Errors and validation
 
-A workflow can fail at three points: before it is queued, when ComfyUI accepts
-or rejects it, and while it runs. Each point catches different mistakes, so
-knowing which one spoke tells you where to look.
+A workflow can fail when ComfyUI checks it on submit (section 2), or while it
+runs (section 3). Each point catches different mistakes, so knowing which one
+spoke tells you where to look. The relay adds a check before submitting
+(section 1). *(needs the comfyrelay sidecar)*
 
 ## 1. Before submitting: `workflow_validate` (comfyrelay)
 
-*Needs the comfyrelay sidecar.* Without it, a graph's first check is ComfyUI's own, on submit.
+*Needs the comfyrelay sidecar.*
 
 ComfyUI has no dry run, so the relay checks only what can be known without
 submitting the graph, against the live `/object_info`:
@@ -30,6 +31,7 @@ Those are ComfyUI's checks, and they run when the graph is submitted.
 When `/prompt` refuses a graph it answers HTTP 400 with an `error` and a
 `node_errors` object keyed by node id. Each node's entry lists its errors, each
 with a `type`, a `message`, `details` and `extra_info` (often the input name).
+
 The relay's `workflow_run` passes this on as `workflow_rejected`, and flattens
 it into `type`, `node_id`, `class_type`, `input`, `details`, `expected` and
 `got`. *(needs the comfyrelay sidecar)*
@@ -46,18 +48,21 @@ The error types you'll meet most:
 | `prompt_no_outputs` / `prompt_outputs_failed_validation` | no output node, or every output's branch failed | reading the per-node errors; the top-level message alone is generic |
 
 ComfyUI accepts a graph when **any** output passes, and drops the outputs
-that fail, so a run can succeed with less than you asked for. The relay
-reports those dropped outputs as warnings. *(needs the comfyrelay sidecar)*
+that fail, so a run can succeed with less than you asked for.
+
+The relay reports those dropped outputs as warnings. *(needs the comfyrelay sidecar)*
 
 ## 3. While running: execution errors
 
 A node can still fail at run time: out of memory, a corrupt model file, a
 custom node's own exception. ComfyUI records it in the prompt's `/history`
-entry. The relay's `job_status` then reports `failed` with
+entry.
+
+The relay's `job_status` then reports `failed` with
 `workflow_execution_failed`, naming the node id and class, the exception type
-and message, and the last lines of the traceback. `workflow_interrupted` means
-something other than this job stopped it (a person, or another client).
-*(needs the comfyrelay sidecar)*
+and message, and the last lines of the traceback. *(needs the comfyrelay sidecar)*
+The relay's `workflow_interrupted` means something other than the relay
+stopped the run (a person, or another client). *(needs the comfyrelay sidecar)*
 
 ## Reading errors well
 
@@ -67,7 +72,7 @@ something other than this job stopped it (a person, or another client).
   at once, but one bad link often causes errors further down the graph.
 - **Check against the instance, not the docs.** An input the docs mention may
   not exist on an older ComfyUI. `/object_info/<class>` shows what this one
-  accepts, as does `node_describe` *(needs the comfyrelay sidecar)*.
+  accepts. So does the relay's `node_describe`. *(needs the comfyrelay sidecar)*
 
 ComfyUI's own description of the execution flow is on docs.comfy.org under
 *Development → Server* (<https://docs.comfy.org/development/comfyui-server/comms_overview>).
