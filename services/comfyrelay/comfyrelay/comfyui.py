@@ -73,6 +73,17 @@ class ComfyUIClient:
         path = "/object_info" if node_class is None else f"/object_info/{quote(node_class, safe='')}"
         return await self._get_json(path)
 
+    async def markdown(self, path: str) -> str | None:
+        """GET a markdown file ComfyUI serves, such as a node's help page. None when it has none: HTTP 404, or an
+        HTML page in its place (what the frontend also treats as missing)."""
+        response = await self._send("GET", path, headers={"Accept": "text/markdown, text/plain, */*"})
+        if response.status_code == 404:
+            return None
+        self._raise_for_status(response, path)
+        if "text/html" in response.headers.get("content-type", ""):
+            return None
+        return response.content.decode("utf-8", errors="replace")  # aiohttp serves .md as octet-stream, no charset
+
     def _bad_shape(self, path: str, expected: str) -> ComfyUIError:
         return ComfyUIError(
             "comfyui_bad_response", f"ComfyUI answered {self._shown_url}{path} with JSON that is not {expected}"

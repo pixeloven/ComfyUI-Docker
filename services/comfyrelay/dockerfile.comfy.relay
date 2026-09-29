@@ -36,6 +36,23 @@ COPY comfyctl/comfyctl comfyctl/comfyctl
 COPY comfyrelay/comfyrelay comfyrelay/comfyrelay
 RUN uv sync --frozen --no-dev --all-packages --no-editable
 
+# The docs corpus (#134) that docs_search and docs_guide read: Comfy-Org/docs at
+# COMFY_DOCS_SHA (the bake pin; GPL-3.0) and our guides, skills/comfyui-workflows/
+# (MIT), which arrive as the `skills` named context because this context is
+# services/. `comfyctl relay corpus build` fetches the docs shallow and sparse
+# (only docs.json, the snippets and the English pages it lists; no history, no
+# media) and writes the index, the markdown it indexed, NOTICE and the GPL text.
+# This is the only stage that touches the network after the lock install, and
+# the server never does: the corpus is data in the image.
+FROM builder AS corpus
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+ARG COMFY_DOCS_SHA
+RUN test -n "$COMFY_DOCS_SHA" || { echo "COMFY_DOCS_SHA is required; build with docker buildx bake" >&2; exit 1; }
+COPY --from=skills . /skills
+RUN /opt/venv/bin/comfyctl relay corpus build --docs-sha "$COMFY_DOCS_SHA" --skills /skills --out /corpus
+
 FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
 
 # tini as PID 1, so `docker stop` and a pod's SIGTERM reach the server at once
@@ -54,6 +71,13 @@ RUN groupadd -g "$APP_GID" comfy && \
 
 COPY --from=builder /opt/venv /opt/venv
 
+# The corpus is a GPL-3.0 work, shipped with the English markdown it was built
+# from (/opt/corpus/source), the GPL text and a NOTICE (/licenses). The server's
+# code stays MIT; it reads the corpus as a data file.
+COPY --from=corpus /corpus/corpus.sqlite /opt/corpus/corpus.sqlite
+COPY --from=corpus /corpus/source /opt/corpus/source
+COPY --from=corpus /corpus/NOTICE /corpus/GPL-3.0.txt /licenses/
+
 # The ComfyUI this image serves, from the bake pin, stated the way the ComfyUI
 # images state it: the label for `docker inspect`, and COMFYUI_VERSION for the
 # process, whose server_info compares it with what the live ComfyUI reports.
@@ -61,7 +85,8 @@ ARG COMFYUI_VERSION
 RUN test -n "$COMFYUI_VERSION" || { echo "COMFYUI_VERSION is required; build with docker buildx bake" >&2; exit 1; }
 LABEL org.opencontainers.image.source="https://github.com/pixeloven/ComfyUI-Docker" \
       org.opencontainers.image.description="comfyrelay: an MCP sidecar for one ComfyUI instance. Not affiliated with or endorsed by Comfy Org." \
-      org.opencontainers.image.version="$COMFYUI_VERSION"
+      org.opencontainers.image.version="$COMFYUI_VERSION" \
+      org.opencontainers.image.licenses="MIT AND GPL-3.0"
 
 # The env contract, matching the mcp image where the two overlap. The token
 # (COMFYUI_MCP_HTTP_TOKEN) is never set here: without it the server refuses
@@ -82,8 +107,10 @@ USER comfy
 # Prove it at BUILD time, with the defaults above:
 #   - without a token it refuses to start, with exit 2 and the reason;
 #   - with one, `comfyctl relay probe` passes against it: 401 without the
-#     token, then initialize, tools/list and server_info. There is no ComfyUI
-#     here, so --no-comfyui: reaching ComfyUI is the integration test's job.
+#     token, then initialize, tools/list and server_info, and the corpus:
+#     server_info.corpus is built and docs_search finds something. There is no
+#     ComfyUI here, so --no-comfyui: reaching ComfyUI is the integration test's
+#     job.
 RUN set -u; \
     comfyctl --version > /dev/null && comfyctl relay --help > /dev/null || exit 1; \
     log="$(mktemp)"; \

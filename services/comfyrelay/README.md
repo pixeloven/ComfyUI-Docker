@@ -22,7 +22,7 @@ From the source tree, in the uv workspace:
 cd services
 export COMFYUI_MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
 uv run comfyctl relay serve --comfyui-url http://127.0.0.1:8188    # serves http://0.0.0.0:9000/mcp
-uv run comfyctl relay probe                                         # checks it, no agent needed
+uv run comfyctl relay probe --no-corpus                             # checks it, no agent needed
 ```
 
 Or as an image, built locally (`comfyrelay:<IMAGE_LABEL>`, never pushed):
@@ -32,6 +32,15 @@ docker buildx bake comfyrelay --load
 docker run --rm -p 127.0.0.1:9000:9000 --read-only \
   -e COMFYUI_URL=http://<comfyui-host>:8188 -e COMFYUI_MCP_HTTP_TOKEN \
   comfyrelay:latest
+```
+
+From source there's no docs corpus, so `docs_search` and `docs_guide` answer
+`corpus_unavailable` and the probe needs `--no-corpus`. To build one (it fetches the docs with
+`git`), then point the server at it:
+
+```sh
+uv run comfyctl relay corpus build --docs-sha <COMFY_DOCS_SHA> --skills ../skills --out /tmp/corpus
+COMFYUI_MCP_CORPUS=/tmp/corpus/corpus.sqlite uv run comfyctl relay serve
 ```
 
 The image runs as `comfy` (1000:1000), or under any UID: it writes nothing, so a read-only
@@ -56,6 +65,7 @@ environment when comfyrelay moves into that image.
 | `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar. In a container the hostname is the container ID or pod name, which can change when it's recreated, so set this when a gateway federates sidecars. `server_info` reports where the ID came from (`instance_id_source`: `env` or `hostname`), and startup logs a warning when it's the hostname. |
 | `COMFYUI_MCP_MAX_JOBS` | `16` | How many jobs may be in flight at once. A submission past it is refused with `too_many_jobs`. It's retryable, unless every slot is held by a job that didn't stop when cancelled, since those may never free. |
 | `COMFYUI_VERSION` | set by the image | The ComfyUI version the image was built for, from the bake pin |
+| `COMFYUI_MCP_CORPUS` | `/opt/corpus/corpus.sqlite` | The docs corpus `docs_search` and `docs_guide` read. The image builds it there; without one those tools fail with `corpus_unavailable`, and `server_info.corpus` says why. |
 
 `serve` takes the same settings as flags (`--comfyui-url`, `--host`, `--port`, `--profiles`),
 except the token, which it reads only from the environment so it never appears in a process
@@ -70,7 +80,7 @@ as an unknown tool.
 
 | Profile | For | Tools in this version |
 |---|---|---|
-| `read` | Introspection: nodes, models, templates, docs | `server_info`, `node_search`, `node_describe`, `model_list`, `template_search`, `template_get` |
+| `read` | Introspection: nodes, models, templates, docs | `server_info`, `node_search`, `node_describe`, `model_list`, `template_search`, `template_get`, `docs_search`, `docs_guide` |
 | `run` | Validating and running workflows | `server_info`, `job_status`, `job_cancel`, `workflow_validate`, `workflow_run`, `workflow_outputs`, `workflow_upload_input` |
 | `manage` | Changing what's installed, through the manifest and lock (v2) | `server_info` |
 | `develop` | Custom node development, on a sandboxed dev instance only | `server_info` |
@@ -87,8 +97,10 @@ the `job_*` group are the cross-cutting names.
 
 - **`server_info`** identifies the sidecar. It returns the instance ID and where it came from,
   active profiles, capabilities (tools, consent policy, jobs), and ComfyUI's version, both live
-  from `/system_stats` and pinned from the image, with whether they match. It also has a
-  `corpus` entry, empty until the docs corpus lands (#134). It doesn't fail when ComfyUI is
+  from `/system_stats` and pinned from the image, with whether they match. Its `corpus` entry
+  lists the docs built into the image: each source with its version (the docs commit, or this
+  project's version for the guides), license and page count (see *Docs tools*), or
+  `status: "absent"` and the reason. It doesn't fail when ComfyUI is
   down or answers with something unexpected; `comfyui.error` says why.
 - **`job_status`** reads a long-running job by `job_id`, and changes nothing (it's annotated
   read-only). With `timeout_seconds` above 0 it waits up to that long (at most 300) for the job
@@ -160,7 +172,7 @@ recalled from a bundled copy.
 | Tool | Reads | Returns |
 |---|---|---|
 | **`node_search`** | `/object_info` | Node classes matching a query by class name, display name, search alias, category or description. Each hit gives its `class_type`, display name, category, a one-line summary, its custom node `pack` (absent for built-ins), and `api_node` or `deprecated` when set. Exact name matches rank first, then prefixes, then name words, category and description, so `CheckpointLoader` and `CheckpointLoaderSimple` stay apart. Within a tier, partner-API and deprecated nodes come last. A query with no letters or digits fails with `invalid_query`. |
-| **`node_describe`** | `/object_info/<class>` | One class's full spec: each input (required first, in the node's order) with its type, default, min, max, step, tooltip and COMBO values; hidden inputs; outputs in socket order with names and list flags; `output_node` and `api_node`. Dynamic inputs are named as a graph must name them (below). COMBO values and Autogrow names are cut to `max_options` (default 20), with a total. An unknown class fails with `unknown_node_class` and `suggestions`; `.` and `..` are never sent to ComfyUI. |
+| **`node_describe`** | `/object_info/<class>`, and the node's help page | One class's full spec: each input (required first, in the node's order) with its type, default, min, max, step, tooltip and COMBO values; hidden inputs; outputs in socket order with names and list flags; `output_node` and `api_node`. Dynamic inputs are named as a graph must name them (below). COMBO values and Autogrow names are cut to `max_options` (default 20), with a total. An unknown class fails with `unknown_node_class` and `suggestions`; `.` and `..` are never sent to ComfyUI. `help` is the node's help page, the English markdown the editor shows, fetched live where the editor fetches it (frontend 1.52): `/docs/<class>/en.md` for ComfyUI's own nodes, which ComfyUI serves from its pinned `comfyui-embedded-docs`, and a custom node pack's own `/extensions/<pack>/docs/<class>/en.md`, then `<class>.md`. It's absent when ComfyUI answers 404 or with an HTML page. |
 | **`model_list`** | `/models`, `/models/<folder>` | Files on disk per folder type, or for one `folder`: at most `max_files` per folder (default 50) and 400 in all, with the full `count` and `truncated`. `custom_nodes` and `download_model_base` (an `extra_model_paths.yaml` key that ComfyUI lists as a folder type, naming the whole models root) are left out. An unknown folder fails with `unknown_model_folder` and the known ones. Nothing is downloaded. |
 | **`template_search`** | `/templates/index.json`, then each hit's `/templates/<name>.json` | Workflow templates for a goal, ranked by how many query words match, weighted by field (title and name, then tags and model families, then description and category) and by how rare the word is across the index. Partner-API templates are left out unless `include_partner_api` is set: those the index marks `openSource: false`, and any hit whose own check finds a partner-API node. `hidden_partner_api` counts both. Each hit carries a runnability check. |
 | **`template_get`** | the same, for one template | Its metadata, the runnability check, and the workflow in the frontend's UI format (`include_workflow: false` leaves it out). A workflow over 80,000 characters as JSON fails with `workflow_too_large` (`size`, `limit`); `include_workflow: false` still answers. An unknown name fails with `unknown_template` and `suggestions`. |
@@ -441,6 +453,55 @@ per token*), so this adds no reader who couldn't already follow the relay's own 
 comes back is mapped: the graph and its `extra_data` aren't returned. A deployment that must
 keep other clients' runs from the relay's agents entirely should give the relay its own
 ComfyUI.
+
+## Docs tools
+
+The `read` profile's `docs_search` and `docs_guide` (#134), in `comfyrelay/tools_docs.py`, read
+a corpus built into the image. They reach nothing at runtime, not even ComfyUI, and they don't
+merge results with the live node and template tools.
+
+- **`docs_search`** searches two sources section by section (SQLite FTS5, stemmed), best first:
+  - **docs.comfy.org**: every English page that the `navigation` in Comfy-Org/docs'
+    `docs.json` lists, at the `COMFY_DOCS_SHA` bake pin. That's the workflow JSON spec, the
+    server's routes and websocket messages, custom node development, tutorials, the
+    interface, troubleshooting and the built-in node pages. The site describes the latest
+    ComfyUI, not the pinned one, so every result from it carries a `note` saying so.
+  - **guides**: this project's own, the published skill
+    [`skills/comfyui-workflows/`](../../skills/comfyui-workflows/SKILL.md).
+
+  Every result gives its `source`, `version`, `path`, `license` and upstream `url`, the page
+  `title`, the `section` (its heading trail) and the section's text, cut to 1,500 characters
+  around the query's words when it's longer. Common question words are dropped from the
+  query. Every remaining word must match; when no section has them all, sections with any of
+  them are returned, and `match` says `any`.
+- **`docs_guide`** lists the guide topics with a summary each, or returns one topic's markdown.
+  The topics are the files the skill's `SKILL.md` links to, including the separate
+  `comfy-manifest` skill. An unknown topic fails with `unknown_topic` and the list.
+
+**The corpus** is built by `comfyctl relay corpus build` in the image's `corpus` stage
+(`comfyrelay/corpus.py`). It fetches Comfy-Org/docs with a shallow, sparse `git` fetch: only
+`docs.json`, the snippets and the pages it lists, with no history and no media. It converts
+each page from MDX to markdown: front matter goes (the title and description are kept),
+along with `import` lines, JSX and HTML tags, images and videos, and fenced code stays. A
+component imported from `/snippets/` is replaced by that snippet's text. The navigation's
+OpenAPI operation entries (`GET /nodes`, generated from a spec) aren't files, so they're
+skipped and counted. The guides come into the build as the `skills` named context.
+
+At the pin that is 1,644 pages in 8,407 sections, plus 5 guides: a 16 MB index. The build
+step, fetch included, took about 6 seconds here. The image grows by about 31 MB: the index,
+and 14 MB of markdown shipped beside it.
+
+**Licensing.** Comfy-Org/docs is GPL-3.0, so the index is a GPL-3.0 work, and the image
+ships what that needs: the English markdown it indexed and the snippets it used
+(`/opt/corpus/source/`), the GPL-3.0 text (`/licenses/GPL-3.0.txt`), and `/licenses/NOTICE`.
+The NOTICE names the docs repo and commit and the license, dates the modification, gives the
+build script's path at the release tag, and says "© Comfy Org. Not affiliated with or
+endorsed by Comfy Org." The relay's code stays MIT: it reads the corpus as a data file, an
+aggregate. The image is labelled `org.opencontainers.image.licenses="MIT AND GPL-3.0"`. The
+guides are our own words under MIT; they link to docs.comfy.org and copy none of it.
+
+**Bumping the docs** is a PR that changes `COMFY_DOCS_SHA` (a supply-chain pin). The build
+probe fails the image if the corpus is missing or `docs_search` finds nothing.
 
 ## Consent
 

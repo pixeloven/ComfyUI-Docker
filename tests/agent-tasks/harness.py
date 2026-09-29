@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -539,6 +540,91 @@ def check_t3() -> str:
     return detail
 
 
+T6_DIR = HERE / "tasks" / "T6"
+# The comfyrelay image's own index, copied out by derive-t6. The check reads
+# the cited pages from it, so it scores against what the agent could search.
+T6_CORPUS = RESULTS / "T6-corpus.sqlite"
+
+
+def t6_pages(db: sqlite3.Connection, path: str) -> str | None:
+    """Every indexed section of one page (or guide), joined; None when the index has no such path."""
+    rows = db.execute("SELECT body FROM docs WHERE path = ? ORDER BY rowid", (path,)).fetchall()
+    return "\n".join(r[0] for r in rows) if rows else None
+
+
+def t6_norm(value: object, case_sensitive: bool) -> str:
+    """An answer as compared: no backticks, quotes or surrounding punctuation, one space between words."""
+    text = " ".join(str(value).replace("`", "").strip().strip("\"'.").split())
+    return text if case_sensitive else text.lower()
+
+
+def cmd_derive_t6(image: str = "") -> None:
+    """Copy the index out of the relay image and derive answers.json from it:
+    each answer is what the question's pattern captures in its page."""
+    image = image or os.environ.get("COMFYRELAY_IMAGE", "comfyrelay:latest")
+    cid = subprocess.check_output(["docker", "create", image]).decode().strip()
+    try:
+        subprocess.check_call(["docker", "cp", f"{cid}:/opt/corpus/corpus.sqlite", str(T6_CORPUS)])
+    finally:
+        subprocess.run(["docker", "rm", cid], capture_output=True, check=False)
+    image_id = json.loads(subprocess.check_output(["docker", "image", "inspect", image]))[0]["Id"]
+    db = sqlite3.connect(T6_CORPUS)
+    meta = {k: json.loads(v) for k, v in db.execute("SELECT key, value FROM meta")}
+    answers = {}
+    for q in json.loads((T6_DIR / "questions.json").read_text()):
+        text = t6_pages(db, q["path"])
+        if text is None:
+            sys.exit(f"{q['id']}: the index has no {q['path']}")
+        m = re.search(q["pattern"], text)
+        if not m:
+            sys.exit(f"{q['id']}: {q['pattern']!r} matches nothing in {q['path']}")
+        answers[q["id"]] = {"answer": m.group(1), "path": q["path"]}
+    out = {
+        "derived_from": {
+            "image_id": image_id,
+            "sources": {s["name"]: s["version"] for s in meta["sources"]},
+        },
+        "answers": answers,
+    }
+    (T6_DIR / "answers.json").write_text(json.dumps(out, indent=2) + "\n")
+    print(json.dumps(answers))
+
+
+def check_t6() -> str:
+    questions = {q["id"]: q for q in json.loads((T6_DIR / "questions.json").read_text())}
+    want = json.loads((T6_DIR / "answers.json").read_text())["answers"]
+    if not T6_CORPUS.exists():
+        raise CheckFailed(f"{T6_CORPUS} missing; run tasks/T6/derive.sh")
+    p = WORKSPACE / "results" / "T6.json"
+    if not p.exists():
+        raise CheckFailed(f"{p} not written")
+    try:
+        got = json.loads(p.read_text())
+    except ValueError as e:
+        raise CheckFailed(f"T6.json is not JSON: {e}") from e
+    got = got.get("answers", got) if isinstance(got, dict) else {}
+    db = sqlite3.connect(f"file:{T6_CORPUS}?mode=ro", uri=True)
+    wrong = []
+    for qid, expected in want.items():
+        case = bool(questions[qid].get("case_sensitive"))
+        entry = got.get(qid) if isinstance(got.get(qid), dict) else {}
+        answer, path = entry.get("answer"), entry.get("path")
+        target = t6_norm(expected["answer"], case).lstrip("/")  # a route is right with or without its slash
+        if answer is None or not re.search(rf"(?<!\w){re.escape(target)}(?!\w)", t6_norm(answer, case)):
+            wrong.append(f"{qid} (want {expected['answer']!r}, got {answer!r})")
+            continue
+        page = t6_pages(db, str(path)) if path else None
+        if page is None:
+            wrong.append(f"{qid} (cites {path!r}, which is not in the index)")
+        elif target not in t6_norm(page, case):
+            wrong.append(f"{qid} (cites {path!r}, which does not contain {expected['answer']!r})")
+    score = len(want) - len(wrong)
+    detail = f"{score}/{len(want)}" + (f"; wrong: {', '.join(wrong)}" if wrong else "")
+    if wrong:
+        raise CheckFailed(detail)
+    return detail
+
+
 T4_WORKFLOW = {
     # LoadImage's second output (index 1) is a MASK; SaveImage wants an IMAGE.
     "1": {"class_type": "LoadImage", "inputs": {"image": INPUT_IMAGE}},
@@ -620,6 +706,7 @@ CHECKS = {
     "t2-refuse": check_t2_refuse,
     "t3": check_t3,
     "t4": check_t4,
+    "t6": check_t6,
 }
 
 
@@ -637,6 +724,7 @@ COMMANDS = {
     "ensure-input": lambda: print(ensure_input()),
     "submit": cmd_submit,
     "derive-t3": cmd_derive_t3,
+    "derive-t6": cmd_derive_t6,
     "setup-t2-refuse": cmd_setup_t2_refuse,
     "setup-t4": cmd_setup_t4,
     "check": cmd_check,

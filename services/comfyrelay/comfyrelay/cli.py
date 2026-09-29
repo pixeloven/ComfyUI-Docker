@@ -2,6 +2,7 @@
 
     comfyctl relay serve                     start the server (reads its env; see below)
     comfyctl relay probe [URL]               check a running server, with no agent
+    comfyctl relay corpus build              build the docs corpus (the image does, at build time)
 
 serve reads COMFYUI_MCP_HTTP_TOKEN (required: without it the server refuses to
 start), COMFYUI_URL, MCP_HOST, MCP_PORT and COMFYUI_MCP_PROFILES. probe sends
@@ -10,8 +11,10 @@ the same COMFYUI_MCP_HTTP_TOKEN.
 EXIT CODES, as every comfyctl group:
 
     0  did what was asked (probe: every check passed)
-    1  a real failure (probe: a check failed; it says which)
-    2  the request itself was wrong: no token, an unknown profile
+    1  a real failure (probe: a check failed; it says which; corpus build: a
+       fetch or build step failed)
+    2  the request itself was wrong: no token, an unknown profile, a docs pin
+       that is not a full commit SHA
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -120,9 +124,14 @@ def probe(
         bool,
         typer.Option("--no-comfyui", help="Pass even if the server cannot reach ComfyUI (a build-time check)."),
     ] = False,
+    no_corpus: Annotated[
+        bool,
+        typer.Option("--no-corpus", help="Pass even if the server has no docs corpus (a server run from source)."),
+    ] = False,
     output: OutputOpt = Mode.auto,
 ) -> None:
-    """Check a running comfyrelay: 401 without the token, then initialize, tools/list and server_info with it."""
+    """Check a running comfyrelay: 401 without the token, then initialize, tools/list and server_info with it,
+    and that its docs corpus is built and docs_search finds something."""
     token = os.environ.get(TOKEN_ENV, "").strip()
     if not token:
         typer.echo(f"{TOKEN_ENV} is not set: the probe needs the server's token", err=True)
@@ -134,7 +143,9 @@ def probe(
         raise typer.Exit(2) from None
     from .probe import probe as run_probe
 
-    report = asyncio.run(run_probe(url, token, timeout=timeout, require_comfyui=not no_comfyui))
+    report = asyncio.run(
+        run_probe(url, token, timeout=timeout, require_comfyui=not no_comfyui, require_corpus=not no_corpus)
+    )
     if output is Mode.json:
         json.dump(report.as_dict(), sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
@@ -143,3 +154,52 @@ def probe(
             typer.echo(f"{'ok  ' if check.ok else 'FAIL'}  {check.name:<11} {check.detail}")
         typer.echo(f"probe: {'PASS' if report.ok else 'FAIL'} {report.url}")
     raise typer.Exit(0 if report.ok else 1)
+
+
+corpus_app = typer.Typer(
+    name="corpus",
+    help="The docs corpus that docs_search and docs_guide read. The image builds it at build time.",
+    no_args_is_help=True,
+    pretty_exceptions_show_locals=False,
+)
+app.add_typer(corpus_app)
+
+
+@corpus_app.command("build")
+def corpus_build(
+    docs_sha: Annotated[
+        str, typer.Option("--docs-sha", envvar="COMFY_DOCS_SHA", help="The Comfy-Org/docs commit to index (40 hex).")
+    ],
+    skills: Annotated[Path, typer.Option(help="The repository's skills/ directory: the guides are read from it.")],
+    out: Annotated[Path, typer.Option(help="Where to write corpus.sqlite, source/, NOTICE and GPL-3.0.txt.")],
+    docs_repo: Annotated[str, typer.Option(help="The docs repository to fetch.")] = "https://github.com/Comfy-Org/docs",
+    output: OutputOpt = Mode.auto,
+) -> None:
+    """Fetch the docs at --docs-sha (shallow and sparse, with git) and build the corpus in --out."""
+    import tempfile
+
+    from .corpus import COMMIT_SHA, CorpusError, build, fetch_docs
+
+    if not COMMIT_SHA.fullmatch(docs_sha):
+        typer.echo(f"--docs-sha must be a full 40-character commit SHA, not {docs_sha!r}", err=True)
+        raise typer.Exit(2)
+    if not (skills / "comfyui-workflows" / "SKILL.md").is_file():
+        typer.echo(f"{skills} has no comfyui-workflows/SKILL.md", err=True)
+        raise typer.Exit(2)
+    try:
+        with tempfile.TemporaryDirectory(prefix="comfy-docs-") as tmp:
+            fetch_docs(docs_repo, docs_sha, Path(tmp))
+            summary = build(docs=Path(tmp), sha=docs_sha, skills=skills, out=out)
+    except CorpusError as exc:
+        typer.echo(f"corpus build failed: {exc}", err=True)
+        raise typer.Exit(1) from None
+    if output is Mode.json:
+        json.dump(summary, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return
+    for source in summary["sources"]:
+        typer.echo(
+            f"{source['name']:<15} {source['version'][:12]:<12} {source['license']:<8} "
+            f"{source['pages']} pages, {source['sections']} sections"
+        )
+    typer.echo(f"corpus: {out / 'corpus.sqlite'}, {summary['bytes']} bytes, built in {summary['seconds']}s")

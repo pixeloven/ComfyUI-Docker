@@ -86,7 +86,7 @@ def test_relay_is_comfyrelays_app_when_installed():
     from comfyrelay.cli import app as relay_app
 
     relay = typer.main.get_command(app).commands["relay"]
-    assert set(relay.commands) == set(typer.main.get_command(relay_app).commands) == {"serve", "probe"}
+    assert set(relay.commands) == set(typer.main.get_command(relay_app).commands) == {"serve", "probe", "corpus"}
 
 
 def _hide_comfyrelay_distribution(monkeypatch):

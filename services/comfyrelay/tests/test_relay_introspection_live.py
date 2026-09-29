@@ -118,6 +118,12 @@ async def test_a_graph_built_from_node_describe_passes_prompt_validation(class_t
     assert entry["status"]["status_str"] == "success", entry["status"]
 
 
+async def test_node_describe_finds_the_help_page_where_comfyui_serves_it():
+    got = await call("node_describe", {"class_type": "KSampler"})
+    assert got["help_path"] == "/docs/KSampler/en.md"
+    assert got["help"].strip()
+
+
 async def test_a_template_input_is_reported_exactly_while_the_input_directory_lacks_it():
     found = await call("template_search", {"query": "color adjustment", "limit": 1})
     (hit,) = found["results"]

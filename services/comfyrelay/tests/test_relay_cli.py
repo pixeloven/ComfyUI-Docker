@@ -64,9 +64,13 @@ def test_probe_passes_against_a_running_server(live_server, monkeypatch):
         "initialize",
         "tools",
         "server_info",
+        "corpus",
         "comfyui",
     ]
+    assert report["docs_hits"] == 1
     assert report["tools"] == [
+        "docs_guide",
+        "docs_search",
         "job_cancel",
         "job_status",
         "model_list",
@@ -102,6 +106,17 @@ def test_probe_fails_with_exit_1_and_says_which_check(live_server, monkeypatch, 
     assert report["ok"] is False
     assert report["checks"][-1]["name"] == failed
     assert report["checks"][-1]["ok"] is False
+
+
+def test_probe_fails_without_a_corpus_unless_told_not_to_need_one(live_server_without_corpus, monkeypatch):
+    monkeypatch.setenv("COMFYUI_MCP_HTTP_TOKEN", TOKEN)
+    r = runner.invoke(app, ["relay", "probe", live_server_without_corpus, "-o", "json"])
+    assert r.exit_code == 1
+    failed = [c for c in json.loads(r.stdout)["checks"] if not c["ok"]]
+    assert [c["name"] for c in failed] == ["corpus"]
+    assert "no corpus at" in failed[0]["detail"]
+    r = runner.invoke(app, ["relay", "probe", live_server_without_corpus, "--no-corpus"])
+    assert r.exit_code == 0, r.stdout
 
 
 def test_probe_fails_when_nothing_listens(monkeypatch):

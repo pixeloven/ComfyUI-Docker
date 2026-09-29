@@ -20,12 +20,14 @@
 #   3. Start the relay as UID 12345, GID 0, with a read-only root filesystem
 #      and no-new-privileges, pointed at that ComfyUI.
 #   4. From inside the relay container, `comfyctl relay probe -o json` passes:
-#      401 without the token, initialize, tools/list, server_info, and ComfyUI
+#      401 without the token, initialize, tools/list, server_info, the docs
+#      corpus (built, and docs_search finds something), and ComfyUI
 #      reachable. The live and pinned ComfyUI versions are reported; a
 #      mismatch (a pin bump against an older ComfyUI image) is not a failure.
 #      The tools listed are exactly the default profiles' (read,run):
-#      job_cancel, job_status, model_list, node_describe, node_search,
-#      server_info, template_get, template_search and the four workflow_* tools.
+#      docs_guide, docs_search, job_cancel, job_status, model_list,
+#      node_describe, node_search, server_info, template_get, template_search
+#      and the four workflow_* tools.
 #   5. `docker stop` ends it within 2 seconds: tini passes SIGTERM on.
 #   6. On any failure, print both containers' logs and exit 1.
 #
@@ -150,7 +152,7 @@ pinned="$(docker exec -i "$comfy" jq -r '.server_info.comfyui.pinned_version' < 
 matches="$(docker exec -i "$comfy" jq -r '.server_info.comfyui.matches_pin' < "$out/probe.json")"
 echo "relay: probe passed; ComfyUI live $live, image pinned $pinned, matches: $matches"
 tools="$(docker exec -i "$comfy" jq -r '.tools | join(",")' < "$out/probe.json")"
-want_tools="job_cancel,job_status,model_list,node_describe,node_search,server_info,template_get,template_search,workflow_outputs,workflow_run,workflow_upload_input,workflow_validate"
+want_tools="docs_guide,docs_search,job_cancel,job_status,model_list,node_describe,node_search,server_info,template_get,template_search,workflow_outputs,workflow_run,workflow_upload_input,workflow_validate"
 [ "$tools" = "$want_tools" ] || fail "the default profiles list tools $tools, not $want_tools"
 echo "relay: tools $tools"
 

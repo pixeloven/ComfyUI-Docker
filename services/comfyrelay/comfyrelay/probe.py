@@ -9,6 +9,8 @@ after deploying. It connects the way an MCP client does and checks, in order:
     initialize  the MCP handshake succeeds
     tools       tools/list includes server_info
     server_info the call succeeds and returns the identity fields
+    corpus      server_info says the docs corpus is built, and docs_search finds
+                something (skipped with --no-corpus)
     comfyui     server_info says ComfyUI is reachable (skipped with --no-comfyui)
 
 Each failed check names what it saw. Later checks do not run once one that
@@ -54,6 +56,7 @@ class Report:
     server: dict[str, Any] | None = None
     tools: list[str] = field(default_factory=list)
     server_info: dict[str, Any] | None = None
+    docs_hits: int | None = None  # what docs_search found, when the probe called it
 
     @property
     def ok(self) -> bool:
@@ -71,6 +74,7 @@ class Report:
             "server": self.server,
             "tools": self.tools,
             "server_info": self.server_info,
+            "docs_hits": self.docs_hits,
         }
 
 
@@ -81,8 +85,11 @@ def _leaf(exc: BaseException) -> BaseException:
     return exc
 
 
-async def _session(report: Report, http: httpx2.AsyncClient, url: str, timeout: float) -> dict[str, Any] | None:
-    """initialize, tools/list, server_info. Returns server_info's result, or None after a failed check."""
+async def _session(
+    report: Report, http: httpx2.AsyncClient, url: str, timeout: float, corpus: bool
+) -> dict[str, Any] | None:
+    """initialize, tools/list, server_info, and docs_search when `corpus`. Returns server_info's result, or None
+    after a failed check."""
     async with Client(
         streamable_http_client(url, http_client=http),
         mode="legacy",
@@ -115,10 +122,16 @@ async def _session(report: Report, http: httpx2.AsyncClient, url: str, timeout: 
         report.server_info = data
         active = ",".join(data.get("profiles", {}).get("active", []))
         report.add("server_info", True, f"instance {data.get('instance_id')}, profiles {active}")
+        if corpus and "docs_search" in report.tools and (data.get("corpus") or {}).get("status") == "built":
+            found = await client.call_tool("docs_search", {"query": "ComfyUI", "limit": 1})
+            hits = found.structured_content if not found.is_error else None
+            report.docs_hits = len(hits.get("results", [])) if isinstance(hits, dict) else 0
         return data
 
 
-async def probe(url: str, token: str, *, timeout: float = 30.0, require_comfyui: bool = True) -> Report:
+async def probe(
+    url: str, token: str, *, timeout: float = 30.0, require_comfyui: bool = True, require_corpus: bool = True
+) -> Report:
     shown = redact_url(url)  # what is rendered; `url` is what is requested
     report = Report(url=shown)
 
@@ -149,13 +162,28 @@ async def probe(url: str, token: str, *, timeout: float = 30.0, require_comfyui:
         ):
             return report
         try:
-            data = await _session(report, http, url, timeout)
+            data = await _session(report, http, url, timeout, require_corpus)
         except Exception as exc:  # anything the client raises is a failed handshake or call
             leaf = _leaf(exc)
             report.add("initialize" if report.server is None else "call", False, f"{type(leaf).__name__}: {leaf}")
             return report
     if data is None:
         return report
+
+    corpus = data.get("corpus") or {}
+    if not require_corpus:
+        report.add("corpus", True, f"not required (--no-corpus); status {corpus.get('status')}")
+    elif corpus.get("status") != "built":
+        report.add("corpus", False, f"server_info.corpus is {corpus.get('status')!r}: {corpus.get('reason')}")
+    elif "docs_search" not in report.tools:
+        report.add("corpus", True, f"{corpus.get('pages')} pages built; docs_search is not in the active profiles")
+    else:
+        versions = ", ".join(f"{s.get('name')} {str(s.get('version'))[:12]}" for s in corpus.get("sources", []))
+        report.add(
+            "corpus",
+            bool(report.docs_hits),
+            f"{corpus.get('pages')} pages ({versions}); docs_search found {report.docs_hits or 'nothing'}",
+        )
 
     comfy = data.get("comfyui") or {}
     if comfy.get("reachable"):

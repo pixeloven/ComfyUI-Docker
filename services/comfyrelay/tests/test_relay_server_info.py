@@ -1,5 +1,5 @@
 """server_info: identity, profiles, capabilities, the pinned and live ComfyUI
-versions, and the corpus placeholder."""
+versions. The corpus entry is covered in test_relay_docs.py."""
 
 from __future__ import annotations
 
@@ -49,6 +49,8 @@ async def test_identity_and_profiles():
 async def test_capabilities():
     got = await info()
     assert got["capabilities"]["tools"] == [
+        "docs_guide",
+        "docs_search",
         "job_cancel",
         "job_status",
         "model_list",
@@ -97,10 +99,6 @@ async def test_unreachable_comfyui_is_reported_not_raised():
     assert got["comfyui"]["matches_pin"] is None
     assert got["comfyui"]["error"]["code"] == "comfyui_unreachable"
     assert got["comfyui"]["error"]["retryable"] is True
-
-
-async def test_corpus_is_a_placeholder_until_it_is_built():
-    assert (await info())["corpus"] == {"status": "absent", "sources": []}
 
 
 def test_instance_id_and_pin_come_from_the_environment(monkeypatch):

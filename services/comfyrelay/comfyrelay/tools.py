@@ -32,8 +32,10 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .comfyui import ComfyUIClient, ComfyUIError
 from .consent import ConsentGate
+from .corpus import Corpus
 from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
+from .tools_docs import DOCS_TOOLS
 from .tools_introspection import INTROSPECTION_TOOLS
 from .tools_workflow import WORKFLOW_TOOLS, reattach_refuse_cancel, reattach_status
 
@@ -52,6 +54,9 @@ class Relay:
     jobs: JobStore = field(default_factory=JobStore)
     consent: ConsentGate = field(default_factory=ConsentGate)
     tools: list[str] = field(default_factory=list)
+    # The docs corpus built into the image (#134), or None with why.
+    corpus: Corpus | None = None
+    corpus_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +110,7 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
 
         Call it first. It reports the live ComfyUI version next to the version this server was built for, and
         whether ComfyUI is reachable right now. It never fails because ComfyUI is down; `comfyui.error` says why.
+        `corpus` lists the documentation built in for docs_search and docs_guide: each source's version and license.
         """
         s = relay.settings
         live, error = None, None
@@ -143,8 +149,9 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
                 matches_pin=_same_version(live, s.comfyui_pin),
                 error=error,
             ),
-            # Filled by the docs corpus (#134): each source with its license.
-            corpus={"status": "absent", "sources": []},
+            corpus=relay.corpus.info()
+            if relay.corpus
+            else {"status": "absent", "sources": [], "reason": relay.corpus_error or "no corpus"},
         )
 
     return server_info
@@ -239,10 +246,10 @@ TOOLS: tuple[ToolSpec, ...] = (
         ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False),
     ),
 )
-# The read profile's introspection tools (#133) and the run profile's workflow
-# tools (#132) live in their own modules, each as (name, profiles, make,
-# annotations) entries.
-TOOLS += tuple(ToolSpec(*spec) for spec in (*INTROSPECTION_TOOLS, *WORKFLOW_TOOLS))
+# The read profile's introspection tools (#133) and docs tools (#134), and the
+# run profile's workflow tools (#132), live in their own modules, each as
+# (name, profiles, make, annotations) entries.
+TOOLS += tuple(ToolSpec(*spec) for spec in (*INTROSPECTION_TOOLS, *DOCS_TOOLS, *WORKFLOW_TOOLS))
 
 
 def profiles_without_tools(active: tuple[str, ...], specs: tuple[ToolSpec, ...] = TOOLS) -> list[str]:

@@ -5,8 +5,10 @@ collects both."""
 from __future__ import annotations
 
 import asyncio
+import json
 import socket
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import httpx2
@@ -47,6 +49,7 @@ def settings(**overrides) -> Settings:
         profiles=("read", "run"),
         instance_id="test-instance",
         comfyui_pin="v0.37.0",
+        corpus_path="/nonexistent/corpus.sqlite",
     )
     return Settings(**{**base, **overrides})
 
@@ -119,3 +122,103 @@ WORKFLOW_OBJECT_INFO = {
         input={"required": {}, "hidden": CREDENTIAL_INPUTS},
     ),
 }
+
+
+DOCS_SHA = "0123456789abcdef0123456789abcdef01234567"
+# A docs checkout in Comfy-Org/docs' shape: docs.json's English navigation (groups within tabs, an OpenAPI
+# operation, a file name with a space), a page that imports a snippet that imports another, a page the
+# navigation doesn't list, and a translation.
+DOCS_FILES = {
+    "docs.json": json.dumps(
+        {
+            "navigation": {
+                "languages": [
+                    {
+                        "language": "en",
+                        "tabs": [
+                            {
+                                "tab": "Development",
+                                "pages": [
+                                    {"group": "Server", "pages": ["development/server/messages", "GET /nodes"]},
+                                    "built-in-nodes/Video Slice",
+                                ],
+                            }
+                        ],
+                    },
+                    {"language": "zh", "tabs": [{"tab": "Dev", "pages": ["zh/development/server/messages"]}]},
+                ]
+            }
+        }
+    ),
+    "LICENSE": "GNU GENERAL PUBLIC LICENSE\nVersion 3, 29 June 2007\n",
+    "development/server/messages.mdx": """---
+title: "Server Messages"
+description: "What the server sends over the websocket."
+---
+import Reminder from "/snippets/reminder.mdx";
+
+<Reminder />
+
+## Built in message types
+
+The server sends `executing` when a node starts, over the websocket.
+
+<Tip>
+  A message with `node` set to null means the prompt finished.
+</Tip>
+""",
+    "built-in-nodes/Video Slice.mdx": "---\ntitle: Video Slice\n---\nCuts a clip out of a video.\n",
+    "unlisted.mdx": "---\ntitle: Unlisted\n---\nNot in the navigation: quasar.\n",
+    "zh/development/server/messages.mdx": "---\ntitle: Messages (zh)\n---\nTranslated: quasar.\n",
+    "snippets/reminder.mdx": 'import Inner from "/snippets/inner.mdx";\n\n<Note>Keep ComfyUI updated.</Note>\n'
+    "<Inner/>\n",
+    "snippets/inner.mdx": "Nested snippet text.\n",
+    "snippets/unused.mdx": "Never imported.\n",
+}
+SKILL_FILES = {
+    "comfyui-workflows/SKILL.md": """---
+name: comfyui-workflows
+description: Guides.
+---
+
+# Working with ComfyUI workflows
+
+- [workflow-formats](references/workflow-formats.md): UI vs API.
+- [comfy-manifest](../comfy-manifest/SKILL.md): the manifest.
+""",
+    "comfyui-workflows/references/workflow-formats.md": """# Workflow formats
+
+The editor saves the UI format; /prompt takes the API format.
+
+## The relay
+
+template_get returns the UI format, which workflow_run refuses.
+""",
+    "comfy-manifest/SKILL.md": """---
+name: comfy-manifest
+description: Author comfy.yaml and generate locks.
+---
+
+# Authoring comfy.yaml
+
+Profiles compose by set union.
+""",
+}
+
+
+def write_tree(root: Path, files: dict[str, str]) -> Path:
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    return root
+
+
+def make_corpus(root: Path) -> Path:
+    """Build a corpus from DOCS_FILES and SKILL_FILES under `root`, as `comfyctl relay corpus build` does once
+    its fetch is done. Returns the corpus.sqlite path; the rest of the build is beside it."""
+    from comfyrelay.corpus import build
+
+    docs = write_tree(root / "docs", DOCS_FILES)
+    skills = write_tree(root / "skills", SKILL_FILES)
+    build(docs=docs, sha=DOCS_SHA, skills=skills, out=root / "out", version="9.9.9")
+    return root / "out" / "corpus.sqlite"

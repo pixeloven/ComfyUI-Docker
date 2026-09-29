@@ -4,7 +4,9 @@ Every answer comes from the live ComfyUI this relay serves, through
 `ComfyUIClient`, so it matches what that instance will actually accept:
 
     node_search      /object_info, ranked for a query
-    node_describe    /object_info/<class>, rendered as a full input/output spec
+    node_describe    /object_info/<class>, rendered as a full input/output spec,
+                     with the node's help page (/docs/<class>/en.md, or the
+                     pack's own under /extensions/<pack>/docs/) when it has one
     model_list       /models and /models/<folder>
     template_search  /templates/index.json, plus a runnability check per hit
     template_get     /templates/<name>.json, plus the same check
@@ -35,6 +37,7 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import quote
 
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field, model_serializer
@@ -304,9 +307,37 @@ class NodeSpec(_Compact):
     inputs: list[InputSpec] = Field(description="Required inputs first, then optional ones, in the node's order")
     hidden_inputs: list[str] | None = Field(default=None, description="Filled in by ComfyUI, never by a workflow")
     outputs: list[OutputSpec]
+    help: str | None = Field(
+        default=None,
+        description="The node's help page (English markdown), as ComfyUI serves it to the editor; absent when it "
+        "has none",
+    )
+    help_path: str | None = Field(default=None, description="Where on ComfyUI the help page came from")
 
 
 AutogrowSpec.model_rebuild()
+
+
+def _help_paths(class_type: str, info: dict[str, Any]) -> list[str]:
+    """Where ComfyUI serves a node's English help, in the order the editor tries them (ComfyUI frontend 1.52,
+    NodeHelpService): a custom node's pack serves its own under /extensions/<pack>/docs/, per locale and then
+    locale-free; ComfyUI's own nodes' come from comfyui-embedded-docs at /docs/<class>/<locale>.md."""
+    name = quote(class_type, safe="")
+    module = str(info.get("python_module") or "").split(".")
+    if module[0] == "custom_nodes":
+        if len(module) < 2 or not module[1]:
+            return []
+        pack = quote(module[1].split("@")[0], safe="")
+        return [f"/extensions/{pack}/docs/{name}/en.md", f"/extensions/{pack}/docs/{name}.md"]
+    return [f"/docs/{name}/en.md"]
+
+
+async def _help(comfyui: ComfyUIClient, class_type: str, info: dict[str, Any]) -> tuple[str | None, str | None]:
+    for path in _help_paths(class_type, info):
+        text = await comfyui.markdown(path)
+        if text is not None:
+            return text, path
+    return None, None
 
 
 def _number(value: Any) -> int | float | None:
@@ -481,13 +512,16 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
         each input's `name` as the key in a graph: inputs added by a dynamic input are fully qualified with dots
         (a COMFY_DYNAMICCOMBO_V3 `resize_type` set to an option adds `resize_type.width`; a COMFY_AUTOGROW_V3
         `images` takes `images.image0`, `images.image1`, ...). Long lists are cut to max_options, with a total.
+        `help` is the node's help page, the markdown the editor shows for it, when ComfyUI has one.
         An unknown class fails with `unknown_node_class` and a `suggestions` list of close class names.
         """
         found = {} if class_type in DOT_SEGMENTS else await relay.comfyui.object_info(class_type)
         if class_type in found:
             if not isinstance(found[class_type], dict):
                 raise _bad(f"an /object_info/{class_type} that is not an object")
-            return _spec(class_type, found[class_type], max_options)
+            spec = _spec(class_type, found[class_type], max_options)
+            spec.help, spec.help_path = await _help(relay.comfyui, class_type, found[class_type])
+            return spec
         if found:
             raise _bad(f"an /object_info/{class_type} that describes other classes")
         every = _checked_object_info(await relay.comfyui.object_info())
