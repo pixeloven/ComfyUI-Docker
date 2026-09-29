@@ -418,9 +418,9 @@ async def call(mcp, tool: str, args: dict) -> dict:
 
 
 async def test_a_restarted_relay_reattaches_to_its_run(tmp_path):
-    """#146 on ComfyUI itself: start a run through `comfyctl relay serve`, SIGTERM that relay, start a new one with
-    the same instance id, and follow the same job_id there: running, then finished with its files. Across the
-    restart, job_cancel stops the relay's own queued run and refuses another client's."""
+    """#146 on ComfyUI itself: start a run through `comfyctl relay serve`, SIGTERM that relay, start a new one, and
+    follow the same job_id there: running, then finished with its files, fetched. Re-attaching is read-only: the new
+    relay refuses to cancel the run it does not hold, and the one queued behind it (owner decision on #150)."""
     import contextlib
     import signal
 
@@ -439,7 +439,6 @@ async def test_a_restarted_relay_reattaches_to_its_run(tmp_path):
             async with Client(streamable_http_client(url, http_client=http), mode="legacy") as mcp:
                 yield mcp
 
-    instance = f"reattach-{random.randrange(1 << 32):08x}"
     graph = slow_graph(nodes=30)  # about 15s on a CPU
     graph["9"] = {
         "class_type": "SaveImage",
@@ -448,7 +447,7 @@ async def test_a_restarted_relay_reattaches_to_its_run(tmp_path):
     relays, prompts = [], []
     try:
         port = free_port()
-        relays.append(serve_relay(port, instance, (tmp_path / "first.log").open("wb")))
+        relays.append(serve_relay(port, "reattach-first", (tmp_path / "first.log").open("wb")))
         async with session(port) as mcp:
             run = await call(mcp, "workflow_run", {"workflow": graph})
             spare = await call(mcp, "workflow_run", {"workflow": slow_graph()})  # queued behind it
@@ -464,35 +463,41 @@ async def test_a_restarted_relay_reattaches_to_its_run(tmp_path):
         log = (tmp_path / "first.log").read_text(errors="replace")
         assert f"prompt {run['prompt_id']} is left running on ComfyUI" in log, log[-2000:]
 
-        async with httpx2.AsyncClient(base_url=URL, timeout=10) as http:  # another client, straight to ComfyUI
-            theirs = (await http.post("/prompt", json={"prompt": slow_graph()})).json()["prompt_id"]
-        prompts.append(theirs)
-
         port = free_port()
-        relays.append(serve_relay(port, instance, (tmp_path / "second.log").open("wb")))
+        relays.append(serve_relay(port, "reattach-second", (tmp_path / "second.log").open("wb")))
         async with session(port) as mcp:
             status = await call(mcp, "job_status", {"job_id": run["job_id"]})
             assert (status["source"], status["state"], status["finished"]) == ("comfyui", "running", False), status
             assert status["progress"]["comfyui_state"] == "running"
 
-            refused = await call(mcp, "job_cancel", {"job_id": theirs})
-            assert refused["code"] == "job_not_owned", refused
-            assert (await comfyui_state(theirs))[0] == "pending"
-
-            cancelled = await call(mcp, "job_cancel", {"job_id": spare["job_id"]})
-            assert (cancelled["state"], cancelled["progress"]["stop"]) == ("cancelled", "confirmed"), cancelled
-            assert await comfyui_state(spare["prompt_id"]) == ("absent", None)  # dequeued, never ran
+            for job_id in (run["job_id"], spare["job_id"]):
+                refused = await call(mcp, "job_cancel", {"job_id": job_id})
+                assert (refused["code"], refused["job_id"]) == ("job_not_held", job_id), refused
 
             done = await call(mcp, "job_status", {"job_id": run["job_id"], "timeout_seconds": 60})
             assert (done["source"], done["state"]) == ("comfyui", "succeeded"), done
             [saved] = done["result"]["files"]
             assert saved["filename"].startswith("relay_reattach_") and saved["type"] == "output"
 
-            outputs = await call(mcp, "workflow_outputs", {"job_id": run["job_id"]})
-            assert (outputs["source"], outputs["job_state"]) == ("comfyui", "succeeded"), outputs
-            [listed] = outputs["files"]
+            outputs = await mcp.call_tool("workflow_outputs", {"job_id": run["job_id"], "fetch": saved["filename"]})
+            assert not outputs.is_error, outputs.content[0].text
+            assert (outputs.structured_content["source"], outputs.structured_content["job_state"]) == (
+                "comfyui",
+                "succeeded",
+            )
+            [listed] = outputs.structured_content["files"]
             assert listed["filename"] == saved["filename"] and listed["size_bytes"] > 0
-        print("re-attached:", {"job_id": run["job_id"], "running": status["progress"], "done": done["result"]})
+            image = outputs.content[1]
+            assert image.type == "image" and base64.b64decode(image.data).startswith(b"\x89PNG")
+        print(
+            "re-attached:",
+            {
+                "job_id": run["job_id"],
+                "running": status["progress"],
+                "refused": refused["code"],
+                "done": done["result"],
+            },
+        )
     finally:
         for relay in relays:
             if relay.poll() is None:
