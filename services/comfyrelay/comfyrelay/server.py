@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 from . import __version__
 from .comfyui import ComfyUIClient
-from .corpus import Corpus, CorpusError
+from .docs_index import DocsIndex, DocsIndexError
 from .jobs import SHUTDOWN_WAIT_SECONDS, JobStore
 from .settings import INSTANCE_ID_ENV, MCP_PATH, Settings, redact_url
 from .tools import SERVER_NAME, Relay, register
@@ -56,10 +56,10 @@ def build_server(settings: Settings, *, comfyui: ComfyUIClient | None = None) ->
         jobs=JobStore(max_in_flight=settings.max_jobs),
     )
     try:
-        relay.corpus = Corpus(settings.corpus_path)
-    except CorpusError as exc:
-        relay.corpus_error = str(exc)
-        log.warning("docs_search and docs_guide have no corpus: %s", exc)
+        relay.docs = DocsIndex(settings.docs_path)
+    except DocsIndexError as exc:
+        relay.docs_error = str(exc)
+        log.warning("docs_search and docs_guide have no docs index: %s", exc)
     server = MCPServer(SERVER_NAME, version=__version__, instructions=INSTRUCTIONS)
     register(server, relay)
     return server, relay

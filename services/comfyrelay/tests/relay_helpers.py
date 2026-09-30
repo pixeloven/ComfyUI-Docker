@@ -49,7 +49,7 @@ def settings(**overrides) -> Settings:
         profiles=("read", "run"),
         instance_id="test-instance",
         comfyui_pin="v0.37.0",
-        corpus_path="/nonexistent/corpus.sqlite",
+        docs_path="/nonexistent/docs.sqlite",
     )
     return Settings(**{**base, **overrides})
 
@@ -213,12 +213,12 @@ def write_tree(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
-def make_corpus(root: Path) -> Path:
-    """Build a corpus from DOCS_FILES and SKILL_FILES under `root`, as `comfyctl relay corpus build` does once
-    its fetch is done. Returns the corpus.sqlite path; the rest of the build is beside it."""
-    from comfyrelay.corpus import build
+def make_docs_index(root: Path) -> Path:
+    """Build a docs index from DOCS_FILES and SKILL_FILES under `root`, as `comfyctl relay docs build` does once
+    its fetch is done. Returns the docs.sqlite path; the rest of the build is beside it."""
+    from comfyrelay.docs_index import build
 
     docs = write_tree(root / "docs", DOCS_FILES)
     skills = write_tree(root / "skills", SKILL_FILES)
     build(docs=docs, sha=DOCS_SHA, skills=skills, out=root / "out", version="9.9.9")
-    return root / "out" / "corpus.sqlite"
+    return root / "out" / "docs.sqlite"

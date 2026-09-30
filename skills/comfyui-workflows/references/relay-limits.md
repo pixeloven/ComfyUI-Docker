@@ -36,7 +36,7 @@ fails as an unknown tool, so check `server_info` rather than assuming.
 - **The UI format.** `workflow_run` takes API-format graphs only (the
   `workflow-formats` topic).
 - **Anything but its own ComfyUI.** It makes no other outbound connection, so
-  docs answers come from the corpus built into its image, not the web.
+  docs answers come from the docs index built into its image, not the web.
 
 ## Jobs
 

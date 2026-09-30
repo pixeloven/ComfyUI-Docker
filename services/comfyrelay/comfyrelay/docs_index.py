@@ -1,6 +1,6 @@
-"""The docs corpus (#134): built into the image once, read by docs_search and docs_guide.
+"""The docs index (#134): built into the image once, read by docs_search and docs_guide.
 
-`comfyctl relay corpus build` makes it at image build time, from two sources:
+`comfyctl relay docs build` makes it at image build time, from two sources:
 
     docs.comfy.org  Comfy-Org/docs at COMFY_DOCS_SHA: every English page the
                     `navigation.languages[en]` entry of its docs.json lists.
@@ -20,7 +20,7 @@ carrying `source`, `version` (the docs SHA, or our version for the guides),
 
 The build writes, under --out:
 
-    corpus.sqlite   the index, with a `meta` table saying what went in
+    docs.sqlite   the index, with a `meta` table saying what went in
     source/         the English markdown it indexed, unmodified, with the
                     snippets it inlined and the docs.json that listed the
                     pages (the GPL's Corresponding Source)
@@ -29,8 +29,8 @@ The build writes, under --out:
                     non-affiliation statement
     GPL-3.0.txt     the docs repo's LICENSE, the GPL-3.0 text
 
-The server only ever reads corpus.sqlite, read-only. Nothing here runs at
-serve time but `Corpus`.
+The server only ever reads docs.sqlite, read-only. Nothing here runs at
+serve time but `DocsIndex`.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ DOCS_SOURCE = "docs.comfy.org"
 GUIDES_SOURCE = "guides"
 GUIDES_SKILL = "comfyui-workflows"
 REPO = "https://github.com/pixeloven/ComfyUI-Docker"
-BUILD_SCRIPT = "services/comfyrelay/comfyrelay/corpus.py"
+BUILD_SCRIPT = "services/comfyrelay/comfyrelay/docs_index.py"
 DOCS_LICENSE = "GPL-3.0"
 GUIDES_LICENSE = "MIT"
 DOCS_NOTE = (
@@ -69,8 +69,8 @@ DOCS_NOTE = (
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 
 
-class CorpusError(Exception):
-    """The corpus can't be built or read. The CLI reports it and exits 1."""
+class DocsIndexError(Exception):
+    """The docs index can't be built or read. The CLI reports it and exits 1."""
 
 
 # -- MDX to markdown ------------------------------------------------------------
@@ -292,7 +292,7 @@ def docs_pages(docs_json: dict[str, Any], language: str = "en") -> tuple[list[st
     langs = docs_json.get("navigation", {}).get("languages", [])
     nav = next((lang for lang in langs if lang.get("language") == language), None)
     if nav is None:
-        raise CorpusError(f"docs.json has no navigation.languages entry for {language!r}")
+        raise DocsIndexError(f"docs.json has no navigation.languages entry for {language!r}")
     pages: list[str] = []
     other: list[str] = []
 
@@ -318,9 +318,9 @@ def _git(cwd: Path, *args: str, stdin: str | None = None) -> str:
     try:
         done = subprocess.run(["git", *args], cwd=cwd, input=stdin, capture_output=True, text=True, check=False)
     except FileNotFoundError as exc:
-        raise CorpusError("git is not installed; the corpus build fetches the docs with it") from exc
+        raise DocsIndexError("git is not installed; the docs build fetches the docs with it") from exc
     if done.returncode != 0:
-        raise CorpusError(f"git {' '.join(args[:2])} failed: {done.stderr.strip()[-500:]}")
+        raise DocsIndexError(f"git {' '.join(args[:2])} failed: {done.stderr.strip()[-500:]}")
     return done.stdout
 
 
@@ -328,13 +328,13 @@ def fetch_docs(repo: str, sha: str, dest: Path) -> list[str]:
     """A shallow, sparse checkout of `repo` at `sha` in `dest`: docs.json, LICENSE, the snippets and the English
     pages docs.json lists. No history and no media are fetched. Returns the page paths docs.json lists."""
     if not COMMIT_SHA.fullmatch(sha):
-        raise CorpusError(f"the docs pin must be a full 40-character commit SHA, not {sha!r}")
+        raise DocsIndexError(f"the docs pin must be a full 40-character commit SHA, not {sha!r}")
     dest.mkdir(parents=True, exist_ok=True)
     _git(dest, "init", "-q")
     _git(dest, "fetch", "-q", "--depth", "1", "--filter=blob:none", repo, sha)
     got = _git(dest, "rev-parse", "FETCH_HEAD").strip()
     if got != sha:
-        raise CorpusError(f"fetched {got}, not the pinned {sha}")
+        raise DocsIndexError(f"fetched {got}, not the pinned {sha}")
     pages, _ = docs_pages(json.loads(_git(dest, "show", "FETCH_HEAD:docs.json")))
     patterns = ["/docs.json", "/LICENSE", "/snippets/"] + [f"/{p}.mdx\n/{p}.md" for p in pages]
     _git(dest, "sparse-checkout", "set", "--no-cone", "--stdin", stdin="\n".join(patterns) + "\n")
@@ -451,7 +451,7 @@ def guide_topics(skills: Path) -> list[tuple[str, Path, str]]:
     skill's directory name."""
     index = skills / GUIDES_SKILL / "SKILL.md"
     if not index.is_file():
-        raise CorpusError(f"no guides index at {index}")
+        raise DocsIndexError(f"no guides index at {index}")
     items: list[str] = []
     for line in index.read_text().splitlines():
         if re.match(r"\s*[-*]\s", line):
@@ -465,11 +465,11 @@ def guide_topics(skills: Path) -> list[tuple[str, Path, str]]:
             continue
         path = (index.parent / m.group(1)).resolve()
         if skills.resolve() not in path.parents or not path.is_file():
-            raise CorpusError(f"{index} links to {m.group(1)}, which is not a file under {skills}")
+            raise DocsIndexError(f"{index} links to {m.group(1)}, which is not a file under {skills}")
         summary = item[m.end() :].lstrip(":—- ").strip()
         topics.setdefault(path.parent.name if path.name == "SKILL.md" else path.stem, (path, summary))
     if not topics:
-        raise CorpusError(f"{index} links to no topic")
+        raise DocsIndexError(f"{index} links to no topic")
     return [(topic, path, summary) for topic, (path, summary) in topics.items()]
 
 
@@ -512,8 +512,8 @@ def notice(sha: str, built: str, version: str) -> str:
     return f"""\
 comfyrelay: third-party content in this image
 
-The docs corpus (/opt/corpus/corpus.sqlite, and the markdown it was built from
-in /opt/corpus/source/) comes from Comfy-Org/docs, the source of
+The docs index (/opt/docs/docs.sqlite, and the markdown it was built from
+in /opt/docs/source/) comes from Comfy-Org/docs, the source of
 {DOCS_SITE}:
 
     {DOCS_REPO}
@@ -525,27 +525,27 @@ full text is in /licenses/GPL-3.0.txt.
 Modified on {built}: the English pages listed in the repository's docs.json
 were converted to plain markdown (front matter, import lines, JSX and HTML
 tags, images and videos removed; /snippets/ content inlined; code kept), split
-at their headings, and indexed in corpus.sqlite. The unmodified pages that
+at their headings, and indexed in docs.sqlite. The unmodified pages that
 were indexed, the snippets they include, and the docs.json that chose them
-are in /opt/corpus/source/.
+are in /opt/docs/source/.
 
 The build script is {BUILD_SCRIPT}
 in {REPO}, at the tag v{version}:
 {REPO}/blob/v{version}/{BUILD_SCRIPT}
 
-corpus.sqlite as a whole is licensed GPL-3.0. It also holds this project's own
+docs.sqlite as a whole is licensed GPL-3.0. It also holds this project's own
 guides (skills/{GUIDES_SKILL}/), which are MIT-licensed. comfyrelay's code is
-MIT-licensed; it reads the corpus as a separate data file (an aggregate).
+MIT-licensed; it reads the docs index as a separate data file (an aggregate).
 
 © Comfy Org. Not affiliated with or endorsed by Comfy Org.
 """
 
 
 def build(*, docs: Path, sha: str, skills: Path, out: Path, version: str = __version__) -> dict[str, Any]:
-    """Build the corpus in `out` from a docs checkout at `sha` and the skills directory. Returns the meta summary."""
+    """Build the docs index in `out` from a docs checkout at `sha` and the skills directory. Returns the meta summary."""
     started = time.monotonic()
     out.mkdir(parents=True, exist_ok=True)
-    db_path = out / "corpus.sqlite"
+    db_path = out / "docs.sqlite"
     db_path.unlink(missing_ok=True)
     built = datetime.now(UTC).strftime("%Y-%m-%d")
     db = sqlite3.connect(db_path)
@@ -553,7 +553,7 @@ def build(*, docs: Path, sha: str, skills: Path, out: Path, version: str = __ver
         _create(db)
         sources = [index_docs(db, docs, sha, out / "source"), index_guides(db, skills, version)]
         if not sources[0]["pages"]:
-            raise CorpusError(f"no docs page was found in {docs}")
+            raise DocsIndexError(f"no docs page was found in {docs}")
         meta = {"schema": SCHEMA, "built_at": built, "builder": f"comfyrelay {version}", "sources": sources}
         db.executemany("INSERT INTO meta VALUES (?, ?)", [(k, json.dumps(v)) for k, v in meta.items()])
         db.execute("INSERT INTO docs(docs) VALUES ('optimize')")
@@ -588,20 +588,20 @@ class Hit:
     topic: str | None = None  # a guide's docs_guide topic
 
 
-class Corpus:
+class DocsIndex:
     """The built index, read-only. Each call opens its own connection, so a search can run in a worker thread."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         if not self.path.is_file():
-            raise CorpusError(f"no corpus at {self.path}")
+            raise DocsIndexError(f"no docs index at {self.path}")
         try:
             with self._connect() as db:
                 self.meta = {k: json.loads(v) for k, v in db.execute("SELECT key, value FROM meta")}
         except sqlite3.Error as exc:
-            raise CorpusError(f"{self.path} is not a corpus this server can read: {exc}") from exc
+            raise DocsIndexError(f"{self.path} is not a docs index this server can read: {exc}") from exc
         if self.meta.get("schema") != SCHEMA:
-            raise CorpusError(f"{self.path} has corpus schema {self.meta.get('schema')}, not {SCHEMA}")
+            raise DocsIndexError(f"{self.path} has docs index schema {self.meta.get('schema')}, not {SCHEMA}")
 
     def _connect(self) -> closing[sqlite3.Connection]:
         return closing(sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro&immutable=1", uri=True))

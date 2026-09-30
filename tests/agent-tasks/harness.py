@@ -543,7 +543,7 @@ def check_t3() -> str:
 T6_DIR = HERE / "tasks" / "T6"
 # The comfyrelay image's own index, copied out by derive-t6. The check reads
 # the cited pages from it, so it scores against what the agent could search.
-T6_CORPUS = RESULTS / "T6-corpus.sqlite"
+T6_DOCS = RESULTS / "T6-docs.sqlite"
 
 
 def t6_pages(db: sqlite3.Connection, path: str) -> str | None:
@@ -567,10 +567,10 @@ def cmd_derive_t6(image: str = "") -> None:
     image = image or os.environ.get("COMFYRELAY_IMAGE", "comfyrelay:latest")
     cid = subprocess.check_output(["docker", "create", image]).decode().strip()
     try:
-        subprocess.check_call(["docker", "cp", f"{cid}:/opt/corpus/corpus.sqlite", str(T6_CORPUS)])
+        subprocess.check_call(["docker", "cp", f"{cid}:/opt/docs/docs.sqlite", str(T6_DOCS)])
     finally:
         subprocess.run(["docker", "rm", cid], capture_output=True, check=False)
-    db = sqlite3.connect(T6_CORPUS)
+    db = sqlite3.connect(T6_DOCS)
     meta = {k: json.loads(v) for k, v in db.execute("SELECT key, value FROM meta")}
     answers = {}
     for q in json.loads((T6_DIR / "questions.json").read_text()):
@@ -590,8 +590,8 @@ def cmd_derive_t6(image: str = "") -> None:
 def check_t6() -> str:
     questions = {q["id"]: q for q in json.loads((T6_DIR / "questions.json").read_text())}
     want = json.loads((T6_DIR / "answers.json").read_text())["answers"]
-    if not T6_CORPUS.exists():
-        raise CheckFailed(f"{T6_CORPUS} missing; run tasks/T6/derive.sh")
+    if not T6_DOCS.exists():
+        raise CheckFailed(f"{T6_DOCS} missing; run tasks/T6/derive.sh")
     p = WORKSPACE / "results" / "T6.json"
     if not p.exists():
         raise CheckFailed(f"{p} not written")
@@ -600,7 +600,7 @@ def check_t6() -> str:
     except ValueError as e:
         raise CheckFailed(f"T6.json is not JSON: {e}") from e
     got = got.get("answers", got) if isinstance(got, dict) else {}
-    db = sqlite3.connect(f"file:{T6_CORPUS}?mode=ro", uri=True)
+    db = sqlite3.connect(f"file:{T6_DOCS}?mode=ro", uri=True)
     wrong = []
     for qid, expected in want.items():
         q = questions[qid]

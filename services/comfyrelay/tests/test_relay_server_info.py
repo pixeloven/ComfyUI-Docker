@@ -1,5 +1,5 @@
 """server_info: identity, profiles, capabilities, the pinned and live ComfyUI
-versions. The corpus entry is covered in test_relay_docs.py."""
+versions. The docs entry is covered in test_relay_docs.py."""
 
 from __future__ import annotations
 

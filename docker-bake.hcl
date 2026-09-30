@@ -401,7 +401,7 @@ group "fetch" {
 //     under a release (IMAGE_LABEL=4.0.1) it is `comfyrelay:4.0.1`, which the
 //     release's `:X.Y.Z` digest filter would match if the target were in `all`.
 // The context is the uv workspace root, so the image installs services/uv.lock.
-// The guides the docs corpus indexes (skills/comfyui-workflows/, #134) come in
+// The guides the docs index covers (skills/comfyui-workflows/, #134) come in
 // as the `skills` named context, since skills/ is outside that root.
 target "comfyrelay" {
     context = "services"

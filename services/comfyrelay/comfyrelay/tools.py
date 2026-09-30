@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .comfyui import ComfyUIClient, ComfyUIError
 from .consent import ConsentGate
-from .corpus import Corpus
+from .docs_index import DocsIndex
 from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
 from .tools_docs import DOCS_TOOLS
@@ -54,9 +54,9 @@ class Relay:
     jobs: JobStore = field(default_factory=JobStore)
     consent: ConsentGate = field(default_factory=ConsentGate)
     tools: list[str] = field(default_factory=list)
-    # The docs corpus built into the image (#134), or None with why.
-    corpus: Corpus | None = None
-    corpus_error: str | None = None
+    # The docs index built into the image (#134), or None with why.
+    docs: DocsIndex | None = None
+    docs_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -94,7 +94,7 @@ class ServerInfo(BaseModel):
     profiles: ProfileStatus
     capabilities: dict[str, Any]
     comfyui: ComfyUIStatus
-    corpus: dict[str, Any]
+    docs: dict[str, Any]
 
 
 def _same_version(live: str | None, pinned: str | None) -> bool | None:
@@ -110,7 +110,7 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
 
         Call it first. It reports the live ComfyUI version next to the version this server was built for, and
         whether ComfyUI is reachable right now. It never fails because ComfyUI is down; `comfyui.error` says why.
-        `corpus` lists the documentation built in for docs_search and docs_guide: each source's version and license.
+        `docs` lists the documentation built in for docs_search and docs_guide: each source's version and license.
         """
         s = relay.settings
         live, error = None, None
@@ -149,9 +149,9 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
                 matches_pin=_same_version(live, s.comfyui_pin),
                 error=error,
             ),
-            corpus=relay.corpus.info()
-            if relay.corpus
-            else {"status": "absent", "sources": [], "reason": relay.corpus_error or "no corpus"},
+            docs=relay.docs.info()
+            if relay.docs
+            else {"status": "absent", "sources": [], "reason": relay.docs_error or "no docs index"},
         )
 
     return server_info

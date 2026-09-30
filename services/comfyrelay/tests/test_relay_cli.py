@@ -64,7 +64,7 @@ def test_probe_passes_against_a_running_server(live_server, monkeypatch):
         "initialize",
         "tools",
         "server_info",
-        "corpus",
+        "docs",
         "comfyui",
     ]
     assert report["docs_hits"] == 1
@@ -108,14 +108,14 @@ def test_probe_fails_with_exit_1_and_says_which_check(live_server, monkeypatch, 
     assert report["checks"][-1]["ok"] is False
 
 
-def test_probe_fails_without_a_corpus_unless_told_not_to_need_one(live_server_without_corpus, monkeypatch):
+def test_probe_fails_without_a_docs_index_unless_told_not_to_need_one(live_server_without_docs, monkeypatch):
     monkeypatch.setenv("COMFYUI_MCP_HTTP_TOKEN", TOKEN)
-    r = runner.invoke(app, ["relay", "probe", live_server_without_corpus, "-o", "json"])
+    r = runner.invoke(app, ["relay", "probe", live_server_without_docs, "-o", "json"])
     assert r.exit_code == 1
     failed = [c for c in json.loads(r.stdout)["checks"] if not c["ok"]]
-    assert [c["name"] for c in failed] == ["corpus"]
-    assert "no corpus at" in failed[0]["detail"]
-    r = runner.invoke(app, ["relay", "probe", live_server_without_corpus, "--no-corpus"])
+    assert [c["name"] for c in failed] == ["docs"]
+    assert "no docs index at" in failed[0]["detail"]
+    r = runner.invoke(app, ["relay", "probe", live_server_without_docs, "--no-docs"])
     assert r.exit_code == 0, r.stdout
 
 

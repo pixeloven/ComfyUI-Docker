@@ -10,7 +10,7 @@ import time
 import pytest
 import uvicorn
 from comfyrelay.server import build_server, http_app
-from relay_helpers import comfyui_answering, free_port, make_corpus, settings
+from relay_helpers import comfyui_answering, free_port, make_docs_index, settings
 
 
 @pytest.fixture
@@ -19,9 +19,9 @@ def anyio_backend():
 
 
 @pytest.fixture(scope="session")
-def corpus_path(tmp_path_factory) -> str:
-    """A docs corpus built from relay_helpers' small docs and skills trees, once per run."""
-    return str(make_corpus(tmp_path_factory.mktemp("corpus")))
+def docs_path(tmp_path_factory) -> str:
+    """A docs index built from relay_helpers' small docs and skills trees, once per run."""
+    return str(make_docs_index(tmp_path_factory.mktemp("docs")))
 
 
 def _serve(s):
@@ -38,10 +38,10 @@ def _serve(s):
 
 
 @pytest.fixture
-def live_server(corpus_path):
-    """comfyrelay over real HTTP on a free loopback port, with a fake ComfyUI and the test corpus. Yields the /mcp
+def live_server(docs_path):
+    """comfyrelay over real HTTP on a free loopback port, with a fake ComfyUI and the test docs index. Yields the /mcp
     URL."""
-    s = settings(port=free_port(), corpus_path=corpus_path)
+    s = settings(port=free_port(), docs_path=docs_path)
     uv, thread = _serve(s)
     yield f"http://{s.host}:{s.port}/mcp"
     uv.should_exit = True
@@ -49,8 +49,8 @@ def live_server(corpus_path):
 
 
 @pytest.fixture
-def live_server_without_corpus():
-    """The same, with no corpus: a server run from source."""
+def live_server_without_docs():
+    """The same, with no docs index: a server run from source."""
     s = settings(port=free_port())
     uv, thread = _serve(s)
     yield f"http://{s.host}:{s.port}/mcp"

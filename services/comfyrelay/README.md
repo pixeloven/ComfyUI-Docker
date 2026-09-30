@@ -22,7 +22,7 @@ From the source tree, in the uv workspace:
 cd services
 export COMFYUI_MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
 uv run comfyctl relay serve --comfyui-url http://127.0.0.1:8188    # serves http://0.0.0.0:9000/mcp
-uv run comfyctl relay probe --no-corpus                             # checks it, no agent needed
+uv run comfyctl relay probe --no-docs                               # checks it, no agent needed
 ```
 
 Or as an image, built locally (`comfyrelay:<IMAGE_LABEL>`, never pushed):
@@ -34,13 +34,13 @@ docker run --rm -p 127.0.0.1:9000:9000 --read-only \
   comfyrelay:latest
 ```
 
-From source there's no docs corpus, so `docs_search` and `docs_guide` answer
-`corpus_unavailable` and the probe needs `--no-corpus`. To build one (it fetches the docs with
+From source there's no docs index, so `docs_search` and `docs_guide` answer
+`docs_unavailable` and the probe needs `--no-docs`. To build one (it fetches the docs with
 `git`), then point the server at it:
 
 ```sh
-uv run comfyctl relay corpus build --docs-sha <COMFY_DOCS_SHA> --skills ../skills --out /tmp/corpus
-COMFYUI_MCP_CORPUS=/tmp/corpus/corpus.sqlite uv run comfyctl relay serve
+uv run comfyctl relay docs build --docs-sha <COMFY_DOCS_SHA> --skills ../skills --out /tmp/docs
+COMFYUI_MCP_DOCS=/tmp/docs/docs.sqlite uv run comfyctl relay serve
 ```
 
 The image runs as `comfy` (1000:1000), or under any UID: it writes nothing, so a read-only
@@ -65,7 +65,7 @@ environment when comfyrelay moves into that image.
 | `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar. In a container the hostname is the container ID or pod name, which can change when it's recreated, so set this when a gateway federates sidecars. `server_info` reports where the ID came from (`instance_id_source`: `env` or `hostname`), and startup logs a warning when it's the hostname. |
 | `COMFYUI_MCP_MAX_JOBS` | `16` | How many jobs may be in flight at once. A submission past it is refused with `too_many_jobs`. It's retryable, unless every slot is held by a job that didn't stop when cancelled, since those may never free. |
 | `COMFYUI_VERSION` | set by the image | The ComfyUI version the image was built for, from the bake pin |
-| `COMFYUI_MCP_CORPUS` | `/opt/corpus/corpus.sqlite` | The docs corpus `docs_search` and `docs_guide` read. The image builds it there; without one those tools fail with `corpus_unavailable`, and `server_info.corpus` says why. |
+| `COMFYUI_MCP_DOCS` | `/opt/docs/docs.sqlite` | The docs index `docs_search` and `docs_guide` read. The image builds it there; without one those tools fail with `docs_unavailable`, and `server_info.docs` says why. |
 
 `serve` takes the same settings as flags (`--comfyui-url`, `--host`, `--port`, `--profiles`),
 except the token, which it reads only from the environment so it never appears in a process
@@ -97,7 +97,7 @@ the `job_*` group are the cross-cutting names.
 
 - **`server_info`** identifies the sidecar. It returns the instance ID and where it came from,
   active profiles, capabilities (tools, consent policy, jobs), and ComfyUI's version, both live
-  from `/system_stats` and pinned from the image, with whether they match. Its `corpus` entry
+  from `/system_stats` and pinned from the image, with whether they match. Its `docs` entry
   lists the docs built into the image: each source with its version (the docs commit, or this
   project's version for the guides), license and page count (see *Docs tools*), or
   `status: "absent"` and the reason. It doesn't fail when ComfyUI is
@@ -457,7 +457,7 @@ ComfyUI.
 ## Docs tools
 
 The `read` profile's `docs_search` and `docs_guide` (#134), in `comfyrelay/tools_docs.py`, read
-a corpus built into the image. They reach nothing at runtime, not even ComfyUI, and they don't
+a docs index built into the image. They reach nothing at runtime, not even ComfyUI, and they don't
 merge results with the live node and template tools.
 
 - **`docs_search`** searches two sources section by section (SQLite FTS5, stemmed), best first:
@@ -484,8 +484,8 @@ merge results with the live node and template tools.
   The topics are the files the skill's `SKILL.md` links to, including the separate
   `comfy-manifest` skill. An unknown topic fails with `unknown_topic` and the list.
 
-**The corpus** is built by `comfyctl relay corpus build` in the image's `corpus` stage
-(`comfyrelay/corpus.py`). It fetches Comfy-Org/docs with a shallow, sparse `git` fetch: only
+**The docs index** is built by `comfyctl relay docs build` in the image's `docs` stage
+(`comfyrelay/docs_index.py`). It fetches Comfy-Org/docs with a shallow, sparse `git` fetch: only
 `docs.json`, the snippets and the pages it lists, with no history and no media. It converts
 each page from MDX to markdown: front matter goes (the title and description are kept),
 along with `import` lines, JSX and HTML tags, images and videos, and fenced code stays. A
@@ -499,10 +499,10 @@ and 14 MB of markdown shipped beside it.
 
 **Licensing.** Comfy-Org/docs is GPL-3.0, so the index is a GPL-3.0 work, and the image
 ships what that needs: the English markdown it indexed, the snippets it used and the
-`docs.json` that chose the pages (`/opt/corpus/source/`), the GPL-3.0 text (`/licenses/GPL-3.0.txt`), and `/licenses/NOTICE`.
+`docs.json` that chose the pages (`/opt/docs/source/`), the GPL-3.0 text (`/licenses/GPL-3.0.txt`), and `/licenses/NOTICE`.
 The NOTICE names the docs repo and commit and the license, dates the modification, gives the
 build script's path at the release tag, and says "© Comfy Org. Not affiliated with or
-endorsed by Comfy Org." The relay's code stays MIT: it reads the corpus as a data file, an
+endorsed by Comfy Org." The relay's code stays MIT: it reads the docs index as a data file, an
 aggregate. The image is labelled `org.opencontainers.image.licenses="MIT AND GPL-3.0"`. The
 guides are our own words under MIT; they link to docs.comfy.org and copy none of it.
 
@@ -510,7 +510,7 @@ guides are our own words under MIT; they link to docs.comfy.org and copy none of
 on Comfy-Org/docs `main`. GitHub serves any commit in the repository's fork network by its
 SHA, so check the new one: `gh api repos/Comfy-Org/docs/compare/<sha>...main` must say
 `ahead` or `identical`. The build
-probe fails the image if the corpus is missing or `docs_search` finds nothing.
+probe fails the image if the docs index is missing or `docs_search` finds nothing.
 
 ## Consent
 

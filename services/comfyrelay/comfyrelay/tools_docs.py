@@ -1,6 +1,6 @@
 """The `read` profile's docs tools (#134): docs_search and docs_guide.
 
-Both read the corpus built into the image (`corpus.py`), never the network:
+Both read the docs index built into the image (`docs_index.py`), never the network:
 
     docs_search   FTS5 over docs.comfy.org (Comfy-Org/docs at COMFY_DOCS_SHA)
                   and our guides, section by section
@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field
 
-from .corpus import DOCS_SOURCE, Corpus
+from .docs_index import DOCS_SOURCE, DocsIndex
 from .errors import RelayError
 from .tools_introspection import READ, READ_ONLY, _Compact, _invalid_query
 
@@ -47,14 +47,14 @@ def _query_words(query: str) -> list[str]:
     return ([w for w in words if w not in _STOPWORDS] or words)[:MAX_QUERY_WORDS]
 
 
-def _corpus(relay: Relay) -> Corpus:
-    if relay.corpus is None:
+def _docs_index(relay: Relay) -> DocsIndex:
+    if relay.docs is None:
         raise RelayError(
-            "corpus_unavailable",
-            f"this server has no docs corpus ({relay.corpus_error or 'not built'}); the image builds one, a server "
+            "docs_unavailable",
+            f"this server has no docs index ({relay.docs_error or 'not built'}); the image builds one, a server "
             "run from source has none. Use the live tools: node_describe, template_search.",
         )
-    return relay.corpus
+    return relay.docs
 
 
 class DocHit(_Compact):
@@ -109,7 +109,7 @@ def _docs_search(relay: Relay) -> Callable[..., Any]:
         if not words:
             raise _invalid_query(query)
         # SQLite blocks while it works: in a thread, so a slow query never stalls the other tools.
-        hits, total, mode = await asyncio.to_thread(_corpus(relay).search, words, limit, MAX_TEXT_CHARS)
+        hits, total, mode = await asyncio.to_thread(_docs_index(relay).search, words, limit, MAX_TEXT_CHARS)
         pin = relay.settings.comfyui_pin
         note = (
             "docs.comfy.org describes the latest ComfyUI, which may not match the ComfyUI this server serves"
@@ -167,13 +167,13 @@ def _docs_guide(relay: Relay) -> Callable[..., Any]:
         markdown. They are the published comfyui-workflows skill, so an agent with the skill installed has the
         same text. docs_search searches them together with docs.comfy.org.
         """
-        corpus = _corpus(relay)
-        listed = await asyncio.to_thread(corpus.topics)
+        index = _docs_index(relay)
+        listed = await asyncio.to_thread(index.topics)
         if topic is None:
             return DocsGuideResult(
                 topics=[GuideTopic(**{k: t[k] for k in ("topic", "title", "summary")}) for t in listed]
             )
-        found = await asyncio.to_thread(corpus.guide, topic.strip().lower())
+        found = await asyncio.to_thread(index.guide, topic.strip().lower())
         if found is None:
             names = [t["topic"] for t in listed]
             raise RelayError(

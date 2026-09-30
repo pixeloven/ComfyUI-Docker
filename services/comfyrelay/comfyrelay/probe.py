@@ -9,8 +9,8 @@ after deploying. It connects the way an MCP client does and checks, in order:
     initialize  the MCP handshake succeeds
     tools       tools/list includes server_info
     server_info the call succeeds and returns the identity fields
-    corpus      server_info says the docs corpus is built, and docs_search finds
-                something (skipped with --no-corpus)
+    docs        server_info says the docs index is built, and docs_search finds
+                something (skipped with --no-docs)
     comfyui     server_info says ComfyUI is reachable (skipped with --no-comfyui)
 
 Each failed check names what it saw. Later checks do not run once one that
@@ -86,9 +86,9 @@ def _leaf(exc: BaseException) -> BaseException:
 
 
 async def _session(
-    report: Report, http: httpx2.AsyncClient, url: str, timeout: float, corpus: bool
+    report: Report, http: httpx2.AsyncClient, url: str, timeout: float, docs: bool
 ) -> dict[str, Any] | None:
-    """initialize, tools/list, server_info, and docs_search when `corpus`. Returns server_info's result, or None
+    """initialize, tools/list, server_info, and docs_search when `docs`. Returns server_info's result, or None
     after a failed check."""
     async with Client(
         streamable_http_client(url, http_client=http),
@@ -122,7 +122,7 @@ async def _session(
         report.server_info = data
         active = ",".join(data.get("profiles", {}).get("active", []))
         report.add("server_info", True, f"instance {data.get('instance_id')}, profiles {active}")
-        if corpus and "docs_search" in report.tools and (data.get("corpus") or {}).get("status") == "built":
+        if docs and "docs_search" in report.tools and (data.get("docs") or {}).get("status") == "built":
             found = await client.call_tool("docs_search", {"query": "ComfyUI", "limit": 1})
             hits = found.structured_content if not found.is_error else None
             report.docs_hits = len(hits.get("results", [])) if isinstance(hits, dict) else 0
@@ -130,7 +130,7 @@ async def _session(
 
 
 async def probe(
-    url: str, token: str, *, timeout: float = 30.0, require_comfyui: bool = True, require_corpus: bool = True
+    url: str, token: str, *, timeout: float = 30.0, require_comfyui: bool = True, require_docs: bool = True
 ) -> Report:
     shown = redact_url(url)  # what is rendered; `url` is what is requested
     report = Report(url=shown)
@@ -162,7 +162,7 @@ async def probe(
         ):
             return report
         try:
-            data = await _session(report, http, url, timeout, require_corpus)
+            data = await _session(report, http, url, timeout, require_docs)
         except Exception as exc:  # anything the client raises is a failed handshake or call
             leaf = _leaf(exc)
             report.add("initialize" if report.server is None else "call", False, f"{type(leaf).__name__}: {leaf}")
@@ -170,19 +170,19 @@ async def probe(
     if data is None:
         return report
 
-    corpus = data.get("corpus") or {}
-    if not require_corpus:
-        report.add("corpus", True, f"not required (--no-corpus); status {corpus.get('status')}")
-    elif corpus.get("status") != "built":
-        report.add("corpus", False, f"server_info.corpus is {corpus.get('status')!r}: {corpus.get('reason')}")
+    docs = data.get("docs") or {}
+    if not require_docs:
+        report.add("docs", True, f"not required (--no-docs); status {docs.get('status')}")
+    elif docs.get("status") != "built":
+        report.add("docs", False, f"server_info.docs is {docs.get('status')!r}: {docs.get('reason')}")
     elif "docs_search" not in report.tools:
-        report.add("corpus", True, f"{corpus.get('pages')} pages built; docs_search is not in the active profiles")
+        report.add("docs", True, f"{docs.get('pages')} pages built; docs_search is not in the active profiles")
     else:
-        versions = ", ".join(f"{s.get('name')} {str(s.get('version'))[:12]}" for s in corpus.get("sources", []))
+        versions = ", ".join(f"{s.get('name')} {str(s.get('version'))[:12]}" for s in docs.get("sources", []))
         report.add(
-            "corpus",
+            "docs",
             bool(report.docs_hits),
-            f"{corpus.get('pages')} pages ({versions}); docs_search found {report.docs_hits or 'nothing'}",
+            f"{docs.get('pages')} pages ({versions}); docs_search found {report.docs_hits or 'nothing'}",
         )
 
     comfy = data.get("comfyui") or {}

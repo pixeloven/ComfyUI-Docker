@@ -21,7 +21,7 @@
 #      and no-new-privileges, pointed at that ComfyUI.
 #   4. From inside the relay container, `comfyctl relay probe -o json` passes:
 #      401 without the token, initialize, tools/list, server_info, the docs
-#      corpus (built, and docs_search finds something), and ComfyUI
+#      index (built, and docs_search finds something), and ComfyUI
 #      reachable. The live and pinned ComfyUI versions are reported; a
 #      mismatch (a pin bump against an older ComfyUI image) is not a failure.
 #      The tools listed are exactly the default profiles' (read,run):
