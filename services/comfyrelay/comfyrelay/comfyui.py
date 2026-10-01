@@ -172,6 +172,22 @@ class ComfyUIClient:
             raise self._bad_shape("/templates/index.json", "an array of categories with a templates array")
         return data
 
+    async def templates_mcp_index(self) -> list[dict[str, Any]] | None:
+        """GET /templates/index.mcp.json: the index the templates package writes for agents (v0.37.0 serves it),
+        with each template's task, io, capabilities and recommend. None when ComfyUI doesn't serve it (HTTP 404)
+        or serves something that is not an array of categories with a templates array. Any other failure is a
+        ComfyUIError."""
+        path = "/templates/index.mcp.json"
+        try:
+            data = await self._get_json(path, expect=list)
+        except ComfyUIError as exc:
+            if exc.code == "comfyui_bad_response" or exc.detail.get("status") == 404:
+                return None
+            raise
+        if not all(isinstance(c, dict) and isinstance(c.get("templates", []), list) for c in data):
+            return None
+        return data
+
     async def template(self, name: str) -> dict[str, Any]:
         """GET /templates/<name>.json: one template's workflow, in the frontend's (UI) format."""
         path = f"/templates/{quote(name, safe='')}.json"

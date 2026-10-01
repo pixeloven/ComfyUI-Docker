@@ -758,6 +758,58 @@ async def test_template_search_drops_hits_whose_graph_uses_partner_api_nodes():
     assert [h["name"] for h in shown["results"]] == ["restore_cloud", "restore_photo"]
 
 
+MCP_INDEX = [
+    {
+        "category": "Video",
+        "templates": [
+            {
+                "name": "video_wan",
+                "task": "Image to Video",
+                "description": "Animate a still. " + "x" * 400,
+                "io": {"inputs": ["image: The first frame " + "y" * 200], "outputs": ["video: The clip"]},
+                "capabilities": {"workflow": ["image-to-video"], "model_options": {"Node": ["a", "b"]}},
+                "recommend": "high",
+                "freshness": "recent",
+            }
+        ],
+    }
+]
+
+
+async def test_template_search_reads_the_agent_index_when_comfyui_serves_it():
+    mcp = {"/templates/index.mcp.json": httpx2.Response(200, json=MCP_INDEX)}
+    # "still" is only in index.mcp.json's text.
+    got = await ok("template_search", {"query": "animate a still"}, **mcp)
+    assert got["source"]["index"] == "index.mcp.json"
+    (hit,) = got["results"]
+    assert hit["name"] == "video_wan"
+    assert (hit["task"], hit["capabilities"], hit["recommend"], hit["freshness"]) == (
+        "Image to Video",
+        ["image-to-video"],
+        "high",
+        "recent",
+    )
+    assert hit["outputs"] == ["video: The clip"]
+    # Long prose is cut, so a page of hits stays small.
+    assert len(hit["description"]) == 240 and hit["description"].startswith("Animate a still.")
+    assert len(hit["inputs"][0]) == 120 and hit["inputs"][0].endswith("…")
+    # A template the agent index doesn't list is still found, from index.json alone.
+    other = await ok("template_search", {"query": "SD1.5"}, **mcp)
+    assert other["results"][0]["name"] == "sd15_simple" and "task" not in other["results"][0]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [httpx2.Response(404), httpx2.Response(200, text="<html></html>"), httpx2.Response(200, json={"no": "list"})],
+    ids=["missing", "not-json", "wrong-shape"],
+)
+async def test_template_search_falls_back_to_index_json(answer):
+    got = await ok("template_search", {"query": "wan"}, **{"/templates/index.mcp.json": answer})
+    assert got["source"]["index"] == "index.json"
+    (hit,) = got["results"]
+    assert hit["name"] == "video_wan" and "task" not in hit
+
+
 @pytest.mark.parametrize("tool", ["node_search", "template_search"])
 @pytest.mark.parametrize("query", ["!!!", " - ", "|"])
 async def test_a_query_with_nothing_to_search_for_is_invalid(tool, query):

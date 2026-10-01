@@ -8,7 +8,8 @@ Every answer comes from the live ComfyUI this relay serves, through
                      with the node's help page (/docs/<class>/en.md, or the
                      pack's own under /extensions/<pack>/docs/) when it has one
     model_list       /models and /models/<folder>
-    template_search  /templates/index.json, plus a runnability check per hit
+    template_search  /templates/index.json, enriched from index.mcp.json when
+                     ComfyUI serves it, plus a runnability check per hit
     template_get     /templates/<name>.json, plus the same check
 
 All of them are read-only (#103: no writes, no installs, and no calls to
@@ -688,6 +689,17 @@ class TemplateHit(_Compact):
     partner_api: bool = Field(description="The index marks it as using partner-API (paid) nodes")
     min_comfyui_version: str | None = None
     tutorial_url: str | None = None
+    # From /templates/index.mcp.json, on a template_search hit, when ComfyUI serves it and lists the template.
+    task: str | None = Field(default=None, description="What it does, in a few words: 'Image to Video'")
+    inputs: list[str] | None = Field(default=None, description="What it takes, in prose: 'image: Starting frame'")
+    outputs: list[str] | None = Field(default=None, description="What it makes, in prose")
+    capabilities: list[str] | None = Field(default=None, description="Workflow tags: 'image-to-video', 'lora'")
+    recommend: str | None = Field(
+        default=None,
+        description="The index's tier, mostly from usage, best first: highly_recommended, top, high, medium, low, "
+        "not_recommended",
+    )
+    freshness: str | None = Field(default=None, description="new, recent, current or established")
     runnability: Runnability
 
 
@@ -695,7 +707,10 @@ class TemplateSearchResult(BaseModel):
     query: str
     total_matches: int
     hidden_partner_api: int = Field(description="Matches left out because they use partner-API nodes")
-    source: dict[str, Any]
+    source: dict[str, Any] = Field(
+        description="The templates package, and `index`: index.mcp.json when ComfyUI serves it (hits it lists "
+        "carry task, inputs, outputs, capabilities, recommend and freshness), else index.json"
+    )
     results: list[TemplateHit]
 
 
@@ -878,11 +893,59 @@ def _strings(value: Any) -> list[str]:
     return [str(v) for v in value] if isinstance(value, list) else []
 
 
-def _hit_fields(template: dict[str, Any], category: dict[str, Any], description_limit: int | None) -> dict[str, Any]:
-    description = template.get("description") if isinstance(template.get("description"), str) else None
-    if description and description_limit and len(description) > description_limit:
-        description = description[: description_limit - 1].rstrip() + "…"
+def _capped(text: str, limit: int | None) -> str:
+    return text[: limit - 1].rstrip() + "…" if limit and len(text) > limit else text
+
+
+def _mcp_entries(index: list[dict[str, Any]] | None) -> dict[str, dict[str, Any]]:
+    """index.mcp.json's templates by name. index.json stays the catalogue (it has the tags, the partner-API flag
+    and templates this one leaves out); this only adds to the entries it shares a name with."""
     return {
+        t["name"]: t
+        for c in index or []
+        for t in c.get("templates") or []
+        if isinstance(t, dict) and isinstance(t.get("name"), str)
+    }
+
+
+# What a search hit keeps of index.mcp.json's prose: enough to choose by, not a page per hit.
+IO_MAX_CHARS, IO_MAX_ITEMS, CAPABILITIES_MAX = 120, 4, 8
+
+
+def _agent_fields(mcp: dict[str, Any]) -> dict[str, Any]:
+    """The fields of an index.mcp.json entry that help choose a template, capped."""
+    io = mcp.get("io") if isinstance(mcp.get("io"), dict) else {}
+    caps = mcp.get("capabilities") if isinstance(mcp.get("capabilities"), dict) else {}
+
+    def text(key: str) -> str | None:
+        return mcp[key] if isinstance(mcp.get(key), str) else None
+
+    def prose(items: Any) -> list[str] | None:
+        return [_capped(s, IO_MAX_CHARS) for s in _strings(items)[:IO_MAX_ITEMS]] or None
+
+    return {
+        "task": text("task"),
+        "inputs": prose(io.get("inputs")),
+        "outputs": prose(io.get("outputs")),
+        "capabilities": _strings(caps.get("workflow"))[:CAPABILITIES_MAX] or None,
+        "recommend": text("recommend"),
+        "freshness": text("freshness"),
+    }
+
+
+def _hit_fields(
+    template: dict[str, Any],
+    category: dict[str, Any],
+    description_limit: int | None,
+    mcp: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    description = next(
+        (d for d in ((mcp or {}).get("description"), template.get("description")) if isinstance(d, str)), None
+    )
+    if description:
+        description = _capped(description, description_limit)
+    return {
+        **(_agent_fields(mcp) if mcp else {}),
         "name": template["name"],
         "title": str(template.get("title") or template["name"]),
         "description": description,
@@ -898,12 +961,34 @@ def _hit_fields(template: dict[str, Any], category: dict[str, Any], description_
     }
 
 
-def _template_fields(template: dict[str, Any], category: dict[str, Any]) -> tuple[tuple[int, str], ...]:
-    """The searchable text, weighted: the title and name 3, tags and model families 2, the rest 1."""
+def _template_fields(
+    template: dict[str, Any], category: dict[str, Any], mcp: dict[str, Any] | None = None
+) -> tuple[tuple[int, str], ...]:
+    """The searchable text, weighted: the title and name 3; tags, model families, and index.mcp.json's task,
+    model and capabilities 2; the rest, with index.mcp.json's description and io prose, 1."""
+    mcp = mcp or {}
+    io = mcp.get("io") if isinstance(mcp.get("io"), dict) else {}
+    caps = mcp.get("capabilities") if isinstance(mcp.get("capabilities"), dict) else {}
     fields = (
         (3, f"{template.get('title', '')} {template['name'].replace('_', ' ')}"),
-        (2, " ".join(_strings(template.get("tags")) + _strings(template.get("models")))),
-        (1, f"{template.get('description', '')} {category.get('title', '')} {category.get('category', '')}"),
+        (
+            2,
+            " ".join(
+                _strings(template.get("tags"))
+                + _strings(template.get("models"))
+                + [str(mcp.get("task") or ""), str(mcp.get("model") or "")]
+                + _strings(caps.get("workflow"))
+            ),
+        ),
+        (
+            1,
+            " ".join(
+                [str(template.get("description", "")), str(mcp.get("description") or "")]
+                + _strings(io.get("inputs"))
+                + _strings(io.get("outputs"))
+                + [str(category.get("title", "")), str(category.get("category", ""))]
+            ),
+        ),
     )
     return tuple((weight, str(text).lower()) for weight, text in fields)
 
@@ -937,6 +1022,10 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
         """Find ComfyUI workflow templates (the ones the ComfyUI frontend's template browser offers) for a goal,
         by title, description, tags and model family, and check each hit against the live instance.
 
+        When ComfyUI serves its agent index (/templates/index.mcp.json; v0.37.0 does), the search
+        also reads each template's task, inputs and outputs, and capabilities, and a hit carries them, with the
+        index's recommend and freshness, to choose by; source.index says which index answered.
+
         Each hit's runnability lists what this instance is missing for it: node classes, declared models (with
         their folder and source URL), models that are on disk only under another path, input files its loaders
         name, and partner-API nodes. runnable is true only when none of those is found; it does not validate the
@@ -946,11 +1035,16 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
         words = _words(query)
         if not words:
             raise _invalid_query(query)
-        index, object_info, source = await asyncio.gather(
-            relay.comfyui.templates_index(), relay.comfyui.object_info(), _source(relay.comfyui)
+        index, mcp_index, object_info, source = await asyncio.gather(
+            relay.comfyui.templates_index(),
+            relay.comfyui.templates_mcp_index(),
+            relay.comfyui.object_info(),
+            _source(relay.comfyui),
         )
         _checked_object_info(object_info)
-        entries = [(t, c, _template_fields(t, c)) for t, c in _index_entries(index)]
+        mcp = _mcp_entries(mcp_index)
+        source["index"] = "index.json" if mcp_index is None else "index.mcp.json"
+        entries = [(t, c, _template_fields(t, c, mcp.get(t["name"]))) for t, c in _index_entries(index)]
         rarity = {
             w: math.log((len(entries) + 1) / (1 + sum(any(w in text for _, text in f) for _, _, f in entries))) + 1
             for w in set(words)
@@ -970,7 +1064,7 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
         workflows = await _gather_limited(lambda t=t: relay.comfyui.template(t["name"]) for _, t, _ in top)
         folders = await _folder_files(relay.comfyui, workflows)
         results = [
-            TemplateHit(**_hit_fields(t, c, 240), runnability=_runnability(w, object_info, folders))
+            TemplateHit(**_hit_fields(t, c, 240, mcp.get(t["name"])), runnability=_runnability(w, object_info, folders))
             for (_, t, c), w in zip(top, workflows, strict=True)
         ]
         if not include_partner_api:
