@@ -452,6 +452,32 @@ def check_t2_refuse() -> str:
 T3_DIR = HERE / "tasks" / "T3"
 
 
+def derived_answers(task: str) -> Path:
+    """Where a run's derived answers go: under RESULTS, never into the checkout."""
+    return RESULTS / f"{task}.answers.json"
+
+
+def answers_for(task: str) -> dict:
+    """The answers a check scores against: this run's derived ones, else the committed file."""
+    p = derived_answers(task)
+    return json.loads((p if p.exists() else HERE / "tasks" / task / "answers.json").read_text())["answers"]
+
+
+def write_derived(task: str, out: dict) -> None:
+    """Keep the derived answers under RESULTS, and say when they differ from the committed
+    tasks/<task>/answers.json: that difference is the signal that a bump moved an answer."""
+    p = derived_answers(task)
+    p.write_text(json.dumps(out, indent=2) + "\n")
+    committed = json.loads((HERE / "tasks" / task / "answers.json").read_text())["answers"]
+    moved = sorted(k for k in set(committed) | set(out["answers"]) if committed.get(k) != out["answers"].get(k))
+    if moved:
+        print(
+            f"{task}: derived answers differ from the committed tasks/{task}/answers.json at {', '.join(moved)}; "
+            f"to accept them: cp {p} tasks/{task}/answers.json",
+            file=sys.stderr,
+        )
+
+
 def t3_lookup(info: dict, q: dict) -> object:
     node = info[q["node"]]
     if q["kind"] == "output_types":
@@ -487,7 +513,7 @@ def cmd_derive_t3() -> None:
         },
         "answers": answers,
     }
-    (T3_DIR / "answers.json").write_text(json.dumps(out, indent=2) + "\n")
+    write_derived("T3", out)
     print(json.dumps(answers))
 
 
@@ -519,7 +545,7 @@ def check_t3() -> str:
     questions = {
         q["id"]: q for q in json.loads((T3_DIR / "questions.json").read_text())
     }
-    want = json.loads((T3_DIR / "answers.json").read_text())["answers"]
+    want = answers_for("T3")
     p = WORKSPACE / "results" / "T3.json"
     if not p.exists():
         raise CheckFailed(f"{p} not written")
@@ -562,7 +588,7 @@ def t6_norm(value: object, q: dict) -> str:
 
 
 def cmd_derive_t6(image: str = "") -> None:
-    """Copy the index out of the relay image and derive answers.json from it:
+    """Copy the index out of the relay image and derive the answers from it:
     each answer is what the question's pattern captures in its page."""
     image = image or os.environ.get("COMFYRELAY_IMAGE", "comfyrelay:latest")
     cid = subprocess.check_output(["docker", "create", image]).decode().strip()
@@ -583,13 +609,13 @@ def cmd_derive_t6(image: str = "") -> None:
         answers[q["id"]] = {"answer": m.group(1), "path": q["path"]}
     # What the answers depend on: the sources' versions. Not the local image id, which changes on every build.
     out = {"derived_from": {"sources": {s["name"]: s["version"] for s in meta["sources"]}}, "answers": answers}
-    (T6_DIR / "answers.json").write_text(json.dumps(out, indent=2) + "\n")
+    write_derived("T6", out)
     print(json.dumps(answers))
 
 
 def check_t6() -> str:
     questions = {q["id"]: q for q in json.loads((T6_DIR / "questions.json").read_text())}
-    want = json.loads((T6_DIR / "answers.json").read_text())["answers"]
+    want = answers_for("T6")
     if not T6_DOCS.exists():
         raise CheckFailed(f"{T6_DOCS} missing; run tasks/T6/derive.sh")
     p = WORKSPACE / "results" / "T6.json"
@@ -633,7 +659,8 @@ T5_SCALE = 2
 T5_INPUT_SIZE = (512, 384)
 # A template's declared output media type -> the /history output key it saves under.
 T5_KINDS = {"image": "images"}
-# Nodes that exist only in the frontend, as the relay's runnability check skips them.
+# Nodes that exist only in the frontend, which a graph in API format drops; the
+# relay's runnability check skips the same ones.
 FRONTEND_ONLY = {"Note", "MarkdownNote", "Reroute", "PrimitiveNode"}
 
 
@@ -646,19 +673,43 @@ def t5_candidates(index: dict) -> list[str]:
     return sorted(n for n, t in index.items() if T5_TAG in (t.get("tags") or []))
 
 
-def t5_template_classes(name: str) -> set[str]:
-    """Every node class the template's workflow holds, top level and inside subgraphs."""
+def t5_template_nodes(name: str) -> list[dict]:
+    """The template's nodes that run: top level and inside subgraphs, without
+    subgraph instances, frontend-only nodes, or muted (2) and bypassed (4) ones."""
     wf = get(f"/templates/{name}.json")
     subgraphs = (wf.get("definitions") or {}).get("subgraphs") or []  # type: ignore[union-attr]
     nodes = wf.get("nodes", []) + [n for sg in subgraphs for n in sg.get("nodes", [])]  # type: ignore[union-attr]
-    return {n.get("type") for n in nodes} - {sg.get("id") for sg in subgraphs} - FRONTEND_ONLY
+    skip = FRONTEND_ONLY | {sg.get("id") for sg in subgraphs}
+    return [n for n in nodes if n.get("type") not in skip and n.get("mode") not in (2, 4)]
 
 
-def png_size(path: Path) -> tuple[int, int]:
-    blob = path.read_bytes()[:24]
-    if blob[:8] != b"\x89PNG\r\n\x1a\n" or blob[12:16] != b"IHDR":
-        raise CheckFailed(f"{path.name} is not a PNG")
-    return struct.unpack(">II", blob[16:24])
+def is_link(value: object) -> bool:
+    return isinstance(value, list) and len(value) == 2 and isinstance(value[0], str) and isinstance(value[1], int)
+
+
+def widget_values(node: dict) -> list:
+    w = node.get("widgets_values") or []
+    return list(w.values()) if isinstance(w, dict) else list(w)
+
+
+def t5_same_graph(g: dict, nodes: list[dict]) -> str | None:
+    """Why the job's graph isn't the template's, or None. Every class the template
+    runs must be in the job, the job may run no other class, and each job node's
+    set values (every input that isn't a link) must be widget values of a template
+    node of its class: the template's upscale method, factor and file prefix."""
+    by_class: dict[str, list[list]] = {}
+    for n in nodes:
+        by_class.setdefault(n["type"], []).append(widget_values(n))
+    ran = {n.get("class_type") for n in g.values()}
+    if ran - set(by_class):
+        return f"runs {sorted(map(str, ran - set(by_class)))}, which the template doesn't have"
+    if set(by_class) - ran:
+        return f"leaves out the template's {sorted(set(by_class) - ran)}"
+    for nid, n in sorted(g.items()):
+        values = {k: v for k, v in (n.get("inputs") or {}).items() if not is_link(v)}
+        if not any(all(v in w for v in values.values()) for w in by_class[n["class_type"]]):
+            return f"sets {n['class_type']} {nid} to {values}, not the template's {by_class[n['class_type']]}"
+    return None
 
 
 def relay_call(tool: str, args: dict) -> dict:
@@ -683,6 +734,10 @@ def relay_call(tool: str, args: dict) -> dict:
     return json.loads(text)
 
 
+def runnability(name: str) -> dict:
+    return relay_call("template_get", {"name": name, "include_workflow": False}).get("runnability") or {}
+
+
 def cmd_setup_t5() -> None:
     """Give every template for the goal the input images it names, as stand-ins.
     core-cpu has no models, so which of them can run is then down to models,
@@ -700,6 +755,11 @@ def cmd_setup_t5() -> None:
             if i.get("nodeType") == "LoadImage" and i.get("file")
         }
     )
+    if not files:
+        sys.exit(
+            f"no template tagged {T5_TAG!r} names a LoadImage input in /templates/index.json (io.inputs); "
+            "has the index format changed?"
+        )
     for f in files:
         p = (root / f).resolve()
         if root not in p.parents:
@@ -724,7 +784,8 @@ def check_t5() -> str:
         raise CheckFailed(f"T5.json is not a JSON object: {type(rep).__name__}")
     name, job = rep.get("template"), str(rep.get("job_id"))
     index = t5_index()
-    if name not in t5_candidates(index):
+    candidates = t5_candidates(index)
+    if name not in candidates:
         raise CheckFailed(f"template {name!r} is not one /templates/index.json tags {T5_TAG!r}")
 
     # What happened, from ComfyUI's own /history.
@@ -734,14 +795,10 @@ def check_t5() -> str:
     if not completed(entry):
         raise CheckFailed(f"{job[:8]} did not complete successfully ({(entry.get('status') or {}).get('status_str')})")
     g = graph(entry)
-    extra = class_types(entry) - t5_template_classes(name)
-    if extra:
-        raise CheckFailed(f"{job[:8]} ran nodes {sorted(extra)} that {name} doesn't have")
+    why = t5_same_graph(g, t5_template_nodes(name))
+    if why:
+        raise CheckFailed(f"{job[:8]} is not {name} as the template is: it {why}")
     io = index[name].get("io") or {}
-    want_inputs = {i["file"] for i in io.get("inputs", []) if i.get("nodeType") == "LoadImage"}
-    loaded = {(n.get("inputs") or {}).get("image") for n in g.values() if n.get("class_type") == "LoadImage"}
-    if loaded - want_inputs:
-        raise CheckFailed(f"{job[:8]} loads {sorted(map(str, loaded - want_inputs))}, not {name}'s {sorted(want_inputs)}")
     # Each output the template declares saved a file of its media type, and the goal's size.
     saved = []
     for o in io.get("outputs") or []:
@@ -765,20 +822,101 @@ def check_t5() -> str:
         path = output_path(f)
         if not path.is_file():
             raise CheckFailed(f"{path} missing on disk")
-        if png_size(path) != want_size:
-            raise CheckFailed(f"{f['filename']} is {'x'.join(map(str, png_size(path)))}, want {want_size[0]}x{want_size[1]}")
+        size = read_png(path)[:2]
+        if size != want_size:
+            raise CheckFailed(f"{f['filename']} is {size[0]}x{size[1]}, want {want_size[0]}x{want_size[1]}")
     names = {f["filename"] for f in saved}
     reported = rep.get("outputs")
-    if not isinstance(reported, list) or not reported or any(Path(str(r)).name not in names for r in reported):
-        raise CheckFailed(f"report's outputs {reported!r} are not the files {job[:8]} saved: {sorted(names)}")
+    if not isinstance(reported, list) or {Path(str(r)).name for r in reported} != names:
+        raise CheckFailed(f"report's outputs {reported!r} are not the files {job[:8]} saved to output/: {sorted(names)}")
 
-    # The relay's runnability check must agree with what happened: the run succeeded.
-    runnable = (relay_call("template_get", {"name": name, "include_workflow": False}).get("runnability") or {})
-    if runnable.get("runnable") is not True:
-        raise CheckFailed(f"{job[:8]} succeeded, but comfyrelay says {name} is not runnable: {json.dumps(runnable)}")
+    # The relay's runnability check must agree with what happened: the run succeeded...
+    ran = runnability(name)
+    if ran.get("runnable") is not True:
+        raise CheckFailed(f"{job[:8]} succeeded, but comfyrelay says {name} is not runnable: {json.dumps(ran)}")
     if rep.get("runnable") is not True:
         raise CheckFailed(f"report says runnable={rep.get('runnable')!r}; comfyrelay says true")
-    return f"{name} is runnable per comfyrelay, and {job[:8]} completed: {len(saved)} {want_size[0]}x{want_size[1]} PNG"
+    # ...and a candidate that declares a model (none is on disk) must not be runnable.
+    needs_model = next(
+        (
+            n
+            for n in candidates
+            if index[n].get("openSource") is not False
+            and any((m.get("properties") or {}).get("models") for m in t5_template_nodes(n))
+        ),
+        None,
+    )
+    if needs_model is None:
+        raise CheckFailed("no candidate declares a model, so the runnability check can't be tested both ways")
+    other = runnability(needs_model)
+    if other.get("runnable") is not False or not other.get("missing_models"):
+        raise CheckFailed(f"comfyrelay says {needs_model}, whose model isn't on disk, is runnable: {json.dumps(other)}")
+    return (
+        f"{name} is runnable per comfyrelay and {job[:8]} completed as the template is: "
+        f"{len(saved)} {want_size[0]}x{want_size[1]} PNG; {needs_model} is not runnable (missing models)"
+    )
+
+
+# --- External-agent mode (external.sh) -------------------------------------------
+
+AGENT_PREAMBLE = """\
+You are being evaluated on a task against a ComfyUI instance. Your only way to reach it is
+the comfyrelay MCP server below. Nothing enforces these rules, so they are on you:
+
+- Use only that server. Don't call ComfyUI or any other URL, don't use other MCP servers
+  or tools that reach the network, and don't install or download anything.
+- Work in {workspace}, and write only to its results/ directory. Don't read anything
+  outside it, and in particular nothing from the repository's tests/agent-tasks/.
+- Send the token straight from its file on every request, and never print it, echo it, or
+  write it anywhere: -H "Authorization: Bearer $(cat {token_file})".
+
+The server speaks MCP (protocol version 2025-06-18) as JSON-RPC 2.0 over streamable HTTP:
+one POST per message to {url}, with the headers
+  Content-Type: application/json
+  Accept: application/json, text/event-stream
+  Authorization: Bearer <the token, read from the file as above>
+1. POST {{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-06-18","capabilities":{{}},"clientInfo":{{"name":"agent","version":"0"}}}}}}.
+   The response has an Mcp-Session-Id header (curl -D - shows it). Send it as a header,
+   Mcp-Session-Id: <id>, on every later request.
+2. POST {{"jsonrpc":"2.0","method":"notifications/initialized"}} (no id; the answer is empty).
+3. POST {{"jsonrpc":"2.0","id":2,"method":"tools/list"}} to see the tools and their input schemas.
+4. POST {{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"<tool>","arguments":{{...}}}}}}.
+   The tool's answer is JSON text in result.content[].text; result.isError true means it failed.
+A response may be a server-sent event stream: the JSON-RPC message is on the "data:" line
+whose id matches your request. curl or a short stdlib Python client both work. Big
+arguments are easier from a file (curl --data @file.json).
+
+The task follows. Paths in it are relative to {workspace}.
+"""
+
+
+def cmd_handoff(task: str, token_file: str, probe_json: str) -> None:
+    """Write the brief (the preamble, then the task's prompt) into the workspace as
+    TASK.md, and the handoff to RESULTS/<task>.handoff.json; print both. The agent
+    is never pointed at tasks/, which holds the answers."""
+    url = f"http://127.0.0.1:{os.environ['COMFYRELAY_PORT']}/mcp"
+    prompt = (HERE / "tasks" / task / "prompt.md").read_text()
+    brief = AGENT_PREAMBLE.format(workspace=WORKSPACE, token_file=token_file, url=url) + "\n" + prompt
+    brief_file = WORKSPACE / "TASK.md"
+    brief_file.write_text(brief)
+    handoff = {
+        "task": task,
+        "brief_file": str(brief_file),
+        "brief": brief,
+        "mcp": {"server": "comfyrelay", "url": url, "token_file": token_file},
+        "workspace": str(WORKSPACE),
+        "results_dir": str(WORKSPACE / "results"),
+        "relay_tools": json.loads(probe_json)["tools"],
+        "confinement": "by instruction only: nothing stops the agent using other tools; see README",
+        "check": f"./external.sh check {task}",
+        "started": int(time.time()),
+    }
+    out = RESULTS / f"{task}.handoff.json"
+    out.write_text(json.dumps(handoff, indent=2) + "\n")
+    print(f"== {task} is ready for an external agent. Give it the brief below, verbatim (also {brief_file}),")
+    print(f"== with {WORKSPACE} as its working directory. Then: ./external.sh check {task}")
+    print(f"== handoff: {out}\n")
+    print(brief)
 
 
 T4_WORKFLOW = {
@@ -885,6 +1023,7 @@ COMMANDS = {
     "setup-t2-refuse": cmd_setup_t2_refuse,
     "setup-t4": cmd_setup_t4,
     "setup-t5": cmd_setup_t5,
+    "handoff": cmd_handoff,
     "check": cmd_check,
 }
 

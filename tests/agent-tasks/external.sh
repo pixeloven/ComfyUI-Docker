@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 # Run a task against comfyrelay with an agent the harness doesn't launch: a
-# subagent of the lead session, given only the relay's tools. Three commands,
-# so the lead can dispatch the agent between them:
+# subagent of the lead session. Three commands, so the lead can dispatch the
+# agent between them:
 #
 #   ./external.sh up <task>       boot core-cpu if it isn't running (up.sh, then
 #                                 groundtruth.sh), reset the task (its setup.sh),
-#                                 start comfyrelay, and write and print the
-#                                 handoff: results/<task>.handoff.json
+#                                 start comfyrelay, and print the brief to give the
+#                                 agent: a preamble (endpoint, token file, MCP steps,
+#                                 rules), then the task's prompt. Also written to
+#                                 <workspace>/TASK.md and results/<task>.handoff.json
 #   (the agent does the task, and writes its results under the workspace)
-#   ./external.sh check <task>    run the task's check.sh, append a row with mode
-#                                 "external" to results/scorecard.csv, exit 0 on PASS
+#   ./external.sh check <task>    run the task's check.sh, append a scorecard row with
+#                                 mode "external (not sandboxed)", exit 0 on PASS
 #   ./external.sh down [--purge]  stop ComfyUI and the relay (down.sh)
 #
 # Tasks: T1, T2-refuse, T3, T4, T5, T6. `up` can be repeated for the next task
 # on the same instance; each one restarts the relay.
+#
+# Nothing confines the agent: it is told to use only the relay. The confined,
+# blind run is `claude -p` (HARNESS_RUN=1 ./run.sh).
 #
 # The images: HARNESS_IMAGE (core-cpu, default the local build from build.sh;
 # e.g. ghcr.io/pixeloven/comfyui/core:cpu-latest) and COMFYRELAY_IMAGE (default
@@ -24,7 +29,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
@@ -39,7 +44,17 @@ case "$cmd" in
 esac
 
 if [ "$cmd" = up ]; then
-  if [ "$(docker inspect -f '{{.State.Running}}' "$HARNESS_CONTAINER" 2>/dev/null)" != true ]; then
+  if [ "$(docker inspect -f '{{.State.Running}}' "$HARNESS_CONTAINER" 2>/dev/null)" = true ]; then
+    # Reuse it only if it is the instance this run describes.
+    image="$(docker inspect -f '{{.Config.Image}}' "$HARNESS_CONTAINER")"
+    data="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/user"}}{{.Source}}{{end}}{{end}}' "$HARNESS_CONTAINER")"
+    want_data="$(realpath -m "$HARNESS_DATA/user")"
+    if [ "$image" != "$HARNESS_IMAGE" ] || [ "$(realpath -m "$data")" != "$want_data" ]; then
+      echo "$HARNESS_CONTAINER is running $image with $data; this run wants $HARNESS_IMAGE with $want_data." >&2
+      echo "Run ./external.sh down first, or set HARNESS_CONTAINER for a separate run." >&2
+      exit 1
+    fi
+  else
     "$HARNESS_DIR/up.sh" >/dev/null
     "$HARNESS_DIR/groundtruth.sh" >/dev/null
   fi
@@ -51,38 +66,7 @@ if [ "$cmd" = up ]; then
   token_file="$RESULTS/.comfyrelay-token"
   [ "$(cat "$token_file" 2>/dev/null)" = "$COMFYRELAY_MCP_TOKEN" ] \
     || (umask 077; printf '%s\n' "$COMFYRELAY_MCP_TOKEN" > "$token_file")
-  probe="$(python3 "$HARNESS_DIR/servers/probe.py" "$HARNESS_DIR/servers/comfyrelay.json")"
-  python3 - "$handoff" "$task" "$HARNESS_DIR/tasks/$task/prompt.md" "$token_file" "$HARNESS_DATA/workspace" "$probe" <<'EOF'
-import json, os, sys, time
-out, task, prompt, token_file, workspace, probe = sys.argv[1:]
-url = f"http://127.0.0.1:{os.environ['COMFYRELAY_PORT']}/mcp"
-tools = [f"mcp__comfyrelay__{t}" for t in json.loads(probe)["tools"]]
-handoff = {
-    "task": task,
-    "prompt_file": prompt,
-    "prompt": open(prompt).read(),
-    "mcp": {"server": "comfyrelay", "transport": "http", "url": url, "token_file": token_file,
-            "header": "Authorization: Bearer <the token file's contents>"},
-    "workspace": workspace,
-    "results_dir": os.path.join(workspace, "results"),
-    "allowed_tools": tools,
-    "file_tools": "Read and Write, inside the workspace only; no Bash or network",
-    "check": f"./external.sh check {task}",
-    "started": int(time.time()),
-}
-with open(out, "w") as f:
-    json.dump(handoff, f, indent=2)
-print(f"""== {task} is ready for an external agent
-prompt:     {prompt}
-mcp:        comfyrelay, streamable HTTP at {url}
-            header Authorization: Bearer <contents of {token_file}>
-workspace:  {workspace}
-            the agent's working directory: paths in the prompt are relative to it
-tools:      {', '.join(tools)}
-            plus Read and Write inside the workspace; nothing else
-then:       ./external.sh check {task}
-handoff:    {out}""")
-EOF
+  hpy handoff "$task" "$token_file" "$(python3 "$HARNESS_DIR/servers/probe.py" "$HARNESS_DIR/servers/comfyrelay.json")"
   exit 0
 fi
 
@@ -99,5 +83,5 @@ echo "$detail"
 # Keep what the agent wrote beside the other runs' files.
 mkdir -p "$RESULTS/runs/comfyrelay-$task.files"
 cp -r "$HARNESS_DATA/workspace/results/." "$RESULTS/runs/comfyrelay-$task.files/" 2>/dev/null || true
-append_score comfyrelay "$task" "$verdict" "$detail" "$elapsed" external ""
+append_score comfyrelay "$task" "$verdict" "$detail" "$elapsed" "external (not sandboxed)" ""
 exit "$rc"

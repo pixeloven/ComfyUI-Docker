@@ -4,7 +4,7 @@
 set -euo pipefail
 . "$(dirname "$0")/../../lib.sh"
 mkdir -p "$HARNESS_DATA/workspace/results"
-rm -f "$HARNESS_DATA/workspace/results/T3.json"
+rm -f "$HARNESS_DATA/workspace/results/T3.json" "$RESULTS/T3.answers.json"
 if [ -f "$RESULTS/object_info.json" ]; then
   "$HARNESS_DIR/tasks/T3/derive.sh" >/dev/null
 else

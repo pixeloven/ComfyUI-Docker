@@ -13,6 +13,9 @@ HARNESS_CONTAINER="${HARNESS_CONTAINER:-comfyui-harness}"
 # Scratch data volumes. Outside the repo by default, so nothing an agent
 # writes can end up in a commit.
 HARNESS_DATA="${HARNESS_DATA:-${TMPDIR:-/tmp}/comfyui-harness}"
+# The volume directories up.sh creates under it, and down.sh --purge removes.
+# shellcheck disable=SC2034 # used by up.sh and down.sh
+HARNESS_VOLUMES="custom_nodes datasets input models output temp user"
 COMFY_PORT="${COMFY_PORT:-8188}"
 COMFY_URL="${COMFY_URL:-http://127.0.0.1:$COMFY_PORT}"
 COMFYRELAY_PORT="${COMFYRELAY_PORT:-9200}"
