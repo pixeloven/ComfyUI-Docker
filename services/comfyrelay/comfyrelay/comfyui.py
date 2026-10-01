@@ -172,6 +172,15 @@ class ComfyUIClient:
             raise self._bad_shape("/templates/index.json", "an array of categories with a templates array")
         return data
 
+    async def templates_mcp_index(self) -> list[dict[str, Any]]:
+        """GET /templates/index.mcp.json: the index the templates package writes for agents (v0.37.0 serves it),
+        with each template's task, io, capabilities and recommend, in index.json's shape."""
+        path = "/templates/index.mcp.json"
+        data = await self._get_json(path, expect=list)
+        if not all(isinstance(c, dict) and isinstance(c.get("templates", []), list) for c in data):
+            raise self._bad_shape(path, "an array of categories with a templates array")
+        return data
+
     async def template(self, name: str) -> dict[str, Any]:
         """GET /templates/<name>.json: one template's workflow, in the frontend's (UI) format."""
         path = f"/templates/{quote(name, safe='')}.json"

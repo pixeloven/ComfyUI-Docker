@@ -3,6 +3,7 @@ node_describe, model_list, template_search and template_get."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx2
@@ -337,13 +338,14 @@ def routes(**overrides) -> dict[str, httpx2.Response]:
 
 
 async def call(tool: str, args: dict, **overrides):
-    """Call `tool`; unknown /object_info/<class> answers {} as ComfyUI does."""
+    """Call `tool`; unknown /object_info/<class> answers {} as ComfyUI does. An override may be an async function
+    that answers, or raises, in place of a response."""
     table = routes(**overrides)
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
+    async def handler(request: httpx2.Request) -> httpx2.Response:
         path = request.url.raw_path.decode()
         if path in table:
-            return table[path]
+            return await table[path]() if callable(table[path]) else table[path]
         if path.startswith("/object_info/"):
             return httpx2.Response(200, json={})
         return httpx2.Response(404)
@@ -756,6 +758,100 @@ async def test_template_search_drops_hits_whose_graph_uses_partner_api_nodes():
     assert (got["hidden_partner_api"], got["total_matches"]) == (1, 1)
     shown = await ok("template_search", {"query": "restore", "include_partner_api": True})
     assert [h["name"] for h in shown["results"]] == ["restore_cloud", "restore_photo"]
+
+
+MCP_INDEX = [
+    {
+        "category": "Video",
+        "templates": [
+            {
+                "name": "video_wan",
+                "task": "Image to Video",
+                "description": "Animate a still.",
+                "io": {"inputs": ["image: The first frame"], "outputs": ["video: The clip"]},
+                "capabilities": {"workflow": ["image-to-video"], "model_options": {"Node": ["a", "b"]}},
+                "recommend": "high",
+                "freshness": "recent",
+            },
+            # The index.json flags it openSource: false.
+            {"name": "api_dalle", "task": "Text to Image"},
+        ],
+    }
+]
+MCP_PATH = "/templates/index.mcp.json"
+
+
+async def test_template_search_reads_the_agent_index_when_comfyui_serves_it():
+    mcp = {MCP_PATH: httpx2.Response(200, json=MCP_INDEX)}
+    # "still" is only in index.mcp.json's text.
+    got = await ok("template_search", {"query": "animate a still"}, **mcp)
+    assert got["source"]["index"] == "index.mcp.json"
+    (hit,) = got["results"]
+    assert {k: hit[k] for k in ("name", "task", "inputs", "outputs", "capabilities", "recommend", "freshness")} == {
+        "name": "video_wan",
+        "task": "Image to Video",
+        "inputs": ["image: The first frame"],
+        "outputs": ["video: The clip"],
+        "capabilities": ["image-to-video"],
+        "recommend": "high",
+        "freshness": "recent",
+    }
+    # A template the agent index doesn't list is still found, from index.json alone.
+    other = await ok("template_search", {"query": "SD1.5"}, **mcp)
+    assert other["results"][0]["name"] == "sd15_simple" and "task" not in other["results"][0]
+    # The agent index has no openSource flag, so listing a partner-API template there doesn't unhide it.
+    assert (await ok("template_search", {"query": "dall"}, **mcp))["results"] == []
+
+
+async def test_template_search_caps_every_string_the_agent_index_gives():
+    huge = "z" * 10_000
+    entry = {
+        "name": "video_wan",
+        "task": huge,
+        "recommend": huge,
+        "freshness": huge,
+        "description": huge,
+        "io": {"inputs": [huge] * 50, "outputs": [huge] * 50},
+        "capabilities": {"workflow": [huge] * 50},
+    }
+    got = await ok(
+        "template_search", {"query": "wan"}, **{MCP_PATH: httpx2.Response(200, json=[{"templates": [entry]}])}
+    )
+    (hit,) = got["results"]
+    assert len(hit["description"]) == 240
+    assert len(hit["inputs"]) == len(hit["outputs"]) == 4 and len(hit["capabilities"]) == 8
+    assert {len(s) for s in hit["inputs"] + hit["outputs"]} == {120}
+    assert {len(s) for s in [hit["task"], hit["recommend"], hit["freshness"], *hit["capabilities"]]} == {40}
+
+
+async def _stall() -> httpx2.Response:
+    await asyncio.sleep(60)
+    raise AssertionError("the agent index was waited for")
+
+
+async def _read_timeout() -> httpx2.Response:
+    raise httpx2.ReadTimeout("slow")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx2.Response(404),
+        httpx2.Response(500),
+        httpx2.Response(200, text="<html></html>"),
+        httpx2.Response(200, json={"no": "list"}),
+        httpx2.Response(200, json=[{"templates": [{"name": "not_in_index_json", "task": "x"}]}]),
+        _read_timeout,
+        _stall,
+    ],
+    ids=["missing", "server-error", "not-json", "wrong-shape", "nothing-joined", "read-timeout", "stalled"],
+)
+async def test_template_search_falls_back_to_index_json(answer, monkeypatch):
+    monkeypatch.setattr(tools_introspection, "AGENT_INDEX_SECONDS", 0.2)
+    got = await ok("template_search", {"query": "wan"}, **{MCP_PATH: answer})
+    assert got["source"]["index"] == "index.json"
+    (hit,) = got["results"]
+    assert hit["name"] == "video_wan" and "task" not in hit
 
 
 @pytest.mark.parametrize("tool", ["node_search", "template_search"])
