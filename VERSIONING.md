@@ -130,6 +130,8 @@ git commit -am "release 1.2.3"
 git tag v1.2.3 && git push --tags
 ```
 
+Before tagging, the lead session runs agent tasks T1–T6 against comfyrelay and posts the scores on the release PR: see [`tests/agent-tasks/README.md`](tests/agent-tasks/README.md) → *Before each release*.
+
 A release rebuilds every image rather than reusing digests. It is ~60 minutes
 and it happens rarely; the alternative is a release whose images came from a
 different commit than its wheel.

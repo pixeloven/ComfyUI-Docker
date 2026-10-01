@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-RESULTS = HERE / "results"
+RESULTS = Path(os.environ.get("HARNESS_RESULTS") or HERE / "results")
 COMFY_URL = os.environ.get("COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
 DATA = Path(os.environ.get("HARNESS_DATA", "/tmp/comfyui-harness"))
 # The agent's working directory. Its file tools are confined to it, so it
@@ -625,6 +625,162 @@ def check_t6() -> str:
     return detail
 
 
+# T5 (#103): choose a template for a goal, and run it. The goal, in
+# tasks/T5/prompt.md, is an image at twice its width and height; the templates
+# for it are the ones ComfyUI's own index tags with T5_TAG.
+T5_TAG = "Image Upscale"
+T5_SCALE = 2
+T5_INPUT_SIZE = (512, 384)
+# A template's declared output media type -> the /history output key it saves under.
+T5_KINDS = {"image": "images"}
+# Nodes that exist only in the frontend, as the relay's runnability check skips them.
+FRONTEND_ONLY = {"Note", "MarkdownNote", "Reroute", "PrimitiveNode"}
+
+
+def t5_index() -> dict:
+    """The templates ComfyUI serves, by name, from the same /templates/index.json the relay reads."""
+    return {t["name"]: t for cat in get("/templates/index.json") for t in cat.get("templates", [])}  # type: ignore[union-attr]
+
+
+def t5_candidates(index: dict) -> list[str]:
+    return sorted(n for n, t in index.items() if T5_TAG in (t.get("tags") or []))
+
+
+def t5_template_classes(name: str) -> set[str]:
+    """Every node class the template's workflow holds, top level and inside subgraphs."""
+    wf = get(f"/templates/{name}.json")
+    subgraphs = (wf.get("definitions") or {}).get("subgraphs") or []  # type: ignore[union-attr]
+    nodes = wf.get("nodes", []) + [n for sg in subgraphs for n in sg.get("nodes", [])]  # type: ignore[union-attr]
+    return {n.get("type") for n in nodes} - {sg.get("id") for sg in subgraphs} - FRONTEND_ONLY
+
+
+def png_size(path: Path) -> tuple[int, int]:
+    blob = path.read_bytes()[:24]
+    if blob[:8] != b"\x89PNG\r\n\x1a\n" or blob[12:16] != b"IHDR":
+        raise CheckFailed(f"{path.name} is not a PNG")
+    return struct.unpack(">II", blob[16:24])
+
+
+def relay_call(tool: str, args: dict) -> dict:
+    """Call one comfyrelay tool as an agent would, through servers/comfyrelay.json."""
+    sys.path.insert(0, str(HERE / "servers"))
+    import probe  # noqa: PLC0415  (the harness's own MCP client)
+
+    cfg = probe.expand(json.loads((HERE / "servers" / "comfyrelay.json").read_text())["mcpServers"]["comfyrelay"])
+    conn = probe.Http(cfg)
+    try:
+        conn.send(probe.INIT)
+        conn.send(probe.INITIALIZED)
+        reply = conn.send(
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": tool, "arguments": args}}
+        )
+    except (OSError, RuntimeError, ValueError) as e:
+        raise CheckFailed(f"comfyrelay did not answer {tool} at {cfg['url']}: {e}") from e
+    result = reply.get("result") or {}
+    text = "".join(c.get("text", "") for c in result.get("content", []))
+    if "error" in reply or result.get("isError"):
+        raise CheckFailed(f"comfyrelay {tool} failed: {text[:300] or reply.get('error')}")
+    return json.loads(text)
+
+
+def cmd_setup_t5() -> None:
+    """Give every template for the goal the input images it names, as stand-ins.
+    core-cpu has no models, so which of them can run is then down to models,
+    nodes and partner APIs: what the relay's runnability check is about."""
+    index = t5_index()
+    candidates = t5_candidates(index)
+    if not candidates:
+        sys.exit(f"no template in /templates/index.json is tagged {T5_TAG!r}")
+    root = (DATA / "input").resolve()
+    files = sorted(
+        {
+            i["file"]
+            for n in candidates
+            for i in (index[n].get("io") or {}).get("inputs", [])
+            if i.get("nodeType") == "LoadImage" and i.get("file")
+        }
+    )
+    for f in files:
+        p = (root / f).resolve()
+        if root not in p.parents:
+            sys.exit(f"refusing an input outside {root}: {f!r}")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        write_png(p, *T5_INPUT_SIZE)
+    mark("T5")
+    (WORKSPACE / "results").mkdir(parents=True, exist_ok=True)
+    (WORKSPACE / "results" / "T5.json").unlink(missing_ok=True)
+    print(f"{len(candidates)} templates tagged {T5_TAG!r}; {len(files)} stand-in inputs in {root}")
+
+
+def check_t5() -> str:
+    p = WORKSPACE / "results" / "T5.json"
+    if not p.exists():
+        raise CheckFailed(f"{p} not written")
+    try:
+        rep = json.loads(p.read_text())
+    except ValueError as e:
+        raise CheckFailed(f"T5.json is not JSON: {e}") from e
+    if not isinstance(rep, dict):
+        raise CheckFailed(f"T5.json is not a JSON object: {type(rep).__name__}")
+    name, job = rep.get("template"), str(rep.get("job_id"))
+    index = t5_index()
+    if name not in t5_candidates(index):
+        raise CheckFailed(f"template {name!r} is not one /templates/index.json tags {T5_TAG!r}")
+
+    # What happened, from ComfyUI's own /history.
+    entry = new_entries("T5").get(job)
+    if entry is None:
+        raise CheckFailed(f"job_id {job!r} is not a /history entry new since setup")
+    if not completed(entry):
+        raise CheckFailed(f"{job[:8]} did not complete successfully ({(entry.get('status') or {}).get('status_str')})")
+    g = graph(entry)
+    extra = class_types(entry) - t5_template_classes(name)
+    if extra:
+        raise CheckFailed(f"{job[:8]} ran nodes {sorted(extra)} that {name} doesn't have")
+    io = index[name].get("io") or {}
+    want_inputs = {i["file"] for i in io.get("inputs", []) if i.get("nodeType") == "LoadImage"}
+    loaded = {(n.get("inputs") or {}).get("image") for n in g.values() if n.get("class_type") == "LoadImage"}
+    if loaded - want_inputs:
+        raise CheckFailed(f"{job[:8]} loads {sorted(map(str, loaded - want_inputs))}, not {name}'s {sorted(want_inputs)}")
+    # Each output the template declares saved a file of its media type, and the goal's size.
+    saved = []
+    for o in io.get("outputs") or []:
+        kind = T5_KINDS.get(o.get("mediaType"))
+        if kind is None:
+            raise CheckFailed(f"{name} declares a {o.get('mediaType')!r} output, which T5 doesn't check")
+        files = [
+            f
+            for nid, n in g.items()
+            if n.get("class_type") == o.get("nodeType")
+            for f in entry.get("outputs", {}).get(nid, {}).get(kind, [])
+            if f.get("type") == "output"
+        ]
+        if not files:
+            raise CheckFailed(f"{job[:8]} has no {o.get('nodeType')} that saved {kind}")
+        saved += files
+    if not saved:
+        raise CheckFailed(f"{name} declares no outputs in /templates/index.json")
+    want_size = (T5_INPUT_SIZE[0] * T5_SCALE, T5_INPUT_SIZE[1] * T5_SCALE)
+    for f in saved:
+        path = output_path(f)
+        if not path.is_file():
+            raise CheckFailed(f"{path} missing on disk")
+        if png_size(path) != want_size:
+            raise CheckFailed(f"{f['filename']} is {'x'.join(map(str, png_size(path)))}, want {want_size[0]}x{want_size[1]}")
+    names = {f["filename"] for f in saved}
+    reported = rep.get("outputs")
+    if not isinstance(reported, list) or not reported or any(Path(str(r)).name not in names for r in reported):
+        raise CheckFailed(f"report's outputs {reported!r} are not the files {job[:8]} saved: {sorted(names)}")
+
+    # The relay's runnability check must agree with what happened: the run succeeded.
+    runnable = (relay_call("template_get", {"name": name, "include_workflow": False}).get("runnability") or {})
+    if runnable.get("runnable") is not True:
+        raise CheckFailed(f"{job[:8]} succeeded, but comfyrelay says {name} is not runnable: {json.dumps(runnable)}")
+    if rep.get("runnable") is not True:
+        raise CheckFailed(f"report says runnable={rep.get('runnable')!r}; comfyrelay says true")
+    return f"{name} is runnable per comfyrelay, and {job[:8]} completed: {len(saved)} {want_size[0]}x{want_size[1]} PNG"
+
+
 T4_WORKFLOW = {
     # LoadImage's second output (index 1) is a MASK; SaveImage wants an IMAGE.
     "1": {"class_type": "LoadImage", "inputs": {"image": INPUT_IMAGE}},
@@ -706,6 +862,7 @@ CHECKS = {
     "t2-refuse": check_t2_refuse,
     "t3": check_t3,
     "t4": check_t4,
+    "t5": check_t5,
     "t6": check_t6,
 }
 
@@ -727,6 +884,7 @@ COMMANDS = {
     "derive-t6": cmd_derive_t6,
     "setup-t2-refuse": cmd_setup_t2_refuse,
     "setup-t4": cmd_setup_t4,
+    "setup-t5": cmd_setup_t5,
     "check": cmd_check,
 }
 

@@ -15,10 +15,17 @@ HARNESS_CONTAINER="${HARNESS_CONTAINER:-comfyui-harness}"
 HARNESS_DATA="${HARNESS_DATA:-${TMPDIR:-/tmp}/comfyui-harness}"
 COMFY_PORT="${COMFY_PORT:-8188}"
 COMFY_URL="${COMFY_URL:-http://127.0.0.1:$COMFY_PORT}"
-export COMFY_URL HARNESS_DATA
+COMFYRELAY_PORT="${COMFYRELAY_PORT:-9200}"
+export COMFY_URL HARNESS_DATA COMFYRELAY_PORT
 
-RESULTS="$HARNESS_DIR/results"
+# Markers, tokens, the scorecard and transcripts. Two runs at once on one host
+# each need their own HARNESS_RESULTS, as well as their own HARNESS_CONTAINER,
+# COMFY_PORT, COMFYRELAY_PORT and HARNESS_DATA.
+RESULTS="${HARNESS_RESULTS:-$HARNESS_DIR/results}"
 mkdir -p "$RESULTS"
+RESULTS="$(cd "$RESULTS" && pwd)"
+HARNESS_RESULTS="$RESULTS"
+export HARNESS_RESULTS
 
 # artokun's HTTP transport needs a bearer token. servers/artokun.json reads it
 # as ${ARTOKUN_MCP_TOKEN}, and servers/artokun.sh hands the same value to the
@@ -57,3 +64,38 @@ wait_ready() {
 
 # The stdlib-only Python helper that the setup and check scripts share.
 hpy() { python3 "$HARNESS_DIR/harness.py" "$@"; }
+
+# Reset a task. Run it before the server starts: T2's reset restarts ComfyUI,
+# and the server should meet the instance the agent will use. The workspace is
+# emptied too, so an agent never sees files an earlier run left behind; setup
+# then places this task's inputs.
+prepare_task() {
+  rm -rf "$HARNESS_DATA/workspace"
+  mkdir -p "$HARNESS_DATA/workspace/results" "$RESULTS/runs"
+  "$HARNESS_DIR/tasks/$1/setup.sh"
+}
+
+# Append a row to results/scorecard.csv:
+#   append_score <server> <task> <pass|fail> <detail> <seconds> <mode> <transcript or "">
+# cost_usd_notional is what claude reports; on a subscription it is plan quota,
+# not a charge.
+append_score() {
+  local sc="$RESULTS/scorecard.csv"
+  [ -s "$sc" ] || echo "timestamp,server,task,result,detail,seconds,mode,turns,cost_usd_notional" > "$sc"
+  python3 - "$sc" "$@" <<'EOF'
+import csv, json, sys
+from datetime import datetime, timezone
+path, *row, transcript = sys.argv[1:]
+turns = cost = ""
+if transcript:
+    try:
+        for line in open(transcript):
+            if line.startswith("{") and '"type":"result"' in line.replace(" ", ""):
+                r = json.loads(line)
+                turns, cost = r.get("num_turns", ""), r.get("total_cost_usd", "")
+    except (OSError, ValueError):
+        pass
+with open(path, "a", newline="") as f:
+    csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), *row, turns, cost])
+EOF
+}
