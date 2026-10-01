@@ -171,6 +171,14 @@ These carry forward what was still true of the retired spec-kit constitution (v1
    nightly is what follows upstream. No automation bounds how far the stable pin
    lags: it sat five weeks behind before 2.3.0.
 
+## comfyrelay tool rules
+
+Each rule below was a review finding at least once:
+
+- **Delegate to ComfyUI; don't copy it.** Read the live API (`/object_info`, `/prompt`, `/docs`, `/templates`) instead of re-implementing its checks or bundling what it already serves. The local validator that wrongly refused a valid graph (#145) is why. Tests cover our behaviour, not ComfyUI's.
+- **Optional enrichment never fails the main call.** A fetch that only adds detail to a tool's answer, such as node help (#163) or the agent template index (#164), has a short total time bound. Any failure or timeout drops the detail and leaves the answer as it would have been without it.
+- **Cap everything that comes from ComfyUI's data** before it reaches an agent: strings, lists and bodies (help is 64 KB at most, and search fields have fixed widths). Treat ComfyUI's data as untrusted input.
+
 ## Verification commands
 
 These match what CI runs:
