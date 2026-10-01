@@ -79,13 +79,15 @@ jobs:
             - 'locks/**'
             - 'services/fetch/comfyfetch/schemas/**'
           # The comfyrelay image installs all three workspace members from the
-          # one lock, so a change to any of them can break it.
+          # one lock, so a change to any of them can break it. It also indexes
+          # the guides in skills/ into its docs index (#134).
           relay:
             - 'services/comfyrelay/**'
             - 'services/comfyctl/**'
             - 'services/fetch/**'
             - 'services/pyproject.toml'
             - 'services/uv.lock'
+            - 'skills/**'
             - 'tests/relay/**'
             - 'docker-bake.hcl'
             - '.github/workflows/ci.yml'

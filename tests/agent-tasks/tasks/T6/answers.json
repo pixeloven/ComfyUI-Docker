@@ -1,0 +1,26 @@
+{
+  "derived_from": {
+    "sources": {
+      "docs.comfy.org": "efb8fdd3de17027da633eb9c12e80fbbeb993a19",
+      "guides": "4.0.1"
+    }
+  },
+  "answers": {
+    "q1": {
+      "answer": "lastGroupid",
+      "path": "specs/workflow_json.mdx"
+    },
+    "q2": {
+      "answer": "/workflow_templates",
+      "path": "development/comfyui-server/comms_routes.mdx"
+    },
+    "q3": {
+      "answer": "job_not_held",
+      "path": "skills/comfyui-workflows/references/relay-limits.md"
+    },
+    "q4": {
+      "answer": "512-inpainting-ema.safetensors",
+      "path": "tutorials/basic/inpaint.mdx"
+    }
+  }
+}

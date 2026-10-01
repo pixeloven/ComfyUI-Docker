@@ -17,6 +17,9 @@
     COMFYUI_VERSION         the ComfyUI version the image was built for. The
                             image sets it from the bake pin, as the ComfyUI
                             images do; nobody else needs to.
+    COMFYUI_MCP_DOCS        the docs index docs_search and docs_guide read
+                            (default /opt/docs/docs.sqlite, where the image
+                            builds it); without one those tools say so
 
 The token and ComfyUI variables are the ones the `mcp` image already reads, so
 a deployment keeps its environment when comfyrelay replaces the server in that
@@ -37,6 +40,8 @@ TOKEN_ENV = "COMFYUI_MCP_HTTP_TOKEN"
 PROFILES_ENV = "COMFYUI_MCP_PROFILES"
 INSTANCE_ID_ENV = "COMFYUI_MCP_INSTANCE_ID"
 MAX_JOBS_ENV = "COMFYUI_MCP_MAX_JOBS"
+DOCS_ENV = "COMFYUI_MCP_DOCS"
+DEFAULT_DOCS = "/opt/docs/docs.sqlite"
 DEFAULT_MAX_JOBS = 16
 DEFAULT_COMFYUI_URL = "http://localhost:8188"
 DEFAULT_HOST = "0.0.0.0"
@@ -150,6 +155,7 @@ class Settings:
     instance_id_source: Literal["env", "hostname"] = "env"
     comfyui_pin: str | None = None
     max_jobs: int = DEFAULT_MAX_JOBS
+    docs_path: str = DEFAULT_DOCS
 
     @classmethod
     def load(
@@ -190,4 +196,5 @@ class Settings:
             instance_id_source="env" if instance_id else "hostname",
             comfyui_pin=env.get("COMFYUI_VERSION", "").strip() or None,
             max_jobs=max_jobs,
+            docs_path=env.get(DOCS_ENV, "").strip() or DEFAULT_DOCS,
         )

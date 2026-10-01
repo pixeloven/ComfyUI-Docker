@@ -45,6 +45,21 @@ variable "COMFYUI_VERSION" {
     default = "v0.37.0"
 }
 
+variable "COMFY_DOCS_SHA" {
+    // The Comfy-Org/docs commit the comfyrelay image indexes for docs_search
+    // (#134): the source of docs.comfy.org, GPL-3.0, recorded in the image's
+    // NOTICE and in the index. The repo has no tags, so it is pinned by full
+    // commit SHA and bumped by PR, like any supply-chain pin. It tracks the
+    // latest ComfyUI, not COMFYUI_VERSION, and docs_search says so.
+    //
+    // A bump must name a commit on Comfy-Org/docs `main` (an ancestor of its
+    // tip): GitHub serves any commit in the repo's fork network by SHA, so a
+    // SHA from someone's fork would fetch just as well. Check it with the
+    // compare API: gh api repos/Comfy-Org/docs/compare/<sha>...main reports
+    // "ahead" or "identical" for a commit on main.
+    default = "efb8fdd3de17027da633eb9c12e80fbbeb993a19"
+}
+
 variable "IMAGE_VERSION" {
     // OUR packaging version for the ComfyUI image family, from the VERSION file.
     // Distinct from COMFYUI_VERSION, which is what is INSIDE the image -- the
@@ -386,13 +401,19 @@ group "fetch" {
 //     under a release (IMAGE_LABEL=4.0.1) it is `comfyrelay:4.0.1`, which the
 //     release's `:X.Y.Z` digest filter would match if the target were in `all`.
 // The context is the uv workspace root, so the image installs services/uv.lock.
+// The guides the docs index covers (skills/comfyui-workflows/, #134) come in
+// as the `skills` named context, since skills/ is outside that root.
 target "comfyrelay" {
     context = "services"
     dockerfile = "comfyrelay/dockerfile.comfy.relay"
+    contexts = {
+        skills = "skills"
+    }
     platforms = PLATFORMS
     tags = ["comfyrelay:${IMAGE_LABEL}"]
     args = {
         COMFYUI_VERSION = COMFYUI_VERSION
+        COMFY_DOCS_SHA = COMFY_DOCS_SHA
     }
 }
 

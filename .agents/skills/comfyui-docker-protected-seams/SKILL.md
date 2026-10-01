@@ -82,7 +82,10 @@ registry is what they check against.
   `comfyui-mcp` at an exact version, and every package under it with an integrity
   hash), the `sam2` commit in `extra-requirements.txt`, the base-image tags and
   digests in `services/*/dockerfile.*` (and `services/comfyrelay/dockerfile.comfy.relay`,
-  including its `ghcr.io/astral-sh/uv` build stage), comfyrelay's exact `mcp==` pin
+  including its `ghcr.io/astral-sh/uv` build stage), `COMFY_DOCS_SHA` in
+  `docker-bake.hcl` (the Comfy-Org/docs commit the relay's docs index covers:
+  GPL-3.0 content, pinned by full SHA and bumped by PR, #134; a bump must be a commit on
+  Comfy-Org/docs `main`, because GitHub serves any SHA in the fork network), comfyrelay's exact `mcp==` pin
   and `services/uv.lock`, which its image installs as written, action versions in workflows, and in
   `services/mcp/dockerfile.comfy.mcp`: `npm ci --ignore-scripts`, the optional
   dependencies it removes, and the hardening `ENV` (`COMFYUI_MCP_ENV_FILE`,

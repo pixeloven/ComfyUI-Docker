@@ -73,6 +73,29 @@ class ComfyUIClient:
         path = "/object_info" if node_class is None else f"/object_info/{quote(node_class, safe='')}"
         return await self._get_json(path)
 
+    async def markdown(self, path: str, limit: int) -> tuple[str, bool] | None:
+        """GET a markdown file ComfyUI serves, such as a node's help page, reading at most `limit` bytes: (text,
+        truncated). None when it has none: HTTP 404, or an HTML page in its place (what the frontend also treats
+        as missing). Any other failure is a ComfyUIError."""
+        try:
+            async with self._http.stream("GET", path, headers={"Accept": "text/markdown, text/plain, */*"}) as response:
+                if response.status_code == 404:
+                    return None
+                self._raise_for_status(response, path)
+                if "text/html" in response.headers.get("content-type", ""):
+                    return None
+                chunks, size = [], 0
+                async for chunk in response.aiter_bytes():
+                    chunks.append(chunk)
+                    size += len(chunk)
+                    if size > limit:
+                        break
+        except httpx2.RequestError as exc:
+            raise self._transport_error(exc, path) from exc
+        truncated = size > limit
+        # aiohttp serves .md as octet-stream, with no charset. A cut can split a character: drop that one.
+        return b"".join(chunks)[:limit].decode("utf-8", errors="ignore" if truncated else "replace"), truncated
+
     def _bad_shape(self, path: str, expected: str) -> ComfyUIError:
         return ComfyUIError(
             "comfyui_bad_response", f"ComfyUI answered {self._shown_url}{path} with JSON that is not {expected}"

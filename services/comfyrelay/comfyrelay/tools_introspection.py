@@ -4,7 +4,9 @@ Every answer comes from the live ComfyUI this relay serves, through
 `ComfyUIClient`, so it matches what that instance will actually accept:
 
     node_search      /object_info, ranked for a query
-    node_describe    /object_info/<class>, rendered as a full input/output spec
+    node_describe    /object_info/<class>, rendered as a full input/output spec,
+                     with the node's help page (/docs/<class>/en.md, or the
+                     pack's own under /extensions/<pack>/docs/) when it has one
     model_list       /models and /models/<folder>
     template_search  /templates/index.json, plus a runnability check per hit
     template_get     /templates/<name>.json, plus the same check
@@ -35,6 +37,7 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, Literal
+from urllib.parse import quote
 
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field, model_serializer
@@ -71,6 +74,8 @@ INACTIVE_MODES = frozenset({2, 4})
 # names the whole models root, so it would list every model a second time.
 NOT_MODEL_FOLDERS = frozenset({"custom_nodes", "download_model_base"})
 FETCH_CONCURRENCY = 8
+# A node's help page is read up to this many bytes. The longest in comfyui-embedded-docs 0.5.12 is about 11 KB.
+HELP_MAX_BYTES = 64 * 1024
 # Never sent as a path segment: /object_info/.. or /models/. would be
 # normalised to another route.
 DOT_SEGMENTS = frozenset({".", ".."})
@@ -304,9 +309,45 @@ class NodeSpec(_Compact):
     inputs: list[InputSpec] = Field(description="Required inputs first, then optional ones, in the node's order")
     hidden_inputs: list[str] | None = Field(default=None, description="Filled in by ComfyUI, never by a workflow")
     outputs: list[OutputSpec]
+    help: str | None = Field(
+        default=None,
+        description="The node's help page (English markdown), as ComfyUI serves it to the editor; absent when it "
+        "has none",
+    )
+    help_path: str | None = Field(default=None, description="Where on ComfyUI the help page came from")
+    help_truncated: bool | None = Field(
+        default=None, description=f"true: the help page is longer than {HELP_MAX_BYTES} bytes, and help is its start"
+    )
 
 
 AutogrowSpec.model_rebuild()
+
+
+def _help_paths(class_type: str, info: dict[str, Any]) -> list[str]:
+    """Where ComfyUI serves a node's English help, in the order the editor tries them (ComfyUI frontend 1.52,
+    NodeHelpService): a custom node's pack serves its own under /extensions/<pack>/docs/, per locale and then
+    locale-free; ComfyUI's own nodes' come from comfyui-embedded-docs at /docs/<class>/<locale>.md."""
+    name = quote(class_type, safe="")
+    module = str(info.get("python_module") or "").split(".")
+    if module[0] == "custom_nodes":
+        if len(module) < 2 or not module[1]:
+            return []
+        pack = quote(module[1].split("@")[0], safe="")
+        return [f"/extensions/{pack}/docs/{name}/en.md", f"/extensions/{pack}/docs/{name}.md"]
+    return [f"/docs/{name}/en.md"]
+
+
+async def _help(comfyui: ComfyUIClient, class_type: str, info: dict[str, Any]) -> tuple[str, str, bool] | None:
+    """The first help page ComfyUI has for the node: (text, path, truncated). A page it can't serve, for whatever
+    reason, is no help page, as in the editor (tryFetchMarkdown): it never fails node_describe."""
+    for path in _help_paths(class_type, info):
+        try:
+            found = await comfyui.markdown(path, HELP_MAX_BYTES)
+        except ComfyUIError:
+            continue
+        if found is not None:
+            return found[0], path, found[1]
+    return None
 
 
 def _number(value: Any) -> int | float | None:
@@ -481,13 +522,18 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
         each input's `name` as the key in a graph: inputs added by a dynamic input are fully qualified with dots
         (a COMFY_DYNAMICCOMBO_V3 `resize_type` set to an option adds `resize_type.width`; a COMFY_AUTOGROW_V3
         `images` takes `images.image0`, `images.image1`, ...). Long lists are cut to max_options, with a total.
+        `help` is the node's help page, the markdown the editor shows for it, when ComfyUI has one.
         An unknown class fails with `unknown_node_class` and a `suggestions` list of close class names.
         """
         found = {} if class_type in DOT_SEGMENTS else await relay.comfyui.object_info(class_type)
         if class_type in found:
             if not isinstance(found[class_type], dict):
                 raise _bad(f"an /object_info/{class_type} that is not an object")
-            return _spec(class_type, found[class_type], max_options)
+            spec = _spec(class_type, found[class_type], max_options)
+            page = await _help(relay.comfyui, class_type, found[class_type])
+            if page:
+                spec.help, spec.help_path, spec.help_truncated = page[0], page[1], page[2] or None
+            return spec
         if found:
             raise _bad(f"an /object_info/{class_type} that describes other classes")
         every = _checked_object_info(await relay.comfyui.object_info())

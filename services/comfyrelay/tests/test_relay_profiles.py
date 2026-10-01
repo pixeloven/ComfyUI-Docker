@@ -53,7 +53,15 @@ async def listed(profiles: tuple[str, ...]) -> tuple[set[str], Client]:
     return names, missing
 
 
-READ_TOOLS = {"node_search", "node_describe", "model_list", "template_search", "template_get"}
+READ_TOOLS = {
+    "node_search",
+    "node_describe",
+    "model_list",
+    "template_search",
+    "template_get",
+    "docs_search",
+    "docs_guide",
+}
 RUN_TOOLS = {
     "job_status",
     "job_cancel",

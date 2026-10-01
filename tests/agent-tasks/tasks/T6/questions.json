@@ -1,0 +1,14 @@
+[
+  {"id": "q1", "path": "specs/workflow_json.mdx", "case_sensitive": true,
+   "pattern": "\"(lastGroup[A-Za-z]*)\"",
+   "text": "In the ComfyUI workflow JSON schema, version 1.0, what is the exact name of the property of `state` that records the last group id? Spelling and letter case matter."},
+  {"id": "q2", "path": "development/comfyui-server/comms_routes.mdx", "optional_prefix": "/",
+   "pattern": "`(/[\\w/{}]+)`\\s*\\|\\s*get\\s*\\|\\s*retrieve a map of custom node modules",
+   "text": "Which GET route of the ComfyUI server returns a map of custom node modules and the template workflows associated with them?"},
+  {"id": "q3", "path": "skills/comfyui-workflows/references/relay-limits.md",
+   "pattern": "`job_cancel` refuses a run the relay doesn't hold, with `(\\w+)`",
+   "text": "What error code does the comfyrelay sidecar's job_cancel return for a workflow run the relay doesn't hold, such as one submitted before the relay restarted?"},
+  {"id": "q4", "path": "tutorials/basic/inpaint.mdx",
+   "pattern": "Ensure `Load Checkpoint` loads `([^`]+)`",
+   "text": "In docs.comfy.org's basic inpainting tutorial, which checkpoint file does the Load Checkpoint node load?"}
+]
