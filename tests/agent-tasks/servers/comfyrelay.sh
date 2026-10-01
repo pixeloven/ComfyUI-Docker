@@ -10,7 +10,7 @@
 #
 # It runs as the image ships it, hardened the way tests/relay/run.sh runs it:
 # an arbitrary UID, a read-only root filesystem, no-new-privileges. The bearer
-# token is COMFYRELAY_MCP_TOKEN (lib.sh makes one per checkout), and it binds
+# token is COMFYRELAY_MCP_TOKEN (lib.sh keeps one per HARNESS_DATA), and it binds
 # loopback only, so under --network host nothing else on the network reaches
 # it. COMFYUI_MCP_PROFILES is the image default (read,run) unless set.
 set -euo pipefail
@@ -27,6 +27,11 @@ case "${1:-}" in
       echo "no image $IMAGE; build it with: docker buildx bake comfyrelay --load" >&2
       exit 1
     }
+    # Under --network host a second server on the port would answer for us.
+    if [ "$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/mcp" || true)" != "000" ]; then
+      echo "something already answers on 127.0.0.1:$PORT; set COMFYRELAY_PORT to a free port" >&2
+      exit 1
+    fi
     profiles=()
     [ -n "${COMFYUI_MCP_PROFILES:-}" ] && profiles=(-e COMFYUI_MCP_PROFILES="$COMFYUI_MCP_PROFILES")
     docker run -d --name "$NAME" --network host \
@@ -39,9 +44,9 @@ case "${1:-}" in
       "$IMAGE" >/dev/null
     for _ in $(seq 60); do
       # Any HTTP answer from /mcp (a 401 without the token) means it is listening.
-      code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/mcp" || true)"
-      [ "$code" != "000" ] && exit 0
+      code="$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/mcp" || true)"
       [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = true ] || break
+      [ "$code" != "000" ] && exit 0
       sleep 1
     done
     echo "comfyrelay did not listen on :$PORT" >&2

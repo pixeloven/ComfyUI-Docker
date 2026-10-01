@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Regenerate answers.json from the ground-truth dump (results/object_info.json).
-# answers.json is derived, never hand-edited. A diff after a ComfyUI bump is the
-# signal that a default moved.
+# Derive the answers from the ground-truth dump (results/object_info.json) into
+# results/T3.answers.json, which the check scores against. The committed
+# answers.json is derived too, never hand-edited, and this never writes it: it
+# reports a difference instead, the signal that a ComfyUI bump moved a default.
 set -euo pipefail
 . "$(dirname "$0")/../../lib.sh"
 hpy derive-t3

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Stop the harness instance and any MCP server it started. Keeps results/.
-# `./down.sh --purge` also deletes the scratch data directory.
+# `./down.sh --purge` also deletes the scratch data the harness created: the
+# directories listed in $HARNESS_DATA/.harness-created (volume directories
+# up.sh made, and the agent workspace) and the relay's token, then
+# $HARNESS_DATA if that leaves it empty. A directory the harness found rather
+# than made, such as a real models/ mounted on purpose, is never removed.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
@@ -11,6 +15,15 @@ docker rm -f "$HARNESS_CONTAINER" >/dev/null 2>&1 || true
 
 if [ "${1:-}" = "--purge" ]; then
   # Files ComfyUI wrote are owned by $(id -u), so no sudo is needed.
-  rm -rf "$HARNESS_DATA"
-  echo "removed $HARNESS_DATA"
+  for d in $HARNESS_VOLUMES workspace; do
+    [ -e "$HARNESS_DATA/$d" ] || continue
+    if grep -qxF "$d" "$HARNESS_CREATED" 2>/dev/null; then
+      rm -rf "${HARNESS_DATA:?}/$d"
+    else
+      echo "not removing $HARNESS_DATA/$d: the harness didn't create it" >&2
+    fi
+  done
+  rm -f "$HARNESS_CREATED" "$COMFYRELAY_TOKEN_FILE"
+  rmdir "$HARNESS_DATA" 2>/dev/null || true
+  echo "removed what the harness created in $HARNESS_DATA"
 fi

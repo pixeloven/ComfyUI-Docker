@@ -16,8 +16,8 @@ if curl -fsS -o /dev/null "$COMFY_URL/system_stats" 2>/dev/null; then
 fi
 docker image inspect "$HARNESS_IMAGE" >/dev/null 2>&1 || "$HARNESS_DIR/build.sh"
 
-for d in custom_nodes datasets input models output temp user; do
-  mkdir -p "$HARNESS_DATA/$d"
+for d in $HARNESS_VOLUMES; do
+  [ -d "$HARNESS_DATA/$d" ] || { mkdir -p "$HARNESS_DATA/$d"; created_by_harness "$d"; }
 done
 
 # PUID/PGID follow the invoking user, so the scratch files stay removable.

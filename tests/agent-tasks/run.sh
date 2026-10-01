@@ -42,13 +42,8 @@ fi
 prompt="$HARNESS_DIR/tasks/$task/prompt.md"
 [ -f "$prompt" ] || { echo "no task $task" >&2; exit 2; }
 
-# Reset first: T2's reset restarts ComfyUI, and the server should meet the
-# instance the agent will use. The workspace is emptied too, so an agent never
-# sees files an earlier run left behind; setup then places this task's inputs.
 workspace="$HARNESS_DATA/workspace"
-rm -rf "$workspace"
-mkdir -p "$workspace/results" "$RESULTS/runs"
-"$HARNESS_DIR/tasks/$task/setup.sh"
+prepare_task "$task"
 start_server
 
 # Read and Write only: no Bash, so the agent cannot curl ComfyUI around the
@@ -96,24 +91,4 @@ rc=$?
 set -e
 verdict=$([ "$rc" = 0 ] && echo pass || echo fail)
 echo "$detail"
-
-sc="$RESULTS/scorecard.csv"
-# cost_usd_notional is what claude reports; on a subscription it is plan quota,
-# not a charge.
-[ -s "$sc" ] || echo "timestamp,server,task,result,detail,seconds,mode,turns,cost_usd_notional" > "$sc"
-python3 - "$sc" "$server" "$task" "$verdict" "$detail" "$elapsed" "$mode" "${transcript:-}" <<'EOF'
-import csv, json, sys
-from datetime import datetime, timezone
-path, *row, transcript = sys.argv[1:]
-turns = cost = ""
-if transcript:
-    try:
-        for line in open(transcript):
-            if line.startswith("{") and '"type":"result"' in line.replace(" ", ""):
-                r = json.loads(line)
-                turns, cost = r.get("num_turns", ""), r.get("total_cost_usd", "")
-    except (OSError, ValueError):
-        pass
-with open(path, "a", newline="") as f:
-    csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), *row, turns, cost])
-EOF
+append_score "$server" "$task" "$verdict" "$detail" "$elapsed" "$mode" "${transcript:-}"

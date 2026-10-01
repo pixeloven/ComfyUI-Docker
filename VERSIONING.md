@@ -119,6 +119,8 @@ Adding is never major: a new env var, volume, profile, or image is a minor.
 
 ## Releasing
 
+Before tagging, the lead session runs agent tasks T1–T6 against comfyrelay and posts the scores on the release PR: see [`tests/agent-tasks/README.md`](tests/agent-tasks/README.md) → *Before each release*.
+
 ```sh
 echo 1.2.3 > VERSION
 # match it in services/fetch/pyproject.toml, services/comfyctl/pyproject.toml (version
