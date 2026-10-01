@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.request
 import zlib
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -463,19 +464,28 @@ def answers_for(task: str) -> dict:
     return json.loads((p if p.exists() else HERE / "tasks" / task / "answers.json").read_text())["answers"]
 
 
-def write_derived(task: str, out: dict) -> None:
-    """Keep the derived answers under RESULTS, and say when they differ from the committed
-    tasks/<task>/answers.json: that difference is the signal that a bump moved an answer."""
+def drift(task: str) -> str:
+    """Where this run's derived answers differ from the committed tasks/<task>/answers.json,
+    as a note for the check's detail line, or "": the signal that a bump moved an answer."""
     p = derived_answers(task)
-    p.write_text(json.dumps(out, indent=2) + "\n")
+    if not p.exists():
+        return ""
+    derived = json.loads(p.read_text())["answers"]
     committed = json.loads((HERE / "tasks" / task / "answers.json").read_text())["answers"]
-    moved = sorted(k for k in set(committed) | set(out["answers"]) if committed.get(k) != out["answers"].get(k))
-    if moved:
-        print(
-            f"{task}: derived answers differ from the committed tasks/{task}/answers.json at {', '.join(moved)}; "
-            f"to accept them: cp {p} tasks/{task}/answers.json",
-            file=sys.stderr,
-        )
+    moved = sorted(k for k in set(committed) | set(derived) if committed.get(k) != derived.get(k))
+    if not moved:
+        return ""
+    return (
+        f"; ANSWER DRIFT: derived answers differ from the committed tasks/{task}/answers.json at "
+        f"{', '.join(moved)} (to accept them: cp {p} tasks/{task}/answers.json)"
+    )
+
+
+def write_derived(task: str, out: dict) -> None:
+    """Keep the derived answers under RESULTS, and report any drift from the committed file."""
+    derived_answers(task).write_text(json.dumps(out, indent=2) + "\n")
+    if drift(task):
+        print(task + drift(task), file=sys.stderr)
 
 
 def t3_lookup(info: dict, q: dict) -> object:
@@ -560,7 +570,7 @@ def check_t3() -> str:
         if not t3_equal(questions[qid]["kind"], want[qid], got.get(qid))
     ]
     score = len(want) - len(wrong)
-    detail = f"{score}/{len(want)}" + (f"; wrong: {', '.join(wrong)}" if wrong else "")
+    detail = f"{score}/{len(want)}" + (f"; wrong: {', '.join(wrong)}" if wrong else "") + drift("T3")
     if score < 9:
         raise CheckFailed(detail)
     return detail
@@ -645,7 +655,7 @@ def check_t6() -> str:
         elif not found or t6_norm(found.group(1), q) != target:
             wrong.append(f"{qid} (cites {path!r}, which does not give {expected['answer']!r})")
     score = len(want) - len(wrong)
-    detail = f"{score}/{len(want)}" + (f"; wrong: {', '.join(wrong)}" if wrong else "")
+    detail = f"{score}/{len(want)}" + (f"; wrong: {', '.join(wrong)}" if wrong else "") + drift("T6")
     if wrong:
         raise CheckFailed(detail)
     return detail
@@ -693,20 +703,20 @@ def widget_values(node: dict) -> list:
 
 
 def t5_same_graph(g: dict, nodes: list[dict]) -> str | None:
-    """Why the job's graph isn't the template's, or None. Every class the template
-    runs must be in the job, the job may run no other class, and each job node's
-    set values (every input that isn't a link) must be widget values of a template
-    node of its class: the template's upscale method, factor and file prefix."""
+    """Why the job's nodes and settings aren't the template's, or None. The job
+    must run each node class as many times as the template does, and each job
+    node's set values (every input that isn't a link; an empty dict counts as
+    unset) must be widget values of a template node of its class: the template's
+    input file, upscale method, factor and file prefix. Links aren't compared."""
     by_class: dict[str, list[list]] = {}
     for n in nodes:
         by_class.setdefault(n["type"], []).append(widget_values(n))
-    ran = {n.get("class_type") for n in g.values()}
-    if ran - set(by_class):
-        return f"runs {sorted(map(str, ran - set(by_class)))}, which the template doesn't have"
-    if set(by_class) - ran:
-        return f"leaves out the template's {sorted(set(by_class) - ran)}"
+    want = Counter(n["type"] for n in nodes)
+    got = Counter(str(n.get("class_type")) for n in g.values())
+    if got != want:
+        return f"runs {dict(sorted(got.items()))}, where the template runs {dict(sorted(want.items()))}"
     for nid, n in sorted(g.items()):
-        values = {k: v for k, v in (n.get("inputs") or {}).items() if not is_link(v)}
+        values = {k: v for k, v in (n.get("inputs") or {}).items() if not is_link(v) and v != {}}
         if not any(all(v in w for v in values.values()) for w in by_class[n["class_type"]]):
             return f"sets {n['class_type']} {nid} to {values}, not the template's {by_class[n['class_type']]}"
     return None
@@ -797,7 +807,7 @@ def check_t5() -> str:
     g = graph(entry)
     why = t5_same_graph(g, t5_template_nodes(name))
     if why:
-        raise CheckFailed(f"{job[:8]} is not {name} as the template is: it {why}")
+        raise CheckFailed(f"{job[:8]} doesn't have {name}'s nodes and settings: it {why}")
     io = index[name].get("io") or {}
     # Each output the template declares saved a file of its media type, and the goal's size.
     saved = []
@@ -852,7 +862,7 @@ def check_t5() -> str:
     if other.get("runnable") is not False or not other.get("missing_models"):
         raise CheckFailed(f"comfyrelay says {needs_model}, whose model isn't on disk, is runnable: {json.dumps(other)}")
     return (
-        f"{name} is runnable per comfyrelay and {job[:8]} completed as the template is: "
+        f"{name} is runnable per comfyrelay and {job[:8]} completed with its nodes and settings: "
         f"{len(saved)} {want_size[0]}x{want_size[1]} PNG; {needs_model} is not runnable (missing models)"
     )
 
@@ -865,8 +875,12 @@ the comfyrelay MCP server below. Nothing enforces these rules, so they are on yo
 
 - Use only that server. Don't call ComfyUI or any other URL, don't use other MCP servers
   or tools that reach the network, and don't install or download anything.
-- Work in {workspace}, and write only to its results/ directory. Don't read anything
-  outside it, and in particular nothing from the repository's tests/agent-tasks/.
+- Read only two things: the token file below, and your workspace, {workspace}.
+  Nothing else on this machine, the repository included.
+- Your workspace is your working directory. Put scratch files (a client script, saved
+  responses) anywhere in it, and your answers in its results/ directory.
+- If your own tooling saves a large tool result to a file outside the workspace, don't
+  read that file: call the tool again with narrower arguments.
 - Send the token straight from its file on every request, and never print it, echo it, or
   write it anywhere: -H "Authorization: Bearer $(cat {token_file})".
 
@@ -876,8 +890,8 @@ one POST per message to {url}, with the headers
   Accept: application/json, text/event-stream
   Authorization: Bearer <the token, read from the file as above>
 1. POST {{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-06-18","capabilities":{{}},"clientInfo":{{"name":"agent","version":"0"}}}}}}.
-   The response has an Mcp-Session-Id header (curl -D - shows it). Send it as a header,
-   Mcp-Session-Id: <id>, on every later request.
+   The response has an Mcp-Session-Id header (curl -D - shows it). On every later request,
+   also send the headers Mcp-Session-Id: <id> and MCP-Protocol-Version: 2025-06-18.
 2. POST {{"jsonrpc":"2.0","method":"notifications/initialized"}} (no id; the answer is empty).
 3. POST {{"jsonrpc":"2.0","id":2,"method":"tools/list"}} to see the tools and their input schemas.
 4. POST {{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"<tool>","arguments":{{...}}}}}}.

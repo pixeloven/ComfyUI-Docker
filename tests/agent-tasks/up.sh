@@ -17,7 +17,7 @@ fi
 docker image inspect "$HARNESS_IMAGE" >/dev/null 2>&1 || "$HARNESS_DIR/build.sh"
 
 for d in $HARNESS_VOLUMES; do
-  mkdir -p "$HARNESS_DATA/$d"
+  [ -d "$HARNESS_DATA/$d" ] || { mkdir -p "$HARNESS_DATA/$d"; created_by_harness "$d"; }
 done
 
 # PUID/PGID follow the invoking user, so the scratch files stay removable.

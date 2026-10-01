@@ -45,28 +45,35 @@ esac
 
 if [ "$cmd" = up ]; then
   if [ "$(docker inspect -f '{{.State.Running}}' "$HARNESS_CONTAINER" 2>/dev/null)" = true ]; then
-    # Reuse it only if it is the instance this run describes.
-    image="$(docker inspect -f '{{.Config.Image}}' "$HARNESS_CONTAINER")"
+    # Reuse it only if it is the instance this run describes: the same image
+    # (by ID, so a re-pointed tag doesn't match and a digest reference does),
+    # the same data directory, and the same port.
+    image="$(docker inspect -f '{{.Image}}' "$HARNESS_CONTAINER")"
+    want_image="$(docker image inspect -f '{{.Id}}' "$HARNESS_IMAGE" 2>/dev/null || echo "missing")"
     data="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/user"}}{{.Source}}{{end}}{{end}}' "$HARNESS_CONTAINER")"
     want_data="$(realpath -m "$HARNESS_DATA/user")"
-    if [ "$image" != "$HARNESS_IMAGE" ] || [ "$(realpath -m "$data")" != "$want_data" ]; then
-      echo "$HARNESS_CONTAINER is running $image with $data; this run wants $HARNESS_IMAGE with $want_data." >&2
+    port="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$HARNESS_CONTAINER" | sed -n 's/^COMFY_PORT=//p')"
+    if [ "$image" != "$want_image" ] || [ "$(realpath -m "$data")" != "$want_data" ] || [ "$port" != "$COMFY_PORT" ]; then
+      echo "$HARNESS_CONTAINER runs image $image on $data, port $port;" >&2
+      echo "this run wants $HARNESS_IMAGE ($want_image) on $want_data, port $COMFY_PORT." >&2
       echo "Run ./external.sh down first, or set HARNESS_CONTAINER for a separate run." >&2
       exit 1
     fi
   else
     "$HARNESS_DIR/up.sh" >/dev/null
-    "$HARNESS_DIR/groundtruth.sh" >/dev/null
   fi
+  # A fresh HARNESS_RESULTS on a reused instance has no dump yet; T3 needs one.
+  [ -f "$RESULTS/object_info.json" ] || "$HARNESS_DIR/groundtruth.sh" >/dev/null
   rm -f "$handoff"
+  export HARNESS_EXTERNAL=1   # setups that would fall back to committed answers fail instead
   prepare_task "$task"
   "$HARNESS_DIR/servers/comfyrelay.sh" up
 
   # The token may come from the environment; the agent reads it from a file.
-  token_file="$RESULTS/.comfyrelay-token"
-  [ "$(cat "$token_file" 2>/dev/null)" = "$COMFYRELAY_MCP_TOKEN" ] \
-    || (umask 077; printf '%s\n' "$COMFYRELAY_MCP_TOKEN" > "$token_file")
-  hpy handoff "$task" "$token_file" "$(python3 "$HARNESS_DIR/servers/probe.py" "$HARNESS_DIR/servers/comfyrelay.json")"
+  [ "$(cat "$COMFYRELAY_TOKEN_FILE" 2>/dev/null)" = "$COMFYRELAY_MCP_TOKEN" ] \
+    || (umask 077; printf '%s\n' "$COMFYRELAY_MCP_TOKEN" > "$COMFYRELAY_TOKEN_FILE")
+  chmod 600 "$COMFYRELAY_TOKEN_FILE"
+  hpy handoff "$task" "$COMFYRELAY_TOKEN_FILE" "$(python3 "$HARNESS_DIR/servers/probe.py" "$HARNESS_DIR/servers/comfyrelay.json")"
   exit 0
 fi
 
