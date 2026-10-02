@@ -8,7 +8,15 @@ import json
 import time
 
 import pytest
-from comfyrelay.server import LARGE_BODY_BYTES, LargeBodyGate, TokenAuth, build_server, http_app
+from comfyrelay.server import (
+    LARGE_BODY_BYTES,
+    LARGE_BODY_IDLE_SECONDS,
+    LARGE_BODY_TOTAL_SECONDS,
+    LargeBodyGate,
+    TokenAuth,
+    build_server,
+    http_app,
+)
 from comfyrelay.settings import MAX_LARGE_REQUESTS_ENV, TOKEN_ENV, ConfigError, Settings
 from relay_helpers import TOKEN, comfyui_answering, settings
 
@@ -120,8 +128,14 @@ async def test_small_and_bodyless_requests_never_wait(headers):
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "headers",
-    [[(b"transfer-encoding", b"chunked")], [(b"content-length", b"lots")]],
-    ids=["chunked", "unreadable-length"],
+    [
+        [(b"transfer-encoding", b"chunked")],
+        [(b"content-length", b"lots")],
+        # The server reads this body as chunked and ignores the length, so a small length must not let it in.
+        [(b"content-length", b"10"), (b"transfer-encoding", b"chunked")],
+        [(b"transfer-encoding", b"Chunked"), (b"content-length", b"10")],
+    ],
+    ids=["chunked", "unreadable-length", "chunked-with-a-small-length", "chunked-any-case"],
 )
 async def test_a_body_of_unknown_length_counts_as_large(headers):
     app = Held()
@@ -153,6 +167,124 @@ async def test_lifespan_and_other_scopes_pass_straight_through():
 
     await LargeBodyGate(inner, 1)({"type": "lifespan"}, None, None)
     assert reached == ["lifespan"]
+
+
+class Reader:
+    """A transport stand-in that reads the whole body first, as the SDK's body-limit middleware does."""
+
+    def __init__(self) -> None:
+        self.bodies = 0
+
+    async def __call__(self, scope, receive, send):
+        while True:
+            message = await receive()
+            if message["type"] != "http.request" or not message.get("more_body", False):
+                break
+        self.bodies += 1
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+
+async def stalled_request(gate, chunks=1, every=0.0):
+    """A large request that sends `chunks` chunks `every` seconds apart, then never sends the rest."""
+    scope = {"type": "http", "method": "POST", "path": "/mcp", "headers": length(BIG)}
+    sent, count = [], 0
+
+    async def receive():
+        nonlocal count
+        if count < chunks:
+            count += 1
+            await asyncio.sleep(every)
+            return {"type": "http.request", "body": b"x" * 1024, "more_body": True}
+        await asyncio.Event().wait()  # never
+
+    async def send(message):
+        sent.append(message)
+
+    await gate(scope, receive, send)
+    return sent
+
+
+def test_the_body_deadlines_are_named_and_bounded():
+    assert LARGE_BODY_IDLE_SECONDS == 30.0 and LARGE_BODY_TOTAL_SECONDS == 120.0
+
+
+@pytest.mark.anyio
+async def test_a_stalled_body_gets_408_and_its_slot_back():
+    app = Reader()
+    gate = LargeBodyGate(app, 1, wait=5, idle=0.2, total=10)
+    started = time.monotonic()
+    sent = await asyncio.wait_for(stalled_request(gate), 3)
+    assert 0.15 <= time.monotonic() - started < 1.5
+    assert sent[0]["status"] == 408
+    error = json.loads(sent[1]["body"])["error"]
+    assert error["code"] == "request_timeout" and error["retryable"] is True
+    assert len(sent) == 2, "something was sent after the 408"
+    # The slot is free again: the next large request goes straight in.
+    started = time.monotonic()
+    assert (await request(gate, length(BIG)))[0]["status"] == 200
+    assert time.monotonic() - started < 0.5 and app.bodies == 1
+
+
+@pytest.mark.anyio
+async def test_a_body_that_trickles_past_the_total_deadline_gets_408():
+    gate = LargeBodyGate(Reader(), 1, wait=5, idle=1, total=0.3)
+    started = time.monotonic()
+    sent = await asyncio.wait_for(stalled_request(gate, chunks=1000, every=0.05), 3)
+    assert 0.25 <= time.monotonic() - started < 1.5
+    assert sent[0]["status"] == 408
+
+
+@pytest.mark.anyio
+async def test_a_waiting_request_gets_the_slot_a_stalled_one_loses():
+    app = Reader()
+    gate = LargeBodyGate(app, 1, wait=2, idle=0.3, total=10)
+    stalled = asyncio.create_task(stalled_request(gate))
+    await asyncio.sleep(0.05)
+    assert (await request(gate, length(BIG)))[0]["status"] == 200
+    assert (await stalled)[0]["status"] == 408
+
+
+@pytest.mark.anyio
+async def test_a_stalled_body_through_the_sdk_transport_gets_408_not_500():
+    """The real path: the stall is raised inside the SDK's body reader and passes Starlette's error middleware."""
+    s = settings()
+    server, _ = build_server(s, comfyui=comfyui_answering())
+    starlette = server.streamable_http_app(streamable_http_path="/mcp", host=s.host)
+    gate = LargeBodyGate(starlette, 1, idle=0.2)
+    headers = [
+        (b"host", b"127.0.0.1"),
+        (b"content-type", b"application/json"),
+        (b"accept", b"application/json, text/event-stream"),
+    ] + length(BIG)
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/mcp",
+        "raw_path": b"/mcp",
+        "query_string": b"",
+        "headers": headers,
+        "client": ("127.0.0.1", 1),
+        "server": ("127.0.0.1", 9000),
+        "root_path": "",
+    }
+    sent, given = [], []
+
+    async def receive():
+        if not given:
+            given.append(1)
+            return {"type": "http.request", "body": b"{", "more_body": True}
+        await asyncio.Event().wait()
+
+    async def send(message):
+        sent.append(message)
+
+    async with starlette.router.lifespan_context(starlette):
+        await asyncio.wait_for(gate(scope, receive, send), 5)
+    assert [m["status"] for m in sent if m["type"] == "http.response.start"] == [408]
 
 
 def test_the_limit_comes_from_the_environment():

@@ -3,8 +3,10 @@
 The token check is ASGI middleware around the whole app, so it runs before
 the MCP layer parses anything: no route, and no MCP method, is reachable
 without the token. It accepts `Authorization: Bearer <token>` or
-`X-API-Key: <token>`, the two forms the `mcp` image accepted before 5.0.0, and compares
-in constant time. Anything else gets 401. Only two ASGI scopes exist here:
+`X-API-Key: <token>`, the two forms the `mcp` image accepted before 5.0.0: a
+request passes if either header carries the token, so a gateway can send its
+own Bearer and this server's token as X-API-Key. Each is compared in constant
+time. Anything else gets 401. Only two ASGI scopes exist here:
 `http`, behind the token, and `lifespan`, which the server itself sends. Every
 other scope, a websocket included, is refused whatever it carries.
 
@@ -77,6 +79,15 @@ LARGE_BODY_BYTES = 1024 * 1024
 # How long a large request waits for a slot before it gets a retryable 503.
 LARGE_BODY_WAIT_SECONDS = 5.0
 LARGE_BODY_RETRY_AFTER_SECONDS = 2
+# Once it holds a slot, a large request's body must keep arriving: a gap of
+# this long with no chunk, or a body not complete this long after the slot was
+# taken, gets 408 and frees the slot. A client that stalls can't keep a slot.
+LARGE_BODY_IDLE_SECONDS = 30.0
+LARGE_BODY_TOTAL_SECONDS = 120.0
+
+
+class _BodyStalled(Exception):
+    """Raised out of the gate's receive once it has answered 408 for a stalled body."""
 
 
 class LargeBodyGate:
@@ -88,13 +99,18 @@ class LargeBodyGate:
     too late: six maximum-size uploads at once peaked at about 340 MB (#145).
     This sits in front of the transport, behind the token.
 
-    A request is large when its Content-Length is over `threshold`, or when it
-    has a body of unknown length (chunked, or an unreadable Content-Length),
-    since that one's size is only known once it has been read. A large request
-    waits up to `wait` seconds for a slot, then gets 503 with Retry-After and
-    the server's error shape, `retryable: true`. The slot is held until the
-    transport has answered, which covers reading, parsing and the tool call.
-    Anything else, including every request without a body, never waits.
+    A request is large when it is chunked (whatever its Content-Length says:
+    the server reads a chunked body as chunked), when its Content-Length is
+    over `threshold`, or when that length can't be read, since such a body's
+    size is only known once it has been read. A large request waits up to
+    `wait` seconds for a slot, then gets 503 with Retry-After and the server's
+    error shape, `retryable: true`. The slot is held until the transport has
+    answered, which covers reading, parsing and the tool call. Anything else,
+    including every request without a body, never waits.
+
+    While it holds a slot, a large request's body must arrive: no chunk for
+    `idle` seconds, or a body still incomplete `total` seconds after the slot
+    was taken, and the request is answered 408 and the slot released.
     """
 
     def __init__(
@@ -104,11 +120,15 @@ class LargeBodyGate:
         *,
         threshold: int = LARGE_BODY_BYTES,
         wait: float = LARGE_BODY_WAIT_SECONDS,
+        idle: float = LARGE_BODY_IDLE_SECONDS,
+        total: float = LARGE_BODY_TOTAL_SECONDS,
     ) -> None:
         self.app = app
         self.limit = limit
         self.threshold = threshold
         self.wait = wait
+        self.idle = idle
+        self.total = total
         self._slots = asyncio.Semaphore(limit)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -150,16 +170,82 @@ class LargeBodyGate:
             )
             await send({"type": "http.response.body", "body": body.encode()})
             return
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.total
+        state = {"body_done": False, "stalled": False, "started": False}
+
+        async def guarded_send(message: Any) -> None:
+            if state["stalled"]:
+                return  # the 408 is already out; drop whatever the app sends after it
+            if message["type"] == "http.response.start":
+                state["started"] = True
+            await send(message)
+
+        async def guarded_receive() -> Any:
+            if state["body_done"]:
+                return await receive()
+            timeout = min(self.idle, deadline - loop.time())
+            try:
+                if timeout <= 0:
+                    raise TimeoutError
+                async with asyncio.timeout(timeout):
+                    message = await receive()
+            except TimeoutError:
+                await self._stalled(scope, state, send)
+                raise _BodyStalled from None
+            if message["type"] != "http.request" or not message.get("more_body", False):
+                state["body_done"] = True
+            return message
+
         try:
-            await self.app(scope, receive, send)
+            await self.app(scope, guarded_receive, guarded_send)
+        except Exception:
+            if not state["stalled"]:
+                raise
         finally:
             self._slots.release()
 
+    async def _stalled(self, scope: Scope, state: dict[str, bool], send: Send) -> None:
+        log.warning(
+            "408 for %s %s: a large request's body stalled (no data for %ss, or not complete within %ss); "
+            "its slot is released",
+            scope["method"],
+            scope["path"],
+            f"{self.idle:g}",
+            f"{self.total:g}",
+        )
+        already_started = state["started"]
+        state["stalled"] = True
+        if already_started:
+            return
+        body = json.dumps(
+            {
+                "error": {
+                    "code": "request_timeout",
+                    "message": f"the request body stalled: no data for {self.idle:g} seconds, or not complete "
+                    f"within {self.total:g} seconds",
+                    "retryable": True,
+                }
+            }
+        )
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 408,
+                "headers": [(b"content-type", b"application/json"), (b"connection", b"close")],
+            }
+        )
+        await send({"type": "http.response.body", "body": body.encode()})
+
     def _large(self, scope: Scope) -> bool:
         headers = dict(scope.get("headers") or [])
+        # Chunked first: with both headers, the server reads the body as chunked
+        # and ignores Content-Length, so the length proves nothing.
+        if b"chunked" in headers.get(b"transfer-encoding", b"").lower():
+            return True
         length = headers.get(b"content-length")
         if length is None:
-            return b"chunked" in headers.get(b"transfer-encoding", b"").lower()
+            return False
         try:
             return int(length) > self.threshold
         except ValueError:
@@ -186,7 +272,9 @@ class TokenAuth:
             log.warning("refused an ASGI %r scope: only http is served", scope["type"])
             return
         log.warning("401 for %s %s from %s: missing or wrong token", scope["method"], scope["path"], client[0])
-        body = json.dumps({"error": "unauthorized", "message": "send the server's token as a Bearer token"})
+        body = json.dumps(
+            {"error": "unauthorized", "message": "send the server's token as a Bearer token or as X-API-Key"}
+        )
         await send(
             {
                 "type": "http.response.start",
@@ -200,13 +288,19 @@ class TokenAuth:
         await send({"type": "http.response.body", "body": body.encode()})
 
     def _authorized(self, scope: Scope) -> bool:
+        """Either header carrying the token is enough, as it was for artokun: a gateway may put its own
+        credential in Authorization and this server's in X-API-Key. Every candidate is compared."""
         headers = dict(scope.get("headers") or [])
-        presented = headers.get(b"x-api-key")
-        auth = headers.get(b"authorization", b"")
-        scheme, _, credential = auth.partition(b" ")
+        presented = []
+        if (api_key := headers.get(b"x-api-key")) is not None:
+            presented.append(api_key)
+        scheme, _, credential = headers.get(b"authorization", b"").partition(b" ")
         if scheme.lower() == b"bearer":
-            presented = credential.strip()
-        return presented is not None and hmac.compare_digest(presented, self._token)
+            presented.append(credential.strip())
+        matched = False
+        for candidate in presented:
+            matched |= hmac.compare_digest(candidate, self._token)
+        return matched
 
 
 def http_app(server: MCPServer, settings: Settings) -> Any:
