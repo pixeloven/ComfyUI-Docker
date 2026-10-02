@@ -18,7 +18,7 @@ dependencies = ["mcp==2.2.0", "httpx2>=2.5", "uvicorn>=0.31.1", "typer>=0.16.0"]
 # `comfyrelay.cli.app` as a group when this package is installed.
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
