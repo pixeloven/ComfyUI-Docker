@@ -109,7 +109,11 @@ There is no date tag.
   are world-writable, and `PYTHONDONTWRITEBYTECODE=1`. `complete` re-applies the
   venv permissions after its own installs, and any new install layer must do the same.
   `/app/ComfyUI/custom_nodes` is a symlink to `/app/custom_nodes`, so comfy-cli, which
-  installs into `<workspace>/custom_nodes`, lands on the volume (#126).
+  installs into `<workspace>/custom_nodes`, lands on the volume (#126). Run comfy-cli
+  as the runtime user (`docker exec -u <PUID>`): under root its installs are root-owned
+  and ComfyUI fails on them with `PermissionError`. Never bind-mount the symlink path
+  (it silently hides the volume) or list it in `extra_model_paths.yaml` (`folder_paths`
+  de-duplicates by string, not realpath, so every pack loads twice).
 - `dockerfile.comfy.core` also drops setuid/setgid bits from every file in its final
   stage, since nothing in the image needs them. The last two `RUN`s of `core` and of
   `complete` assert that no setuid/setgid file and no file with capabilities remain,
