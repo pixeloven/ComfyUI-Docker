@@ -61,9 +61,14 @@ registry is what they check against.
   Jobs and Compose append `/lock.yaml /app --apply` to it, and overrides name the
   binary), the permission steps in `dockerfile.comfy.core`, the volume mounts in
   `examples/*/docker-compose.yml`, and removing a bake target, image, or example.
+  Also the node-pack template, `templates/node-pack/` (#107), which pack repos copy
+  and keep: `PACK_NAME`, the mount path `/app/custom_nodes/${PACK_NAME}`, the
+  `COMFY_*` env names its compose file reads, and `dev-check.sh`'s flags and exit
+  codes (0 every check passed, 1 one failed, 2 a usage error).
 - **Risk:** a deployment that worked breaks on `docker compose pull`, or only under
   a UID nobody tested. That includes Kubernetes `runAsUser` deployments, which
-  this repo cannot see.
+  this repo cannot see. For the template: a pack repo's copy, or its scripts that
+  call `dev-check.sh`, stop working when it upgrades.
 - **Response:** flag it. Keep existing volume mounts working. A break is a **major**
   version (`VERSIONING.md` → *What counts as major*); the owner confirms the
   classification.

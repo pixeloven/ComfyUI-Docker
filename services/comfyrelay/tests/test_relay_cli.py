@@ -53,7 +53,7 @@ def test_serve_refuses_the_declined_develop_profile(monkeypatch):
     r = runner.invoke(app, ["relay", "serve"])
     assert r.exit_code == 2
     assert "profile develop isn't available in this image" in r.output
-    assert "https://github.com/pixeloven/ComfyUI-Docker/issues/107" in r.output
+    assert "https://github.com/pixeloven/ComfyUI-Docker/blob/main/docs/user-guides/developing-nodes.md" in r.output
 
 
 def test_serve_logs_json_lines_with_o_json(monkeypatch):

@@ -119,7 +119,7 @@ startup, and `server_info` lists it under `profiles.without_tools`: today that i
 
 `develop` is declined (#107): asking for it, alone or with other profiles, makes `serve` exit 2
 with a message that it isn't available in this image. Develop custom nodes against a ComfyUI
-container directly; see [#107](https://github.com/pixeloven/ComfyUI-Docker/issues/107).
+container directly; see [Developing Custom Nodes](../../docs/user-guides/developing-nodes.md).
 
 ## Tools
 

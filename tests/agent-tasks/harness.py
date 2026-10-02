@@ -1125,6 +1125,12 @@ rules, so they are on you:
   ComfyUI loads it as the custom node pack "{pack}" (/app/custom_nodes/{pack} in its
   container), so what you write there is what ComfyUI imports. Work inside pack/, and don't
   delete, move or replace pack/ itself. Put your answers in results/, not in pack/.
+- pack/ is a symlink to the pack on ComfyUI's custom_nodes volume, outside the workspace.
+  Reading and writing through it is allowed, and is the point. Tools that don't follow
+  symlinks miss it from the workspace: use `find -L .`, or start from pack/ (`find pack/`).
+- Put workflow files you write (API format) in the workspace, for example
+  {workspace}/workflows/t7.json, not in pack/. Pass dev-check.sh that absolute path: from
+  inside pack/, `..` is the volume's directory, not the workspace.
 - Reach ComfyUI only over HTTP, at {comfy_url}: its own routes (for example /object_info,
   /prompt, /history and /internal/logs/raw) and ComfyUI-Manager's POST /v2/manager/reboot,
   which restarts ComfyUI in place, in the same container, and so imports the pack again.
@@ -1133,10 +1139,13 @@ rules, so they are on you:
   the only restart allowed. Send ComfyUI no credentials and no extra_data.
 - Read only your workspace: nothing else on this machine, the repository included. Don't
   install or download anything; the ComfyUI side has everything the task needs.
-- pack/dev-check.sh is the loop script from the pack template. Run in pack/, ./dev-check.sh
-  restarts ComfyUI through that route, waits for it, and reports the node classes the pack
-  registers and the load errors ComfyUI logged; ./dev-check.sh --help says more. Using it
-  is up to you; --no-restart checks without restarting. Leave it and pack/.env in place.
+- pack/dev-check.sh is the loop script from the pack template. Run in pack/,
+  `./dev-check.sh --no-docker-fallback` restarts ComfyUI through that route, waits for it,
+  and reports the node classes the pack registers and the load errors ComfyUI logged;
+  ./dev-check.sh --help says more. Always pass --no-docker-fallback: without it, the
+  script restarts the container with docker when the reboot route fails, which this task
+  forbids. --no-restart checks without restarting, and --workflow FILE also runs a
+  workflow. Using it is up to you. Leave it and pack/.env in place.
 - A restart empties ComfyUI's /history and its log, so run what the task asks you to run
   after your last restart.
 

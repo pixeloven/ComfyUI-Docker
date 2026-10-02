@@ -5,6 +5,16 @@
 #   cp .env.example .env      # set PACK_NAME
 #   docker compose up -d
 #   ./dev-check.sh            # restart ComfyUI and report how the pack loaded
+#   ./dev-check.sh --workflow workflows/smoke.json   # and run a workflow
+#
+# PIN THE IMAGE for reproducible results. The default, core:cpu-latest, moves
+# with every merge to pixeloven/ComfyUI-Docker's main, so the ComfyUI you test
+# against changes under you. Set COMFY_IMAGE in .env to a release tag and its
+# digest: ghcr.io/pixeloven/comfyui/core:cpu-X.Y.Z@sha256:<digest>
+# (`docker buildx imagetools inspect <tag>` prints the digest).
+#
+# When you upgrade, diff your copy of this file, .env.example and dev-check.sh
+# against templates/node-pack/ in the release you move to.
 #
 # The repository is mounted into the container as the pack, so ComfyUI loads
 # what you edit. Everything else ComfyUI keeps (models, other custom nodes,
@@ -12,6 +22,7 @@
 # docs/user-guides/developing-nodes.md in pixeloven/ComfyUI-Docker is the guide.
 services:
   comfyui:
+    # Pin it: see the top of this file.
     image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui/core:cpu-latest}
     environment:
       - PUID=${PUID:-1000}

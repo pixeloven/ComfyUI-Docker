@@ -383,19 +383,27 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
         docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
 
-  # The node-pack template (#107): boots the published core-cpu through the
-  # template's compose file with a fixture V3 pack, edits it, and runs the
-  # template's dev-check.sh, asserting that the edit is live, that broken packs
-  # (an import error, the V1/V3 trap, T7-fix's planted pack) fail the loop, and
-  # that with Manager off it restarts the container instead. Outcomes only, not
-  # how fast a restart is. `tests/node-pack/run.sh` is the same script locally.
-  # It tests the template against what main published, so it builds nothing.
+  # The node-pack template (#107): boots a core-cpu through the template's
+  # compose file with a fixture V3 pack, edits it, and runs the template's
+  # dev-check.sh, asserting that the edit is live, that broken packs (an import
+  # error, the V1/V3 trap, T7-fix's planted pack) fail the loop, and what it
+  # does with Manager off. Outcomes only, not how fast a restart is.
+  # `tests/node-pack/run.sh` holds all of it, and runs in two places:
+  #   - here, against the published core:cpu-latest, when the template or its
+  #     test changes and the image doesn't: nothing to build, one pull;
+  #   - in smoke-cpu, against this commit's own core-cpu, whenever the image
+  #     changes (services/comfy, services/runtime, docker-bake.hcl, ci.yml, so
+  #     a COMFYUI_VERSION bump too). smoke-cpu has already built and loaded it,
+  #     so it costs a boot, not a ~5 GB build or hand-off. A ComfyUI that
+  #     changes what the loop parses (/internal/logs/raw, /object_info) then
+  #     fails before merge, not after.
+  # So this job skips whenever smoke-cpu runs, rather than test twice.
   node-pack:
     name: the node-pack template loads and reloads a pack
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: changes
-    if: needs.changes.outputs.node_pack == 'true'
+    needs: [changes, context]
+    if: needs.changes.outputs.node_pack == 'true' && needs.context.outputs.build_images != 'true'
     # Reads the repo and pulls a public image; nothing here writes (#121).
     permissions:
       contents: read
@@ -999,6 +1007,14 @@ jobs:
           --baseline "${REGISTRY_URL}core:cpu-${commit:0:8}" \
           --baseline "${REGISTRY_URL}core:cpu-latest" \
           "$IMAGE"
+
+    # The node-pack template's test (#107), on this commit's core-cpu: the
+    # same tests/node-pack/run.sh the node-pack job runs on the published one.
+    # The image is the one built above, never pulled.
+    - name: The node-pack template loads and reloads a pack, on this build
+      env:
+        COMFY_IMAGE: ${{ needs.context.outputs.registry_url }}core:cpu-smoke
+      run: tests/node-pack/run.sh
 
     - name: Record the startup time and node diff
       if: always()

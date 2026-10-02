@@ -149,7 +149,8 @@ def parse_profiles(value: str) -> tuple[str, ...]:
     if "develop" in names:  # declined (#107, D6): say so, rather than "unknown"
         raise ConfigError(
             f"profile develop isn't available in this image; choose from {', '.join(PROFILES)}. "
-            "To develop custom nodes, see https://github.com/pixeloven/ComfyUI-Docker/issues/107"
+            "To develop custom nodes, see "
+            "https://github.com/pixeloven/ComfyUI-Docker/blob/main/docs/user-guides/developing-nodes.md"
         )
     unknown = sorted(names - set(PROFILES))
     if unknown:

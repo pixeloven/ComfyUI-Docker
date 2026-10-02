@@ -3,16 +3,21 @@
 # loaded. From the node-pack template of pixeloven/ComfyUI-Docker
 # (templates/node-pack); docs/user-guides/developing-nodes.md there is the guide.
 #
-# Usage: ./dev-check.sh [--no-restart] [--expect CLASS]... [--workflow FILE] [--timeout SECONDS]
+# Usage: ./dev-check.sh [--no-restart] [--no-docker-fallback] [--expect CLASS]...
+#                       [--workflow FILE] [--timeout SECONDS]
 #
-#   --no-restart       check the running ComfyUI as it is
-#   --expect CLASS     fail unless this pack registers node class CLASS (repeatable)
-#   --workflow FILE    also run FILE, a workflow in API format, and report the result
-#   --timeout SECONDS  how long to wait for ComfyUI, and for the workflow (default 180)
+#   --no-restart          check the running ComfyUI as it is
+#   --no-docker-fallback  if Manager can't restart ComfyUI, fail instead of
+#                         restarting the container: never run docker
+#   --expect CLASS        fail unless this pack registers node class CLASS (repeatable)
+#   --workflow FILE       also run FILE, a workflow in API format, and report the
+#                         result; keep them in workflows/ (workflows/smoke.json)
+#   --timeout SECONDS     how long to wait for ComfyUI, and for the workflow (default 180)
 #
 # It calls ComfyUI's own routes, and docker only as the fallback restart:
 #   restart  Manager's POST /v2/manager/reboot, which restarts ComfyUI in place;
 #            `docker compose restart comfyui` when Manager is off or doesn't answer
+#            (unless --no-docker-fallback)
 #   ready    GET /system_stats
 #   load     GET /object_info for the classes whose python_module is
 #            custom_nodes.<PACK_NAME>, and GET /internal/logs/raw for the pack's
@@ -29,15 +34,17 @@
 set -o pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
 
 no_restart=false
+docker_fallback=true
 timeout=180
 workflow=""
 expect=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-restart) no_restart=true ;;
+    --no-docker-fallback) docker_fallback=false ;;
     --expect|--workflow|--timeout)
       [ $# -ge 2 ] || { echo "$1 needs a value" >&2; exit 2; }
       case "$1" in
@@ -84,11 +91,18 @@ get() { curl -fsS --max-time 60 "$COMFY_URL$1"; }
 
 restart() {
   local code rc t
+  # Manager runs inside ComfyUI, so a ComfyUI that doesn't answer can't be
+  # restarted through it (and a dropped connection would mean nothing).
+  if ! answers; then
+    note "ComfyUI doesn't answer, so Manager can't restart it"
+    fallback_restart
+    return
+  fi
   code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST "$COMFY_URL/v2/manager/reboot" 2>/dev/null)"
   rc=$?
   # Manager re-executes ComfyUI before it can answer, so the connection drops
-  # (curl exit 52, or 56 where a port proxy resets it). Wait until the old process stops answering, so the wait
-  # for /system_stats meets the new one.
+  # (curl exit 52, or 56 where a port proxy resets it). Wait until the old
+  # process stops answering, so the wait for /system_stats meets the new one.
   if [ "$rc" = 52 ] || [ "$rc" = 56 ] || { [ "$rc" = 0 ] && [ "$code" = 200 ]; }; then
     t=$SECONDS
     while answers; do
@@ -102,6 +116,15 @@ restart() {
     note "Manager's reboot route answered HTTP $code (is COMFY_ENABLE_MANAGER=true?)"
   else
     note "Manager's reboot route didn't answer (curl exit $rc)"
+  fi
+  fallback_restart
+}
+
+fallback_restart() {
+  local out
+  if ! $docker_fallback; then
+    fail "Manager didn't restart ComfyUI, and --no-docker-fallback is set, so dev-check.sh won't run docker"
+    return 1
   fi
   note "restarting the container: docker compose restart comfyui (slower, #120)"
   if ! out="$(cd "$here" && docker compose restart comfyui 2>&1)"; then

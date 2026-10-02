@@ -39,6 +39,18 @@ cp .env.example .env
 echo .env >> .gitignore
 ```
 
+> **Pin the image.** The template's default, `core:cpu-latest`, moves with every
+> merge to our `main`, so the ComfyUI you test against changes under you. For
+> reproducible results, set `COMFY_IMAGE` in `.env` to a release tag and its digest:
+> `ghcr.io/pixeloven/comfyui/core:cpu-X.Y.Z@sha256:<digest>`
+> (`docker buildx imagetools inspect <tag>` prints the digest).
+
+**When you upgrade**, diff your copies against `templates/node-pack/` in the release
+you move to: they are copied, so nothing updates them. What a pack repo may rely on
+(`PACK_NAME`, the mount path `/app/custom_nodes/${PACK_NAME}`, the `COMFY_*`
+variables the compose file reads, and `dev-check.sh`'s flags and exit codes) changes
+only as a versioned change of this repository.
+
 In `.env`:
 
 - **`PACK_NAME`** is required. It is the pack's directory name inside ComfyUI, so
@@ -48,9 +60,7 @@ In `.env`:
   starts as root and drops to them. Don't also set `user:` in the compose file:
   that starts it as non-root, and then `PUID`/`PGID` are ignored (see the
   [runtime contract](runtime-contract.md#startup-root-versus-non-root)).
-- **`COMFY_IMAGE`** defaults to `core:cpu-latest`, which moves with every merge to
-  our `main`. Pin a release (`core:cpu-X.Y.Z`) to keep the ComfyUI you test against
-  fixed.
+- **`COMFY_IMAGE`**: pin it, as above. Unset, it is `core:cpu-latest`.
 - **NVIDIA**: set
   `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`, which makes the default
   image `core:cuda-latest` (pin a `core:cuda-X.Y.Z` with `COMFY_IMAGE`). Setting it in `.env`
@@ -83,11 +93,14 @@ load yours alone, set
 ## The Loop
 
 ```bash
-./dev-check.sh [--no-restart] [--expect CLASS]... [--workflow FILE] [--timeout SECONDS]
+./dev-check.sh [--no-restart] [--no-docker-fallback] [--expect CLASS]...
+               [--workflow FILE] [--timeout SECONDS]
 ```
 
 1. **Restart**: Manager's `POST /v2/manager/reboot`. If Manager is off or doesn't
-   answer, `docker compose restart comfyui`.
+   answer, `docker compose restart comfyui`, unless `--no-docker-fallback` is given:
+   then the loop fails instead and never runs docker. Use it where only ComfyUI's
+   HTTP API is allowed, such as an agent working without Docker access.
 2. **Ready**: waits for `GET /system_stats`.
 3. **Load**: lists the classes whose `python_module` is `custom_nodes.<PACK_NAME>`,
    and prints the pack's `IMPORT FAILED`, `Cannot import` and `comfy_entrypoint`
@@ -101,7 +114,9 @@ load yours alone, set
    has JavaScript that `/extensions` doesn't list.
 5. **Run** (with `--workflow`): posts the workflow, in API format, to `/prompt` and
    waits for it in `/history`. It prints the outputs, or the error and the node that
-   raised it. Only the graph is sent.
+   raised it. Only the graph is sent. Keep these workflows in the repository's
+   `workflows/` directory (`./dev-check.sh --workflow workflows/smoke.json`), and
+   export them from ComfyUI with Export (API).
 
 It needs bash (3.2 or later, so macOS's own works), `curl` and `jq`. It reads
 `PACK_NAME` and `COMFY_PORT` from the environment, else from `.env`, and

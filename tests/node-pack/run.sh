@@ -11,7 +11,13 @@
 #   3. an edit to its JavaScript is served with no restart;
 #   4. a pack with an import error, the V1/V3 trap, and T7-fix's planted pack
 #      (tests/agent-tasks/tasks/T7-fix/pack) each fail dev-check.sh;
-#   5. with Manager off, dev-check.sh restarts the container instead.
+#   5. with Manager off, dev-check.sh --no-docker-fallback fails without running
+#      docker, and without the flag it restarts the container instead.
+#
+# CI runs it in two places: the node-pack job, against the published
+# core:cpu-latest, when only the template or this test changes; and smoke-cpu,
+# against the pull request's own core-cpu build, whenever the image changes
+# (a ComfyUI bump included), so a ComfyUI that breaks the loop fails before merge.
 #
 # Settings: COMFY_IMAGE (default the template's, core:cpu-latest), COMFY_PORT
 # (default 8188, published on 127.0.0.1), COMPOSE_PROJECT_NAME (default
@@ -77,6 +83,11 @@ expect_failure() {
 use_pack "$here/fixtures/good"
 step "boot core-cpu through the template"
 (cd "$work" && docker compose up -d)
+# Say which image this run tests: the reference, its ID and its ComfyUI version.
+cid="$(cd "$work" && docker compose ps -q comfyui)"
+docker inspect -f 'image under test: {{.Config.Image}} ({{.Image}})' "$cid"
+docker image inspect -f 'ComfyUI {{index .Config.Labels "org.opencontainers.image.version"}}' \
+  "$(docker inspect -f '{{.Image}}' "$cid")"
 
 step "1. the fixture loads, and a workflow using it runs"
 check --no-restart --expect DevCheckEcho --workflow "$here/workflow.json"
@@ -108,12 +119,27 @@ step "4c. T7-fix's planted pack fails the loop"
 use_pack "$repo_root/tests/agent-tasks/tasks/T7-fix/pack"
 expect_failure "Cannot import /app/custom_nodes/$pack module"
 
-step "5. with Manager off, the loop restarts the container"
+step "5a. with Manager off, --no-docker-fallback fails and never runs docker"
 use_pack "$here/fixtures/good"
 sed -i 's/^COMFY_ENABLE_MANAGER=.*/COMFY_ENABLE_MANAGER=false/' "$work/.env"
 (cd "$work" && docker compose up -d)
 check --no-restart   # wait until it answers, so the reboot route answers too
 [ "$rc" = 0 ] || die "dev-check.sh exited $rc"
+cid="$(cd "$work" && docker compose ps -q comfyui)"
+started="$(docker inspect -f '{{.State.StartedAt}}' "$cid")"
+# A docker on PATH that only records that it was called.
+stub="$(mktemp -d "${TMPDIR:-/tmp}/node-pack-stub.XXXXXX")"
+printf '#!/bin/sh\ntouch "%s/called"\nexit 1\n' "$stub" > "$stub/docker"
+chmod +x "$stub/docker"
+PATH="$stub:$PATH" check --no-docker-fallback --expect DevCheckEcho
+[ "$rc" = 1 ] || die "dev-check.sh --no-docker-fallback exited $rc, want 1"
+grep -qF -- "--no-docker-fallback is set" <<<"$out" || die "dev-check.sh didn't say why it failed"
+[ ! -e "$stub/called" ] || die "dev-check.sh --no-docker-fallback ran docker"
+rm -rf "$stub"
+[ "$(docker inspect -f '{{.State.StartedAt}}' "$cid")" = "$started" ] || die "the container restarted"
+echo "no docker call, and the container's StartedAt is unchanged"
+
+step "5b. with Manager off and no flag, the loop restarts the container"
 check --expect DevCheckEcho
 [ "$rc" = 0 ] || die "dev-check.sh exited $rc"
 grep -qF "reboot route answered HTTP" <<<"$out" || die "Manager's reboot route was not refused"
