@@ -16,6 +16,7 @@ Essential guides for users:
 - **[Performance Tuning](user-guides/performance.md)** - CLI arguments and resource optimization
 - **[Current Feature Support](user-guides/features.md)** - Ecosystem audit and container support matrix
 - **[Runtime Contract](user-guides/runtime-contract.md)** - Env vars, volumes, port, readiness and startup user that deployments rely on
+- **[Developing Custom Nodes](user-guides/developing-nodes.md)** - Develop a node pack in its own repository with the node-pack template
 
 **[View all User Guides →](user-guides/index.md)**
 

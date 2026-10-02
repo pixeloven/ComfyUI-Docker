@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run a task against comfyrelay with an agent the harness doesn't launch: a
+# Run a task with an agent the harness doesn't launch: a
 # subagent of the lead session. Three commands, so the lead can dispatch the
 # agent between them:
 #
@@ -14,10 +14,12 @@
 #                                 mode "external (not sandboxed)", exit 0 on PASS
 #   ./external.sh down [--purge]  stop ComfyUI and the relay (down.sh)
 #
-# Tasks: T1, T2-refuse, T3, T4, T5, T6. `up` can be repeated for the next task
-# on the same instance; each one restarts the relay.
+# Tasks: T1, T2-refuse, T3, T4, T5, T6 through the relay; T7 and T7-fix with
+# no relay, as a pack developer works (files plus ComfyUI's HTTP API; the
+# relay is stopped and the brief says so). `up` can be repeated for the next
+# task on the same instance; each relay task restarts the relay.
 #
-# Nothing confines the agent: it is told to use only the relay. The confined,
+# Nothing confines the agent: it is told what it may use. The confined,
 # blind run is `claude -p` (HARNESS_RUN=1 ./run.sh).
 #
 # The images: HARNESS_IMAGE (core-cpu, default the local build from build.sh;
@@ -29,7 +31,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
@@ -38,6 +40,8 @@ case "$cmd" in
     [ -n "$task" ] || usage
     [ -f "$HARNESS_DIR/tasks/$task/prompt.md" ] || { echo "no task $task" >&2; exit 2; }
     handoff="$RESULTS/$task.handoff.json"
+    # The pack-developer tasks (#107) reach ComfyUI directly, not through a server.
+    case "$task" in T7|T7-fix) server=direct ;; *) server=comfyrelay ;; esac
     ;;
   down) shift; exec "$HARNESS_DIR/down.sh" "$@" ;;
   *) usage ;;
@@ -67,6 +71,12 @@ if [ "$cmd" = up ]; then
   rm -f "$handoff"
   export HARNESS_EXTERNAL=1   # setups that would fall back to committed answers fail instead
   prepare_task "$task"
+  if [ "$server" = direct ]; then
+    # No relay for this task, so stop one an earlier task left running.
+    "$HARNESS_DIR/servers/comfyrelay.sh" down >/dev/null 2>&1 || true
+    hpy handoff-dev "$task"
+    exit 0
+  fi
   "$HARNESS_DIR/servers/comfyrelay.sh" up
 
   # The token may come from the environment; the agent reads it from a file.
@@ -88,7 +98,7 @@ set -e
 verdict=$([ "$rc" = 0 ] && echo pass || echo fail)
 echo "$detail"
 # Keep what the agent wrote beside the other runs' files.
-mkdir -p "$RESULTS/runs/comfyrelay-$task.files"
-cp -r "$HARNESS_DATA/workspace/results/." "$RESULTS/runs/comfyrelay-$task.files/" 2>/dev/null || true
-append_score comfyrelay "$task" "$verdict" "$detail" "$elapsed" "external (not sandboxed)" ""
+mkdir -p "$RESULTS/runs/$server-$task.files"
+cp -r "$HARNESS_DATA/workspace/results/." "$RESULTS/runs/$server-$task.files/" 2>/dev/null || true
+append_score "$server" "$task" "$verdict" "$detail" "$elapsed" "external (not sandboxed)" ""
 exit "$rc"

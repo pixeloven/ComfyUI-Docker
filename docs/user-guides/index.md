@@ -27,6 +27,9 @@ See what the modern ComfyUI ecosystem provides and how this image exposes it.
 ### [Runtime Contract](runtime-contract.md)
 The env vars, volume paths, port, readiness probe and startup-user behaviour that every deployment relies on, including Kubernetes.
 
+### [Developing Custom Nodes](developing-nodes.md)
+Develop a custom node pack in its own repository against these images: the node-pack template, the restart-and-check loop, logs, and the V3 node API.
+
 ---
 
 **[⬆ Back to Documentation](../index.md)**
