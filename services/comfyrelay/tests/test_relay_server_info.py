@@ -41,7 +41,7 @@ async def test_identity_and_profiles():
     assert got["instance_id_source"] == "env"
     assert got["profiles"] == {
         "active": ["read", "run"],
-        "available": ["read", "run", "manage", "develop"],
+        "available": ["read", "run", "manage"],
         "without_tools": [],
     }
 

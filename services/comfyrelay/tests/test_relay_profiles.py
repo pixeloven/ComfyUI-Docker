@@ -17,7 +17,7 @@ pytestmark = pytest.mark.anyio
 
 def test_the_v1_default_is_read_and_run():
     assert DEFAULT_PROFILES == ("read", "run")
-    assert PROFILES == ("read", "run", "manage", "develop")
+    assert PROFILES == ("read", "run", "manage")
 
 
 @pytest.mark.parametrize(
@@ -25,7 +25,7 @@ def test_the_v1_default_is_read_and_run():
     [
         ("read,run", ("read", "run")),
         (" RUN , read ", ("read", "run")),
-        ("develop,read,read", ("read", "develop")),
+        ("manage,read,read", ("read", "manage")),
         ("manage", ("manage",)),
     ],
 )
@@ -33,7 +33,15 @@ def test_parse_profiles(value, want):
     assert parse_profiles(value) == want
 
 
-@pytest.mark.parametrize(("value", "why"), [("", "no profile"), (" , ", "no profile"), ("read,admin", "admin")])
+@pytest.mark.parametrize(
+    ("value", "why"),
+    [
+        ("", "no profile"),
+        (" , ", "no profile"),
+        ("read,admin", "admin"),
+        ("read, Develop", "profile develop isn't available in this image"),
+    ],
+)
 def test_parse_profiles_refuses(value, why):
     with pytest.raises(ConfigError, match=why):
         parse_profiles(value)
@@ -93,10 +101,9 @@ async def test_introspection_is_the_read_profile_only(caplog):
     assert run_only == {"server_info"} | RUN_TOOLS
 
 
-@pytest.mark.parametrize("profile", ["manage", "develop"])
-async def test_manage_and_develop_are_recognised_but_log_that_nothing_is_available(profile, caplog):
+async def test_manage_is_recognised_but_logs_that_nothing_is_available(caplog):
     caplog.set_level(logging.WARNING, logger="comfyrelay")
-    names, _ = await listed((profile,))
+    names, _ = await listed(("manage",))
     assert names == {"server_info"}
-    assert f"profile '{profile}' is enabled" in caplog.text
+    assert "profile 'manage' is enabled" in caplog.text
     assert "nothing is available through it" in caplog.text
