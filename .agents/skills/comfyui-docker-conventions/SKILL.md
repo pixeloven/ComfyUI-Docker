@@ -1,6 +1,6 @@
 ---
 name: comfyui-docker-conventions
-description: ComfyUI-Docker's repository facts and project invariants — bake targets and profiles, image tag model, CUDA/torch/SageAttention coupling, data volumes, entrypoint UID contract, container standards, dependency rules, verification commands. Load before editing a Dockerfile, docker-bake.hcl, entrypoint/startup, an example compose file, or the Python tooling under services/ (comfyctl, fetch).
+description: ComfyUI-Docker's repository facts and project invariants — bake targets and profiles, image tag model, CUDA/torch/SageAttention coupling, data volumes, entrypoint UID contract, container standards, dependency rules, verification commands. Load before editing a Dockerfile, docker-bake.hcl, entrypoint/startup, an example compose file, or the Python tooling under services/ (comfyctl, fetch, comfyrelay).
 ---
 
 # ComfyUI-Docker conventions
@@ -12,7 +12,7 @@ this skill disagree, the file is right, so fix the skill in the same change.
 
 | Path | What it is |
 |---|---|
-| `docker-bake.hcl` | Every image target and group. Pins `COMFYUI_VERSION` and the SageAttention wheels. |
+| `docker-bake.hcl` | Every image target and group. Pins `COMFYUI_VERSION`, `COMFY_DOCS_SHA` (the `mcp` image's docs index) and the SageAttention wheels, and passes `GIT_SHA` to the `mcp` build. |
 | `services/runtime/` | Base images: `dockerfile.cuda.runtime` (`nvidia/cuda:13.0.2-base-ubuntu24.04`) and `dockerfile.cpu.runtime` (`ubuntu:24.04`, used for cpu, **rocm and xpu**) |
 | `services/comfy/core/` | `dockerfile.comfy.core` (a builder stage, then the `core` stage), `entrypoint.sh`, `startup.sh` |
 | `services/comfy/complete/` | `dockerfile.comfy.cuda.complete`, built `FROM core`, and `extra-requirements.txt` |
@@ -119,6 +119,8 @@ There is no date tag.
 - **Base images:** official `nvidia/cuda` for CUDA. `ubuntu:24.04` for cpu, rocm and xpu,
   with the accelerator coming from PyTorch's official wheel index (not an official
   Python image). `python:3.13-slim` for `mcp` (comfyrelay), and `python:*-alpine` for `fetch`.
+  Only the `mcp` image pins its bases by digest; `nvidia/cuda:13.0.2-base-ubuntu24.04`,
+  `ubuntu:24.04` and `python:3.13-alpine` are pinned by tag alone.
 - **Multi-stage:** the venv, ComfyUI and torch are built in `builder` and copied into
   `core`. The runtime base keeps `build-essential` and `python3-dev`.
 - **Layer order:** base, then apt, then torch, then the ComfyUI clone. Nightly busts only the
@@ -190,6 +192,8 @@ uvx --from ./services/comfyctl comfyctl fetch check comfy.yaml locks/preview.yam
 make validate                                    # bake --print all + every example's compose config
 docker buildx bake <target|group> --load         # or make cuda / cpu / rocm / xpu
 make smoke                                       # builds core-cpu, boots it; SMOKE_NETWORK=host without a docker0 bridge
+IMAGE_LABEL=local docker buildx bake mcp --load  # the mcp image; its build probes the server
+tests/relay/run.sh [--network host] --comfyui <core-cpu image> ghcr.io/pixeloven/comfyui/mcp:local
 docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
 ```
 

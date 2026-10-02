@@ -81,15 +81,19 @@ registry is what they check against.
 ### 6. Supply-chain pins
 
 - **Pattern:** `SAGEATTENTION_RELEASE_URL` and each `SAGEATTENTION_WHEEL_SHA256`,
-  the `sam2` commit in `extra-requirements.txt`, the base-image tags and
-  digests in `services/*/dockerfile.*` (and `services/comfyrelay/dockerfile.comfy.relay`,
-  the `mcp` image, including its `ghcr.io/astral-sh/uv` build stage, `tini`'s apt
-  version, and the builder step that strips the SDK's `mcp` CLI from the venv and fails
-  the build if `mcp.cli` or `dotenv` can be imported), `COMFY_DOCS_SHA` in
+  the `sam2` commit in `extra-requirements.txt`, the base images in the Dockerfiles
+  under `services/` (`nvidia/cuda:13.0.2-base-ubuntu24.04`, `ubuntu:24.04` and
+  `python:3.13-alpine` are pinned by tag only, with no digest;
+  `services/comfyrelay/dockerfile.comfy.relay`, the `mcp` image, pins its
+  `python:3.13-slim` and its `ghcr.io/astral-sh/uv` build stage by tag and digest),
+  and in the `mcp` image `tini`'s apt version and the builder step that strips the
+  SDK's `mcp` CLI from the venv and fails the build if `mcp.cli` or `dotenv` can be
+  imported, `COMFY_DOCS_SHA` in
   `docker-bake.hcl` (the Comfy-Org/docs commit the relay's docs index covers:
   GPL-3.0 content, pinned by full SHA and bumped by PR, #134; a bump must be a commit on
   Comfy-Org/docs `main`, because GitHub serves any SHA in the fork network; CI's
-  `docs-pin` job checks it on every PR that touches `docker-bake.hcl`), comfyrelay's exact
+  `docs-pin` job checks it on every PR that touches `docker-bake.hcl`, and on every
+  `v*` tag), comfyrelay's exact
   `mcp==` pin and `services/uv.lock`, which its image installs as written, and action
   versions in workflows.
 - **Risk:** executing unreviewed third-party code, or a silent ABI or behavior change.
