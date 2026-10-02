@@ -113,11 +113,13 @@ as an unknown tool.
 | `read` | Introspection: nodes, models, templates, docs | `server_info`, `node_search`, `node_describe`, `model_list`, `template_search`, `template_get`, `docs_search`, `docs_guide` |
 | `run` | Validating and running workflows | `server_info`, `job_status`, `job_cancel`, `workflow_validate`, `workflow_run`, `workflow_outputs`, `workflow_upload_input` |
 | `manage` | Changing what's installed, through the manifest and lock (v2) | `server_info` |
-| `develop` | Custom node development, on a sandboxed dev instance only | `server_info` |
 
 `server_info` is in every profile. An enabled profile with nothing else logs a warning at
-startup, and `server_info` lists it under `profiles.without_tools`: today that is `manage` and
-`develop`.
+startup, and `server_info` lists it under `profiles.without_tools`: today that is `manage`.
+
+`develop` is declined (#107): asking for it, alone or with other profiles, makes `serve` exit 2
+with a message that it isn't available in this image. Develop custom nodes against a ComfyUI
+container directly; see [#107](https://github.com/pixeloven/ComfyUI-Docker/issues/107).
 
 ## Tools
 

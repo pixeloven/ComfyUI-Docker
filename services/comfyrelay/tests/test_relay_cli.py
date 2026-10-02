@@ -47,6 +47,15 @@ def test_serve_refuses_an_unknown_profile(monkeypatch):
     assert "unknown profile admin" in r.output
 
 
+def test_serve_refuses_the_declined_develop_profile(monkeypatch):
+    monkeypatch.setenv("COMFYUI_MCP_HTTP_TOKEN", TOKEN)
+    monkeypatch.setenv("COMFYUI_MCP_PROFILES", "read,develop")
+    r = runner.invoke(app, ["relay", "serve"])
+    assert r.exit_code == 2
+    assert "profile develop isn't available in this image" in r.output
+    assert "https://github.com/pixeloven/ComfyUI-Docker/issues/107" in r.output
+
+
 def test_serve_logs_json_lines_with_o_json(monkeypatch):
     monkeypatch.delenv("COMFYUI_MCP_HTTP_TOKEN", raising=False)
     r = runner.invoke(app, ["relay", "serve", "-o", "json"])

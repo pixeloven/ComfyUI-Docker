@@ -11,8 +11,8 @@ is a major version. New tools take a namespace prefix: `workflow_*`, `node_*`,
 (`job_status`, `job_cancel`) are the cross-cutting names.
 
 A tool may belong to several profiles. The `job_*` tools belong to `run`
-today, because workflow runs are the only jobs; they join `manage` and
-`develop` when installs and dev reloads start producing jobs. Reading a job
+today, because workflow runs are the only jobs; they join `manage` when
+installs start producing jobs. Reading a job
 and cancelling one are separate tools so that each carries honest
 annotations: `job_status` is read-only, `job_cancel` is destructive.
 """

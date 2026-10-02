@@ -60,7 +60,7 @@ MCP_PATH = "/mcp"
 DEFAULT_PROBE_URL = f"http://127.0.0.1:{DEFAULT_PORT}{MCP_PATH}"
 
 # Decision 6 of #103. Order is the order of trust: each one reaches further.
-PROFILES = ("read", "run", "manage", "develop")
+PROFILES = ("read", "run", "manage")
 DEFAULT_PROFILES = ("read", "run")
 
 
@@ -146,6 +146,11 @@ def parse_profiles(value: str) -> tuple[str, ...]:
     names = {p.strip().lower() for p in value.split(",") if p.strip()}
     if not names:
         raise ConfigError(f"no profile selected; choose from {', '.join(PROFILES)}")
+    if "develop" in names:  # declined (#107, D6): say so, rather than "unknown"
+        raise ConfigError(
+            f"profile develop isn't available in this image; choose from {', '.join(PROFILES)}. "
+            "To develop custom nodes, see https://github.com/pixeloven/ComfyUI-Docker/issues/107"
+        )
     unknown = sorted(names - set(PROFILES))
     if unknown:
         raise ConfigError(f"unknown profile {', '.join(unknown)}; choose from {', '.join(PROFILES)}")

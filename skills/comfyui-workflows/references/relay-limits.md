@@ -18,7 +18,7 @@ fails as an unknown tool, so check `server_info` rather than assuming.
 |---|---|
 | `read` | `node_search`, `node_describe`, `model_list`, `template_search`, `template_get`, `docs_search`, `docs_guide` |
 | `run` | `workflow_validate`, `workflow_run`, `workflow_outputs`, `workflow_upload_input`, `job_status`, `job_cancel` |
-| `manage`, `develop` | nothing yet |
+| `manage` | nothing yet |
 
 `server_info` is in every profile.
 
