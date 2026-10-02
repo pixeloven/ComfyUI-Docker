@@ -102,6 +102,42 @@ spec:
             # container restart but not a reschedule.
             - name: cache
               mountPath: /app/.cache
+        # OPTIONAL: the MCP sidecar for agents (comfyrelay, the `mcp` image).
+        # Delete this container, and mcp-secret.yaml, if you don't use an MCP
+        # client. It reaches ComfyUI over the pod's loopback, so 8188 needs no
+        # exposure for it, and it serves agents on 9000 with a token (README.md).
+        - name: mcp
+          # A placeholder that moves. Pin a release and a digest instead:
+          #   ghcr.io/pixeloven/comfyui/mcp:X.Y.Z@sha256:<digest>
+          image: ghcr.io/pixeloven/comfyui/mcp:latest
+          env:
+            - name: COMFYUI_URL
+              value: http://127.0.0.1:8188
+            # At least 32 characters, or the server refuses to start.
+            - name: COMFYUI_MCP_HTTP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: comfyui-mcp
+                  key: COMFYUI_MCP_HTTP_TOKEN
+            # COMFYUI_MCP_PROFILES is left at its default, read,run.
+          ports:
+            - name: mcp
+              containerPort: 9000
+          # 256Mi fits the default COMFYUI_MCP_MAX_LARGE_REQUESTS (2) with up to
+          # three clients that upload large files (runtime-contract.md).
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          # It writes nothing, so the root filesystem can be read-only.
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
       volumes:
         - name: models
           persistentVolumeClaim:

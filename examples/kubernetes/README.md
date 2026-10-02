@@ -1,7 +1,7 @@
 # ComfyUI on Kubernetes
 
 A minimal, generic example: one Deployment, one PersistentVolumeClaim per data
-volume, and a ClusterIP Service. It uses the `core:cpu` image so it runs on any
+volume, a ClusterIP Service, and an optional MCP sidecar for agents. It uses the `core:cpu` image so it runs on any
 cluster. There is no ingress, no namespace, and no storage class. Those depend on
 your cluster, so you add them.
 
@@ -10,6 +10,7 @@ your cluster, so you add them.
 | `deployment.yaml` | ComfyUI, running as UID/GID `1000`, with a readiness probe on `/system_stats` |
 | `pvc.yaml` | Seven `ReadWriteOnce` claims, one per volume root under `/app` |
 | `service.yaml` | `comfyui:8188` inside the cluster |
+| `mcp-secret.yaml` | **Optional.** A placeholder Secret for the MCP sidecar's token |
 
 ## Deploy
 
@@ -20,6 +21,45 @@ kubectl port-forward service/comfyui 8188:8188
 ```
 
 Then open **http://localhost:8188**.
+
+Before that first `apply`, either set the MCP sidecar's token (below) or delete
+the sidecar. Left as a placeholder, the sidecar refuses to start, and the pod
+never becomes Ready.
+
+## The MCP Sidecar (Optional)
+
+The Deployment's second container, `mcp`, is the
+[`mcp` image](../../services/comfyrelay/README.md): an MCP server for agents,
+one per ComfyUI. It reaches ComfyUI over the pod's loopback
+(`COMFYUI_URL=http://127.0.0.1:8188`), so nothing extra is exposed for it, and it
+serves agents on port 9000 at `/mcp`, behind a token. It installs and restarts
+nothing.
+
+**If you don't use an MCP client, delete the `mcp` container from
+`deployment.yaml`, and delete `mcp-secret.yaml`.**
+
+To use it, give it a token of at least 32 characters. Either replace the
+`REPLACE-ME` value in `mcp-secret.yaml` with the output of `openssl rand -hex 32`
+(and don't commit it), or delete that file and create the Secret directly:
+
+```bash
+kubectl create secret generic comfyui-mcp \
+  --from-literal=COMFYUI_MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
+```
+
+Then reach it from your machine, and point the client at it with the token:
+
+```bash
+kubectl port-forward deployment/comfyui 9000:9000
+claude mcp add --transport http comfyui http://127.0.0.1:9000/mcp \
+  --header "Authorization: Bearer $(kubectl get secret comfyui-mcp -o jsonpath='{.data.COMFYUI_MCP_HTTP_TOKEN}' | base64 -d)"
+```
+
+It runs under the pod's UID with a read-only root filesystem, and its memory
+limit is 256Mi, which fits the default large-request limit with up to three
+clients that upload large files. See the
+[runtime contract](../../docs/user-guides/runtime-contract.md#the-mcp-image) for
+what it promises, and pin its image the same way as ComfyUI's.
 
 ## How the Container Starts Here
 
