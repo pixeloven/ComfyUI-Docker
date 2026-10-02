@@ -318,10 +318,10 @@ sidecar. Its README explains every setting and tool.
 | Contract | Value |
 |----------|-------|
 | Endpoint | Streamable HTTP at `/mcp` on port `9000` (`MCP_PORT`), on `MCP_HOST` (default `0.0.0.0`, all interfaces) |
-| Token | `COMFYUI_MCP_HTTP_TOKEN` is **required, and at least 32 characters**. Without one, or with a shorter one, the container exits 2 at start and says why (`openssl rand -hex 32` makes one). Clients send `Authorization: Bearer <token>` or `X-API-Key: <token>`, and anything else gets `401` |
+| Token | `COMFYUI_MCP_HTTP_TOKEN` is **required, and at least 32 characters**. Without one, or with a shorter one, the container exits 2 at start and says why (`openssl rand -hex 32` makes one). Clients send `Authorization: Bearer <token>` or `X-API-Key: <token>`. A request passes if either header carries the token, so a gateway can send its own Bearer and this token as `X-API-Key`. Anything else gets `401` |
 | ComfyUI | `COMFYUI_URL`, default `http://localhost:8188`, as reachable from the `mcp` container. The server contacts nothing else |
 | Tools | Chosen by `COMFYUI_MCP_PROFILES`, default `read,run`. The tool names are part of this contract (below) |
-| Large requests | At most `COMFYUI_MCP_MAX_LARGE_REQUESTS` (default `2`) requests with a body over 1 MiB are handled at once. One more waits up to 5 seconds, then gets `503` with `Retry-After` and a JSON error with `"retryable": true` |
+| Large requests | At most `COMFYUI_MCP_MAX_LARGE_REQUESTS` (default `2`) requests with a body over 1 MiB are handled at once. Every chunked request counts as large, whatever its `Content-Length`. One more waits up to 5 seconds, then gets `503` with `Retry-After` and a JSON error with `"retryable": true`. While it holds a slot, a large request's body must keep arriving: no data for 30 seconds, or a body not complete within 120 seconds of taking the slot, and it gets `408` (`request_timeout`, retryable) and the slot is released, so a stalled client can't hold one |
 | Memory | 256 MiB at the default large-request limit, with up to three clients that upload large files. It idles at about 90 MB and one maximum-size upload peaks at about 150 MB. Each MCP session keeps its last request (about 25 MB after a maximum-size upload) until its next message or 30 idle minutes |
 | User | `1000:1000` by default (numeric `USER`), and any UID works. It writes nothing, so a read-only root filesystem works |
 | Stopping | `SIGTERM` stops the server at once. `tini` is PID 1 and passes the signal on |
@@ -332,7 +332,8 @@ profile: the tool names are versioned with the image.
 
 The other variables (`COMFYUI_MCP_INSTANCE_ID`, `COMFYUI_MCP_MAX_JOBS` and
 `COMFYUI_MCP_DOCS`) are documented in the README, with the memory measurements. Under
-Kubernetes, set `resources.limits.memory: 256Mi` on the container, and raise it with
+Kubernetes, set `resources.limits.memory: 256Mi` on the container, as the optional sidecar in
+[`examples/kubernetes/`](../../examples/kubernetes/) does, and raise it with
 `COMFYUI_MCP_MAX_LARGE_REQUESTS` or with the number of clients that upload large files.
 
 ## What Counts as a Breaking Change

@@ -361,11 +361,15 @@ jobs:
   # from a fork would build just as well; the compare API tells them apart:
   # main is `ahead` of a commit on it, or `identical` to its tip. Reads one
   # public repo, so the workflow's token with read-only contents is enough.
+  # It runs on every release tag too, and `release` needs it: there it must run,
+  # never skip, so its `if` holds on any v* tag whatever the path filter says.
   docs-pin:
     name: COMFY_DOCS_SHA is on Comfy-Org/docs main
     runs-on: ubuntu-latest
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.bake == 'true'
+    if: >-
+      (github.event_name == 'pull_request' && needs.changes.outputs.bake == 'true')
+      || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     permissions:
       contents: read
     steps:
@@ -378,12 +382,20 @@ jobs:
         GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
-        sha="$(docker buildx bake -f docker-bake.hcl --print mcp 2>/dev/null | jq -r '.target.mcp.args.COMFY_DOCS_SHA')"
+        err="${RUNNER_TEMP}/docs-pin.err"
+        if ! printed="$(docker buildx bake -f docker-bake.hcl --print mcp 2>"${err}")"; then
+          echo "::error::docker buildx bake --print mcp failed, so COMFY_DOCS_SHA could not be read: $(cat "${err}")"
+          exit 1
+        fi
+        sha="$(printf '%s' "${printed}" | jq -r '.target.mcp.args.COMFY_DOCS_SHA' 2>/dev/null || true)"
         if ! printf '%s' "${sha}" | grep -qE '^[0-9a-f]{40}$'; then
           echo "::error::could not read a 40-hex COMFY_DOCS_SHA out of docker-bake.hcl (got '${sha}')"
           exit 1
         fi
-        status="$(gh api "repos/Comfy-Org/docs/compare/${sha}...main" --jq .status)"
+        if ! status="$(gh api "repos/Comfy-Org/docs/compare/${sha}...main" --jq .status 2>"${err}")"; then
+          echo "::error::gh api repos/Comfy-Org/docs/compare/${sha}...main failed (a SHA GitHub doesn't know, or an API error): $(cat "${err}")"
+          exit 1
+        fi
         case "${status}" in
           ahead|identical) echo "COMFY_DOCS_SHA ${sha} is on Comfy-Org/docs main (${status})" ;;
           *) echo "::error::COMFY_DOCS_SHA ${sha} is not on Comfy-Org/docs main: main is '${status}' of it, not 'ahead' or 'identical'"
@@ -753,10 +765,12 @@ jobs:
   # The mcp image: comfyrelay since 5.0.0 (#136). bake has declared the target
   # since #43, and VERSIONING.md counts it in the image family.
   #
-  # It publishes only after the relay job has probed the same commit's build
-  # against a booted ComfyUI, so a server that fails that never reaches GHCR.
-  # It runs whenever the relay job does: on main, on a tag, and on a PR that
-  # touches what the image installs (no push from a PR).
+  # It publishes only after the relay job has probed this commit's image
+  # against a booted ComfyUI, so a commit whose server fails that never reaches
+  # GHCR. What it pushes is its own build of the same commit, inputs and pins:
+  # equivalent to the probed image, but not byte-identical to it. It runs
+  # whenever the relay job does: on main, on a tag, and on a PR that touches
+  # what the image installs (no push from a PR).
   #
   # No free-disk-space step: this is python:3.13-slim and one venv, not a CUDA
   # stack.
@@ -1196,14 +1210,15 @@ jobs:
   release:
     name: cut the release
     runs-on: ubuntu-latest
-    needs: [context, validate-models, end-to-end, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, relay, build-linux-accelerators, smoke-cpu]
+    needs: [context, validate-models, end-to-end, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, relay, docs-pin, build-linux-accelerators, smoke-cpu]
     # `!contains(failure)` rather than the default all-succeeded: on a non-release
     # push some build jobs are legitimately `skipped` by the path filter, and
     # `skipped` is not `success`.
     #
     # But this job only runs for a release, which is a `v*` tag, and on a tag
     # nothing it needs is skipped legitimately: `context` forces build_images,
-    # build_fetch and build_relay true, and validate-models, end-to-end and
+    # build_fetch and build_relay true, docs-pin runs on every v* tag, and
+    # validate-models, end-to-end and
     # build-cuda-arch have no `if`. So a `skipped` need here means an upstream
     # failure hid it -- a failed validate-models leaves publish-fetch
     # skipped, not failed -- and every need must have succeeded.

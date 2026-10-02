@@ -24,8 +24,9 @@ uv run comfyctl relay serve --comfyui-url http://127.0.0.1:8188    # serves http
 uv run comfyctl relay probe --no-docs                               # checks it, no agent needed
 ```
 
-Or as the image, published or built from the checkout (`docker buildx bake mcp --load` tags it
-`ghcr.io/pixeloven/comfyui/mcp:latest`; set `IMAGE_LABEL` for another tag):
+Or as the image, published or built from the checkout
+(`IMAGE_LABEL=local docker buildx bake mcp --load` tags it `ghcr.io/pixeloven/comfyui/mcp:local`, a
+label CI never publishes, so it can't be confused with a pulled `mcp:latest`):
 
 ```sh
 docker run --rm -p 127.0.0.1:9000:9000 --read-only \
@@ -86,13 +87,13 @@ image read before 5.0.0, so a deployment keeps them.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `COMFYUI_MCP_HTTP_TOKEN` | *(unset, required)* | The token clients send, as `Authorization: Bearer <token>` or `X-API-Key: <token>`. Without it the server logs `Refusing to start` and exits 2. It must be **at least 32 characters** (generate one with `openssl rand -hex 32`), or it exits 2 with the length and that command. It must be visible ASCII (no spaces, line breaks or other characters a header can't carry); anything else also exits 2, and the value is never printed. |
+| `COMFYUI_MCP_HTTP_TOKEN` | *(unset, required)* | The token clients send, as `Authorization: Bearer <token>` or `X-API-Key: <token>`. A request passes if either header carries it, so a gateway can send its own Bearer and this token as `X-API-Key`. Without it the server logs `Refusing to start` and exits 2. It must be **at least 32 characters** (generate one with `openssl rand -hex 32`), or it exits 2 with the length and that command. It must be visible ASCII (no spaces, line breaks or other characters a header can't carry); anything else also exits 2, and the value is never printed. |
 | `COMFYUI_URL` | `http://localhost:8188` | Where ComfyUI answers, from this container. It must be an `http://` or `https://` URL with a host, or the server exits 2 at startup. A `user:password@` in it is sent to ComfyUI but never shown: logs and errors print `***@`. Percent-encode any `/`, `?`, `#` or `@` in the credentials (`/` is `%2F`): unencoded, they end the host part early, and the server refuses the URL. |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `9000` | The listen address. The path is always `/mcp`. |
 | `COMFYUI_MCP_PROFILES` | `read,run` | The capability profiles to enable (below) |
 | `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar. In a container the hostname is the container ID or pod name, which can change when it's recreated, so set this when a gateway federates sidecars. `server_info` reports where the ID came from (`instance_id_source`: `env` or `hostname`), and startup logs a warning when it's the hostname. |
 | `COMFYUI_MCP_MAX_JOBS` | `16` | How many jobs may be in flight at once. A submission past it is refused with `too_many_jobs`. It's retryable, unless every slot is held by a job that didn't stop when cancelled, since those may never free. |
-| `COMFYUI_MCP_MAX_LARGE_REQUESTS` | `2` | How many requests with a body over 1 MiB (in practice, `workflow_upload_input` calls) are handled at once. One more waits up to 5 seconds for a slot, then gets HTTP `503` with `Retry-After: 2` and `{"error": {"code": "server_busy", ..., "retryable": true}}`. Requests under 1 MiB never wait. See *Memory* below. |
+| `COMFYUI_MCP_MAX_LARGE_REQUESTS` | `2` | How many requests with a body over 1 MiB (in practice, `workflow_upload_input` calls) are handled at once. One more waits up to 5 seconds for a slot, then gets HTTP `503` with `Retry-After: 2` and `{"error": {"code": "server_busy", ..., "retryable": true}}`. Every chunked request counts as large, whatever its `Content-Length` says. Requests under 1 MiB never wait. While it holds a slot, a large request's body must keep arriving: no data for 30 seconds, or a body not complete within 120 seconds of taking the slot, and it gets `408` (`request_timeout`, retryable) and the slot is released, so a stalled client can't hold one. See *Memory* below. |
 | `COMFYUI_VERSION` | set by the image | The ComfyUI version the image was built for, from the bake pin |
 | `COMFYUI_MCP_DOCS` | `/opt/docs/docs.sqlite` | The docs index `docs_search` and `docs_guide` read. The image builds it there; without one those tools fail with `docs_unavailable`, and `server_info.docs` says why. |
 

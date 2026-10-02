@@ -59,7 +59,8 @@ RUN test -n "$COMFY_DOCS_SHA" || { echo "COMFY_DOCS_SHA is required; build with 
 COPY --from=skills . /skills
 # The commit this image is built from: the guides' URLs and the NOTICE's
 # Corresponding Source pointer name it. CI passes it; a build without it
-# points them at the release tag of the version it reports.
+# points them at the release tag of the version it reports. Deliberately
+# here, so every new commit rebuilds this stage and re-fetches the docs.
 ARG GIT_SHA=
 RUN /opt/venv/bin/comfyctl relay docs build --docs-sha "$COMFY_DOCS_SHA" --skills /skills --out /docs \
       --git-sha "$GIT_SHA"
@@ -116,9 +117,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
     COMFYUI_MCP_PROFILES=read,run
 
 WORKDIR /app
-# Numeric, so a runtime that checks for a non-root UID (Kubernetes
-# runAsNonRoot) can tell without reading /etc/passwd.
-USER 1000:1000
+# Numeric (1000:1000 by default), so a runtime that checks for a non-root UID
+# (Kubernetes runAsNonRoot) can tell without reading /etc/passwd.
+USER ${APP_UID}:${APP_GID}
 
 # Prove it at BUILD time, with the defaults above:
 #   - without a token it refuses to start, with exit 2 and the reason;

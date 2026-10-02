@@ -31,7 +31,9 @@ version from now on.
 
 **Unchanged:** the image name and tags, port `9000` (`MCP_PORT`), `MCP_HOST`,
 the `/mcp` path, `COMFYUI_URL`, `COMFYUI_MCP_HTTP_TOKEN` sent as
-`Authorization: Bearer <token>` or `X-API-Key: <token>`, session-based
+`Authorization: Bearer <token>` or `X-API-Key: <token>` (a request passes if
+either header carries it, as with artokun, so a gateway that sends its own
+Bearer and this token as `X-API-Key` keeps working), session-based
 streamable HTTP, running under any UID with a read-only root filesystem, and
 `tini` passing `SIGTERM` on.
 
@@ -107,17 +109,26 @@ streamable HTTP, running under any UID with a read-only root filesystem, and
 **Memory.** A `run`-profile sidecar idles at about 90 MB, and one maximum-size
 upload (10 MiB) peaks at about 150 MB. The new `COMFYUI_MCP_MAX_LARGE_REQUESTS`
 admits at most two requests over 1 MiB at once; one more waits up to 5 seconds,
-then gets `503` with `Retry-After: 2` and an error marked `retryable`. The SDK
+then gets `503` with `Retry-After: 2` and an error marked `retryable`. Every
+chunked request counts as large. A large request whose body stalls (no data for
+30 seconds, or not complete within 120) gets `408` and gives its slot back. The SDK
 also keeps each MCP session's last request until its next message or 30 idle
 minutes, about 25 MB after a maximum-size upload. Six maximum-size uploads at
 once from six sessions peaked at about 300 MB, against about 350 MB without the
 cap. **256 MiB** fits the default with up to three clients that upload large
 files; allow about 25 MB for each one beyond that. In Kubernetes, set
-`resources.limits.memory` on the sidecar.
+`resources.limits.memory` on the sidecar, as `examples/kubernetes/` now does.
+
+**`examples/kubernetes/` gains an optional MCP sidecar**: a second container
+running this image beside ComfyUI, reaching it over the pod's loopback, with its
+token from a Secret (`mcp-secret.yaml`, a placeholder to replace) and a 256Mi
+memory limit. Delete the container and the Secret if you don't use an MCP
+client: left as a placeholder, the token is too short and the sidecar refuses to
+start.
 
 ### Also in this image
 
-- `USER 1000:1000`, numeric, so Kubernetes `runAsNonRoot` accepts the image
+- `USER 1000:1000` (from the `APP_UID`/`APP_GID` build args), numeric, so Kubernetes `runAsNonRoot` accepts the image
   without reading its `/etc/passwd`.
 - `/licenses/NOTICE` states that comfyrelay isn't affiliated with or endorsed by
   Comfy Org, with the docs' GPL-3.0 notice. Its Corresponding Source pointer and

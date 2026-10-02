@@ -83,8 +83,9 @@ registry is what they check against.
 - **Pattern:** `SAGEATTENTION_RELEASE_URL` and each `SAGEATTENTION_WHEEL_SHA256`,
   the `sam2` commit in `extra-requirements.txt`, the base-image tags and
   digests in `services/*/dockerfile.*` (and `services/comfyrelay/dockerfile.comfy.relay`,
-  the `mcp` image, including its `ghcr.io/astral-sh/uv` build stage and `tini`'s apt
-  version), `COMFY_DOCS_SHA` in
+  the `mcp` image, including its `ghcr.io/astral-sh/uv` build stage, `tini`'s apt
+  version, and the builder step that strips the SDK's `mcp` CLI from the venv and fails
+  the build if `mcp.cli` or `dotenv` can be imported), `COMFY_DOCS_SHA` in
   `docker-bake.hcl` (the Comfy-Org/docs commit the relay's docs index covers:
   GPL-3.0 content, pinned by full SHA and bumped by PR, #134; a bump must be a commit on
   Comfy-Org/docs `main`, because GitHub serves any SHA in the fork network; CI's
