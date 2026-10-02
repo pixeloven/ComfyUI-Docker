@@ -29,7 +29,7 @@
 set -o pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-usage() { sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; }
 
 no_restart=false
 timeout=180
