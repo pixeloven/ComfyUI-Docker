@@ -16,7 +16,7 @@ dev = ["pytest>=8.0", "respx>=0.21"]
 # library that command, and anything else, imports.
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
