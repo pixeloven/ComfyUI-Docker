@@ -149,6 +149,12 @@ Two more paths are part of the contract:
 Nothing else under `/app` is meant to be a volume. `/app/ComfyUI` and `/app/.venv`
 belong to the image.
 
+`/app/ComfyUI/custom_nodes` is a symlink to `/app/custom_nodes`, so comfy-cli
+installs land on the volume. Run it as the runtime user (`docker exec -u <PUID> …`);
+under root, the installed files are root-owned and ComfyUI fails on them with a
+`PermissionError`. Don't bind-mount the symlink path, which silently hides the volume,
+and don't list it in `extra_model_paths.yaml`, which loads every pack twice.
+
 ## Port
 
 ComfyUI listens on **`8188`** on all interfaces (`--listen` without an address, which
