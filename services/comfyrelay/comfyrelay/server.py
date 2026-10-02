@@ -82,6 +82,9 @@ LARGE_BODY_RETRY_AFTER_SECONDS = 2
 # Once it holds a slot, a large request's body must keep arriving: a gap of
 # this long with no chunk, or a body not complete this long after the slot was
 # taken, gets 408 and frees the slot. A client that stalls can't keep a slot.
+# The total is a minimum throughput: a maximum-size upload body (about 14 MB)
+# needs about 1 Mbit/s to arrive within it. Only an idle stall is retryable; a
+# link too slow for the total would only fail again.
 LARGE_BODY_IDLE_SECONDS = 30.0
 LARGE_BODY_TOTAL_SECONDS = 120.0
 
@@ -99,18 +102,21 @@ class LargeBodyGate:
     too late: six maximum-size uploads at once peaked at about 340 MB (#145).
     This sits in front of the transport, behind the token.
 
-    A request is large when it is chunked (whatever its Content-Length says:
-    the server reads a chunked body as chunked), when its Content-Length is
-    over `threshold`, or when that length can't be read, since such a body's
-    size is only known once it has been read. A large request waits up to
+    Only POST is gated: it is the only method whose body the transport reads,
+    and a GET opens a standing event stream that can hold a slot for as long
+    as it stays open. A POST is large when it is chunked (whatever its
+    Content-Length says: the server reads a chunked body as chunked), when its
+    Content-Length is over `threshold`, or when that length can't be read,
+    since such a body's size is only known once it has been read. A large request waits up to
     `wait` seconds for a slot, then gets 503 with Retry-After and the server's
     error shape, `retryable: true`. The slot is held until the transport has
     answered, which covers reading, parsing and the tool call. Anything else,
     including every request without a body, never waits.
 
     While it holds a slot, a large request's body must arrive: no chunk for
-    `idle` seconds, or a body still incomplete `total` seconds after the slot
-    was taken, and the request is answered 408 and the slot released.
+    `idle` seconds (retryable), or a body still incomplete `total` seconds
+    after the slot was taken (not retryable), and the request is answered 408
+    and the slot released.
     """
 
     def __init__(
@@ -172,7 +178,7 @@ class LargeBodyGate:
             return
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.total
-        state = {"body_done": False, "stalled": False, "started": False}
+        state = {"body_done": False, "stalled": False, "started": False, "too_slow": False}
 
         async def guarded_send(message: Any) -> None:
             if state["stalled"]:
@@ -182,9 +188,13 @@ class LargeBodyGate:
             await send(message)
 
         async def guarded_receive() -> Any:
+            if state["stalled"]:
+                raise _BodyStalled  # already answered 408; never let the app start a second response
             if state["body_done"]:
                 return await receive()
-            timeout = min(self.idle, deadline - loop.time())
+            left = deadline - loop.time()
+            timeout = min(self.idle, left)
+            state["too_slow"] = left <= self.idle
             try:
                 if timeout <= 0:
                     raise TimeoutError
@@ -206,28 +216,25 @@ class LargeBodyGate:
             self._slots.release()
 
     async def _stalled(self, scope: Scope, state: dict[str, bool], send: Send) -> None:
+        too_slow = state["too_slow"]
+        why = f"not complete within {self.total:g} seconds" if too_slow else f"no data for {self.idle:g} seconds"
         log.warning(
-            "408 for %s %s: a large request's body stalled (no data for %ss, or not complete within %ss); "
-            "its slot is released",
+            "408 for %s %s: a large request's body stalled (%s); its slot is released",
             scope["method"],
             scope["path"],
-            f"{self.idle:g}",
-            f"{self.total:g}",
+            why,
         )
         already_started = state["started"]
         state["stalled"] = True
         if already_started:
             return
-        body = json.dumps(
-            {
-                "error": {
-                    "code": "request_timeout",
-                    "message": f"the request body stalled: no data for {self.idle:g} seconds, or not complete "
-                    f"within {self.total:g} seconds",
-                    "retryable": True,
-                }
-            }
+        message = (
+            f"the request body was {why}, which needs about 1 Mbit/s for a maximum-size upload; a retry over the "
+            "same link would fail again"
+            if too_slow
+            else f"the request body stalled: {why}"
         )
+        body = json.dumps({"error": {"code": "request_timeout", "message": message, "retryable": not too_slow}})
         await send(
             {
                 "type": "http.response.start",
@@ -238,6 +245,8 @@ class LargeBodyGate:
         await send({"type": "http.response.body", "body": body.encode()})
 
     def _large(self, scope: Scope) -> bool:
+        if scope["method"] != "POST":
+            return False
         headers = dict(scope.get("headers") or [])
         # Chunked first: with both headers, the server reads the body as chunked
         # and ignores Content-Length, so the length proves nothing.

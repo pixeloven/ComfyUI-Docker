@@ -42,8 +42,8 @@ class Held:
             self.inside -= 1
 
 
-async def request(gate, headers):
-    scope = {"type": "http", "method": "POST", "path": "/mcp", "headers": headers}
+async def request(gate, headers, method="POST"):
+    scope = {"type": "http", "method": method, "path": "/mcp", "headers": headers}
     sent = []
 
     async def receive():
@@ -148,6 +148,40 @@ async def test_a_body_of_unknown_length_counts_as_large(headers):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("method", ["GET", "DELETE", "PUT"])
+@pytest.mark.parametrize(
+    "headers",
+    [[(b"transfer-encoding", b"chunked")], length(BIG)],
+    ids=["chunked", "big-length"],
+)
+async def test_only_a_post_is_gated(method, headers):
+    """A GET opens the standing event stream; with a body it must still never take a slot, or two such GETs would
+    block every upload for as long as their streams stay open."""
+    app = Held()
+    gate = LargeBodyGate(app, 1, wait=0.2)
+    blocker = asyncio.create_task(request(gate, length(BIG)))
+    await until(lambda: app.inside == 1)
+    other = asyncio.create_task(request(gate, headers, method))
+    await until(lambda: app.inside == 2, timeout=0.5)
+    app.release.set()
+    assert (await other)[0]["status"] == 200
+    await blocker
+
+
+@pytest.mark.anyio
+async def test_body_carrying_gets_hold_no_slot_while_an_upload_goes_through():
+    app = Held()
+    gate = LargeBodyGate(app, 2, wait=0.2)
+    streams = [asyncio.create_task(request(gate, [(b"transfer-encoding", b"chunked")], "GET")) for _ in range(2)]
+    await until(lambda: app.inside == 2)
+    upload = asyncio.create_task(request(gate, length(BIG)))
+    await until(lambda: app.inside == 3, timeout=0.5)
+    app.release.set()
+    assert (await upload)[0]["status"] == 200
+    await asyncio.gather(*streams)
+
+
+@pytest.mark.anyio
 async def test_a_failing_request_gives_its_slot_back():
     async def broken(scope, receive, send):
         raise RuntimeError("boom")
@@ -218,7 +252,7 @@ async def test_a_stalled_body_gets_408_and_its_slot_back():
     assert 0.15 <= time.monotonic() - started < 1.5
     assert sent[0]["status"] == 408
     error = json.loads(sent[1]["body"])["error"]
-    assert error["code"] == "request_timeout" and error["retryable"] is True
+    assert error["code"] == "request_timeout" and error["retryable"] is True, "an idle stall is worth retrying"
     assert len(sent) == 2, "something was sent after the 408"
     # The slot is free again: the next large request goes straight in.
     started = time.monotonic()
@@ -233,6 +267,30 @@ async def test_a_body_that_trickles_past_the_total_deadline_gets_408():
     sent = await asyncio.wait_for(stalled_request(gate, chunks=1000, every=0.05), 3)
     assert 0.25 <= time.monotonic() - started < 1.5
     assert sent[0]["status"] == 408
+    error = json.loads(sent[1]["body"])["error"]
+    assert error["retryable"] is False, "a link too slow for the total would only fail again"
+    assert "1 Mbit/s" in error["message"]
+
+
+@pytest.mark.anyio
+async def test_once_stalled_the_app_cannot_receive_again_or_start_a_second_response():
+    """An app that swallows the stall and reads again is stopped, and anything it sends is dropped."""
+    attempts = []
+
+    async def stubborn(scope, receive, send):
+        for _ in range(3):
+            try:
+                await receive()
+                await receive()
+            except Exception as exc:  # noqa: BLE001 - the app under test swallows whatever the gate raises
+                attempts.append(type(exc).__name__)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"late"})
+
+    gate = LargeBodyGate(stubborn, 1, idle=0.1, total=10)
+    sent = await asyncio.wait_for(stalled_request(gate), 3)
+    assert attempts == ["_BodyStalled"] * 3
+    assert [m.get("status") for m in sent if m["type"] == "http.response.start"] == [408]
 
 
 @pytest.mark.anyio

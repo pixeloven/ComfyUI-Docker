@@ -93,7 +93,7 @@ image read before 5.0.0, so a deployment keeps them.
 | `COMFYUI_MCP_PROFILES` | `read,run` | The capability profiles to enable (below) |
 | `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar. In a container the hostname is the container ID or pod name, which can change when it's recreated, so set this when a gateway federates sidecars. `server_info` reports where the ID came from (`instance_id_source`: `env` or `hostname`), and startup logs a warning when it's the hostname. |
 | `COMFYUI_MCP_MAX_JOBS` | `16` | How many jobs may be in flight at once. A submission past it is refused with `too_many_jobs`. It's retryable, unless every slot is held by a job that didn't stop when cancelled, since those may never free. |
-| `COMFYUI_MCP_MAX_LARGE_REQUESTS` | `2` | How many requests with a body over 1 MiB (in practice, `workflow_upload_input` calls) are handled at once. One more waits up to 5 seconds for a slot, then gets HTTP `503` with `Retry-After: 2` and `{"error": {"code": "server_busy", ..., "retryable": true}}`. Every chunked request counts as large, whatever its `Content-Length` says. Requests under 1 MiB never wait. While it holds a slot, a large request's body must keep arriving: no data for 30 seconds, or a body not complete within 120 seconds of taking the slot, and it gets `408` (`request_timeout`, retryable) and the slot is released, so a stalled client can't hold one. See *Memory* below. |
+| `COMFYUI_MCP_MAX_LARGE_REQUESTS` | `2` | How many `POST` requests with a body over 1 MiB (in practice, `workflow_upload_input` calls) are handled at once. No other method is limited: a `GET` opens the standing event stream, whatever it carries. One more waits up to 5 seconds for a slot, then gets HTTP `503` with `Retry-After: 2` and `{"error": {"code": "server_busy", ..., "retryable": true}}`. Every chunked `POST` counts as large, whatever its `Content-Length` says. Requests under 1 MiB never wait. While it holds a slot, a large request's body must keep arriving, so a stalled client can't hold one: no data for 30 seconds gets `408` (`request_timeout`, retryable), and a body not complete within 120 seconds of taking the slot gets `408` marked not retryable, since that is a minimum throughput (about 1 Mbit/s for a maximum-size upload) and a retry over the same link would fail again. Either way the slot is released. See *Memory* below. |
 | `COMFYUI_VERSION` | set by the image | The ComfyUI version the image was built for, from the bake pin |
 | `COMFYUI_MCP_DOCS` | `/opt/docs/docs.sqlite` | The docs index `docs_search` and `docs_guide` read. The image builds it there; without one those tools fail with `docs_unavailable`, and `server_info.docs` says why. |
 
@@ -375,7 +375,7 @@ returns, is refused with directions to export the API format. The code is
 peaks at about 150 MB. Most of what a large upload costs is its request body, which the
 transport reads and parses before the tool runs, however the tool queues the uploads
 themselves. So the server admits at most `COMFYUI_MCP_MAX_LARGE_REQUESTS` (default 2)
-requests over 1 MiB at once, in front of the transport and behind the token; one more waits up
+`POST` requests over 1 MiB at once, in front of the transport and behind the token; one more waits up
 to 5 seconds, then gets a retryable `503`.
 
 The SDK also keeps each MCP session's last request, body included, until that session sends

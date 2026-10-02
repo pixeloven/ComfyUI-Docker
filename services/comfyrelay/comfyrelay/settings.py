@@ -16,7 +16,7 @@
     COMFYUI_MCP_MAX_JOBS    how many jobs may be in flight at once (default
                             16); a submission past it is refused
     COMFYUI_MCP_MAX_LARGE_REQUESTS
-                            how many requests with a body over 1 MiB are
+                            how many POST requests with a body over 1 MiB are
                             handled at once (default 2); the rest wait
                             briefly, then get a retryable 503 (server.py)
     COMFYUI_VERSION         the ComfyUI version the image was built for. The

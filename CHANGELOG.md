@@ -96,7 +96,7 @@ streamable HTTP, running under any UID with a read-only root filesystem, and
    | `COMFYUI_MCP_PROFILES` | `read,run` | The capability profiles |
    | `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar; set it to something stable if a gateway federates sidecars |
    | `COMFYUI_MCP_MAX_JOBS` | `16` | Workflow runs in flight at once |
-   | `COMFYUI_MCP_MAX_LARGE_REQUESTS` | `2` | Requests over 1 MiB handled at once (see *Memory*) |
+   | `COMFYUI_MCP_MAX_LARGE_REQUESTS` | `2` | `POST` requests over 1 MiB handled at once (see *Memory*) |
    | `COMFYUI_MCP_DOCS` | `/opt/docs/docs.sqlite` | The built-in docs index |
 
 5. **Drop the state mounts.** The server writes nothing: a volume or tmpfs at
@@ -108,23 +108,26 @@ streamable HTTP, running under any UID with a read-only root filesystem, and
 
 **Memory.** A `run`-profile sidecar idles at about 90 MB, and one maximum-size
 upload (10 MiB) peaks at about 150 MB. The new `COMFYUI_MCP_MAX_LARGE_REQUESTS`
-admits at most two requests over 1 MiB at once; one more waits up to 5 seconds,
+admits at most two `POST` requests over 1 MiB at once; one more waits up to 5 seconds,
 then gets `503` with `Retry-After: 2` and an error marked `retryable`. Every
-chunked request counts as large. A large request whose body stalls (no data for
-30 seconds, or not complete within 120) gets `408` and gives its slot back. The SDK
+chunked `POST` counts as large. A large request whose body stalls gets `408` and
+gives its slot back: retryable after 30 seconds with no data, and not retryable
+when the body isn't complete within 120 seconds, a minimum throughput of about
+1 Mbit/s for a maximum-size upload. The SDK
 also keeps each MCP session's last request until its next message or 30 idle
 minutes, about 25 MB after a maximum-size upload. Six maximum-size uploads at
 once from six sessions peaked at about 300 MB, against about 350 MB without the
 cap. **256 MiB** fits the default with up to three clients that upload large
 files; allow about 25 MB for each one beyond that. In Kubernetes, set
-`resources.limits.memory` on the sidecar, as `examples/kubernetes/` now does.
+`resources.limits.memory` on the sidecar, as `examples/kubernetes/with-mcp/` does.
 
-**`examples/kubernetes/` gains an optional MCP sidecar**: a second container
-running this image beside ComfyUI, reaching it over the pod's loopback, with its
-token from a Secret (`mcp-secret.yaml`, a placeholder to replace) and a 256Mi
-memory limit. Delete the container and the Secret if you don't use an MCP
-client: left as a placeholder, the token is too short and the sidecar refuses to
-start.
+**`examples/kubernetes/` gains an opt-in MCP sidecar** in `with-mcp/`: a
+strategic merge patch that adds this image as a second container beside
+ComfyUI, reaching it over the pod's loopback, with its token from the
+`comfyui-mcp` Secret and a 256Mi memory limit. `kubectl apply -f
+examples/kubernetes/` deploys ComfyUI exactly as before; the example's README
+says how to opt in (`kubectl create secret …`, then `kubectl patch deployment
+comfyui --patch-file …`).
 
 ### Also in this image
 
