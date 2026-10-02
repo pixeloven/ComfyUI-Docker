@@ -1,10 +1,7 @@
-# comfyrelay: the first-party MCP sidecar for one ComfyUI (#103, #131).
-# Standalone Python image; does NOT depend on the ComfyUI runtime images. It
-# talks to ComfyUI over HTTP (COMFYUI_URL) and to nothing else.
-#
-# NOT PUBLISHED. The bake target stays out of group "all", its only tag is a
-# local name with no registry, and no CI job pushes it. #136 moves it into the
-# `mcp` image, which is when it starts to publish.
+# comfyrelay: the first-party MCP sidecar for one ComfyUI (#103, #131),
+# published as ghcr.io/pixeloven/comfyui/mcp since 5.0.0 (#136; bake target
+# `mcp`). Standalone Python image; does NOT depend on the ComfyUI runtime
+# images. It talks to ComfyUI over HTTP (COMFYUI_URL) and to nothing else.
 #
 # The build context is services/, the uv workspace root, so the image installs
 # exactly what services/uv.lock pins, hash-checked. comfyctl is the command:
@@ -35,6 +32,15 @@ COPY fetch/comfyfetch fetch/comfyfetch
 COPY comfyctl/comfyctl comfyctl/comfyctl
 COPY comfyrelay/comfyrelay comfyrelay/comfyrelay
 RUN uv sync --frozen --no-dev --all-packages --no-editable
+# The SDK's own `mcp` command (mcp.cli: dev, run, install, which can write a
+# Claude Desktop config) comes with the SDK wheel whether or not its [cli]
+# extra is installed, and so does its --env-file dotenv loader. The relay uses
+# neither, so both go from the venv. python-dotenv itself is not installed (it
+# comes only with that extra); the last check fails the build if it ever is.
+RUN rm /opt/venv/bin/mcp && \
+    rm -r "$(/opt/venv/bin/python -c 'import mcp, os; print(os.path.dirname(mcp.__file__))')/cli" && \
+    ! /opt/venv/bin/python -c 'import mcp.cli' 2>/dev/null && \
+    ! /opt/venv/bin/python -c 'import dotenv' 2>/dev/null
 
 # The docs index (#134) that docs_search and docs_guide read: Comfy-Org/docs at
 # COMFY_DOCS_SHA (the bake pin; GPL-3.0) and our guides, skills/comfyui-workflows/
@@ -51,18 +57,26 @@ RUN apt-get update && \
 ARG COMFY_DOCS_SHA
 RUN test -n "$COMFY_DOCS_SHA" || { echo "COMFY_DOCS_SHA is required; build with docker buildx bake" >&2; exit 1; }
 COPY --from=skills . /skills
-RUN /opt/venv/bin/comfyctl relay docs build --docs-sha "$COMFY_DOCS_SHA" --skills /skills --out /docs
+# The commit this image is built from: the guides' URLs and the NOTICE's
+# Corresponding Source pointer name it. CI passes it; a build without it
+# points them at the release tag of the version it reports.
+ARG GIT_SHA=
+RUN /opt/venv/bin/comfyctl relay docs build --docs-sha "$COMFY_DOCS_SHA" --skills /skills --out /docs \
+      --git-sha "$GIT_SHA"
 
 FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
 
 # tini as PID 1, so `docker stop` and a pod's SIGTERM reach the server at once
-# instead of waiting out the grace period.
+# instead of waiting out the grace period. Pinned to the version Debian 13
+# (the base image's release) serves. Debian keeps one version per suite, so a
+# rebuild of tini there makes this fail loudly rather than install another build:
+# move the pin after checking `apt-cache policy tini` in the base image.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends tini && \
+    apt-get install -y --no-install-recommends tini=0.19.0-3+b8 && \
     rm -rf /var/lib/apt/lists/*
 
-# comfy, 1000:1000, as in the mcp image. Any other UID works too: the server
-# writes nothing, so a read-only root filesystem needs no tmpfs beyond /tmp.
+# comfy, 1000:1000. Any other UID works too: the server writes nothing, so a
+# read-only root filesystem needs no tmpfs beyond /tmp.
 ARG APP_UID=1000
 ARG APP_GID=1000
 RUN groupadd -g "$APP_GID" comfy && \
@@ -88,9 +102,9 @@ LABEL org.opencontainers.image.source="https://github.com/pixeloven/ComfyUI-Dock
       org.opencontainers.image.version="$COMFYUI_VERSION" \
       org.opencontainers.image.licenses="MIT AND GPL-3.0"
 
-# The env contract, matching the mcp image where the two overlap. The token
-# (COMFYUI_MCP_HTTP_TOKEN) is never set here: without it the server refuses
-# to start.
+# The env contract (docs/user-guides/runtime-contract.md). The token
+# (COMFYUI_MCP_HTTP_TOKEN) is never set here: without it, or with one under 32
+# characters, the server refuses to start.
 ENV PATH="/opt/venv/bin:$PATH" \
     HOME=/app \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -102,7 +116,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
     COMFYUI_MCP_PROFILES=read,run
 
 WORKDIR /app
-USER comfy
+# Numeric, so a runtime that checks for a non-root UID (Kubernetes
+# runAsNonRoot) can tell without reading /etc/passwd.
+USER 1000:1000
 
 # Prove it at BUILD time, with the defaults above:
 #   - without a token it refuses to start, with exit 2 and the reason;
@@ -118,10 +134,11 @@ RUN set -u; \
     if [ "$rc" != 2 ] || ! grep -q "Refusing to start" "$log"; then \
       echo "comfyrelay did not refuse to start without a token (exit $rc):" >&2; cat "$log" >&2; exit 1; \
     fi; \
-    COMFYUI_MCP_HTTP_TOKEN=build-probe MCP_HOST=127.0.0.1 comfyctl relay serve > "$log" 2>&1 & \
+    token=build-probe-0123456789abcdef0123456789; \
+    COMFYUI_MCP_HTTP_TOKEN=$token MCP_HOST=127.0.0.1 comfyctl relay serve > "$log" 2>&1 & \
     pid=$!; \
     for i in $(seq 60); do \
-      out="$(COMFYUI_MCP_HTTP_TOKEN=build-probe comfyctl relay probe --no-comfyui --timeout 5 2>&1)" && break; \
+      out="$(COMFYUI_MCP_HTTP_TOKEN=$token comfyctl relay probe --no-comfyui --timeout 5 2>&1)" && break; \
       case "$out" in *"FAIL  reachable"*) sleep 1 ;; *) break ;; esac; \
     done; \
     kill "$pid"; wait "$pid" 2>/dev/null; \

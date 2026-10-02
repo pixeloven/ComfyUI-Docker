@@ -3,10 +3,14 @@
 The token check is ASGI middleware around the whole app, so it runs before
 the MCP layer parses anything: no route, and no MCP method, is reachable
 without the token. It accepts `Authorization: Bearer <token>` or
-`X-API-Key: <token>`, the two forms the `mcp` image accepts today, and compares
+`X-API-Key: <token>`, the two forms the `mcp` image accepted before 5.0.0, and compares
 in constant time. Anything else gets 401. Only two ASGI scopes exist here:
 `http`, behind the token, and `lifespan`, which the server itself sends. Every
 other scope, a websocket included, is refused whatever it carries.
+
+Behind the token, LargeBodyGate bounds memory: at most
+COMFYUI_MCP_MAX_LARGE_REQUESTS requests with a body over 1 MiB are handled at
+once (#136).
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from . import __version__
 from .comfyui import ComfyUIClient
 from .docs_index import DocsIndex, DocsIndexError
 from .jobs import SHUTDOWN_WAIT_SECONDS, JobStore
-from .settings import INSTANCE_ID_ENV, MCP_PATH, Settings, redact_url
+from .settings import INSTANCE_ID_ENV, MAX_LARGE_REQUESTS_ENV, MCP_PATH, Settings, redact_url
 from .tools import SERVER_NAME, Relay, register
 from .tools_workflow import MAX_REQUEST_BODY_BYTES
 
@@ -63,6 +67,102 @@ def build_server(settings: Settings, *, comfyui: ComfyUIClient | None = None) ->
     server = MCPServer(SERVER_NAME, version=__version__, instructions=INSTRUCTIONS)
     register(server, relay)
     return server, relay
+
+
+# A request body over this counts as large. The transport reads a body whole
+# and parses it before any tool runs, about 4.5 times its size in memory, so
+# only large bodies are worth queueing: everything but an upload stays well
+# under it.
+LARGE_BODY_BYTES = 1024 * 1024
+# How long a large request waits for a slot before it gets a retryable 503.
+LARGE_BODY_WAIT_SECONDS = 5.0
+LARGE_BODY_RETRY_AFTER_SECONDS = 2
+
+
+class LargeBodyGate:
+    """At most `limit` requests with a large body are handled at once; others wait, briefly.
+
+    Memory, not throughput. The SDK's transport reads each request body and
+    parses it before a tool sees it (about 45 MB of RSS for a maximum-size
+    workflow_upload_input), so the tool's own one-at-a-time upload limit came
+    too late: six maximum-size uploads at once peaked at about 340 MB (#145).
+    This sits in front of the transport, behind the token.
+
+    A request is large when its Content-Length is over `threshold`, or when it
+    has a body of unknown length (chunked, or an unreadable Content-Length),
+    since that one's size is only known once it has been read. A large request
+    waits up to `wait` seconds for a slot, then gets 503 with Retry-After and
+    the server's error shape, `retryable: true`. The slot is held until the
+    transport has answered, which covers reading, parsing and the tool call.
+    Anything else, including every request without a body, never waits.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        limit: int,
+        *,
+        threshold: int = LARGE_BODY_BYTES,
+        wait: float = LARGE_BODY_WAIT_SECONDS,
+    ) -> None:
+        self.app = app
+        self.limit = limit
+        self.threshold = threshold
+        self.wait = wait
+        self._slots = asyncio.Semaphore(limit)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not self._large(scope):
+            await self.app(scope, receive, send)
+            return
+        try:
+            async with asyncio.timeout(self.wait):
+                await self._slots.acquire()
+        except TimeoutError:
+            log.warning(
+                "503 for %s %s: %d large requests already in progress (%s=%d)",
+                scope["method"],
+                scope["path"],
+                self.limit,
+                MAX_LARGE_REQUESTS_ENV,
+                self.limit,
+            )
+            body = json.dumps(
+                {
+                    "error": {
+                        "code": "server_busy",
+                        "message": f"{self.limit} large requests (over {self.threshold} bytes) are already in "
+                        f"progress; retry in {LARGE_BODY_RETRY_AFTER_SECONDS} seconds",
+                        "retryable": True,
+                    }
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 503,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"retry-after", str(LARGE_BODY_RETRY_AFTER_SECONDS).encode()),
+                    ],
+                }
+            )
+            await send({"type": "http.response.body", "body": body.encode()})
+            return
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            self._slots.release()
+
+    def _large(self, scope: Scope) -> bool:
+        headers = dict(scope.get("headers") or [])
+        length = headers.get(b"content-length")
+        if length is None:
+            return b"chunked" in headers.get(b"transfer-encoding", b"").lower()
+        try:
+            return int(length) > self.threshold
+        except ValueError:
+            return True
 
 
 class TokenAuth:
@@ -114,7 +214,7 @@ def http_app(server: MCPServer, settings: Settings) -> Any:
     # is read.
     limit = {"max_request_body_size": MAX_REQUEST_BODY_BYTES} if "run" in settings.profiles else {}
     app = server.streamable_http_app(streamable_http_path=MCP_PATH, host=settings.host, **limit)
-    return TokenAuth(app, settings.token)
+    return TokenAuth(LargeBodyGate(app, settings.max_large_requests), settings.token)
 
 
 def serve(settings: Settings) -> None:

@@ -6,13 +6,12 @@ private network. The vision spec is [#103](https://github.com/pixeloven/ComfyUI-
 
 comfyrelay is an independent project. It isn't affiliated with or endorsed by Comfy Org.
 
-> **Status: skeleton, not released.** This is v1.2 of #103
-> ([#131](https://github.com/pixeloven/ComfyUI-Docker/issues/131)): transport, auth, capability
-> profiles, consent plumbing, jobs and `server_info`. The workflow and knowledge tools arrive in
-> #132 to #134. **No release ships it:** there's no comfyrelay wheel, the released `comfyctl` has
-> no `relay` group, and the image isn't published. The published `mcp` image is still the
-> hardened artokun server ([`../mcp`](../mcp/README.md)). comfyrelay replaces it in #136, as a
-> major version.
+**Published as `ghcr.io/pixeloven/comfyui/mcp`** since 5.0.0
+([#136](https://github.com/pixeloven/ComfyUI-Docker/issues/136)), with the same tags as the
+other images: `mcp:X.Y.Z` for a release, `mcp:<sha8>` and `mcp:latest` for a build of `main`.
+Before 5.0.0 that image packaged artokun/comfyui-mcp; `CHANGELOG.md` → *5.0.0* has the migration
+notes. comfyrelay ships only as that image: there's no comfyrelay wheel, and the released
+`comfyctl` has no `relay` group.
 
 ## Running it
 
@@ -25,13 +24,41 @@ uv run comfyctl relay serve --comfyui-url http://127.0.0.1:8188    # serves http
 uv run comfyctl relay probe --no-docs                               # checks it, no agent needed
 ```
 
-Or as an image, built locally (`comfyrelay:<IMAGE_LABEL>`, never pushed):
+Or as the image, published or built from the checkout (`docker buildx bake mcp --load` tags it
+`ghcr.io/pixeloven/comfyui/mcp:latest`; set `IMAGE_LABEL` for another tag):
 
 ```sh
-docker buildx bake comfyrelay --load
 docker run --rm -p 127.0.0.1:9000:9000 --read-only \
   -e COMFYUI_URL=http://<comfyui-host>:8188 -e COMFYUI_MCP_HTTP_TOKEN \
-  comfyrelay:latest
+  ghcr.io/pixeloven/comfyui/mcp:5.0.0
+```
+
+Next to one of the [`examples/`](../../examples/), add it with an override file beside the
+example's `docker-compose.yml` (for example `examples/core-cpu/docker-compose.override.yml`,
+which Compose reads automatically):
+
+```yaml
+services:
+  mcp:
+    image: ghcr.io/pixeloven/comfyui/mcp:5.0.0
+    environment:
+      - COMFYUI_URL=http://comfyui:8188
+      - COMFYUI_MCP_HTTP_TOKEN=${COMFYUI_MCP_HTTP_TOKEN:?set COMFYUI_MCP_HTTP_TOKEN}
+    ports:
+      - "127.0.0.1:9000:9000"
+    read_only: true
+    mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - comfy_network
+```
+
+```sh
+export COMFYUI_MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
+docker compose up -d
+claude mcp add --transport http comfyui http://127.0.0.1:9000/mcp \
+  --header "Authorization: Bearer $COMFYUI_MCP_HTTP_TOKEN"
 ```
 
 From source there's no docs index, so `docs_search` and `docs_guide` answer
@@ -43,8 +70,9 @@ uv run comfyctl relay docs build --docs-sha <COMFY_DOCS_SHA> --skills ../skills 
 COMFYUI_MCP_DOCS=/tmp/docs/docs.sqlite uv run comfyctl relay serve
 ```
 
-The image runs as `comfy` (1000:1000), or under any UID: it writes nothing, so a read-only
-root filesystem works as it is. `tini` is PID 1, so `docker stop` and a pod's `SIGTERM` stop
+The image runs as `1000:1000` (named `comfy`; `USER` is numeric, so Kubernetes
+`runAsNonRoot` accepts it), or under any UID: it writes nothing, so a read-only root
+filesystem works as it is. `tini` is PID 1, so `docker stop` and a pod's `SIGTERM` stop
 it at once. The only outbound connection it makes is to `COMFYUI_URL`. Its build refuses to
 finish unless the server refuses to start without a token and passes `comfyctl relay probe`.
 
@@ -53,17 +81,18 @@ beside it, and probes it.
 
 ## Environment
 
-The names follow the `mcp` image wherever the two overlap, so a deployment keeps its
-environment when comfyrelay moves into that image.
+`COMFYUI_MCP_HTTP_TOKEN`, `COMFYUI_URL`, `MCP_HOST` and `MCP_PORT` are the names the `mcp`
+image read before 5.0.0, so a deployment keeps them.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `COMFYUI_MCP_HTTP_TOKEN` | *(unset, required)* | The token clients send, as `Authorization: Bearer <token>` or `X-API-Key: <token>`. Without it the server logs `Refusing to start` and exits 2. It must be visible ASCII (no spaces, line breaks or other characters a header can't carry); anything else also exits 2, and the value is never printed. |
+| `COMFYUI_MCP_HTTP_TOKEN` | *(unset, required)* | The token clients send, as `Authorization: Bearer <token>` or `X-API-Key: <token>`. Without it the server logs `Refusing to start` and exits 2. It must be **at least 32 characters** (generate one with `openssl rand -hex 32`), or it exits 2 with the length and that command. It must be visible ASCII (no spaces, line breaks or other characters a header can't carry); anything else also exits 2, and the value is never printed. |
 | `COMFYUI_URL` | `http://localhost:8188` | Where ComfyUI answers, from this container. It must be an `http://` or `https://` URL with a host, or the server exits 2 at startup. A `user:password@` in it is sent to ComfyUI but never shown: logs and errors print `***@`. Percent-encode any `/`, `?`, `#` or `@` in the credentials (`/` is `%2F`): unencoded, they end the host part early, and the server refuses the URL. |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `9000` | The listen address. The path is always `/mcp`. |
 | `COMFYUI_MCP_PROFILES` | `read,run` | The capability profiles to enable (below) |
 | `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar. In a container the hostname is the container ID or pod name, which can change when it's recreated, so set this when a gateway federates sidecars. `server_info` reports where the ID came from (`instance_id_source`: `env` or `hostname`), and startup logs a warning when it's the hostname. |
 | `COMFYUI_MCP_MAX_JOBS` | `16` | How many jobs may be in flight at once. A submission past it is refused with `too_many_jobs`. It's retryable, unless every slot is held by a job that didn't stop when cancelled, since those may never free. |
+| `COMFYUI_MCP_MAX_LARGE_REQUESTS` | `2` | How many requests with a body over 1 MiB (in practice, `workflow_upload_input` calls) are handled at once. One more waits up to 5 seconds for a slot, then gets HTTP `503` with `Retry-After: 2` and `{"error": {"code": "server_busy", ..., "retryable": true}}`. Requests under 1 MiB never wait. See *Memory* below. |
 | `COMFYUI_VERSION` | set by the image | The ComfyUI version the image was built for, from the bake pin |
 | `COMFYUI_MCP_DOCS` | `/opt/docs/docs.sqlite` | The docs index `docs_search` and `docs_guide` read. The image builds it there; without one those tools fail with `docs_unavailable`, and `server_info.docs` says why. |
 
@@ -333,18 +362,29 @@ returns, is refused with directions to export the API format. The code is
     ran. So an upload a little over the cap gets `upload_too_large`; only one over about
     10.75 MiB meets the transport's bare 413. Without `run` the SDK's 4 MiB default stands. The
     token is checked before any body is read.
-  - Uploads decode and send one at a time. **Memory:** a `run`-profile sidecar idles at about
-    75 MB RSS. One maximum-size upload peaks at about 140 MB, and six at once at about 340 MB
-    (measured at v0.37.0). Most of that is the request bodies, which the transport reads and
-    parses before the tool runs: about 45 MB each for a maximum-size upload, however the tool
-    queues them. Without the one-at-a-time limit, six peaked at about 390 MB. Give a
-    `run`-profile sidecar that takes large uploads 512 MiB.
+  - Uploads decode and send one at a time. **Memory:** see *Memory* below.
   - The name is sanitised: directories are dropped, anything outside `A-Z a-z 0-9 . _ ( ) + -`
     and space becomes `_`, and leading dots go. A name with nothing left is refused.
   - It never overwrites: a different file under a taken name is stored as `name (1).ext`
     (`renamed: true`), and the same bytes again reuse the file that's there. It writes nowhere
     else. There's no mask variant: `/upload/mask` edits the alpha of an image that's already
     there.
+
+**Memory.** A `run`-profile sidecar idles at about 90 MB RSS, and one maximum-size upload
+peaks at about 150 MB. Most of what a large upload costs is its request body, which the
+transport reads and parses before the tool runs, however the tool queues the uploads
+themselves. So the server admits at most `COMFYUI_MCP_MAX_LARGE_REQUESTS` (default 2)
+requests over 1 MiB at once, in front of the transport and behind the token; one more waits up
+to 5 seconds, then gets a retryable `503`.
+
+The SDK also keeps each MCP session's last request, body included, until that session sends
+its next message or has been idle for 30 minutes (its session timeout). So each client that
+has just uploaded a large file holds about 25 MB more, and the cap can't bound that. Six
+maximum-size uploads at once, from six sessions, peaked at about 300 MB with the cap and about
+350 MB without it; the same six one after another peaked at about 290 MB, and six through one
+session at about 170 MB (measured at v0.37.0, image built from 5.0.0's tree). **256 MiB** fits
+the default cap with up to three clients that upload large files. Allow about 25 MB per
+client beyond that, and more if you raise the cap.
 
 **Annotations.** `workflow_validate` and `workflow_outputs` are read-only. `workflow_run` isn't
 read-only, since it queues work and ComfyUI writes new output files. It isn't destructive
@@ -507,15 +547,17 @@ and 14 MB of markdown shipped beside it.
 ships what that needs: the English markdown it indexed, the snippets it used and the
 `docs.json` that chose the pages (`/opt/docs/source/`), the GPL-3.0 text (`/licenses/GPL-3.0.txt`), and `/licenses/NOTICE`.
 The NOTICE names the docs repo and commit and the license, dates the modification, gives the
-build script's path at the release tag, and says "© Comfy Org. Not affiliated with or
-endorsed by Comfy Org." The relay's code stays MIT: it reads the docs index as a data file, an
+build script's path at the commit the image was built from (the `GIT_SHA` build arg, which CI
+passes; a build without it names the release tag of its version), and says "© Comfy Org. Not
+affiliated with or endorsed by Comfy Org." Each guide's `url` names the same commit. The relay's code stays MIT: it reads the docs index as a data file, an
 aggregate. The image is labelled `org.opencontainers.image.licenses="MIT AND GPL-3.0"`. The
 guides are our own words under MIT; they link to docs.comfy.org and copy none of it.
 
 **Bumping the docs** is a PR that changes `COMFY_DOCS_SHA` (a supply-chain pin) to a commit
 on Comfy-Org/docs `main`. GitHub serves any commit in the repository's fork network by its
 SHA, so check the new one: `gh api repos/Comfy-Org/docs/compare/<sha>...main` must say
-`ahead` or `identical`. The build
+`ahead` or `identical`. CI's `docs-pin` job runs that check on every PR that changes
+`docker-bake.hcl`. The build
 probe fails the image if the docs index is missing or `docs_search` finds nothing.
 
 ## Consent

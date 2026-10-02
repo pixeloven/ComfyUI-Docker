@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# joenorton/comfyui-mcp-server, as this repo's `mcp` image packages it.
+# joenorton/comfyui-mcp-server, as this repo's `mcp` image packaged it before 3.0.0.
 # `up` starts it (HTTP on :9000/mcp) and waits for it; `down` removes it.
 #
 # The image binds 0.0.0.0:9000 (the sed patch in dockerfile.comfy.mcp) with no

@@ -173,15 +173,28 @@ def docs_build(
     skills: Annotated[Path, typer.Option(help="The repository's skills/ directory: the guides are read from it.")],
     out: Annotated[Path, typer.Option(help="Where to write docs.sqlite, source/, NOTICE and GPL-3.0.txt.")],
     docs_repo: Annotated[str, typer.Option(help="The docs repository to fetch.")] = "https://github.com/Comfy-Org/docs",
+    git_sha: Annotated[
+        str,
+        typer.Option(
+            "--git-sha",
+            envvar="GIT_SHA",
+            help="The commit of this repository being built, for the guides' URLs and the NOTICE. "
+            "Without it they point at the release tag of this version.",
+        ),
+    ] = "",
     output: OutputOpt = Mode.auto,
 ) -> None:
     """Fetch the docs at --docs-sha (shallow and sparse, with git) and build the docs index in --out."""
     import tempfile
 
-    from .docs_index import COMMIT_SHA, DocsIndexError, build, fetch_docs
+    from .docs_index import COMMIT_SHA, GIT_SHA, DocsIndexError, build, fetch_docs
 
     if not COMMIT_SHA.fullmatch(docs_sha):
         typer.echo(f"--docs-sha must be a full 40-character commit SHA, not {docs_sha!r}", err=True)
+        raise typer.Exit(2)
+    git_sha = git_sha.strip()
+    if git_sha and not GIT_SHA.fullmatch(git_sha):
+        typer.echo(f"--git-sha must be a commit SHA (7 to 40 lowercase hex digits), not {git_sha!r}", err=True)
         raise typer.Exit(2)
     if not (skills / "comfyui-workflows" / "SKILL.md").is_file():
         typer.echo(f"{skills} has no comfyui-workflows/SKILL.md", err=True)
@@ -189,7 +202,7 @@ def docs_build(
     try:
         with tempfile.TemporaryDirectory(prefix="comfy-docs-") as tmp:
             fetch_docs(docs_repo, docs_sha, Path(tmp))
-            summary = build(docs=Path(tmp), sha=docs_sha, skills=skills, out=out)
+            summary = build(docs=Path(tmp), sha=docs_sha, skills=skills, out=out, git_sha=git_sha or None)
     except DocsIndexError as exc:
         typer.echo(f"docs build failed: {exc}", err=True)
         raise typer.Exit(1) from None

@@ -13,7 +13,7 @@ from comfyrelay import __version__
 from comfyrelay.server import build_server, serve
 from comfyrelay.settings import Settings
 from mcp import Client
-from relay_helpers import comfyui_answering, comfyui_raising, serve_nothing, settings
+from relay_helpers import TOKEN, comfyui_answering, comfyui_raising, serve_nothing, settings
 
 pytestmark = pytest.mark.anyio
 
@@ -103,14 +103,14 @@ async def test_unreachable_comfyui_is_reported_not_raised():
 
 def test_instance_id_and_pin_come_from_the_environment(monkeypatch):
     env = {
-        "COMFYUI_MCP_HTTP_TOKEN": "t",
+        "COMFYUI_MCP_HTTP_TOKEN": TOKEN,
         "COMFYUI_MCP_INSTANCE_ID": "comfy-a",
         "COMFYUI_VERSION": "v0.37.0",
     }
     s = Settings.load(comfyui_url="http://x", host="0.0.0.0", port=9000, profiles="read", env=env)
     assert (s.instance_id, s.instance_id_source, s.comfyui_pin) == ("comfy-a", "env", "v0.37.0")
     s = Settings.load(
-        comfyui_url="http://x", host="0.0.0.0", port=9000, profiles="read", env={"COMFYUI_MCP_HTTP_TOKEN": "t"}
+        comfyui_url="http://x", host="0.0.0.0", port=9000, profiles="read", env={"COMFYUI_MCP_HTTP_TOKEN": TOKEN}
     )
     assert s.instance_id == socket.gethostname()
     assert s.instance_id_source == "hostname"

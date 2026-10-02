@@ -182,7 +182,7 @@ def test_a_host_the_http_client_would_refuse_is_a_config_error(url, reason):
 
 
 def test_an_idna_host_the_http_client_accepts_is_accepted():
-    s = Settings.load(comfyui_url="http://exämple.com:8188", host="h", port=1, profiles="read", env={TOKEN_ENV: "t"})
+    s = Settings.load(comfyui_url="http://exämple.com:8188", host="h", port=1, profiles="read", env={TOKEN_ENV: TOKEN})
     assert s.comfyui_url == "http://exämple.com:8188"
 
 

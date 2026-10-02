@@ -3,10 +3,12 @@
 # `up` starts it on 127.0.0.1:$COMFYRELAY_PORT/mcp (default 9200) and waits
 # for it; `down` removes it.
 #
-# The image is COMFYRELAY_IMAGE, default comfyrelay:latest: build it from the
-# checkout under test with `docker buildx bake comfyrelay --load` (on a host
-# without a docker0 bridge, `docker buildx build --network host` with bake's
-# args). It is never pulled: comfyrelay is not published before #136.
+# The image is COMFYRELAY_IMAGE, default ghcr.io/pixeloven/comfyui/mcp:local:
+# build it from the checkout under test with
+# `IMAGE_LABEL=local docker buildx bake mcp --load` (on a host without a
+# docker0 bridge, `docker buildx build --network host` with bake's args). It is
+# never pulled, so a run tests the checkout: CI never publishes the `local`
+# label.
 #
 # It runs as the image ships it, hardened the way tests/relay/run.sh runs it:
 # an arbitrary UID, a read-only root filesystem, no-new-privileges. The bearer
@@ -16,7 +18,7 @@
 set -euo pipefail
 . "$(dirname "$0")/../lib.sh"
 
-IMAGE="${COMFYRELAY_IMAGE:-comfyrelay:latest}"
+IMAGE="${COMFYRELAY_IMAGE:-ghcr.io/pixeloven/comfyui/mcp:local}"
 PORT="${COMFYRELAY_PORT:-9200}"
 NAME="$HARNESS_CONTAINER-mcp-comfyrelay"
 
@@ -24,7 +26,7 @@ case "${1:-}" in
   up)
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     docker image inspect "$IMAGE" >/dev/null 2>&1 || {
-      echo "no image $IMAGE; build it with: docker buildx bake comfyrelay --load" >&2
+      echo "no image $IMAGE; build it with: IMAGE_LABEL=local docker buildx bake mcp --load" >&2
       exit 1
     }
     # Under --network host a second server on the port would answer for us.

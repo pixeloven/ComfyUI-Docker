@@ -52,8 +52,11 @@ registry is what they check against.
 
 - **Pattern:** env var names and defaults (`PUID`, `PGID`, `COMFY_*`, `CLI_ARGS`),
   volume paths under `/app`, the port, `entrypoint.sh` user, chown and gosu logic,
-  the `mcp` image's promises (`COMFYUI_MCP_HTTP_TOKEN` required, `MCP_PORT` 9000,
-  the `/mcp` path, `COMFYUI_URL`, any UID, `SIGTERM` handling),
+  the `mcp` image's promises (`COMFYUI_MCP_HTTP_TOKEN` required and at least 32
+  characters, `MCP_PORT` 9000, the `/mcp` path, `COMFYUI_URL`, the tool names and
+  which profile holds each, `COMFYUI_MCP_PROFILES` and its default,
+  `COMFYUI_MCP_MAX_LARGE_REQUESTS` and its default, `USER 1000:1000` and any UID,
+  `SIGTERM` handling; `docs/user-guides/runtime-contract.md` → *The `mcp` Image*),
   the fetch image's `ENTRYPOINT` in `dockerfile.comfy.fetch` (`comfyctl fetch fetch`:
   Jobs and Compose append `/lock.yaml /app --apply` to it, and overrides name the
   binary), the permission steps in `dockerfile.comfy.core`, the volume mounts in
@@ -78,28 +81,20 @@ registry is what they check against.
 ### 6. Supply-chain pins
 
 - **Pattern:** `SAGEATTENTION_RELEASE_URL` and each `SAGEATTENTION_WHEEL_SHA256`,
-  `services/mcp/package.json` and `package-lock.json` (the pin for the `mcp` image:
-  `comfyui-mcp` at an exact version, and every package under it with an integrity
-  hash), the `sam2` commit in `extra-requirements.txt`, the base-image tags and
+  the `sam2` commit in `extra-requirements.txt`, the base-image tags and
   digests in `services/*/dockerfile.*` (and `services/comfyrelay/dockerfile.comfy.relay`,
-  including its `ghcr.io/astral-sh/uv` build stage), `COMFY_DOCS_SHA` in
+  the `mcp` image, including its `ghcr.io/astral-sh/uv` build stage and `tini`'s apt
+  version), `COMFY_DOCS_SHA` in
   `docker-bake.hcl` (the Comfy-Org/docs commit the relay's docs index covers:
   GPL-3.0 content, pinned by full SHA and bumped by PR, #134; a bump must be a commit on
-  Comfy-Org/docs `main`, because GitHub serves any SHA in the fork network), comfyrelay's exact `mcp==` pin
-  and `services/uv.lock`, which its image installs as written, action versions in workflows, and in
-  `services/mcp/dockerfile.comfy.mcp`: `npm ci --ignore-scripts`, the optional
-  dependencies it removes, and the hardening `ENV` (`COMFYUI_MCP_ENV_FILE`,
-  `COMFYUI_MCP_AUTO_UPDATE_DISABLE`, `COMFYUI_MCP_PANEL_AUTOINSTALL`,
-  `COMFYUI_MCP_FORCE_REMOTE`, `COMFYUI_MCP_TOOL_DENY`, and `MCP_HOST`, which with no
-  token makes the server refuse to start).
+  Comfy-Org/docs `main`, because GitHub serves any SHA in the fork network; CI's
+  `docs-pin` job checks it on every PR that touches `docker-bake.hcl`), comfyrelay's exact
+  `mcp==` pin and `services/uv.lock`, which its image installs as written, and action
+  versions in workflows.
 - **Risk:** executing unreviewed third-party code, or a silent ABI or behavior change.
-  `comfyui-mcp` has one maintainer and ships several releases a week. By default it
-  updates itself from npm, installs its own custom node into ComfyUI, and loads a
-  dotenv that its own tools can write. A lock bump can rename a tool or an env var:
-  re-check the deny list against that version's `dist/tools/tool-surface-filter.js`.
-  The build probe fails if a denied tool reappears in `tools/list`, but not if a new
-  tool ought to be denied. Dropping `--ignore-scripts` runs `cloudflared`'s
-  postinstall, which downloads its latest binary as root.
+  An SDK minor has changed what a tool error looks like to the client
+  (`services/comfyrelay/pyproject.toml`), and the image builds its docs index from a
+  third-party repository at build time.
 - **Response:** flag any change that removes a hash or moves a pin to a moving ref.
   A routine Dependabot action bump is expected.
 

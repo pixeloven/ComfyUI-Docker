@@ -16,7 +16,7 @@ from comfyrelay.comfyui import ComfyUIClient
 from comfyrelay.jobs import SHUTDOWN_WAIT_SECONDS, JobState, JobStore
 from comfyrelay.settings import Settings
 
-TOKEN = "test-token-0123456789"
+TOKEN = "test-token-0123456789-0123456789abcdef"
 SYSTEM_STATS = {
     "system": {"os": "posix", "comfyui_version": "0.37.0", "python_version": "3.12.3"},
     "devices": [{"name": "cpu", "type": "cpu"}],

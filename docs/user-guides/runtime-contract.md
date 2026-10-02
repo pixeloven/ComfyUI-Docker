@@ -310,27 +310,30 @@ runs as `runAsUser`.
 ## The `mcp` Image
 
 `ghcr.io/pixeloven/comfyui/mcp` is an MCP server for agents, separate from the
-ComfyUI images and talking to ComfyUI over HTTP. Since 3.0.0 it packages
-[artokun/comfyui-mcp](https://github.com/artokun/comfyui-mcp). Its
-[README](../../services/mcp/README.md) explains every default.
+ComfyUI images and talking to ComfyUI over HTTP. Since 5.0.0 it is
+[comfyrelay](../../services/comfyrelay/README.md), this repository's own server;
+before that it packaged artokun/comfyui-mcp. Run one beside each ComfyUI, as a
+sidecar. Its README explains every setting and tool.
 
 | Contract | Value |
 |----------|-------|
-| Endpoint | Streamable HTTP at `/mcp` on port `9000` (`MCP_PORT`), on all interfaces |
-| Token | `COMFYUI_MCP_HTTP_TOKEN` is **required**. Without it, the container exits 1 at start. Clients send `Authorization: Bearer <token>` or `X-API-Key: <token>`, and anything else gets `401` |
-| ComfyUI | `COMFYUI_URL`, default `http://localhost:8188`, as reachable from the `mcp` container |
-| User | Runs under any UID. `HOME` is `/app`, which any UID can write |
+| Endpoint | Streamable HTTP at `/mcp` on port `9000` (`MCP_PORT`), on `MCP_HOST` (default `0.0.0.0`, all interfaces) |
+| Token | `COMFYUI_MCP_HTTP_TOKEN` is **required, and at least 32 characters**. Without one, or with a shorter one, the container exits 2 at start and says why (`openssl rand -hex 32` makes one). Clients send `Authorization: Bearer <token>` or `X-API-Key: <token>`, and anything else gets `401` |
+| ComfyUI | `COMFYUI_URL`, default `http://localhost:8188`, as reachable from the `mcp` container. The server contacts nothing else |
+| Tools | Chosen by `COMFYUI_MCP_PROFILES`, default `read,run`. The tool names are part of this contract (below) |
+| Large requests | At most `COMFYUI_MCP_MAX_LARGE_REQUESTS` (default `2`) requests with a body over 1 MiB are handled at once. One more waits up to 5 seconds, then gets `503` with `Retry-After` and a JSON error with `"retryable": true` |
+| Memory | 256 MiB at the default large-request limit, with up to three clients that upload large files. It idles at about 90 MB and one maximum-size upload peaks at about 150 MB. Each MCP session keeps its last request (about 25 MB after a maximum-size upload) until its next message or 30 idle minutes |
+| User | `1000:1000` by default (numeric `USER`), and any UID works. It writes nothing, so a read-only root filesystem works |
 | Stopping | `SIGTERM` stops the server at once. `tini` is PID 1 and passes the signal on |
 
 These are the promises. Breaking one is a major version, by the same rule as the
-rest of this page.
+rest of this page. So is renaming or removing a tool, or moving one to another
+profile: the tool names are versioned with the image.
 
-What the server does behind them is not frozen. The tool names follow the pinned
-upstream version, which can rename or add tools in any release. Restarting ComfyUI
-goes through ComfyUI-Manager's reboot endpoint today, so it needs Manager enabled
-(`COMFY_ENABLE_MANAGER=true`, the default). A first-party server, planned in
-[#103](https://github.com/pixeloven/ComfyUI-Docker/issues/103), is meant to replace
-this one in a later major version.
+The other variables (`COMFYUI_MCP_INSTANCE_ID`, `COMFYUI_MCP_MAX_JOBS` and
+`COMFYUI_MCP_DOCS`) are documented in the README, with the memory measurements. Under
+Kubernetes, set `resources.limits.memory: 256Mi` on the container, and raise it with
+`COMFYUI_MCP_MAX_LARGE_REQUESTS` or with the number of clients that upload large files.
 
 ## What Counts as a Breaking Change
 

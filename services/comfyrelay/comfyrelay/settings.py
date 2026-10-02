@@ -1,8 +1,9 @@
 """Configuration, from the environment. The names follow the `mcp` image.
 
-    COMFYUI_MCP_HTTP_TOKEN  REQUIRED. Clients send it as `Authorization: Bearer
-                            <token>` or `X-API-Key: <token>`. The server
-                            refuses to start without one.
+    COMFYUI_MCP_HTTP_TOKEN  REQUIRED, at least 32 characters. Clients send it as
+                            `Authorization: Bearer <token>` or `X-API-Key:
+                            <token>`. The server refuses to start without one,
+                            or with a shorter one.
     COMFYUI_URL             where ComfyUI answers, from this container
                             (default http://localhost:8188)
     MCP_HOST, MCP_PORT      the listen address (default 0.0.0.0:9000); the
@@ -14,6 +15,10 @@
                             server_info says which, and startup warns)
     COMFYUI_MCP_MAX_JOBS    how many jobs may be in flight at once (default
                             16); a submission past it is refused
+    COMFYUI_MCP_MAX_LARGE_REQUESTS
+                            how many requests with a body over 1 MiB are
+                            handled at once (default 2); the rest wait
+                            briefly, then get a retryable 503 (server.py)
     COMFYUI_VERSION         the ComfyUI version the image was built for. The
                             image sets it from the bake pin, as the ComfyUI
                             images do; nobody else needs to.
@@ -21,9 +26,9 @@
                             (default /opt/docs/docs.sqlite, where the image
                             builds it); without one those tools say so
 
-The token and ComfyUI variables are the ones the `mcp` image already reads, so
-a deployment keeps its environment when comfyrelay replaces the server in that
-image (#136).
+The token, ComfyUI and listen variables are the ones the `mcp` image read
+before 5.0.0, when it packaged artokun/comfyui-mcp, so a deployment keeps them
+across the switch to comfyrelay (#136).
 """
 
 from __future__ import annotations
@@ -40,9 +45,14 @@ TOKEN_ENV = "COMFYUI_MCP_HTTP_TOKEN"
 PROFILES_ENV = "COMFYUI_MCP_PROFILES"
 INSTANCE_ID_ENV = "COMFYUI_MCP_INSTANCE_ID"
 MAX_JOBS_ENV = "COMFYUI_MCP_MAX_JOBS"
+MAX_LARGE_REQUESTS_ENV = "COMFYUI_MCP_MAX_LARGE_REQUESTS"
 DOCS_ENV = "COMFYUI_MCP_DOCS"
 DEFAULT_DOCS = "/opt/docs/docs.sqlite"
 DEFAULT_MAX_JOBS = 16
+DEFAULT_MAX_LARGE_REQUESTS = 2
+# The shortest token the server starts with (owner decision on #136): 32
+# characters is 128 bits as hex, and `openssl rand -hex 32` gives 64.
+MIN_TOKEN_CHARS = 32
 DEFAULT_COMFYUI_URL = "http://localhost:8188"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 9000
@@ -155,6 +165,7 @@ class Settings:
     instance_id_source: Literal["env", "hostname"] = "env"
     comfyui_pin: str | None = None
     max_jobs: int = DEFAULT_MAX_JOBS
+    max_large_requests: int = DEFAULT_MAX_LARGE_REQUESTS
     docs_path: str = DEFAULT_DOCS
 
     @classmethod
@@ -176,16 +187,15 @@ class Settings:
                 "random secret (for example `openssl rand -hex 32`) from your secret store."
             )
         check_token(token)
+        if len(token) < MIN_TOKEN_CHARS:
+            # The length only, never the value.
+            raise ConfigError(
+                f"Refusing to start: {TOKEN_ENV} is {len(token)} characters, and it must be at least "
+                f"{MIN_TOKEN_CHARS}. Generate one with `openssl rand -hex 32` and keep it in your secret store."
+            )
         if not 0 < port < 65536:
             raise ConfigError(f"port {port} is out of range")
         instance_id = env.get(INSTANCE_ID_ENV, "").strip()
-        raw_max_jobs = env.get(MAX_JOBS_ENV, "").strip() or str(DEFAULT_MAX_JOBS)
-        try:
-            max_jobs = int(raw_max_jobs)
-        except ValueError:
-            max_jobs = 0
-        if max_jobs < 1:
-            raise ConfigError(f"{MAX_JOBS_ENV}={raw_max_jobs!r} must be a whole number of at least 1")
         return cls(
             token=token,
             comfyui_url=check_comfyui_url(comfyui_url),
@@ -195,6 +205,18 @@ class Settings:
             instance_id=instance_id or socket.gethostname(),
             instance_id_source="env" if instance_id else "hostname",
             comfyui_pin=env.get("COMFYUI_VERSION", "").strip() or None,
-            max_jobs=max_jobs,
+            max_jobs=_at_least_one(env, MAX_JOBS_ENV, DEFAULT_MAX_JOBS),
+            max_large_requests=_at_least_one(env, MAX_LARGE_REQUESTS_ENV, DEFAULT_MAX_LARGE_REQUESTS),
             docs_path=env.get(DOCS_ENV, "").strip() or DEFAULT_DOCS,
         )
+
+
+def _at_least_one(env: Mapping[str, str], name: str, default: int) -> int:
+    raw = env.get(name, "").strip() or str(default)
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise ConfigError(f"{name}={raw!r} must be a whole number of at least 1")
+    return value

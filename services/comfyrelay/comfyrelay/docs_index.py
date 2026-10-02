@@ -25,7 +25,8 @@ The build writes, under --out:
                     snippets it inlined and the docs.json that listed the
                     pages (the GPL's Corresponding Source)
     NOTICE          the docs repo and SHA, the license, the build date as a
-                    modification notice, where this script is, and the
+                    modification notice, where this script is (at the
+                    commit the image was built from, GIT_SHA), and the
                     non-affiliation statement
     GPL-3.0.txt     the docs repo's LICENSE, the GPL-3.0 text
 
@@ -67,6 +68,9 @@ DOCS_NOTE = (
 )
 
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+# The commit of this repository the image is built from (GIT_SHA): full, or
+# abbreviated to at least 7 hex digits, as GitHub resolves either in a URL.
+GIT_SHA = re.compile(r"[0-9a-f]{7,40}")
 
 
 class DocsIndexError(Exception):
@@ -473,7 +477,7 @@ def guide_topics(skills: Path) -> list[tuple[str, Path, str]]:
     return [(topic, path, summary) for topic, (path, summary) in topics.items()]
 
 
-def index_guides(db: sqlite3.Connection, skills: Path, version: str) -> dict[str, Any]:
+def index_guides(db: sqlite3.Connection, skills: Path, version: str, ref: str) -> dict[str, Any]:
     root = skills.resolve().parent
     topics = guide_topics(skills)
     count = 0
@@ -482,7 +486,7 @@ def index_guides(db: sqlite3.Connection, skills: Path, version: str) -> dict[str
         title, summary = _summary(fields, body)
         summary = listed or summary
         rel = path.resolve().relative_to(root).as_posix()
-        url = f"{REPO}/blob/v{version}/{rel}"
+        url = f"{REPO}/blob/{ref}/{rel}"
         db.execute(
             "INSERT INTO guides VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (topic, title or topic, summary, rel, url, GUIDES_LICENSE, version, body.strip() + "\n", position),
@@ -501,14 +505,27 @@ def index_guides(db: sqlite3.Connection, skills: Path, version: str) -> dict[str
         "repo": REPO,
         "version": version,
         "license": GUIDES_LICENSE,
-        "url": f"{REPO}/tree/v{version}/skills/{GUIDES_SKILL}",
+        "url": f"{REPO}/tree/{ref}/skills/{GUIDES_SKILL}",
         "pages": len(topics),
         "sections": count,
         "topics": [t for t, _, _ in topics],
     }
 
 
-def notice(sha: str, built: str, version: str) -> str:
+def source_ref(git_sha: str | None, version: str) -> tuple[str, str]:
+    """Where this repository's files are, for URLs: the commit the image was built from, or the release tag.
+
+    The release tag is the fallback, for a build without GIT_SHA (a local one).
+    It names the version the build reports, though the tag may not hold these
+    exact files.
+    """
+    if git_sha:
+        return git_sha, f"commit {git_sha}"
+    return f"v{version}", f"the tag v{version}"
+
+
+def notice(sha: str, built: str, version: str, git_sha: str | None = None) -> str:
+    ref, at = source_ref(git_sha, version)
     return f"""\
 comfyrelay: third-party content in this image
 
@@ -530,8 +547,8 @@ were indexed, the snippets they include, and the docs.json that chose them
 are in /opt/docs/source/.
 
 The build script is {BUILD_SCRIPT}
-in {REPO}, at the tag v{version}:
-{REPO}/blob/v{version}/{BUILD_SCRIPT}
+in {REPO}, at {at}:
+{REPO}/blob/{ref}/{BUILD_SCRIPT}
 
 docs.sqlite as a whole is licensed GPL-3.0. It also holds this project's own
 guides (skills/{GUIDES_SKILL}/), which are MIT-licensed. comfyrelay's code is
@@ -541,8 +558,14 @@ MIT-licensed; it reads the docs index as a separate data file (an aggregate).
 """
 
 
-def build(*, docs: Path, sha: str, skills: Path, out: Path, version: str = __version__) -> dict[str, Any]:
-    """Build the docs index in `out` from a docs checkout at `sha` and the skills directory. Returns the meta summary."""
+def build(
+    *, docs: Path, sha: str, skills: Path, out: Path, version: str = __version__, git_sha: str | None = None
+) -> dict[str, Any]:
+    """Build the docs index in `out` from a docs checkout at `sha` and the skills directory. Returns the meta summary.
+
+    `git_sha` is the commit of this repository being built; the guides' URLs and the NOTICE point at it.
+    """
+    ref, _ = source_ref(git_sha, version)
     started = time.monotonic()
     out.mkdir(parents=True, exist_ok=True)
     db_path = out / "docs.sqlite"
@@ -551,7 +574,7 @@ def build(*, docs: Path, sha: str, skills: Path, out: Path, version: str = __ver
     db = sqlite3.connect(db_path)
     try:
         _create(db)
-        sources = [index_docs(db, docs, sha, out / "source"), index_guides(db, skills, version)]
+        sources = [index_docs(db, docs, sha, out / "source"), index_guides(db, skills, version, ref)]
         if not sources[0]["pages"]:
             raise DocsIndexError(f"no docs page was found in {docs}")
         meta = {"schema": SCHEMA, "built_at": built, "builder": f"comfyrelay {version}", "sources": sources}
@@ -563,7 +586,7 @@ def build(*, docs: Path, sha: str, skills: Path, out: Path, version: str = __ver
     db = sqlite3.connect(db_path)
     db.execute("VACUUM")
     db.close()
-    (out / "NOTICE").write_text(notice(sha, built, version))
+    (out / "NOTICE").write_text(notice(sha, built, version, git_sha))
     shutil.copyfile(docs / "LICENSE", out / "GPL-3.0.txt")
     return {
         **meta,

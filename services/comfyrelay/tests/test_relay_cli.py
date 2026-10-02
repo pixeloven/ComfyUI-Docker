@@ -31,8 +31,17 @@ def test_serve_refuses_to_start_without_a_token(monkeypatch):
     assert "Refusing to start: COMFYUI_MCP_HTTP_TOKEN is not set" in r.output
 
 
+def test_serve_refuses_a_short_token_with_exit_2(monkeypatch):
+    monkeypatch.setenv("COMFYUI_MCP_HTTP_TOKEN", "short-token")
+    r = runner.invoke(app, ["relay", "serve"])
+    assert r.exit_code == 2
+    assert "Refusing to start: COMFYUI_MCP_HTTP_TOKEN is 11 characters" in r.output
+    assert "openssl rand -hex 32" in r.output
+    assert "short-token" not in r.output
+
+
 def test_serve_refuses_an_unknown_profile(monkeypatch):
-    monkeypatch.setenv("COMFYUI_MCP_HTTP_TOKEN", "t")
+    monkeypatch.setenv("COMFYUI_MCP_HTTP_TOKEN", TOKEN)
     r = runner.invoke(app, ["relay", "serve", "--profiles", "read,admin"])
     assert r.exit_code == 2
     assert "unknown profile admin" in r.output

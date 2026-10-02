@@ -12,7 +12,7 @@ from comfyrelay.errors import RelayError
 from comfyrelay.jobs import MAX_WAIT_SECONDS, JobState, JobStore
 from comfyrelay.server import build_server
 from mcp import Client
-from relay_helpers import assert_producer_honours_cancel, comfyui_answering, settings
+from relay_helpers import TOKEN, assert_producer_honours_cancel, comfyui_answering, settings
 
 pytestmark = pytest.mark.anyio
 
@@ -366,7 +366,7 @@ def test_the_cap_comes_from_the_environment():
     from comfyrelay.settings import TOKEN_ENV, ConfigError, Settings
 
     def load(env):
-        return Settings.load(comfyui_url="http://x", host="h", port=1, profiles="run", env={TOKEN_ENV: "t", **env})
+        return Settings.load(comfyui_url="http://x", host="h", port=1, profiles="run", env={TOKEN_ENV: TOKEN, **env})
 
     assert load({}).max_jobs == 16
     assert load({"COMFYUI_MCP_MAX_JOBS": "4"}).max_jobs == 4

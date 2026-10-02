@@ -11,7 +11,7 @@ import pytest
 from comfyrelay.docs_index import docs_pages, excerpt, mdx_to_markdown, sections
 from comfyrelay.server import build_server
 from mcp import Client
-from relay_helpers import DOCS_FILES, DOCS_SHA, comfyui_answering, settings
+from relay_helpers import DOCS_FILES, DOCS_SHA, SKILL_FILES, comfyui_answering, settings, write_tree
 
 pytestmark = pytest.mark.anyio
 
@@ -216,6 +216,36 @@ def test_the_build_ships_the_indexed_source_the_license_and_a_notice(docs_path):
         "© Comfy Org. Not affiliated with or endorsed by Comfy Org.",
     ):
         assert needed in notice, needed
+
+
+def test_the_build_commit_names_the_guides_and_the_build_script(tmp_path):
+    """GIT_SHA (#136): an image built between releases points at its own commit, not at the last tag."""
+    from comfyrelay.docs_index import REPO, build
+
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    docs = write_tree(tmp_path / "docs", DOCS_FILES)
+    skills = write_tree(tmp_path / "skills", SKILL_FILES)
+    meta = build(docs=docs, sha=DOCS_SHA, skills=skills, out=tmp_path / "out", version="9.9.9", git_sha=commit)
+    urls = [u for (u,) in sqlite3.connect(tmp_path / "out/docs.sqlite").execute("SELECT url FROM guides")]
+    assert urls and all(u.startswith(f"{REPO}/blob/{commit}/skills/") for u in urls)
+    assert meta["sources"][1]["url"] == f"{REPO}/tree/{commit}/skills/comfyui-workflows"
+    notice = (tmp_path / "out/NOTICE").read_text()
+    assert f"at commit {commit}:" in notice
+    assert f"{REPO}/blob/{commit}/services/comfyrelay/comfyrelay/docs_index.py" in notice
+    assert "v9.9.9" not in notice
+
+
+def test_docs_build_refuses_a_git_sha_that_is_not_one(tmp_path):
+    from comfyctl.cli import app
+    from typer.testing import CliRunner
+
+    r = CliRunner().invoke(
+        app,
+        ["relay", "docs", "build", "--docs-sha", DOCS_SHA, "--skills", str(tmp_path), "--out", str(tmp_path)]
+        + ["--git-sha", "main"],
+    )
+    assert r.exit_code == 2
+    assert "--git-sha must be a commit SHA" in r.output
 
 
 # -- the tools --------------------------------------------------------------------------

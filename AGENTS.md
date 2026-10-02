@@ -53,13 +53,13 @@ Delegate by work domain, without asking first. Reach for delegation by default o
    | Change touches | Run |
    |---|---|
    | `services/` Python (`fetch/`, `comfyctl/`, `comfyrelay/`), `comfy.yaml`, `comfy-lock.yaml`, `locks/` | `cd services && uv run --locked pytest -q` (add `-m "not network"` offline), then `uv run --locked comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml` |
-   | `services/comfyrelay/`, anything its image installs, or `skills/` (its docs index covers the guides) | `docker buildx bake comfyrelay --load` (its build refuses a server that starts without a token or fails the probe), then `tests/relay/run.sh [--network host] --comfyui <core-cpu image> comfyrelay:latest`, which CI's `relay` job runs against main's `core:cpu-latest` |
+   | `services/comfyrelay/` (the `mcp` image), anything its image installs, or `skills/` (its docs index covers the guides) | `docker buildx bake mcp --load` (its build refuses a server that starts without a token or fails the probe), then `tests/relay/run.sh [--network host] --comfyui <core-cpu image> ghcr.io/pixeloven/comfyui/mcp:latest`, which CI's `relay` job runs against main's `core:cpu-latest` |
    | `docker-bake.hcl`, `examples/` | `make validate` (bake prints `all`, and every example's `docker compose config` resolves) |
    | A Dockerfile, `entrypoint.sh`, `startup.sh` | build the affected bake group and load it (`make cuda`, `make cpu`, `make rocm`, `make xpu`, or `docker buildx bake <target> --load`), then start the matching example |
    | `services/comfy/`, `services/runtime/`, `docker-bake.hcl` | `make smoke` (add `SMOKE_NETWORK=host` on a host without a docker0 bridge). It builds `core-cpu` from the tree and boots it as root with `PUID`/`PGID` 1001 and all seven volume roots bind-mounted. It then checks `/system_stats`, that ComfyUI runs as 1001:1001 and owns and can write every root, and compares node classes with main's published `core:cpu-latest` (`SMOKE_BASELINE` overrides it). On the same ComfyUI version a missing class fails; after a `COMFYUI_VERSION` bump the diff is only reported, in `tests/smoke/results/node-diff.md` |
    | `.github/workflows/` | `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color` |
 
-   CI builds every image target on a PR that touches `services/comfy/`, `services/runtime/`, `services/mcp/`, `docker-bake.hcl` or `ci.yml`, and its `smoke-cpu` job runs `make smoke`'s script on `core-cpu`. It does not push from a PR.
+   CI builds every ComfyUI image target on a PR that touches `services/comfy/`, `services/runtime/`, `docker-bake.hcl` or `ci.yml`, and its `smoke-cpu` job runs `make smoke`'s script on `core-cpu`. Its `relay` job builds and probes the `mcp` image on a PR that touches what that image installs. It does not push from a PR.
 
 ### Isolation
 

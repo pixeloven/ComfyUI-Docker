@@ -29,7 +29,19 @@ def test_refuses_to_start_without_a_token(env):
 
 
 def test_starts_with_a_token():
-    assert load({TOKEN_ENV: " s3cret "}).token == "s3cret"
+    assert load({TOKEN_ENV: f" {TOKEN} "}).token == TOKEN
+
+
+def test_refuses_to_start_with_a_token_under_32_characters_and_says_how_to_make_one():
+    short = "s3cret-but-only-31-characters-x"
+    assert len(short) == 31
+    with pytest.raises(ConfigError) as info:
+        load({TOKEN_ENV: short})
+    message = str(info.value)
+    assert message.startswith(f"Refusing to start: {TOKEN_ENV} is 31 characters")
+    assert "at least 32" in message and "openssl rand -hex 32" in message
+    assert short not in message
+    assert load({TOKEN_ENV: short + "y"}).token == short + "y"
 
 
 @pytest.mark.parametrize(

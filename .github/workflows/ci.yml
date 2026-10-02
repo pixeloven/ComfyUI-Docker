@@ -50,6 +50,7 @@ jobs:
       images: ${{ steps.filter.outputs.images }}
       fetch: ${{ steps.filter.outputs.fetch }}
       relay: ${{ steps.filter.outputs.relay }}
+      bake: ${{ steps.filter.outputs.bake }}
       examples: ${{ steps.filter.outputs.examples }}
     steps:
     - uses: actions/checkout@v7.0.1
@@ -66,7 +67,6 @@ jobs:
           images:
             - 'services/comfy/**'
             - 'services/runtime/**'
-            - 'services/mcp/**'
             - 'docker-bake.hcl'
             - '.github/workflows/ci.yml'
           fetch:
@@ -78,9 +78,10 @@ jobs:
             - 'comfy-lock.yaml'
             - 'locks/**'
             - 'services/fetch/comfyfetch/schemas/**'
-          # The comfyrelay image installs all three workspace members from the
-          # one lock, so a change to any of them can break it. It also indexes
-          # the guides in skills/ into its docs index (#134).
+          # The mcp image (comfyrelay, since 5.0.0) installs all three
+          # workspace members from the one lock, so a change to any of them can
+          # break it. It also indexes the guides in skills/ into its docs index
+          # (#134).
           relay:
             - 'services/comfyrelay/**'
             - 'services/comfyctl/**'
@@ -91,6 +92,9 @@ jobs:
             - 'tests/relay/**'
             - 'docker-bake.hcl'
             - '.github/workflows/ci.yml'
+          # The docs-pin job checks COMFY_DOCS_SHA whenever this file changes.
+          bake:
+            - 'docker-bake.hcl'
           examples:
             - 'examples/**'
 
@@ -206,8 +210,7 @@ jobs:
             "services/fetch/pyproject.toml": lambda: toml("services/fetch/pyproject.toml")["project"]["version"],
             "services/comfyctl/pyproject.toml": lambda: toml("services/comfyctl/pyproject.toml")["project"]["version"],
             "the comfyfetch pin in services/comfyctl/pyproject.toml": comfyfetch_pin,
-            # Not released yet (#136), but server_info reports it, so it moves
-            # with the one number rather than going stale.
+            # Not a wheel, but the mcp image's server_info reports it.
             "services/comfyrelay/pyproject.toml": lambda: toml("services/comfyrelay/pyproject.toml")["project"]["version"],
             ".claude-plugin/plugin.json": lambda: json.load(open(".claude-plugin/plugin.json"))["version"],
             "package.json": lambda: json.load(open("package.json")).get("version", "<no version key>"),
@@ -247,7 +250,8 @@ jobs:
         if [ -n "${release_version}" ]; then
           build_images=true
           build_fetch=true
-          # comfyrelay is not a release artifact until #136, so a tag skips it.
+          # The mcp image is comfyrelay (#136): a release probes it too.
+          build_relay=true
         elif [ "${main}" = true ]; then
           build_images=true
           build_fetch=true
@@ -294,7 +298,7 @@ jobs:
           echo "commit_sha=${commit_sha}"
         } >> "${GITHUB_OUTPUT}"
 
-        echo "images=${build_images} (label ${image_label}) fetch=${build_fetch} (label ${fetch_label}) relay=${build_relay} (never pushed)"
+        echo "images=${build_images} (label ${image_label}) fetch=${build_fetch} (label ${fetch_label}) mcp=${build_relay} (label ${image_label})"
 
   # The workflows themselves. This repo's expensive bugs have been shell bugs --
   # a yq escape change that processed 0 files and exited 0, an `A && B || C`
@@ -351,12 +355,40 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-xpu"
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
         docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
-        docker buildx bake --file docker-bake.hcl --print comfyrelay | jq -e '.target | has("comfyrelay")' > /dev/null
-        # Not published until #136: the release reads IMAGE-DIGESTS from `all`.
-        if docker buildx bake --file docker-bake.hcl --print all | jq -e '.target | has("comfyrelay")' > /dev/null; then
-          echo "::error::comfyrelay is in bake's 'all' group, so a release would try to publish its digest"
+
+  # COMFY_DOCS_SHA must be a commit on Comfy-Org/docs `main` (#134, #136).
+  # GitHub serves any commit in the repo's fork network by its SHA, so a SHA
+  # from a fork would build just as well; the compare API tells them apart:
+  # main is `ahead` of a commit on it, or `identical` to its tip. Reads one
+  # public repo, so the workflow's token with read-only contents is enough.
+  docs-pin:
+    name: COMFY_DOCS_SHA is on Comfy-Org/docs main
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.bake == 'true'
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Compare the pin with Comfy-Org/docs main
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        sha="$(docker buildx bake -f docker-bake.hcl --print mcp 2>/dev/null | jq -r '.target.mcp.args.COMFY_DOCS_SHA')"
+        if ! printf '%s' "${sha}" | grep -qE '^[0-9a-f]{40}$'; then
+          echo "::error::could not read a 40-hex COMFY_DOCS_SHA out of docker-bake.hcl (got '${sha}')"
           exit 1
         fi
+        status="$(gh api "repos/Comfy-Org/docs/compare/${sha}...main" --jq .status)"
+        case "${status}" in
+          ahead|identical) echo "COMFY_DOCS_SHA ${sha} is on Comfy-Org/docs main (${status})" ;;
+          *) echo "::error::COMFY_DOCS_SHA ${sha} is not on Comfy-Org/docs main: main is '${status}' of it, not 'ahead' or 'identical'"
+             exit 1 ;;
+        esac
 
   validate-models:
     runs-on: ubuntu-latest
@@ -718,16 +750,20 @@ jobs:
         IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
 
-  # The mcp image. bake has declared it since #43 and VERSIONING.md counts it
-  # in the image family -- but no job ever built it, so `mcp:latest` has never
-  # existed and `mcp:0.1.0` failed the first release that went looking for it.
+  # The mcp image: comfyrelay since 5.0.0 (#136). bake has declared the target
+  # since #43, and VERSIONING.md counts it in the image family.
   #
-  # No free-disk-space step: this is node:22-slim plus one npm package, not a
-  # CUDA stack.
+  # It publishes only after the relay job has probed the same commit's build
+  # against a booted ComfyUI, so a server that fails that never reaches GHCR.
+  # It runs whenever the relay job does: on main, on a tag, and on a PR that
+  # touches what the image installs (no push from a PR).
+  #
+  # No free-disk-space step: this is python:3.13-slim and one venv, not a CUDA
+  # stack.
   build-mcp:
     runs-on: ubuntu-latest
-    needs: [context, test-bake-targets]
-    if: needs.context.outputs.build_images == 'true'
+    needs: [context, test-bake-targets, relay]
+    if: needs.context.outputs.build_relay == 'true'
     env:
       REGISTRY: ghcr.io
     steps:
@@ -762,6 +798,7 @@ jobs:
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
         IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
+        GIT_SHA: ${{ github.sha }}
 
   build-cpu:
     runs-on: ubuntu-latest
@@ -917,13 +954,12 @@ jobs:
         if-no-files-found: warn
         retention-days: 14
 
-  # comfyrelay, the first-party MCP sidecar (#131). Built and tested, never
-  # pushed: it is not published until #136 moves it into the mcp image, which
-  # is also why `release` does not need this job. The image's own build already
-  # checks that it refuses to start without a token and passes a probe with no
-  # ComfyUI. This boots a core-cpu and probes the image against it for real, as
-  # UID 12345 on a read-only root filesystem, then times its SIGTERM stop
-  # (`tests/relay/run.sh`, the same script locally). Then it runs the live
+  # The mcp image, comfyrelay (#131, #136). This job builds it and tests it;
+  # build-mcp publishes it, and only after this has passed. The image's own
+  # build already checks that it refuses to start without a token and passes a
+  # probe with no ComfyUI. This boots a core-cpu and probes the image against it
+  # for real, as UID 12345 on a read-only root filesystem, then times its
+  # SIGTERM stop (`tests/relay/run.sh`, the same script locally). Then it runs the live
   # tests (*_live.py) against a fresh core-cpu: the only check that the relay
   # and a real ComfyUI agree (cancel, SIGTERM survival, /prompt errors), and
   # that the unit tests' FakeComfyUI behaves like the real one (#147).
@@ -944,19 +980,21 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
 
-    # Never pushed: `push: false`, and the target's only tag has no registry.
-    - name: Build comfyrelay
+    # Never pushed: `push: false`, and `ci` is not a label CI publishes.
+    - name: Build the mcp image
       uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
-        targets: comfyrelay
+        targets: mcp
         load: true
         push: false
         provenance: false
         sbom: false
       env:
+        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
         IMAGE_LABEL: ci
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
+        GIT_SHA: ${{ github.sha }}
 
     # Which ComfyUI to test against: the core-cpu main already published, when
     # it holds the ComfyUI this commit pins. That is every run but a pin bump
@@ -1004,9 +1042,10 @@ jobs:
     - name: Probe it against a booted core-cpu
       env:
         COMFYUI_IMAGE: ${{ steps.comfyui.outputs.image }}
+        RELAY_IMAGE: ${{ needs.context.outputs.registry_url }}mcp:ci
       run: |
         docker image inspect "${COMFYUI_IMAGE}" >/dev/null 2>&1 || docker pull -q "${COMFYUI_IMAGE}"
-        tests/relay/run.sh --comfyui "${COMFYUI_IMAGE}" comfyrelay:ci
+        tests/relay/run.sh --comfyui "${COMFYUI_IMAGE}" "${RELAY_IMAGE}"
 
     - name: Install uv
       uses: astral-sh/setup-uv@v10.0.1
@@ -1157,14 +1196,14 @@ jobs:
   release:
     name: cut the release
     runs-on: ubuntu-latest
-    needs: [context, validate-models, end-to-end, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, build-linux-accelerators, smoke-cpu]
+    needs: [context, validate-models, end-to-end, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, relay, build-linux-accelerators, smoke-cpu]
     # `!contains(failure)` rather than the default all-succeeded: on a non-release
     # push some build jobs are legitimately `skipped` by the path filter, and
     # `skipped` is not `success`.
     #
     # But this job only runs for a release, which is a `v*` tag, and on a tag
-    # nothing it needs is skipped legitimately: `context` forces build_images
-    # and build_fetch true, and validate-models, end-to-end and
+    # nothing it needs is skipped legitimately: `context` forces build_images,
+    # build_fetch and build_relay true, and validate-models, end-to-end and
     # build-cuda-arch have no `if`. So a `skipped` need here means an upstream
     # failure hid it -- a failed validate-models leaves publish-fetch
     # skipped, not failed -- and every need must have succeeded.
@@ -1231,9 +1270,10 @@ jobs:
     # -- the CLI line: wheels, so comfyctl is usable without Docker ------------
     # Two, from the one uv workspace: comfyctl, and comfyfetch, the library its
     # `fetch` group mounts. Neither is on PyPI, so they install as a pair.
-    # Named, not --all-packages: the workspace also holds comfyrelay, which no
-    # release ships until #136. comfyctl does not depend on it; without it,
-    # `comfyctl relay` is a hidden command that says it is not in this build.
+    # Named, not --all-packages: the workspace also holds comfyrelay, which
+    # ships as the mcp image, not as a wheel. comfyctl does not depend on it;
+    # without it, `comfyctl relay` is a hidden command that says it is not in
+    # this build.
 
     - uses: astral-sh/setup-uv@v10.0.1
 

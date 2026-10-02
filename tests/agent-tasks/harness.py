@@ -600,7 +600,7 @@ def t6_norm(value: object, q: dict) -> str:
 def cmd_derive_t6(image: str = "") -> None:
     """Copy the index out of the relay image and derive the answers from it:
     each answer is what the question's pattern captures in its page."""
-    image = image or os.environ.get("COMFYRELAY_IMAGE", "comfyrelay:latest")
+    image = image or os.environ.get("COMFYRELAY_IMAGE", "ghcr.io/pixeloven/comfyui/mcp:local")
     cid = subprocess.check_output(["docker", "create", image]).decode().strip()
     try:
         subprocess.check_call(["docker", "cp", f"{cid}:/opt/docs/docs.sqlite", str(T6_DOCS)])
