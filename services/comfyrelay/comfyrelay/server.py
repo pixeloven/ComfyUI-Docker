@@ -120,10 +120,10 @@ class LargeBodyGate:
                 await self._slots.acquire()
         except TimeoutError:
             log.warning(
-                "503 for %s %s: %d large requests already in progress (%s=%d)",
+                "503 for %s %s: no slot for a large request within %ss (%s=%d)",
                 scope["method"],
                 scope["path"],
-                self.limit,
+                self.wait,
                 MAX_LARGE_REQUESTS_ENV,
                 self.limit,
             )
@@ -131,8 +131,9 @@ class LargeBodyGate:
                 {
                     "error": {
                         "code": "server_busy",
-                        "message": f"{self.limit} large requests (over {self.threshold} bytes) are already in "
-                        f"progress; retry in {LARGE_BODY_RETRY_AFTER_SECONDS} seconds",
+                        "message": f"this server handles at most {self.limit} request(s) over {self.threshold} "
+                        f"bytes at once, and none finished within {self.wait:g} seconds; retry in "
+                        f"{LARGE_BODY_RETRY_AFTER_SECONDS} seconds",
                         "retryable": True,
                     }
                 }
