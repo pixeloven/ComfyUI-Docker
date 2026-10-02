@@ -107,6 +107,8 @@ There is no date tag.
   `.cache`, the volume roots, `/app`, `/app/ComfyUI`, `/etc/passwd` and `/etc/group`
   are world-writable, and `PYTHONDONTWRITEBYTECODE=1`. `complete` re-applies the
   venv permissions after its own installs, and any new install layer must do the same.
+  `/app/ComfyUI/custom_nodes` is a symlink to `/app/custom_nodes`, so comfy-cli, which
+  installs into `<workspace>/custom_nodes`, lands on the volume (#126).
 - `dockerfile.comfy.core` also drops setuid/setgid bits from every file in its final
   stage, since nothing in the image needs them. The last two `RUN`s of `core` and of
   `complete` assert that no setuid/setgid file and no file with capabilities remain,

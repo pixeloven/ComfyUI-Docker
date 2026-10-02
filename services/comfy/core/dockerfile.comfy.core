@@ -124,6 +124,9 @@ RUN chmod +x /app/startup.sh && chmod 0755 /usr/local/bin/entrypoint.sh
 #   - venv/bin: pip-installed packages create entry point scripts here
 #   - .cache: uv/pip cache operations
 #   - ComfyUI data dirs: ComfyUI creates these at startup if missing
+#   - /app/ComfyUI/custom_nodes is a symlink to the /app/custom_nodes volume:
+#     comfy-cli installs into <workspace>/custom_nodes, and ComfyUI loads from
+#     /app/custom_nodes under --base-directory /app (#126)
 #   - /etc/passwd, /etc/group: entrypoint injects entries for arbitrary UIDs
 #     so getpwuid(), getgrgid(), getpass.getuser(), expanduser("~") all work
 RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')") && \
@@ -148,6 +151,8 @@ RUN PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.maj
     /app/output \
     /app/temp \
     /app/user && \
+  rm -rf /app/ComfyUI/custom_nodes && \
+  ln -s /app/custom_nodes /app/ComfyUI/custom_nodes && \
   chmod a+w /app /app/ComfyUI && \
   chmod a+w /etc/passwd /etc/group
 
