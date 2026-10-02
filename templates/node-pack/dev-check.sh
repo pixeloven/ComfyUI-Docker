@@ -87,9 +87,9 @@ restart() {
   code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST "$COMFY_URL/v2/manager/reboot" 2>/dev/null)"
   rc=$?
   # Manager re-executes ComfyUI before it can answer, so the connection drops
-  # (curl exit 52). Wait until the old process stops answering, so the wait
+  # (curl exit 52, or 56 where a port proxy resets it). Wait until the old process stops answering, so the wait
   # for /system_stats meets the new one.
-  if [ "$rc" = 52 ] || { [ "$rc" = 0 ] && [ "$code" = 200 ]; }; then
+  if [ "$rc" = 52 ] || [ "$rc" = 56 ] || { [ "$rc" = 0 ] && [ "$code" = 200 ]; }; then
     t=$SECONDS
     while answers; do
       [ $((SECONDS - t)) -lt 30 ] || { fail "Manager accepted the reboot, but ComfyUI still answers after 30 s"; return 1; }
@@ -171,7 +171,8 @@ fi
 # The V1/V3 trap: with NODE_CLASS_MAPPINGS present, ComfyUI loads the V1
 # mappings and never calls comfy_entrypoint, and logs nothing about it.
 if [ -f "$here/__init__.py" ] \
-  && grep -qw NODE_CLASS_MAPPINGS "$here/__init__.py" && grep -qw comfy_entrypoint "$here/__init__.py"; then
+  && grep -qE '^[[:space:]]*NODE_CLASS_MAPPINGS[[:space:]]*=|import.*NODE_CLASS_MAPPINGS' "$here/__init__.py" \
+  && grep -qE '^[[:space:]]*(async[[:space:]]+)?def[[:space:]]+comfy_entrypoint|import.*comfy_entrypoint' "$here/__init__.py"; then
   fail "__init__.py has both NODE_CLASS_MAPPINGS and comfy_entrypoint: ComfyUI loads only NODE_CLASS_MAPPINGS (V1) and ignores comfy_entrypoint (V3), silently. Keep one."
 fi
 
@@ -194,7 +195,18 @@ project="$( [ -f "$here/pyproject.toml" ] && sed -n 's/^name[[:space:]]*=[[:spac
 if ext="$(get /extensions)"; then
   files="$(jq -r --arg a "/extensions/$PACK_NAME/" --arg b "/extensions/${project:-$PACK_NAME}/" \
     '.[] | select(startswith($a) or startswith($b))' <<<"$ext")"
-  if [ -z "$files" ]; then
+  # The web directories the pack declares, as WEB_DIRECTORY or [tool.comfy] web.
+  webdirs="$( { [ -f "$here/__init__.py" ] && sed -n 's/^WEB_DIRECTORY[[:space:]]*=[[:space:]]*["'"'"']\([^"'"'"']*\).*/\1/p' "$here/__init__.py"
+    [ -f "$here/pyproject.toml" ] && sed -n 's/^web[[:space:]]*=[[:space:]]*["'"'"']\([^"'"'"']*\).*/\1/p' "$here/pyproject.toml"; } | sort -u)"
+  local_js=""
+  while IFS= read -r d; do
+    [ -n "$d" ] && [ -d "$here/$d" ] || continue
+    local_js="$(find "$here/$d" -name '*.js' | head -n 1)"
+    [ -n "$local_js" ] && break
+  done <<<"$webdirs"
+  if [ -z "$files" ] && [ -n "$local_js" ]; then
+    fail "the pack has JavaScript (${local_js#"$here"/}) in its declared web directory, but /extensions lists none of it: ComfyUI doesn't serve it (restart after adding WEB_DIRECTORY or [tool.comfy] web)"
+  elif [ -z "$files" ]; then
     note "serves no JavaScript"
   fi
   body="$(mktemp)"

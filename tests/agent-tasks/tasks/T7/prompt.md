@@ -7,7 +7,7 @@ Give the pack a `pyproject.toml` that the Comfy registry would accept: `[project
 
 Then make the running ComfyUI load the pack without recreating its container, and make sure both nodes are registered from your pack and that ComfyUI logged no error loading it.
 
-Run one workflow in which `T7Reverse` gets `text` = `harness` and its output goes to `T7Show`, and wait until it has finished.
+Run one workflow in which `T7Reverse` gets `text` = `harness` and its output goes to `T7Show`, and wait until it has finished. Run it after your last restart: a restart empties `/history`, so check anything after it without restarting (`./dev-check.sh --no-restart`).
 
 Write `results/T7.json` as one JSON object with exactly these keys:
 

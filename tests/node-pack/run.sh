@@ -49,7 +49,7 @@ cp "$template/docker-compose.yml" "$template/dev-check.sh" "$work/"
 sed -e "s/^PACK_NAME=.*/PACK_NAME=$pack/" -e "s/^COMFY_PORT=.*/COMFY_PORT=$port/" \
   -e "s/^PUID=.*/PUID=$(id -u)/" -e "s/^PGID=.*/PGID=$(id -g)/" \
   "$template/.env.example" > "$work/.env"
-[ -z "$image" ] || sed -i "s|^COMFY_IMAGE=.*|COMFY_IMAGE=$image|" "$work/.env"
+[ -z "$image" ] || echo "COMFY_IMAGE=$image" >> "$work/.env"
 echo "COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME" >> "$work/.env"
 
 # Replace the pack's files with a fixture's, keeping the template's.

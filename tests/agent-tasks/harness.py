@@ -17,7 +17,6 @@ import struct
 import subprocess
 import sys
 import time
-import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -980,6 +979,9 @@ def t7_nonce_run() -> str:
     graph = {
         "1": {"class_type": "T7Reverse", "inputs": {"text": nonce}},
         "2": {"class_type": "T7Show", "inputs": {"text": ["1", 0]}},
+        # The built-in PreviewAny shows T7Reverse's own output, so a T7Show
+        # that reverses can't cover for a T7Reverse that doesn't.
+        "3": {"class_type": "PreviewAny", "inputs": {"source": ["1", 0]}},
     }
     status, body = http("POST", "/prompt", {"prompt": graph})
     if status != 200:
@@ -987,8 +989,14 @@ def t7_nonce_run() -> str:
     entry = wait_done(body["prompt_id"])  # type: ignore[index]
     if not completed(entry):
         raise CheckFailed(f"the check's T7Reverse -> T7Show run did not complete: {json.dumps(entry.get('status'))[:400]}")
-    if nonce[::-1] not in shown_text(entry):
-        raise CheckFailed(f"T7Show showed {shown_text(entry)} for T7Reverse({nonce!r}), want [{nonce[::-1]!r}]")
+    outputs = entry.get("outputs", {})
+    want = [nonce[::-1]]
+    reversed_ = [str(t) for t in outputs.get("3", {}).get("text", [])]
+    if reversed_ != want:
+        raise CheckFailed(f"T7Reverse({nonce!r}) output {reversed_}, want {want}")
+    shown = [str(t) for t in outputs.get("2", {}).get("text", [])]
+    if shown != want:
+        raise CheckFailed(f"T7Show showed {shown} for {want}")
     return "a hidden value comes back reversed through T7Reverse and T7Show"
 
 
@@ -1023,6 +1031,8 @@ def check_t7() -> str:
     pp = t7_pack_dir() / "pyproject.toml"
     if not pp.is_file():
         raise CheckFailed("the pack has no pyproject.toml")
+    import tomllib  # Python 3.11+, so only T7's check needs it
+
     try:
         meta = tomllib.loads(pp.read_text())
     except tomllib.TOMLDecodeError as e:
@@ -1126,7 +1136,9 @@ rules, so they are on you:
 - pack/dev-check.sh is the loop script from the pack template. Run in pack/, ./dev-check.sh
   restarts ComfyUI through that route, waits for it, and reports the node classes the pack
   registers and the load errors ComfyUI logged; ./dev-check.sh --help says more. Using it
-  is up to you. Leave it and pack/.env in place.
+  is up to you; --no-restart checks without restarting. Leave it and pack/.env in place.
+- A restart empties ComfyUI's /history and its log, so run what the task asks you to run
+  after your last restart.
 
 The task follows. Paths in it are relative to {workspace}.
 """

@@ -51,8 +51,9 @@ In `.env`:
 - **`COMFY_IMAGE`** defaults to `core:cpu-latest`, which moves with every merge to
   our `main`. Pin a release (`core:cpu-X.Y.Z`) to keep the ComfyUI you test against
   fixed.
-- **NVIDIA**: set `COMFY_IMAGE` to a `core:cuda-*` tag and
-  `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`. Setting it in `.env`
+- **NVIDIA**: set
+  `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`, which makes the default
+  image `core:cuda-latest` (pin a `core:cuda-X.Y.Z` with `COMFY_IMAGE`). Setting it in `.env`
   means `docker compose` and the loop script's fallback restart both use it. For
   AMD or Intel, use `core:rocm-*` or `core:xpu-*` and copy the device lines from
   [`examples/core-amd`](../../examples/core-amd/) or
@@ -95,7 +96,9 @@ load yours alone, set
    register, saying which module did if another one has that name.
 4. **Web**: lists the pack's JavaScript from `GET /extensions` and fetches each file.
    A file that doesn't return 200 fails, and so does one that imports a path
-   ComfyUI calls deprecated (see [Frontend Extensions](#frontend-extensions)).
+   ComfyUI calls deprecated (see [Frontend Extensions](#frontend-extensions)). So
+   does a pack whose declared web directory (`WEB_DIRECTORY`, or `[tool.comfy] web`)
+   has JavaScript that `/extensions` doesn't list.
 5. **Run** (with `--workflow`): posts the workflow, in API format, to `/prompt` and
    waits for it in `/history`. It prints the outputs, or the error and the node that
    raised it. Only the graph is sent.
