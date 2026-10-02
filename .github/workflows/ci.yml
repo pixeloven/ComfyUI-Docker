@@ -331,7 +331,17 @@ jobs:
     # (tag AND digest), flags and schema version as `make validate`, so a local
     # run and CI agree. Job permissions are tracked separately in #121.
     - name: Validate the Kubernetes example
-      run: docker run --rm -v "$PWD":/repo:ro -w /repo ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e -strict -summary -kubernetes-version 1.36.4 examples/kubernetes
+      run: docker run --rm -v "$PWD":/repo:ro -w /repo ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e -strict -summary -kubernetes-version 1.36.4 -ignore-filename-pattern '\.patch\.yaml$' examples/kubernetes
+
+    # The opt-in MCP sidecar (examples/kubernetes/with-mcp/) is a strategic
+    # merge patch, which is not a resource on its own: validate the Deployment
+    # it makes, merged offline with --local, as `make validate` does.
+    - name: Validate the Kubernetes example with the MCP sidecar
+      run: |
+        set -euo pipefail
+        kubectl patch --local -f examples/kubernetes/deployment.yaml --type strategic \
+          --patch-file examples/kubernetes/with-mcp/mcp-sidecar.patch.yaml -o yaml \
+          | docker run --rm -i ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e -strict -summary -kubernetes-version 1.36.4 -
 
   test-bake-targets:
     runs-on: ubuntu-latest
@@ -361,15 +371,17 @@ jobs:
   # from a fork would build just as well; the compare API tells them apart:
   # main is `ahead` of a commit on it, or `identical` to its tip. Reads one
   # public repo, so the workflow's token with read-only contents is enough.
-  # It runs on every release tag too, and `release` needs it: there it must run,
-  # never skip, so its `if` holds on any v* tag whatever the path filter says.
+  # It runs on every v* tag ref too, whatever the event (a tag push, or a
+  # workflow_dispatch run at the tag), and `release` needs it: on a release ref
+  # it must run, never skip, or `release` would silently not run. So its `if`
+  # holds on any v* tag ref, whatever the path filter says.
   docs-pin:
     name: COMFY_DOCS_SHA is on Comfy-Org/docs main
     runs-on: ubuntu-latest
     needs: changes
     if: >-
       (github.event_name == 'pull_request' && needs.changes.outputs.bake == 'true')
-      || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+      || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
     steps:
@@ -1215,13 +1227,14 @@ jobs:
     # push some build jobs are legitimately `skipped` by the path filter, and
     # `skipped` is not `success`.
     #
-    # But this job only runs for a release, which is a `v*` tag, and on a tag
-    # nothing it needs is skipped legitimately: `context` forces build_images,
-    # build_fetch and build_relay true, docs-pin runs on every v* tag, and
-    # validate-models, end-to-end and
-    # build-cuda-arch have no `if`. So a `skipped` need here means an upstream
-    # failure hid it -- a failed validate-models leaves publish-fetch
-    # skipped, not failed -- and every need must have succeeded.
+    # But this job only runs for a release, which is a `v*` tag ref (pushed,
+    # or a workflow_dispatch run at the tag), and there nothing it needs is
+    # skipped legitimately: `context` forces build_images, build_fetch and
+    # build_relay true, docs-pin's `if` holds on any v* tag ref whatever the
+    # event, and validate-models, end-to-end and build-cuda-arch have no `if`.
+    # So a `skipped` need here means an upstream failure hid it -- a failed
+    # validate-models leaves publish-fetch skipped, not failed -- and every
+    # need must have succeeded.
     #
     # This gates the GitHub Release only. On a tag the build jobs push their
     # images in parallel with smoke-cpu, so an image that fails it still
