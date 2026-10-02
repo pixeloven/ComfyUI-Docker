@@ -1,0 +1,9 @@
+[project]
+name = "t7-pack"
+version = "0.1.0"
+description = "Text nodes for the agent-task harness"
+license = { text = "MIT" }
+
+[tool.comfy]
+PublisherId = "harness"
+DisplayName = "T7 text nodes"

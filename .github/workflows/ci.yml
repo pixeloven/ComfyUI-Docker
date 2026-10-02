@@ -52,6 +52,7 @@ jobs:
       relay: ${{ steps.filter.outputs.relay }}
       bake: ${{ steps.filter.outputs.bake }}
       examples: ${{ steps.filter.outputs.examples }}
+      node_pack: ${{ steps.filter.outputs.node_pack }}
     steps:
     - uses: actions/checkout@v7.0.1
     # Pinned to an exact semver tag, like every other action here -- a version
@@ -97,6 +98,14 @@ jobs:
             - 'docker-bake.hcl'
           examples:
             - 'examples/**'
+          # The node-pack template, its loop script, its test and the T7
+          # fixtures that test runs through the loop (#107).
+          node_pack:
+            - 'templates/node-pack/**'
+            - 'tests/node-pack/**'
+            - 'tests/agent-tasks/tasks/T7/**'
+            - 'tests/agent-tasks/tasks/T7-fix/**'
+            - '.github/workflows/ci.yml'
 
   # Which release line this ref belongs to, and what to call what it builds.
   #
@@ -327,6 +336,14 @@ jobs:
           cd ../..
         done
 
+    # The node-pack template is copied into a pack's own repository; its
+    # .env.example sets the PACK_NAME the compose file requires.
+    - name: Validate the node-pack template
+      working-directory: templates/node-pack
+      run: |
+        docker compose --env-file .env.example config --quiet
+        docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.gpu.yml config --quiet
+
     # The Kubernetes example has no compose file. The same kubeconform image
     # (tag AND digest), flags and schema version as `make validate`, so a local
     # run and CI agree. Job permissions are tracked separately in #121.
@@ -365,6 +382,28 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-xpu"
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
         docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
+
+  # The node-pack template (#107): boots the published core-cpu through the
+  # template's compose file with a fixture V3 pack, edits it, and runs the
+  # template's dev-check.sh, asserting that the edit is live, that broken packs
+  # (an import error, the V1/V3 trap, T7-fix's planted pack) fail the loop, and
+  # that with Manager off it restarts the container instead. Outcomes only, not
+  # how fast a restart is. `tests/node-pack/run.sh` is the same script locally.
+  # It tests the template against what main published, so it builds nothing.
+  node-pack:
+    name: the node-pack template loads and reloads a pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: changes
+    if: needs.changes.outputs.node_pack == 'true'
+    # Reads the repo and pulls a public image; nothing here writes (#121).
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
+    - run: tests/node-pack/run.sh
 
   # COMFY_DOCS_SHA must be a commit on Comfy-Org/docs `main` (#134, #136).
   # GitHub serves any commit in the repo's fork network by its SHA, so a SHA

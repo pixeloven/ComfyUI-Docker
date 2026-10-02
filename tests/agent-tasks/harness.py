@@ -10,12 +10,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
+import shutil
 import sqlite3
 import struct
 import subprocess
 import sys
 import time
+import tomllib
 import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 from collections import Counter
@@ -867,6 +871,201 @@ def check_t5() -> str:
     )
 
 
+# T7 (#107): develop a V3 node pack the way docs/user-guides/developing-nodes.md
+# describes, with a shell and ComfyUI's HTTP API, and no relay. The pack lives on
+# the custom_nodes volume, and the workspace's pack/ links to it, so the agent's
+# files are what ComfyUI imports. T7-fix plants a broken pack to repair.
+T7_PACK = "t7_pack"
+T7_MODULE = f"custom_nodes.{T7_PACK}"
+T7_FIX_PACK = HERE / "tasks" / "T7-fix" / "pack"
+LOOP_SCRIPT = HERE.parent.parent / "templates" / "node-pack" / "dev-check.sh"
+# What ComfyUI logs about a custom node pack that didn't load: nodes.py's
+# import failures and comfy_entrypoint warnings, and Manager's policy block.
+LOAD_FAILURE = re.compile(r"IMPORT FAILED|Cannot import|comfy_entrypoint|^Skip |Blocked by policy")
+
+
+def t7_pack_dir() -> Path:
+    return DATA / "custom_nodes" / T7_PACK
+
+
+def t7_instance_marker(task: str) -> Path:
+    return RESULTS / f"{task}.instance-before.json"
+
+
+def cmd_setup_t7_pack(task: str) -> None:
+    """Plant the pack (empty for T7, the broken one for T7-fix) with the template's
+    loop script and a .env for it, and link the workspace's pack/ to it. Run
+    before ComfyUI restarts, so the restart loads what is planted."""
+    pack = t7_pack_dir()
+    shutil.rmtree(pack, ignore_errors=True)
+    if task == "T7-fix":
+        shutil.copytree(T7_FIX_PACK, pack)
+    else:
+        pack.mkdir(parents=True)
+    shutil.copy2(LOOP_SCRIPT, pack / "dev-check.sh")
+    port = urllib.parse.urlsplit(COMFY_URL).port or 8188
+    (pack / ".env").write_text(f"PACK_NAME={T7_PACK}\nCOMFY_PORT={port}\n")
+    (WORKSPACE / "pack").symlink_to(pack.resolve(), target_is_directory=True)
+    (WORKSPACE / "results").mkdir(parents=True, exist_ok=True)
+    (WORKSPACE / "results" / f"{task}.json").unlink(missing_ok=True)
+
+
+def cmd_setup_t7_mark(task: str, container: str) -> None:
+    """After the restart: the task's nodes must not be registered yet. Then mark
+    /history and the container's start time, so the check sees a recreate."""
+    for cls in ("T7Reverse", "T7Show"):
+        if cls in get(f"/object_info/{cls}"):  # type: ignore[operator]
+            sys.exit(f"{cls} is already registered before {task} starts; is another pack providing it?")
+    mark(task)
+    t7_instance_marker(task).write_text(json.dumps({"container": container, "started_at": started_at(container)}))
+    print(f"{task}: {t7_pack_dir()} planted, linked as {WORKSPACE / 'pack'}; ComfyUI restarted")
+
+
+def clean_log(m: str) -> str:
+    """A log entry without its colour codes, [LEVEL] prefix and final newline."""
+    return re.sub(r"^\[[A-Z]+\] ", "", re.sub(r"\x1b\[[0-9;]*m", "", m)).rstrip("\n")
+
+
+def t7_load_failures() -> list[str]:
+    """The entries in ComfyUI's log that say the pack didn't load (it names the pack by its path)."""
+    entries = [clean_log(e.get("m", "")) for e in get("/internal/logs/raw")["entries"]]  # type: ignore[index]
+    path = f"/custom_nodes/{T7_PACK}"
+    return [
+        m
+        for m in entries
+        if (any(path + end in m for end in ("/", " ", ":", "\n", '"')) or m.endswith(path)) and LOAD_FAILURE.search(m)
+    ]
+
+
+def t7_registered() -> str:
+    """T7Reverse and T7Show come from the pack, with the task's types."""
+    want = {
+        "T7Reverse": {"output": ["STRING"], "output_node": False},
+        "T7Show": {"output_node": True},
+    }
+    for cls, spec in want.items():
+        info = get(f"/object_info/{cls}").get(cls)  # type: ignore[union-attr]
+        if info is None:
+            raise CheckFailed(f"{cls} is not in /object_info")
+        if info.get("python_module") != T7_MODULE:
+            raise CheckFailed(f"{cls} comes from {info.get('python_module')!r}, not {T7_MODULE!r}")
+        if info.get("category") != "t7":
+            raise CheckFailed(f"{cls} is in category {info.get('category')!r}, want 't7'")
+        text = (info.get("input") or {}).get("required", {}).get("text")
+        if not text or text[0] != "STRING":
+            raise CheckFailed(f"{cls} has no required STRING input 'text': {info.get('input')}")
+        for key, value in spec.items():
+            if info.get(key) != value:
+                raise CheckFailed(f"{cls} {key} is {info.get(key)!r}, want {value!r}")
+    return "T7Reverse (STRING -> STRING) and T7Show (output node) come from " + T7_MODULE
+
+
+def wait_done(prompt_id: str, seconds: int = 120) -> dict:
+    for _ in range(seconds):
+        entry = history().get(prompt_id)
+        if entry and (entry.get("status") or {}).get("completed") is not None:
+            return entry
+        time.sleep(1)
+    raise CheckFailed(f"{prompt_id[:8]} did not finish in {seconds} s")
+
+
+def shown_text(entry: dict) -> list[str]:
+    return [str(t) for out in entry.get("outputs", {}).values() for t in out.get("text", [])]
+
+
+def t7_nonce_run() -> str:
+    """The check's own run, with a value nothing in the workspace holds: T7Reverse
+    must reverse it and T7Show must show the result. Only the graph is sent."""
+    nonce = "n" + secrets.token_hex(8)
+    graph = {
+        "1": {"class_type": "T7Reverse", "inputs": {"text": nonce}},
+        "2": {"class_type": "T7Show", "inputs": {"text": ["1", 0]}},
+    }
+    status, body = http("POST", "/prompt", {"prompt": graph})
+    if status != 200:
+        raise CheckFailed(f"ComfyUI rejected T7Reverse -> T7Show (HTTP {status}): {json.dumps(body)[:400]}")
+    entry = wait_done(body["prompt_id"])  # type: ignore[index]
+    if not completed(entry):
+        raise CheckFailed(f"the check's T7Reverse -> T7Show run did not complete: {json.dumps(entry.get('status'))[:400]}")
+    if nonce[::-1] not in shown_text(entry):
+        raise CheckFailed(f"T7Show showed {shown_text(entry)} for T7Reverse({nonce!r}), want [{nonce[::-1]!r}]")
+    return "a hidden value comes back reversed through T7Reverse and T7Show"
+
+
+def t7_v3_only() -> None:
+    pack = t7_pack_dir()
+    init = pack / "__init__.py"
+    if not init.is_file() or "comfy_entrypoint" not in init.read_text():
+        raise CheckFailed("the pack's __init__.py doesn't define comfy_entrypoint")
+    v1 = [str(p.relative_to(pack)) for p in sorted(pack.rglob("*.py")) if "NODE_CLASS_MAPPINGS" in p.read_text()]
+    if v1:
+        raise CheckFailed(f"NODE_CLASS_MAPPINGS (V1) appears in {v1}")
+
+
+def t7_not_recreated(task: str) -> None:
+    before = json.loads(t7_instance_marker(task).read_text())
+    now = started_at(before["container"])
+    if now != before["started_at"]:
+        raise CheckFailed(f"the container was restarted or recreated ({before['started_at']} -> {now})")
+
+
+def t7_clean_load() -> None:
+    failures = t7_load_failures()
+    if failures:
+        raise CheckFailed("ComfyUI logged that the pack didn't load: " + " | ".join(f[:200] for f in failures))
+
+
+def check_t7() -> str:
+    t7_not_recreated("T7")
+    registered = t7_registered()
+    t7_clean_load()
+    t7_v3_only()
+    pp = t7_pack_dir() / "pyproject.toml"
+    if not pp.is_file():
+        raise CheckFailed("the pack has no pyproject.toml")
+    try:
+        meta = tomllib.loads(pp.read_text())
+    except tomllib.TOMLDecodeError as e:
+        raise CheckFailed(f"pyproject.toml doesn't parse: {e}") from e
+    for path in (("project", "name"), ("project", "version"), ("tool", "comfy", "PublisherId")):
+        value: object = meta
+        for key in path:
+            value = value.get(key) if isinstance(value, dict) else None
+        if not isinstance(value, str) or not value.strip():
+            raise CheckFailed(f"pyproject.toml has no {'.'.join(path)}")
+    p = WORKSPACE / "results" / "T7.json"
+    if not p.exists():
+        raise CheckFailed(f"{p} not written")
+    try:
+        rep = json.loads(p.read_text())
+    except ValueError as e:
+        raise CheckFailed(f"T7.json is not JSON: {e}") from e
+    if not isinstance(rep, dict) or rep.get("class") != "T7Reverse":
+        raise CheckFailed(f"T7.json must be an object with class 'T7Reverse': {rep!r}")
+    pid = str(rep.get("prompt_id"))
+    entry = new_entries("T7").get(pid)
+    if entry is None:
+        raise CheckFailed(f"prompt_id {pid!r} is not a /history entry new since setup")
+    if not completed(entry):
+        raise CheckFailed(f"{pid[:8]} did not complete successfully ({(entry.get('status') or {}).get('status_str')})")
+    texts = [n.get("inputs", {}).get("text") for n in graph(entry).values() if n.get("class_type") == "T7Reverse"]
+    if "harness" not in texts:
+        raise CheckFailed(f"{pid[:8]} didn't run T7Reverse with text 'harness' (T7Reverse texts: {texts})")
+    if "ssenrah" not in shown_text(entry):
+        raise CheckFailed(f"{pid[:8]} didn't show 'ssenrah': its text outputs are {shown_text(entry)}")
+    nonce = t7_nonce_run()
+    return f"{registered}; {pid[:8]} showed 'ssenrah'; {nonce}; clean load, V3 only, pyproject keys, same container"
+
+
+def check_t7_fix() -> str:
+    t7_not_recreated("T7-fix")
+    registered = t7_registered()
+    t7_clean_load()
+    t7_v3_only()
+    nonce = t7_nonce_run()
+    return f"{registered}; {nonce}; clean load, still V3, same container"
+
+
 # --- External-agent mode (external.sh) -------------------------------------------
 
 AGENT_PREAMBLE = """\
@@ -904,23 +1103,48 @@ The task follows. Paths in it are relative to {workspace}.
 """
 
 
-def cmd_handoff(task: str, token_file: str, probe_json: str) -> None:
+# The brief for the pack-developer tasks (T7, T7-fix): no relay. The agent works
+# as a developer in a pack's own repository does (docs/user-guides/developing-nodes.md):
+# files in the pack, and ComfyUI's HTTP API, including Manager's in-place reboot.
+DEV_PREAMBLE = """\
+You are being evaluated on a task: developing a ComfyUI custom node pack against a running
+ComfyUI, the way a developer works in the pack's own repository. Nothing enforces these
+rules, so they are on you:
+
+- Your workspace, {workspace}, is your working directory. Its pack/ directory is the pack:
+  ComfyUI loads it as the custom node pack "{pack}" (/app/custom_nodes/{pack} in its
+  container), so what you write there is what ComfyUI imports. Work inside pack/, and don't
+  delete, move or replace pack/ itself. Put your answers in results/, not in pack/.
+- Reach ComfyUI only over HTTP, at {comfy_url}: its own routes (for example /object_info,
+  /prompt, /history and /internal/logs/raw) and ComfyUI-Manager's POST /v2/manager/reboot,
+  which restarts ComfyUI in place, in the same container, and so imports the pack again.
+  ComfyUI never reloads a pack's Python without a restart.
+- Don't use docker, and don't stop, restart or recreate the container: that reboot route is
+  the only restart allowed. Send ComfyUI no credentials and no extra_data.
+- Read only your workspace: nothing else on this machine, the repository included. Don't
+  install or download anything; the ComfyUI side has everything the task needs.
+- pack/dev-check.sh is the loop script from the pack template. Run in pack/, ./dev-check.sh
+  restarts ComfyUI through that route, waits for it, and reports the node classes the pack
+  registers and the load errors ComfyUI logged; ./dev-check.sh --help says more. Using it
+  is up to you. Leave it and pack/.env in place.
+
+The task follows. Paths in it are relative to {workspace}.
+"""
+
+
+def write_handoff(task: str, brief: str, extra: dict) -> None:
     """Write the brief (the preamble, then the task's prompt) into the workspace as
     TASK.md, and the handoff to RESULTS/<task>.handoff.json; print both. The agent
     is never pointed at tasks/, which holds the answers."""
-    url = f"http://127.0.0.1:{os.environ['COMFYRELAY_PORT']}/mcp"
-    prompt = (HERE / "tasks" / task / "prompt.md").read_text()
-    brief = AGENT_PREAMBLE.format(workspace=WORKSPACE, token_file=token_file, url=url) + "\n" + prompt
     brief_file = WORKSPACE / "TASK.md"
     brief_file.write_text(brief)
     handoff = {
         "task": task,
         "brief_file": str(brief_file),
         "brief": brief,
-        "mcp": {"server": "comfyrelay", "url": url, "token_file": token_file},
+        **extra,
         "workspace": str(WORKSPACE),
         "results_dir": str(WORKSPACE / "results"),
-        "relay_tools": json.loads(probe_json)["tools"],
         "confinement": "by instruction only: nothing stops the agent using other tools; see README",
         "check": f"./external.sh check {task}",
         "started": int(time.time()),
@@ -931,6 +1155,28 @@ def cmd_handoff(task: str, token_file: str, probe_json: str) -> None:
     print(f"== with {WORKSPACE} as its working directory. Then: ./external.sh check {task}")
     print(f"== handoff: {out}\n")
     print(brief)
+
+
+def cmd_handoff(task: str, token_file: str, probe_json: str) -> None:
+    """The brief for a relay task: the relay preamble, then the task's prompt."""
+    url = f"http://127.0.0.1:{os.environ['COMFYRELAY_PORT']}/mcp"
+    prompt = (HERE / "tasks" / task / "prompt.md").read_text()
+    brief = AGENT_PREAMBLE.format(workspace=WORKSPACE, token_file=token_file, url=url) + "\n" + prompt
+    write_handoff(
+        task,
+        brief,
+        {
+            "mcp": {"server": "comfyrelay", "url": url, "token_file": token_file},
+            "relay_tools": json.loads(probe_json)["tools"],
+        },
+    )
+
+
+def cmd_handoff_dev(task: str) -> None:
+    """The brief for a pack-developer task: no relay, ComfyUI's own HTTP API."""
+    prompt = (HERE / "tasks" / task / "prompt.md").read_text()
+    brief = DEV_PREAMBLE.format(workspace=WORKSPACE, pack=T7_PACK, comfy_url=COMFY_URL) + "\n" + prompt
+    write_handoff(task, brief, {"comfy_url": COMFY_URL, "pack": str(t7_pack_dir())})
 
 
 T4_WORKFLOW = {
@@ -1016,6 +1262,8 @@ CHECKS = {
     "t4": check_t4,
     "t5": check_t5,
     "t6": check_t6,
+    "t7": check_t7,
+    "t7-fix": check_t7_fix,
 }
 
 
@@ -1037,7 +1285,10 @@ COMMANDS = {
     "setup-t2-refuse": cmd_setup_t2_refuse,
     "setup-t4": cmd_setup_t4,
     "setup-t5": cmd_setup_t5,
+    "setup-t7-pack": cmd_setup_t7_pack,
+    "setup-t7-mark": cmd_setup_t7_mark,
     "handoff": cmd_handoff,
+    "handoff-dev": cmd_handoff_dev,
     "check": cmd_check,
 }
 

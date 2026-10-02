@@ -64,13 +64,16 @@ clean: ## Clean build cache and rebuild from scratch
 KUBECONFORM ?= docker run --rm -i -v "$(CURDIR)":/repo:ro -w /repo ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
 KUBERNETES_VERSION ?= 1.36.4
 
-validate: ## Validate Bake, example Compose configurations and the Kubernetes example
+validate: ## Validate Bake, example and node-pack template Compose configurations, and the Kubernetes example
 	docker buildx bake --print all > /dev/null
 	cd examples/core-gpu && docker compose config --quiet
 	cd examples/complete-gpu && docker compose config --quiet
 	cd examples/core-cpu && docker compose config --quiet
 	cd examples/core-amd && docker compose config --quiet
 	cd examples/core-intel && docker compose config --quiet
+	# The node-pack template needs PACK_NAME, which a copied .env sets.
+	cd templates/node-pack && docker compose --env-file .env.example config --quiet
+	cd templates/node-pack && docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.gpu.yml config --quiet
 	$(KUBECONFORM) -strict -summary -kubernetes-version $(KUBERNETES_VERSION) -ignore-filename-pattern '\.patch\.yaml$$' examples/kubernetes
 	# The opt-in MCP sidecar is a patch, not a resource: validate the Deployment it makes.
 	@if command -v kubectl >/dev/null; then \

@@ -1,0 +1,67 @@
+# Develop a ComfyUI custom node pack against the pixeloven/ComfyUI-Docker
+# images. Copy this file, .env.example and dev-check.sh into the root of the
+# pack's own repository, then:
+#
+#   cp .env.example .env      # set PACK_NAME
+#   docker compose up -d
+#   ./dev-check.sh            # restart ComfyUI and report how the pack loaded
+#
+# The repository is mounted into the container as the pack, so ComfyUI loads
+# what you edit. Everything else ComfyUI keeps (models, other custom nodes,
+# settings, outputs) lives on named volumes, outside the repository.
+# docs/user-guides/developing-nodes.md in pixeloven/ComfyUI-Docker is the guide.
+services:
+  comfyui:
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui/core:cpu-latest}
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - COMFY_PORT=${COMFY_PORT:-8188}
+      # Manager's POST /v2/manager/reboot is how dev-check.sh restarts ComfyUI
+      # in place. With it off, dev-check.sh falls back to `docker compose restart`.
+      - COMFY_ENABLE_MANAGER=${COMFY_ENABLE_MANAGER:-true}
+      - COMFY_ENABLE_ASSETS=${COMFY_ENABLE_ASSETS:-true}
+      # To load only this pack: --disable-all-custom-nodes --whitelist-custom-nodes <PACK_NAME>
+      - CLI_ARGS=${CLI_ARGS:-}
+    # Loopback only. ComfyUI has no authentication, and anyone who can reach
+    # this port can run code in it, including Manager's reboot route.
+    ports:
+      - "127.0.0.1:${COMFY_PORT:-8188}:${COMFY_PORT:-8188}"
+    volumes:
+      - ${COMFY_CUSTOM_NODE_PATH:-custom_nodes}:/app/custom_nodes
+      # This repository, as the pack. Its directory name inside ComfyUI is
+      # PACK_NAME, so its nodes report python_module "custom_nodes.<PACK_NAME>".
+      - ./:/app/custom_nodes/${PACK_NAME:?set PACK_NAME in .env (see .env.example)}
+      - ${COMFY_DATASET_PATH:-datasets}:/app/datasets
+      - ${COMFY_INPUT_PATH:-input}:/app/input
+      - ${COMFY_MODEL_PATH:-models}:/app/models
+      - ${COMFY_OUTPUT_PATH:-output}:/app/output
+      - ${COMFY_TEMP_PATH:-temp}:/app/temp
+      - ${COMFY_USER_PATH:-user}:/app/user
+    security_opt:
+      - no-new-privileges:true
+
+  # (Optional) comfyrelay, the MCP server for agents, beside ComfyUI. An agent
+  # working in this repository with a shell doesn't need it: it edits files and
+  # calls ComfyUI's HTTP API itself. Set COMFYUI_MCP_HTTP_TOKEN in .env
+  # (`openssl rand -hex 32`); the read,run profiles install and restart nothing.
+  # mcp:
+  #   image: ghcr.io/pixeloven/comfyui/mcp:latest
+  #   environment:
+  #     - COMFYUI_URL=http://comfyui:${COMFY_PORT:-8188}
+  #     - COMFYUI_MCP_HTTP_TOKEN=${COMFYUI_MCP_HTTP_TOKEN:?set COMFYUI_MCP_HTTP_TOKEN in .env}
+  #     - COMFYUI_MCP_PROFILES=read,run
+  #   ports:
+  #     - "127.0.0.1:9000:9000"
+  #   read_only: true
+  #   security_opt:
+  #     - no-new-privileges:true
+
+volumes:
+  custom_nodes:
+  datasets:
+  input:
+  models:
+  output:
+  temp:
+  user:

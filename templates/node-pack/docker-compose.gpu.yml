@@ -1,0 +1,18 @@
+# The NVIDIA variant: the CUDA image and the GPU, on top of docker-compose.yml.
+# Use it with `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` in .env,
+# so `docker compose` and dev-check.sh's fallback restart both pick it up.
+# For AMD (core:rocm-*) or Intel (core:xpu-*), set COMFY_IMAGE and copy the
+# device lines from examples/core-amd or examples/core-intel instead.
+services:
+  comfyui:
+    image: ${COMFY_IMAGE:-ghcr.io/pixeloven/comfyui/core:cuda-latest}
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
