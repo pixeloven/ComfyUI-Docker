@@ -22,7 +22,7 @@
 #
 # The images: HARNESS_IMAGE (core-cpu, default the local build from build.sh;
 # e.g. ghcr.io/pixeloven/comfyui/core:cpu-latest) and COMFYRELAY_IMAGE (default
-# comfyrelay:latest, the image under test, built locally). Both containers use
+# ghcr.io/pixeloven/comfyui/mcp:local, the image under test, built locally). Both containers use
 # --network host and bind loopback. For several runs on one host, give each its
 # own HARNESS_CONTAINER (the prefix of both container names), COMFY_PORT,
 # COMFYRELAY_PORT, HARNESS_DATA and HARNESS_RESULTS.

@@ -42,8 +42,8 @@ app.add_typer(fetch_app, name="fetch")
 
 RELAY_UNAVAILABLE = (
     "comfyctl relay is not available in this build: the comfyrelay package is not "
-    "installed. It is not released yet; it runs from the source tree "
-    "(services/, `uv run comfyctl relay …`) and in the comfyrelay image."
+    "installed. comfyrelay ships as the mcp image (ghcr.io/pixeloven/comfyui/mcp), not as a "
+    "wheel; from the source tree, run `uv run comfyctl relay …` under services/."
 )
 
 

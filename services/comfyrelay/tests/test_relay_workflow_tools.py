@@ -1199,7 +1199,7 @@ async def test_the_larger_body_limit_comes_with_the_run_profile_only(profiles, l
     server, _ = build_server(s, comfyui=FakeComfyUI().client())
     app = http_app(server, s)
     body = b"{" + b" " * (5 * 1024 * 1024) + b"}"  # 5 MiB: over the SDK's 4 MiB, under the run profile's limit
-    starlette = app.app  # inside TokenAuth; its lifespan starts the MCP session manager
+    starlette = app.app.app  # inside TokenAuth and LargeBodyGate; its lifespan starts the MCP session manager
     async with (
         starlette.router.lifespan_context(starlette),
         httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url="http://127.0.0.1") as http,

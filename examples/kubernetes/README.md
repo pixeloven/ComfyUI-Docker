@@ -1,8 +1,8 @@
 # ComfyUI on Kubernetes
 
 A minimal, generic example: one Deployment, one PersistentVolumeClaim per data
-volume, and a ClusterIP Service. It uses the `core:cpu` image so it runs on any
-cluster. There is no ingress, no namespace, and no storage class. Those depend on
+volume, and a ClusterIP Service, plus an opt-in MCP sidecar for agents in
+`with-mcp/`. It uses the `core:cpu` image so it runs on any cluster. There is no ingress, no namespace, and no storage class. Those depend on
 your cluster, so you add them.
 
 | File | What it is |
@@ -10,6 +10,7 @@ your cluster, so you add them.
 | `deployment.yaml` | ComfyUI, running as UID/GID `1000`, with a readiness probe on `/system_stats` |
 | `pvc.yaml` | Seven `ReadWriteOnce` claims, one per volume root under `/app` |
 | `service.yaml` | `comfyui:8188` inside the cluster |
+| `with-mcp/` | **Opt-in.** The MCP sidecar: a patch that adds it to the Deployment, and a placeholder Secret for its token. `kubectl apply -f examples/kubernetes/` doesn't apply it |
 
 ## Deploy
 
@@ -20,6 +21,59 @@ kubectl port-forward service/comfyui 8188:8188
 ```
 
 Then open **http://localhost:8188**.
+
+## Adding the MCP Sidecar (Opt-In)
+
+The deploy above runs ComfyUI alone. To let agents drive it over MCP, add the
+[`mcp` image](../../services/comfyrelay/README.md) as a second container in the
+same pod: an MCP server for agents, one per ComfyUI. It reaches ComfyUI over the
+pod's loopback (`COMFYUI_URL=http://127.0.0.1:8188`), so nothing extra is exposed
+for it, and it serves agents on port 9000 at `/mcp`, behind a token. It installs
+and restarts nothing. Skip this section if you don't use an MCP client.
+
+1. **Create its token**, at least 32 characters, as the `comfyui-mcp` Secret:
+
+   ```bash
+   kubectl create secret generic comfyui-mcp \
+     --from-literal=COMFYUI_MCP_HTTP_TOKEN="$(openssl rand -hex 32)"
+   ```
+
+   `with-mcp/mcp-secret.yaml` shows the same Secret as a manifest. Its value is a
+   placeholder, deliberately too short: replace it before applying that file
+   (and don't commit the real one), or the sidecar refuses to start.
+
+2. **Add the container** to the Deployment, and wait for the pod to restart:
+
+   ```bash
+   kubectl patch deployment comfyui \
+     --patch-file examples/kubernetes/with-mcp/mcp-sidecar.patch.yaml
+   kubectl rollout status deployment/comfyui
+   ```
+
+   Re-applying `examples/kubernetes/` later keeps the sidecar. To remove it,
+   delete the `mcp` container with `kubectl edit deployment comfyui`, or delete
+   and re-apply the Deployment.
+
+3. **Reach it from your machine.** The port-forward runs in the foreground, so
+   leave it running and use another terminal for the client:
+
+   ```bash
+   kubectl port-forward deployment/comfyui 9000:9000
+   ```
+
+   Then, in another terminal, point the client at it with the token:
+
+   ```bash
+   claude mcp add --transport http comfyui http://127.0.0.1:9000/mcp \
+     --header "Authorization: Bearer $(kubectl get secret comfyui-mcp -o jsonpath='{.data.COMFYUI_MCP_HTTP_TOKEN}' | base64 -d)"
+   ```
+
+The sidecar runs under the pod's UID with a read-only root filesystem, and its
+memory limit is 256Mi, which fits the default large-request limit with up to
+three clients that upload large files. Pin its image the same way as ComfyUI's
+(the patch has the placeholder). See the
+[runtime contract](../../docs/user-guides/runtime-contract.md#the-mcp-image) for
+what it promises.
 
 ## How the Container Starts Here
 
@@ -96,4 +150,6 @@ startup paths, every environment variable, and the volume paths.
 
 `make validate` checks these manifests against the Kubernetes 1.36.4 schemas with
 [kubeconform](https://github.com/yannh/kubeconform), run through Docker and pinned
-by digest. CI runs the same check.
+by digest. The sidecar patch isn't a resource on its own, so it is validated as
+the Deployment it makes, merged offline with `kubectl patch --local` (skipped
+when `kubectl` isn't installed). CI runs the same checks.

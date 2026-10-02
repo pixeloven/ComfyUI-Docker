@@ -46,7 +46,7 @@ variable "COMFYUI_VERSION" {
 }
 
 variable "COMFY_DOCS_SHA" {
-    // The Comfy-Org/docs commit the comfyrelay image indexes for docs_search
+    // The Comfy-Org/docs commit the mcp image (comfyrelay) indexes for docs_search
     // (#134): the source of docs.comfy.org, GPL-3.0, recorded in the image's
     // NOTICE and in the index. The repo has no tags, so it is pinned by full
     // commit SHA and bumped by PR, like any supply-chain pin. It tracks the
@@ -56,8 +56,17 @@ variable "COMFY_DOCS_SHA" {
     // tip): GitHub serves any commit in the repo's fork network by SHA, so a
     // SHA from someone's fork would fetch just as well. Check it with the
     // compare API: gh api repos/Comfy-Org/docs/compare/<sha>...main reports
-    // "ahead" or "identical" for a commit on main.
+    // "ahead" or "identical" for a commit on main. CI's docs-pin job runs
+    // that check on every PR that changes this file.
     default = "efb8fdd3de17027da633eb9c12e80fbbeb993a19"
+}
+
+variable "GIT_SHA" {
+    // The commit being built. The mcp image's NOTICE (its Corresponding
+    // Source pointer) and its guides' URLs name it, so an image built between
+    // releases points at the files it was built from (#136). CI passes it;
+    // without it they point at the release tag of the version the image reports.
+    default = ""
 }
 
 variable "IMAGE_VERSION" {
@@ -345,9 +354,17 @@ target "complete-cuda-sm120" {
     }
 }
 
+// The MCP sidecar for agents: comfyrelay (#103), the first-party server, since
+// 5.0.0 (#136). Before that this image packaged artokun/comfyui-mcp.
+// The context is the uv workspace root, so the image installs services/uv.lock.
+// The guides the docs index covers (skills/comfyui-workflows/, #134) come in
+// as the `skills` named context, since skills/ is outside that root.
 target "mcp" {
-    context = "services/mcp"
-    dockerfile = "dockerfile.comfy.mcp"
+    context = "services"
+    dockerfile = "comfyrelay/dockerfile.comfy.relay"
+    contexts = {
+        skills = "skills"
+    }
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}mcp:${IMAGE_LABEL}",
@@ -357,7 +374,11 @@ target "mcp" {
     ]
     cache-from = ["type=registry,ref=${REGISTRY_URL}mcp:cache,optional=true"]
     cache-to   = ["type=inline"]
-    // The comfyui-mcp version is pinned by services/mcp/package-lock.json.
+    args = {
+        COMFYUI_VERSION = COMFYUI_VERSION
+        COMFY_DOCS_SHA = COMFY_DOCS_SHA
+        GIT_SHA = GIT_SHA
+    }
 }
 
 group "mcp" {
@@ -389,32 +410,6 @@ target "fetch" {
 
 group "fetch" {
     targets = ["fetch"]
-}
-
-// comfyrelay, the first-party MCP sidecar (#131). NOT PUBLISHED until #136
-// moves it into the `mcp` image, and kept that way by construction:
-//   - it is in no group, so `all` (which the release reads IMAGE-DIGESTS
-//     from) and `make all` never build it. This is what keeps it out of a
-//     release, and CI's validate job fails if it ever joins `all`;
-//   - its one tag is a bare local name, with no registry, so a stray `--push`
-//     fails rather than landing in GHCR. The tag does carry IMAGE_LABEL, so
-//     under a release (IMAGE_LABEL=4.0.1) it is `comfyrelay:4.0.1`, which the
-//     release's `:X.Y.Z` digest filter would match if the target were in `all`.
-// The context is the uv workspace root, so the image installs services/uv.lock.
-// The guides the docs index covers (skills/comfyui-workflows/, #134) come in
-// as the `skills` named context, since skills/ is outside that root.
-target "comfyrelay" {
-    context = "services"
-    dockerfile = "comfyrelay/dockerfile.comfy.relay"
-    contexts = {
-        skills = "skills"
-    }
-    platforms = PLATFORMS
-    tags = ["comfyrelay:${IMAGE_LABEL}"]
-    args = {
-        COMFYUI_VERSION = COMFYUI_VERSION
-        COMFY_DOCS_SHA = COMFY_DOCS_SHA
-    }
 }
 
 // Convenience groups

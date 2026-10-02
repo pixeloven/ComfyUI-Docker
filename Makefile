@@ -61,7 +61,7 @@ clean: ## Clean build cache and rebuild from scratch
 # Utility targets
 # Pinned by tag and digest, like CI's validate-examples step. KUBERNETES_VERSION
 # is the schema version the example is checked against.
-KUBECONFORM ?= docker run --rm -v "$(CURDIR)":/repo:ro -w /repo ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
+KUBECONFORM ?= docker run --rm -i -v "$(CURDIR)":/repo:ro -w /repo ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
 KUBERNETES_VERSION ?= 1.36.4
 
 validate: ## Validate Bake, example Compose configurations and the Kubernetes example
@@ -71,7 +71,13 @@ validate: ## Validate Bake, example Compose configurations and the Kubernetes ex
 	cd examples/core-cpu && docker compose config --quiet
 	cd examples/core-amd && docker compose config --quiet
 	cd examples/core-intel && docker compose config --quiet
-	$(KUBECONFORM) -strict -summary -kubernetes-version $(KUBERNETES_VERSION) examples/kubernetes
+	$(KUBECONFORM) -strict -summary -kubernetes-version $(KUBERNETES_VERSION) -ignore-filename-pattern '\.patch\.yaml$$' examples/kubernetes
+	# The opt-in MCP sidecar is a patch, not a resource: validate the Deployment it makes.
+	@if command -v kubectl >/dev/null; then \
+	  kubectl patch --local -f examples/kubernetes/deployment.yaml --type strategic \
+	    --patch-file examples/kubernetes/with-mcp/mcp-sidecar.patch.yaml -o yaml \
+	  | $(KUBECONFORM) -strict -summary -kubernetes-version $(KUBERNETES_VERSION) -; \
+	else echo "kubectl not found: skipped validating the with-mcp sidecar patch"; fi
 
 # Boot smoke test, the same script CI's smoke-cpu job runs, on core-cpu built
 # from this tree under the never-published `smoke` label, as CI builds it.

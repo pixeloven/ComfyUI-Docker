@@ -5,9 +5,9 @@
 #   fetch/       comfyfetch -- manifest, lock and verified model downloads
 #   comfyctl/    comfyctl   -- the umbrella CLI, which mounts each tool as a group
 #   comfyrelay/  comfyrelay -- the MCP sidecar, mounted as `comfyctl relay`.
-#                NOT released yet: the release builds only comfyfetch and
-#                comfyctl, and comfyctl does not depend on it (see
-#                comfyctl/cli.py).
+#                It ships as the mcp image, not as a wheel: the release
+#                builds only comfyfetch and comfyctl, and comfyctl does not
+#                depend on it (see comfyctl/cli.py).
 #
 # It is rooted here rather than at the repository root because everything else
 # in this repo is Docker and Compose, and a root pyproject.toml would pull every

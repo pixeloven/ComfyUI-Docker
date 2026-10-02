@@ -15,7 +15,7 @@ models/  --comfyctl fetch build-->  comfy.yaml  --comfyctl fetch resolve-->  com
 The command is `comfyctl fetch <verb>`. Up to 3.x it was `comfyfetch <verb>`, with
 the same verbs and flags. 4.0.0 removed that command and left no alias, so
 rewrite any old invocation you find. Without installing anything, pinned to a tag:
-`uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v4.0.1#subdirectory=services/comfyctl' comfyctl fetch --help`.
+`uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v5.0.0#subdirectory=services/comfyctl' comfyctl fetch --help`.
 
 **Never let an installer resolve `comfyfetch` from a package index.** Neither
 `comfyctl` nor `comfyfetch` is registered on PyPI. Use the `uvx` line above, which

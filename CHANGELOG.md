@@ -9,6 +9,149 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 5.0.0 — 2026-10-02
+
+### Breaking: the `mcp` image is now comfyrelay
+
+`ghcr.io/pixeloven/comfyui/mcp` keeps its name, its port (`9000`), its path
+(`/mcp`), its token variable and `COMFYUI_URL`, but the server inside is
+[comfyrelay](services/comfyrelay/README.md), this repository's own MCP sidecar
+([#103](https://github.com/pixeloven/ComfyUI-Docker/issues/103),
+[#136](https://github.com/pixeloven/ComfyUI-Docker/issues/136)). The
+artokun/comfyui-mcp server it packaged since 3.0.0 is retired, with its npm pins
+and its build-time probe (`services/mcp/` is gone).
+
+comfyrelay is one server per ComfyUI, run beside it. It never installs,
+updates or restarts anything, never runs a partner-API node (those spend
+credits), and contacts nothing but its own ComfyUI. Its knowledge comes from the
+live instance (nodes, models, templates, node help) and from a docs index built
+into the image (docs.comfy.org at a pinned commit, and this repository's guides).
+Its tool names are versioned with the image: renaming or removing one is a major
+version from now on.
+
+**Unchanged:** the image name and tags, port `9000` (`MCP_PORT`), `MCP_HOST`,
+the `/mcp` path, `COMFYUI_URL`, `COMFYUI_MCP_HTTP_TOKEN` sent as
+`Authorization: Bearer <token>` or `X-API-Key: <token>` (a request passes if
+either header carries it, as with artokun, so a gateway that sends its own
+Bearer and this token as `X-API-Key` keeps working), session-based
+streamable HTTP, running under any UID with a read-only root filesystem, and
+`tini` passing `SIGTERM` on.
+
+**To upgrade:**
+
+1. **Use a token of at least 32 characters.** The server now refuses to start
+   with a shorter `COMFYUI_MCP_HTTP_TOKEN`, as it does with none: it exits 2 and
+   logs `Refusing to start: COMFYUI_MCP_HTTP_TOKEN is <n> characters, and it
+   must be at least 32`. `openssl rand -hex 32` makes one (64 characters). The
+   exit code for a missing token is now 2, where artokun's was 1.
+2. **Pick the profiles.** `COMFYUI_MCP_PROFILES` chooses which tools exist:
+   `read` (introspection and docs) and `run` (validate and run workflows), the
+   default being `read,run`. `manage` (v2: changing what's installed, through the
+   manifest and lock) and `develop` register no tools yet. A tool outside the
+   active profiles isn't listed, and calling it fails as an unknown tool.
+3. **Rename the tools in prompts, allow lists and scripts.** No tool name
+   carries over. Call `server_info` first; it names the instance, the profiles,
+   the tools and the ComfyUI version.
+
+   | artokun (3.0.0 to 4.0.1) | comfyrelay (5.0.0) |
+   |---|---|
+   | `get_system_stats` | `server_info` (versions, reachability, profiles, tools) |
+   | `create_workflow` (node info) | `node_search`, `node_describe` |
+   | `create_workflow` (`action:"validate"`) | `workflow_validate` |
+   | `enqueue_workflow` | `workflow_run`, which returns a `job_id` |
+   | `queue`, `get_history` | `job_status` (a run's `job_id` is its ComfyUI `prompt_id`), and `job_cancel` for runs this server holds |
+   | `get_image` | `workflow_outputs` (`fetch=<filename>` returns one file inline) |
+   | `upload_image` (into the input directory) | `workflow_upload_input` |
+   | `list_local_models` | `model_list` (read-only) |
+   | `list_packs` (workflow templates) | `template_search`, `template_get`, each with a runnability check |
+   | *(none)* | `docs_search`, `docs_guide` |
+   | `list_tools`, `describe_tool`, `call_tool` | *(none: every tool is in `tools/list`)* |
+
+   **No equivalent until v2's `manage` profile:** installs, restarts and model
+   downloads: `install_custom_node`, `download_model`, `restart_comfyui`,
+   `apply_manifest`, `comfy_cli`, `node_snapshot` and `bisect`. Propose the
+   change to the deployment's `comfy.yaml` and lock instead, for a human to
+   apply; the server's instructions tell agents to.
+
+   **No equivalent, by design:** one-shot generation and batches
+   (`generate_image`, `batch`: build the graph, often from `template_get`, and
+   call `workflow_run`), partner-API nodes (`list_api_nodes`), sending outputs
+   off the machine (`upload_image`'s output action), registry search
+   (`search_custom_nodes`, which reaches the internet), freeing VRAM
+   (`clear_vram`), and artokun's local helpers (`calculate`, `get_defaults`,
+   `get_workflow`, `save_workflow`, `kitchen`, `model_metadata`,
+   `visualize_workflow`, `workspace`). Custom node development (`node_pack`) is
+   the future `develop` profile, on a sandboxed instance only.
+4. **Drop artokun's variables.** These now do nothing: `MCP_TRANSPORT`,
+   `COMFYUI_MCP_TOOL_DENY`, `COMFYUI_MCP_TOOL_ALLOW`, `COMFYUI_MCP_TOOL_PRESET`,
+   `COMFYUI_MCP_TOOL_ACTION_ALLOW`, `COMFYUI_MCP_ALLOW_UNAUTH` (there is no way
+   to run without a token), `COMFYUI_MCP_FORCE_REMOTE`, `COMFYUI_MCP_ENV_FILE`,
+   `COMFYUI_MCP_AUTO_UPDATE_DISABLE`, `COMFYUI_MCP_PANEL_AUTOINSTALL`,
+   `COMFYUI_WORKFLOWS_DIR`, `COMFYUI_RESTART_COMMAND`, `COMFYUI_PATH` and
+   `COMFY_API_KEY`. What the tool deny list did, the profiles do, and nothing it
+   denied exists in comfyrelay. The new variables:
+
+   | Variable | Default | What it does |
+   |---|---|---|
+   | `COMFYUI_MCP_PROFILES` | `read,run` | The capability profiles |
+   | `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar; set it to something stable if a gateway federates sidecars |
+   | `COMFYUI_MCP_MAX_JOBS` | `16` | Workflow runs in flight at once |
+   | `COMFYUI_MCP_MAX_LARGE_REQUESTS` | `2` | `POST` requests over 1 MiB handled at once (see *Memory*) |
+   | `COMFYUI_MCP_DOCS` | `/opt/docs/docs.sqlite` | The built-in docs index |
+
+5. **Drop the state mounts.** The server writes nothing: a volume or tmpfs at
+   `/app` for artokun's state is no longer needed, and `read_only: true` works
+   as it is. Saved workflows (`COMFYUI_WORKFLOWS_DIR`) are gone.
+6. **Manager is no longer needed by the MCP server.** artokun restarted
+   ComfyUI through ComfyUI-Manager's reboot endpoint; comfyrelay restarts
+   nothing. `COMFY_ENABLE_MANAGER` is still the ComfyUI images' own setting.
+
+**Memory.** A `run`-profile sidecar idles at about 90 MB, and one maximum-size
+upload (10 MiB) peaks at about 150 MB. The new `COMFYUI_MCP_MAX_LARGE_REQUESTS`
+admits at most two `POST` requests over 1 MiB at once; one more waits up to 5 seconds,
+then gets `503` with `Retry-After: 2` and an error marked `retryable`. Every
+chunked `POST` counts as large. A large request whose body stalls gets `408` and
+gives its slot back: retryable after 30 seconds with no data, and not retryable
+when the body isn't complete within 120 seconds, a minimum throughput of about
+1 Mbit/s for a maximum-size upload. The SDK
+also keeps each MCP session's last request until its next message or 30 idle
+minutes, about 25 MB after a maximum-size upload. Six maximum-size uploads at
+once from six sessions peaked at about 300 MB, against about 350 MB without the
+cap. **256 MiB** fits the default with up to three clients that upload large
+files; allow about 25 MB for each one beyond that. In Kubernetes, set
+`resources.limits.memory` on the sidecar, as `examples/kubernetes/with-mcp/` does.
+
+**`examples/kubernetes/` gains an opt-in MCP sidecar** in `with-mcp/`: a
+strategic merge patch that adds this image as a second container beside
+ComfyUI, reaching it over the pod's loopback, with its token from the
+`comfyui-mcp` Secret and a 256Mi memory limit. `kubectl apply -f
+examples/kubernetes/` deploys ComfyUI exactly as before; the example's README
+says how to opt in (`kubectl create secret …`, then `kubectl patch deployment
+comfyui --patch-file …`).
+
+### Also in this image
+
+- `USER 1000:1000` (from the `APP_UID`/`APP_GID` build args), numeric, so Kubernetes `runAsNonRoot` accepts the image
+  without reading its `/etc/passwd`.
+- `/licenses/NOTICE` states that comfyrelay isn't affiliated with or endorsed by
+  Comfy Org, with the docs' GPL-3.0 notice. Its Corresponding Source pointer and
+  the guides' URLs now name the commit the image was built from (the `GIT_SHA`
+  build arg), not the last release tag.
+- The SDK's own `mcp` command and its dotenv loader are removed from the image's
+  venv. Neither was used; `python-dotenv` was never installed.
+- `tini` is pinned to its Debian package version.
+
+### CI
+
+- The `mcp` image publishes from `build-mcp`, only after the `relay` job has
+  probed the same commit's build against a booted `core-cpu`. A release runs
+  both, and the GitHub Release waits for them.
+- A new `docs-pin` job fails a pull request that touches `docker-bake.hcl` unless
+  `COMFY_DOCS_SHA` is a commit on Comfy-Org/docs `main` (the compare API says
+  `ahead` or `identical`).
+- The install lines in the READMEs and the published `comfy-manifest` skill now
+  pin `@v5.0.0`.
+
 ## 4.0.1 — 2026-09-27
 
 ### `comfyctl fetch` could pass without doing anything: typer is now `>=0.16.0`

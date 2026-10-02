@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Integration test for the comfyrelay image against a booted ComfyUI. It tests
+# Integration test for the mcp image (comfyrelay) against a booted ComfyUI. It tests
 # the sidecar as deployed: the token gate, the arbitrary-UID and read-only
 # contract, reaching ComfyUI, and stopping on SIGTERM. No agent runs.
 #
@@ -59,7 +59,8 @@ case "$network" in ""|host) ;; *) echo "--network takes only host" >&2; exit 2 ;
 comfy_port="${RELAY_COMFY_PORT:-8188}"
 relay_port="${RELAY_PORT:-9000}"
 timeout="${RELAY_TIMEOUT:-300}"
-token="relay-test-$$-$RANDOM$RANDOM"
+# The server refuses a token under 32 characters.
+token="relay-test-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
 comfy="comfyrelay-test-comfyui-$$"
 side="comfyrelay-test-relay-$$"
 net=""

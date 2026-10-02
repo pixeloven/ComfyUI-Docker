@@ -29,7 +29,19 @@ def test_refuses_to_start_without_a_token(env):
 
 
 def test_starts_with_a_token():
-    assert load({TOKEN_ENV: " s3cret "}).token == "s3cret"
+    assert load({TOKEN_ENV: f" {TOKEN} "}).token == TOKEN
+
+
+def test_refuses_to_start_with_a_token_under_32_characters_and_says_how_to_make_one():
+    short = "s3cret-but-only-31-characters-x"
+    assert len(short) == 31
+    with pytest.raises(ConfigError) as info:
+        load({TOKEN_ENV: short})
+    message = str(info.value)
+    assert message.startswith(f"Refusing to start: {TOKEN_ENV} is 31 characters")
+    assert "at least 32" in message and "openssl rand -hex 32" in message
+    assert short not in message
+    assert load({TOKEN_ENV: short + "y"}).token == short + "y"
 
 
 @pytest.mark.parametrize(
@@ -49,6 +61,26 @@ def test_requests_without_the_right_token_get_401(live_server, headers):
     assert r.status_code == 401
     assert r.headers["www-authenticate"].startswith("Bearer")
     assert r.json()["error"] == "unauthorized"
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Authorization": "Bearer the-gateways-own-credential", "X-API-Key": TOKEN},
+        {"Authorization": f"Bearer {TOKEN}", "X-API-Key": "something-else"},
+        {"Authorization": "Basic dXNlcjpwYXNz", "X-API-Key": TOKEN},
+    ],
+    ids=["wrong-bearer-right-api-key", "right-bearer-wrong-api-key", "basic-auth-right-api-key"],
+)
+def test_either_header_carrying_the_token_is_enough(live_server, headers):
+    """As artokun did: a gateway can send its own Bearer and pass this server's token in X-API-Key."""
+    r = httpx2.post(live_server, json=INIT, headers={**ACCEPT, **headers})
+    assert r.status_code == 200
+
+
+def test_both_headers_wrong_get_401(live_server):
+    r = httpx2.post(live_server, json=INIT, headers={**ACCEPT, "Authorization": "Bearer no", "X-API-Key": "no"})
+    assert r.status_code == 401
 
 
 def test_every_path_is_behind_the_token(live_server):
