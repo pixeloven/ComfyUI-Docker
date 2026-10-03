@@ -16,7 +16,7 @@ set -euo pipefail
 . "$(dirname "$0")/../lib.sh"
 
 VERSION="0.52.203"
-PORT=9100
+PORT="${ARTOKUN_PORT:-9100}"   # servers/artokun.json reads the same variable
 HOME_DIR="$HARNESS_DATA/artokun-home"
 PIDFILE="$RESULTS/artokun.pid"
 

@@ -41,6 +41,10 @@ if [ -z "${ARTOKUN_MCP_TOKEN:-}" ]; then
   ARTOKUN_MCP_TOKEN="$(cat "$RESULTS/.artokun-token")"
 fi
 export ARTOKUN_MCP_TOKEN
+# The copy an external agent reads it from (external.sh writes it): beside the
+# scratch data, like comfyrelay's below, not in results/ with the answers.
+# shellcheck disable=SC2034 # used by external.sh and down.sh
+ARTOKUN_TOKEN_FILE="$HARNESS_DATA/.artokun-token"
 
 # comfyrelay's token: servers/comfyrelay.json reads it as ${COMFYRELAY_MCP_TOKEN},
 # and servers/comfyrelay.sh starts the server with it. An external agent reads
@@ -53,6 +57,18 @@ if [ -z "${COMFYRELAY_MCP_TOKEN:-}" ]; then
   COMFYRELAY_MCP_TOKEN="$(cat "$COMFYRELAY_TOKEN_FILE")"
 fi
 export COMFYRELAY_MCP_TOKEN
+
+# An external agent on a stdio server (comfy-mcp) launches it through this
+# read-only copy of servers/stdio_client.py, which external.sh installs. The
+# copy's path is unique to HARNESS_DATA, so stop_stdio_clients stops only the
+# servers this run's agents started: each runs in its client's process group.
+STDIO_CLIENT="$HARNESS_DATA/bin/stdio_client.py"
+stop_stdio_clients() {
+  local pid
+  for pid in $(pgrep -f "$STDIO_CLIENT _serve" || true); do
+    kill -TERM -- "-$pid" 2>/dev/null || true
+  done
+}
 
 # The ComfyUI pin, read from docker-bake.hcl (the single source of truth).
 bake_pin() {

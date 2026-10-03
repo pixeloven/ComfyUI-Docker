@@ -10,7 +10,7 @@
         "--", "comfy-mcp"
       ],
       "env": {
-        "COMFY_LOCAL_URL": "http://127.0.0.1:8188",
+        "COMFY_LOCAL_URL": "${COMFY_URL:-http://127.0.0.1:8188}",
         "HOME": "${HARNESS_DATA:-/tmp/comfyui-harness}/comfy-mcp-home",
         "UV_CACHE_DIR": "${HARNESS_DATA:-/tmp/comfyui-harness}/uv-cache",
         "UV_PYTHON_INSTALL_DIR": "${HARNESS_DATA:-/tmp/comfyui-harness}/uv-python",

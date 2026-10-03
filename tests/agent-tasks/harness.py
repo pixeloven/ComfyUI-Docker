@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sqlite3
 import struct
 import subprocess
@@ -705,9 +706,11 @@ def widget_values(node: dict) -> list:
 def t5_same_graph(g: dict, nodes: list[dict]) -> str | None:
     """Why the job's nodes and settings aren't the template's, or None. The job
     must run each node class as many times as the template does, and each job
-    node's set values (every input that isn't a link; an empty dict counts as
-    unset) must be widget values of a template node of its class: the template's
-    input file, upscale method, factor and file prefix. Links aren't compared."""
+    node's set values (every input that isn't a link; an empty dict or a null
+    counts as unset, which is how converters write a display-only widget such as
+    ImageCompare's) must be widget values of a template node of its class: the
+    template's input file, upscale method, factor and file prefix. Links aren't
+    compared."""
     by_class: dict[str, list[list]] = {}
     for n in nodes:
         by_class.setdefault(n["type"], []).append(widget_values(n))
@@ -716,7 +719,7 @@ def t5_same_graph(g: dict, nodes: list[dict]) -> str | None:
     if got != want:
         return f"runs {dict(sorted(got.items()))}, where the template runs {dict(sorted(want.items()))}"
     for nid, n in sorted(g.items()):
-        values = {k: v for k, v in (n.get("inputs") or {}).items() if not is_link(v) and v != {}}
+        values = {k: v for k, v in (n.get("inputs") or {}).items() if not is_link(v) and v not in ({}, None)}
         if not any(all(v in w for v in values.values()) for w in by_class[n["class_type"]]):
             return f"sets {n['class_type']} {nid} to {values}, not the template's {by_class[n['class_type']]}"
     return None
@@ -869,18 +872,22 @@ def check_t5() -> str:
 
 # --- External-agent mode (external.sh) -------------------------------------------
 
-AGENT_PREAMBLE = """\
+AGENT_RULES = """\
 You are being evaluated on a task against a ComfyUI instance. Your only way to reach it is
-the comfyrelay MCP server below. Nothing enforces these rules, so they are on you:
+the MCP server below. Nothing enforces these rules, so they are on you:
 
-- Use only that server. Don't call ComfyUI or any other URL, don't use other MCP servers
-  or tools that reach the network, and don't install or download anything.
-- Read only two things: the token file below, and your workspace, {workspace}.
+- Use only that server. Don't call ComfyUI or any other URL, don't use docker, other MCP
+  servers or tools that reach the network, and don't install or download anything.
+- {reads}
   Nothing else on this machine, the repository included.
 - Your workspace is your working directory. Put scratch files (a client script, saved
   responses) anywhere in it, and your answers in its results/ directory.
 - If your own tooling saves a large tool result to a file outside the workspace, don't
   read that file: call the tool again with narrower arguments.
+"""
+
+HTTP_READS = "Read only two things: the token file below, and your workspace, {workspace}."
+HTTP_STEPS = """\
 - Send the token straight from its file on every request, and never print it, echo it, or
   write it anywhere: -H "Authorization: Bearer $(cat {token_file})".
 
@@ -899,36 +906,99 @@ one POST per message to {url}, with the headers
 A response may be a server-sent event stream: the JSON-RPC message is on the "data:" line
 whose id matches your request. curl or a short stdlib Python client both work. Big
 arguments are easier from a file (curl --data @file.json).
+"""
 
-The task follows. Paths in it are relative to {workspace}.
+STDIO_READS = "Read only your workspace, {workspace}, and run only the client helper below."
+STDIO_STEPS = """\
+- Launch the server only through the helper, with exactly the command, environment and
+  working directory below, and stop it when you are done.
+
+The server speaks MCP (protocol version 2025-06-18) as newline-delimited JSON-RPC 2.0 over
+its stdin and stdout, so you launch it yourself:
+  command:           {command}
+  environment:       {env}
+  working directory: {cwd}
+The client helper, {helper}, is read-only: run it, don't edit or copy it. It starts the
+server once and keeps that one process alive across your calls (the server may keep state
+between calls), and sends initialize and notifications/initialized for you. Run it from
+your workspace, where it keeps its socket, pid and the server's stderr log (.mcp-stdio.*):
+  {start}
+      starts the server and prints its initialize result (a first start can take a minute)
+  python3 {helper} list
+      tools/list: the tools and their input schemas
+  python3 {helper} call <tool> '<json arguments>'
+      tools/call; for big arguments, write them to a file and pass @file.json instead
+  python3 {helper} stop
+`list` and `call` print the JSON-RPC result. A tool's answer is JSON text in content[].text;
+isError true (and exit status 1) means it failed.
 """
 
 
-def cmd_handoff(task: str, token_file: str, probe_json: str) -> None:
+def task_prompt(task: str, server: str) -> Path:
+    """The task's prompt. A prompt that names comfyrelay's own tools has a neutral
+    variant, prompt.neutral.md, which every other server gets; the check is the same."""
+    neutral = HERE / "tasks" / task / "prompt.neutral.md"
+    return neutral if server != "comfyrelay" and neutral.exists() else HERE / "tasks" / task / "prompt.md"
+
+
+def cmd_handoff(task: str, server: str, token_file: str, helper: str, probe_json: str) -> None:
     """Write the brief (the preamble, then the task's prompt) into the workspace as
     TASK.md, and the handoff to RESULTS/<task>.handoff.json; print both. The agent
-    is never pointed at tasks/, which holds the answers."""
-    url = f"http://127.0.0.1:{os.environ['COMFYRELAY_PORT']}/mcp"
-    prompt = (HERE / "tasks" / task / "prompt.md").read_text()
-    brief = AGENT_PREAMBLE.format(workspace=WORKSPACE, token_file=token_file, url=url) + "\n" + prompt
+    is never pointed at tasks/, which holds the answers. token_file is for an HTTP
+    server, helper (the client's read-only copy) for a stdio one."""
+    sys.path.insert(0, str(HERE / "servers"))
+    import probe  # noqa: PLC0415  (the harness's own MCP client, for its config expansion)
+
+    servers = json.loads((HERE / "servers" / f"{server}.json").read_text())["mcpServers"]
+    cfg = probe.expand(next(iter(servers.values())))
+    if cfg.get("type") in ("http", "streamable-http"):
+        url = cfg["url"]  # never cfg["headers"]: they hold the token itself
+        reads = HTTP_READS.format(workspace=WORKSPACE)
+        preamble = AGENT_RULES.format(reads=reads) + HTTP_STEPS.format(token_file=token_file, url=url)
+        mcp = {"server": server, "transport": "http", "url": url, "token_file": token_file}
+    else:
+        command = [cfg["command"], *cfg.get("args", [])]
+        # UV_OFFLINE: `up` warmed uv's cache, so the agent's launch reaches no package index.
+        env = {**cfg.get("env", {}), "UV_OFFLINE": "1"}
+        # The server runs in its own HOME under the scratch data, outside the workspace.
+        cwd = env.get("HOME", str(DATA))
+        Path(cwd).mkdir(parents=True, exist_ok=True)
+        start = shlex.join(
+            ["python3", helper, "start", "--cwd", cwd]
+            + [a for k, v in env.items() for a in ("--env", f"{k}={v}")]
+            + ["--", *command]
+        )
+        reads = STDIO_READS.format(workspace=WORKSPACE)
+        preamble = AGENT_RULES.format(reads=reads) + STDIO_STEPS.format(
+            command=shlex.join(command),
+            env=" ".join(shlex.quote(f"{k}={v}") for k, v in env.items()),
+            cwd=cwd,
+            helper=helper,
+            start=start,
+        )
+        mcp = {"server": server, "transport": "stdio", "command": command, "env": env, "cwd": cwd, "helper": helper}
+    prompt = task_prompt(task, server)
+    brief = preamble + f"\nThe task follows. Paths in it are relative to {WORKSPACE}.\n\n" + prompt.read_text()
     brief_file = WORKSPACE / "TASK.md"
     brief_file.write_text(brief)
     handoff = {
         "task": task,
+        "server": server,
+        "prompt": str(prompt.relative_to(HERE)),
         "brief_file": str(brief_file),
         "brief": brief,
-        "mcp": {"server": "comfyrelay", "url": url, "token_file": token_file},
+        "mcp": mcp,
         "workspace": str(WORKSPACE),
         "results_dir": str(WORKSPACE / "results"),
-        "relay_tools": json.loads(probe_json)["tools"],
+        "server_tools": json.loads(probe_json)["tools"],
         "confinement": "by instruction only: nothing stops the agent using other tools; see README",
         "check": f"./external.sh check {task}",
         "started": int(time.time()),
     }
     out = RESULTS / f"{task}.handoff.json"
     out.write_text(json.dumps(handoff, indent=2) + "\n")
-    print(f"== {task} is ready for an external agent. Give it the brief below, verbatim (also {brief_file}),")
-    print(f"== with {WORKSPACE} as its working directory. Then: ./external.sh check {task}")
+    print(f"== {task} on {server} is ready for an external agent. Give it the brief below, verbatim")
+    print(f"== (also {brief_file}), with {WORKSPACE} as its working directory. Then: ./external.sh check {task}")
     print(f"== handoff: {out}\n")
     print(brief)
 
