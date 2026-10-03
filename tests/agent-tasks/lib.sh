@@ -12,7 +12,9 @@ HARNESS_CONTAINER="${HARNESS_CONTAINER:-comfyui-harness}"
 
 # Scratch data volumes. Outside the repo by default, so nothing an agent
 # writes can end up in a commit.
-HARNESS_DATA="${HARNESS_DATA:-${TMPDIR:-/tmp}/comfyui-harness}"
+# Normalised, so every path built from it (the client's, which stop_mcp_clients
+# matches by command line) has one spelling.
+HARNESS_DATA="$(realpath -m "${HARNESS_DATA:-${TMPDIR:-/tmp}/comfyui-harness}")"
 # The volume directories up.sh creates under it. Each one it creates (rather
 # than finds) is listed in HARNESS_CREATED, and down.sh --purge removes only those.
 # shellcheck disable=SC2034 # used by up.sh and down.sh
@@ -132,15 +134,32 @@ hpy() { python3 "$HARNESS_DIR/harness.py" "$@"; }
 # Reset a task. Run it before the server starts: T2's reset restarts ComfyUI,
 # and the server should meet the instance the agent will use. The workspace is
 # emptied too, so an agent never sees files an earlier run left behind; setup
-# then places this task's inputs. ComfyUI is asked to drop its execution cache
-# (POST /free with free_memory resets it, and unloads models), so a graph an
-# earlier task ran is executed again rather than served from the cache. Its
-# volumes and /history do carry over: every check counts only what is new
-# since its setup.
+# then places this task's inputs.
+#
+# ComfyUI's queue is emptied first: pending prompts cleared, the running one
+# interrupted, and then a wait until nothing runs or waits. Otherwise a prompt an
+# earlier run left queued would finish after setup's mark and count as this
+# task's work, with a genuinely new file. Then ComfyUI is asked to drop its
+# execution cache (POST /free with free_memory resets it, and unloads models),
+# so a graph an earlier task ran is executed again rather than served from the
+# cache. Its volumes and /history do carry over: every check counts only what
+# is new since its setup.
 prepare_task() {
   created_by_harness workspace
   rm -rf "$HARNESS_DATA/workspace"
   mkdir -p "$HARNESS_DATA/workspace/results" "$RESULTS/runs"
+  curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"clear": true}' "$COMFY_URL/queue"
+  curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' -d '{}' "$COMFY_URL/interrupt"
+  local deadline=$(( $(date +%s) + ${HARNESS_QUEUE_TIMEOUT:-120} ))
+  until curl -fsS "$COMFY_URL/queue" \
+      | python3 -c 'import json,sys; q=json.load(sys.stdin); sys.exit(bool(q["queue_running"] or q["queue_pending"]))'; do
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo "ComfyUI's queue at $COMFY_URL did not empty within ${HARNESS_QUEUE_TIMEOUT:-120}s; not setting up $1" >&2
+      return 1
+    fi
+    curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' -d '{}' "$COMFY_URL/interrupt"
+    sleep 1
+  done
   curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' \
     -d '{"unload_models": true, "free_memory": true}' "$COMFY_URL/free"
   "$HARNESS_DIR/tasks/$1/setup.sh"

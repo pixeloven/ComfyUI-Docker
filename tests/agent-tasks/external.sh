@@ -24,8 +24,9 @@
 # Tasks: T1, T3, T4, T5 and T6-neutral on every server; T2-refuse and the full
 # T6 (with citations) on comfyrelay, T2 on the others. `up` can be repeated for
 # the next task on the same instance. Each one restarts the server, empties the
-# workspace and both servers' HOMEs, removes a T2 pack, and drops ComfyUI's
-# execution cache; ComfyUI's volumes and /history carry over, and every check
+# workspace, both servers' HOMEs and ComfyUI's queue, removes a T2 pack (from a
+# harness-made custom_nodes), and drops ComfyUI's execution cache; ComfyUI's
+# volumes and /history carry over, and every check
 # counts only what is new since its setup. Every agent uses the same client, a
 # read-only copy of servers/mcp_client.py, whatever the server's transport.
 #
@@ -94,6 +95,13 @@ if [ "$cmd" = up ]; then
   else
     "$HARNESS_DIR/up.sh" >/dev/null
   fi
+  # A T2 pack an earlier install left on the volume goes before anything else
+  # reads ComfyUI (the ground-truth dump included), restarting ComfyUI only if
+  # there was one. Only on a custom_nodes the harness created: an operator's
+  # own is never touched. T2's and T2-refuse's setups remove the pack anyway.
+  if grep -qxF custom_nodes "$HARNESS_CREATED" 2>/dev/null; then
+    case "$task" in T2|T2-refuse) ;; *) "$HARNESS_DIR/tasks/T2/reset.sh" --if-installed >/dev/null ;; esac
+  fi
   # A fresh HARNESS_RESULTS on a reused instance has no dump yet; T3 needs one.
   [ -f "$RESULTS/object_info.json" ] || "$HARNESS_DIR/groundtruth.sh" >/dev/null
   # This task's earlier handoffs go, whatever server they were for, so `check`
@@ -104,12 +112,10 @@ if [ "$cmd" = up ]; then
   for s in "$HARNESS_DIR"/servers/*.sh; do "$s" down >/dev/null 2>&1 || true; done
   stop_mcp_clients
   # What an earlier task left behind goes: the servers' HOMEs (what a server,
-  # or an agent through it, wrote there), and T2's pack, which an install
-  # leaves on the volume (T2's own setups remove it anyway). prepare_task then
-  # empties the workspace and drops ComfyUI's execution cache. ComfyUI's
+  # or an agent through it, wrote there). prepare_task then empties the
+  # workspace and ComfyUI's queue, and drops its execution cache. ComfyUI's
   # volumes and /history still carry over; checks count only what's new.
   for d in $SERVER_HOMES; do reset_harness_dir "$d"; done
-  case "$task" in T2|T2-refuse) ;; *) "$HARNESS_DIR/tasks/T2/reset.sh" --if-installed >/dev/null ;; esac
   export HARNESS_EXTERNAL=1   # setups that would fall back to committed answers fail instead
   prepare_task "$task"
   # check refuses a --server that isn't the one this workspace was set up for.

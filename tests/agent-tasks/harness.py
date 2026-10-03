@@ -1042,7 +1042,9 @@ def write_spec(server: str, token_file: str, spec_file: str) -> dict:
         env = {**cfg.get("env", {}), "UV_OFFLINE": "1"}
         cwd = env.get("HOME", str(DATA))  # its own HOME under the scratch data, outside the workspace
         Path(cwd).mkdir(parents=True, exist_ok=True)
-        log = str(RESULTS / f"{server}.log")  # beside the HTTP servers' logs, not in the workspace
+        # Not in the workspace, and not in RESULTS either: the spec is readable, and
+        # RESULTS holds the answer keys, so no spec path points there.
+        log = str(DATA / f"{server}.log")
         spec = {"transport": "stdio", "command": [cfg["command"], *cfg.get("args", [])], "env": env, "cwd": cwd, "log": log}
     p = Path(spec_file)
     p.unlink(missing_ok=True)

@@ -2,12 +2,12 @@
 """The MCP client the harness gives every external agent, whatever the server.
 
 usage (run every command from the same directory; its state files go there):
-  mcp_client.py start [--spec FILE]
+  mcp_client.py start
   mcp_client.py list
   mcp_client.py call TOOL ['<json arguments>' | @arguments.json]
   mcp_client.py stop
 
-`start` reads the server's spec (default: server.json beside this file, which
+`start` reads the server's spec (server.json beside this file, which
 external.sh writes) and launches a background broker that connects to the
 server, sends `initialize` and `notifications/initialized`, and prints the
 initialize result. The broker then holds that one connection, so state the
@@ -21,7 +21,8 @@ The spec picks the transport:
   {"transport": "http", "url": ..., "token_file": ...}
       streamable HTTP: one POST per message with the bearer token read from
       token_file, the Mcp-Session-Id the server assigns, and replies as JSON
-      or as a server-sent event stream.
+      or as a server-sent event stream. Never through a proxy, whatever the
+      environment says, so the token goes only to the server.
   {"transport": "stdio", "command": [...], "env": {...}, "cwd": ..., "log": ...}
       newline-delimited JSON-RPC over the stdin and stdout of a process the
       broker starts and keeps running. It gets only PATH, TMPDIR and the
@@ -143,6 +144,8 @@ class Http:
             self.token = f.read().strip()
         self.session: str | None = None
         self.next_id = 0
+        # An empty ProxyHandler: no http_proxy or the like ever sees the token.
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def post(self, msg: dict) -> str:
         headers = {
@@ -154,7 +157,7 @@ class Http:
             headers["Mcp-Session-Id"] = self.session
             headers["MCP-Protocol-Version"] = PROTOCOL
         req = urllib.request.Request(self.url, data=json.dumps(msg).encode(), headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        with self.opener.open(req, timeout=TIMEOUT) as r:
             self.session = r.headers.get("Mcp-Session-Id") or self.session
             return r.read().decode(errors="replace")
 
@@ -330,10 +333,8 @@ def show(reply: dict) -> None:
 
 def cmd_start(argv: list[str]) -> None:
     spec_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.json")
-    if argv[:1] == ["--spec"] and len(argv) == 2:
-        spec_file = argv[1]
-    elif argv:
-        die("usage: start [--spec FILE]")
+    if argv:
+        die("usage: start")
     if os.path.exists(SOCK) or os.path.exists(PID):
         clear_stale()
         if os.path.exists(SOCK):
