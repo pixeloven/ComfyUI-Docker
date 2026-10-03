@@ -101,7 +101,8 @@ class Http:
             headers=headers,
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        # No proxy: the request carries the server's bearer token, and the server is local.
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=TIMEOUT) as r:
             self.session = r.headers.get("Mcp-Session-Id") or self.session
             body = r.read().decode()
         if "id" not in msg:
