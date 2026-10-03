@@ -23,11 +23,11 @@ PIDFILE="$RESULTS/artokun.pid"
 case "${1:-}" in
   up)
     "$0" down
-    mkdir -p "$HOME_DIR"
+    [ -d "$HOME_DIR" ] || { mkdir -p "$HOME_DIR"; created_by_harness artokun-home; }
     preset="${ARTOKUN_TOOL_PRESET:-}"
     env_args=(
       HOME="$HOME_DIR"
-      npm_config_cache="$HOME_DIR/.npm"
+      npm_config_cache="$HARNESS_DATA/npm-cache"   # outside HOME, so resetting HOME keeps the download
       npm_config_update_notifier=false
       MCP_TRANSPORT=http
       MCP_HOST=127.0.0.1

@@ -19,6 +19,24 @@ HARNESS_DATA="${HARNESS_DATA:-${TMPDIR:-/tmp}/comfyui-harness}"
 HARNESS_VOLUMES="custom_nodes datasets input models output temp user"
 HARNESS_CREATED="$HARNESS_DATA/.harness-created"
 created_by_harness() { grep -qxF "$1" "$HARNESS_CREATED" 2>/dev/null || echo "$1" >> "$HARNESS_CREATED"; }
+# Empty $HARNESS_DATA/<name> so the next task starts clean, creating it if it is
+# missing. Only a directory the harness created is emptied: one it finds but
+# didn't make (not in HARNESS_CREATED) is refused, not deleted.
+reset_harness_dir() {
+  local d="$HARNESS_DATA/$1"
+  if [ -e "$d" ] && ! grep -qxF "$1" "$HARNESS_CREATED" 2>/dev/null; then
+    echo "not resetting $d: the harness didn't create it. Remove it yourself, or set another HARNESS_DATA" >&2
+    return 1
+  fi
+  rm -rf "${d:?}"
+  mkdir -p "$d"
+  created_by_harness "$1"
+}
+# The servers' own HOMEs, where they (and an agent through them) keep config and
+# state. external.sh resets both on every `up`; their package caches live
+# outside them (npm-cache, uv-cache, uv-python), so a reset keeps the downloads.
+# shellcheck disable=SC2034 # used by external.sh and down.sh
+SERVER_HOMES="artokun-home comfy-mcp-home"
 COMFY_PORT="${COMFY_PORT:-8188}"
 COMFY_URL="${COMFY_URL:-http://127.0.0.1:$COMFY_PORT}"
 COMFYRELAY_PORT="${COMFYRELAY_PORT:-9200}"

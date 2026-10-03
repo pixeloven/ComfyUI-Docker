@@ -943,7 +943,7 @@ def task_prompt(task: str, server: str) -> Path:
 
 def cmd_handoff(task: str, server: str, token_file: str, helper: str, probe_json: str) -> None:
     """Write the brief (the preamble, then the task's prompt) into the workspace as
-    TASK.md, and the handoff to RESULTS/<task>.handoff.json; print both. The agent
+    TASK.md, and the handoff to RESULTS/<server>-<task>.handoff.json; print both. The agent
     is never pointed at tasks/, which holds the answers. token_file is for an HTTP
     server, helper (the client's read-only copy) for a stdio one."""
     sys.path.insert(0, str(HERE / "servers"))
@@ -992,13 +992,14 @@ def cmd_handoff(task: str, server: str, token_file: str, helper: str, probe_json
         "results_dir": str(WORKSPACE / "results"),
         "server_tools": json.loads(probe_json)["tools"],
         "confinement": "by instruction only: nothing stops the agent using other tools; see README",
-        "check": f"./external.sh check {task}",
+        "check": f"./external.sh check {task} --server {server}",
         "started": int(time.time()),
     }
-    out = RESULTS / f"{task}.handoff.json"
+    out = RESULTS / f"{server}-{task}.handoff.json"
     out.write_text(json.dumps(handoff, indent=2) + "\n")
     print(f"== {task} on {server} is ready for an external agent. Give it the brief below, verbatim")
-    print(f"== (also {brief_file}), with {WORKSPACE} as its working directory. Then: ./external.sh check {task}")
+    print(f"== (also {brief_file}), with {WORKSPACE} as its working directory.")
+    print(f"== Then: ./external.sh check {task} --server {server}")
     print(f"== handoff: {out}\n")
     print(brief)
 

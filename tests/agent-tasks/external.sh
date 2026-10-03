@@ -10,17 +10,20 @@
 #                                 comfyrelay), and print the brief to give the agent:
 #                                 a preamble (how to reach the server, the rules), then
 #                                 the task's prompt. Also written to <workspace>/TASK.md
-#                                 and results/<task>.handoff.json
+#                                 and results/<server>-<task>.handoff.json
 #   (the agent does the task, and writes its results under the workspace)
-#   ./external.sh check <task>    run the task's check.sh, append a scorecard row for
-#                                 the server `up` started, with mode "external (not
-#                                 sandboxed)", exit 0 on PASS
+#   ./external.sh check <task> [--server ...]
+#                                 run the task's check.sh, append a scorecard row with
+#                                 the server and mode "external (not sandboxed)",
+#                                 exit 0 on PASS. Run it before the next `up`, which
+#                                 empties the workspace.
 #   ./external.sh down [--purge]  stop ComfyUI and every server (down.sh)
 #
 # Tasks: T1, T3, T4, T5 and T6 on every server; T2-refuse on comfyrelay, T2 on
 # the others. `up` can be repeated for the next task on the same instance; each
-# one restarts the server. comfy-mcp speaks stdio, so its agent launches it,
-# through a read-only copy of servers/stdio_client.py.
+# one restarts the server and empties the workspace and both servers' HOMEs,
+# so no task inherits another's state. comfy-mcp speaks stdio, so its agent
+# launches it, through a read-only copy of servers/stdio_client.py.
 #
 # Nothing confines the agent: it is told to use only the server. The confined,
 # blind run is `claude -p` (HARNESS_RUN=1 ./run.sh).
@@ -35,7 +38,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
@@ -52,7 +55,7 @@ case "$cmd" in
     done
     [ -n "$task" ] || usage
     [ -f "$HARNESS_DIR/tasks/$task/prompt.md" ] || { echo "no task $task" >&2; exit 2; }
-    handoff="$RESULTS/$task.handoff.json"
+    handoff="$RESULTS/$server-$task.handoff.json"
     ;;
   down) shift; exec "$HARNESS_DIR/down.sh" "$@" ;;
   *) usage ;;
@@ -91,6 +94,10 @@ if [ "$cmd" = up ]; then
   # server an earlier agent left running.
   for s in "$HARNESS_DIR"/servers/*.sh; do "$s" down >/dev/null 2>&1 || true; done
   stop_stdio_clients
+  # ...and from a clean slate: whatever a server, or an agent through it, wrote
+  # into the servers' HOMEs during an earlier task goes (prepare_task empties
+  # the workspace the same way).
+  for d in $SERVER_HOMES; do reset_harness_dir "$d"; done
   export HARNESS_EXTERNAL=1   # setups that would fall back to committed answers fail instead
   prepare_task "$task"
 
@@ -128,8 +135,8 @@ if [ "$cmd" = up ]; then
 fi
 
 # check
-[ -f "$handoff" ] || { echo "no $handoff; run ./external.sh up $task first" >&2; exit 2; }
-read -r started server < <(python3 -c 'import json,sys; h=json.load(open(sys.argv[1])); print(h["started"], h.get("server", "comfyrelay"))' "$handoff")
+[ -f "$handoff" ] || { echo "no $handoff; run ./external.sh up $task --server $server first" >&2; exit 2; }
+started="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["started"])' "$handoff")"
 elapsed=$(( $(date +%s) - started ))
 # T5's check asks comfyrelay's template_get whether templates are runnable, so
 # that answer comes from the same oracle whatever the server. For another
