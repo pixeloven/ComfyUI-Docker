@@ -1,9 +1,0 @@
-[project]
-name = "dev-check-fixture"
-version = "0.1.0"
-description = "The node-pack template test's fixture pack"
-license = { text = "MIT" }
-
-[tool.comfy]
-PublisherId = "pixeloven"
-DisplayName = "Dev check fixture"

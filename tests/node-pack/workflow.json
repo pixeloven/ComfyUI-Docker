@@ -1,4 +1,0 @@
-{
-  "1": {"class_type": "DevCheckEcho", "inputs": {"text": "hello"}},
-  "2": {"class_type": "PreviewAny", "inputs": {"source": ["1", 0]}}
-}
