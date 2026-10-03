@@ -74,8 +74,29 @@ def marker_path(task: str) -> Path:
     return RESULTS / f"{task}.history-before.json"
 
 
+def outputs_marker(task: str) -> Path:
+    return RESULTS / f"{task}.outputs-before.json"
+
+
+def output_files() -> list[str]:
+    root = DATA / "output"
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()) if root.is_dir() else []
+
+
 def mark(task: str) -> None:
+    """Record the /history entries and the output files that exist now, before the agent runs."""
     marker_path(task).write_text(json.dumps(sorted(history())))
+    outputs_marker(task).write_text(json.dumps(output_files()))
+
+
+def made_since_setup(task: str, img: dict) -> bool:
+    """Whether an output file is one this task's run wrote: not there when setup marked.
+    A run ComfyUI served from its execution cache reports the earlier run's file."""
+    p = outputs_marker(task)
+    if not p.exists():
+        raise CheckFailed(f"no output marker for {task}; run tasks/{task}/setup.sh first")
+    rel = str(Path(img.get("subfolder", "")) / img["filename"])
+    return img.get("type", "output") == "output" and rel not in set(json.loads(p.read_text()))
 
 
 def new_entries(task: str) -> dict:
@@ -258,6 +279,9 @@ def check_t1() -> str:
             p = output_path(img)
             if not p.is_file():
                 reasons.append(f"{pid[:8]}: {p} missing on disk")
+                continue
+            if not made_since_setup("T1", img):
+                reasons.append(f"{pid[:8]}: {img['filename']} was already there at setup (served from ComfyUI's cache?)")
                 continue
             w, h, rows = read_png(p)
             if (w, h) != (256, 256):
@@ -661,6 +685,76 @@ def check_t6() -> str:
     return detail
 
 
+# T6-neutral (the owner, 2026-10-03): T6's questions that aren't about comfyrelay,
+# scored by answer alone so every server can be compared. The key is T6's own
+# derived answers, and the agent's note on where it found each one isn't checked.
+#
+# q1's docs answer is a typo: docs.comfy.org's specs/workflow_json.mdx says
+# `lastGroupid`, where ComfyUI's frontend and every template it serves say
+# `lastGroupId` (next to lastNodeId and lastLinkId). T6-neutral takes the
+# answer from wherever a server can reach, so for q1 it also accepts the
+# spelling this instance's own templates use, found with the same pattern.
+# Both are derived; neither is written by hand. T6 keeps the docs spelling
+# alone, since it cites the docs page.
+T6_NEUTRAL = ("q1", "q2", "q4")
+T6_NEUTRAL_KEY = RESULTS / "T6-neutral.answers.json"
+
+
+def cmd_derive_t6_neutral() -> None:
+    """Write T6-neutral's key: the accepted answers per question. Run after derive-t6."""
+    questions = {q["id"]: q for q in json.loads((T6_DIR / "questions.json").read_text())}
+    t6 = answers_for("T6")
+    accept = {qid: [t6[qid]["answer"]] for qid in T6_NEUTRAL}
+    served = None
+    for cat in get("/templates/index.json"):  # type: ignore[union-attr]
+        for t in cat.get("templates", []):
+            status, body = http("GET", f"/templates/{t['name']}.json")
+            m = re.search(questions["q1"]["pattern"], json.dumps(body)) if status == 200 else None
+            if m:
+                served = (t["name"], m.group(1))
+                break
+        if served:
+            break
+    if served is None:
+        print("warning: no served template uses q1's property; accepting the docs spelling only", file=sys.stderr)
+    elif served[1] not in accept["q1"]:
+        accept["q1"].append(served[1])
+    out = {
+        "derived_from": {"T6": str(derived_answers("T6")), "q1_template": served and served[0]},
+        "answers": {qid: {"accept": a} for qid, a in accept.items()},
+    }
+    T6_NEUTRAL_KEY.write_text(json.dumps(out, indent=2) + "\n")
+    print(json.dumps(out["answers"]))
+
+
+def check_t6_neutral() -> str:
+    questions = {q["id"]: q for q in json.loads((T6_DIR / "questions.json").read_text())}
+    if not T6_NEUTRAL_KEY.exists():
+        raise CheckFailed(f"{T6_NEUTRAL_KEY} missing; run tasks/T6-neutral/setup.sh")
+    want = json.loads(T6_NEUTRAL_KEY.read_text())["answers"]
+    p = WORKSPACE / "results" / "T6-neutral.json"
+    if not p.exists():
+        raise CheckFailed(f"{p} not written")
+    try:
+        got = json.loads(p.read_text())
+    except ValueError as e:
+        raise CheckFailed(f"T6-neutral.json is not JSON: {e}") from e
+    got = got if isinstance(got, dict) else {}
+    wrong = []
+    for qid, expected in want.items():
+        q = questions[qid]
+        entry = got.get(qid)
+        answer = entry.get("answer") if isinstance(entry, dict) else entry
+        # The whole answer, normalised as T6 does: "either X or Y" is not X.
+        if answer is None or t6_norm(answer, q) not in {t6_norm(a, q) for a in expected["accept"]}:
+            wrong.append(f"{qid} (want {' or '.join(map(repr, expected['accept']))}, got {answer!r})")
+    score = len(want) - len(wrong)
+    detail = f"{score}/{len(want)}" + (f"; wrong: {', '.join(wrong)}" if wrong else "") + drift("T6")
+    if wrong:
+        raise CheckFailed(detail)
+    return detail
+
+
 # T5 (#103): choose a template for a goal, and run it. The goal, in
 # tasks/T5/prompt.md, is an image at twice its width and height; the templates
 # for it are the ones ComfyUI's own index tags with T5_TAG.
@@ -705,9 +799,11 @@ def widget_values(node: dict) -> list:
 def t5_same_graph(g: dict, nodes: list[dict]) -> str | None:
     """Why the job's nodes and settings aren't the template's, or None. The job
     must run each node class as many times as the template does, and each job
-    node's set values (every input that isn't a link; an empty dict counts as
-    unset) must be widget values of a template node of its class: the template's
-    input file, upscale method, factor and file prefix. Links aren't compared."""
+    node's set values (every input that isn't a link; an empty dict or a null
+    counts as unset, which is how converters write a display-only widget such as
+    ImageCompare's) must be widget values of a template node of its class: the
+    template's input file, upscale method, factor and file prefix. Links aren't
+    compared."""
     by_class: dict[str, list[list]] = {}
     for n in nodes:
         by_class.setdefault(n["type"], []).append(widget_values(n))
@@ -716,7 +812,7 @@ def t5_same_graph(g: dict, nodes: list[dict]) -> str | None:
     if got != want:
         return f"runs {dict(sorted(got.items()))}, where the template runs {dict(sorted(want.items()))}"
     for nid, n in sorted(g.items()):
-        values = {k: v for k, v in (n.get("inputs") or {}).items() if not is_link(v) and v != {}}
+        values = {k: v for k, v in (n.get("inputs") or {}).items() if not is_link(v) and v not in ({}, None)}
         if not any(all(v in w for v in values.values()) for w in by_class[n["class_type"]]):
             return f"sets {n['class_type']} {nid} to {values}, not the template's {by_class[n['class_type']]}"
     return None
@@ -832,6 +928,8 @@ def check_t5() -> str:
         path = output_path(f)
         if not path.is_file():
             raise CheckFailed(f"{path} missing on disk")
+        if not made_since_setup("T5", f):
+            raise CheckFailed(f"{f['filename']} was already there at setup (served from ComfyUI's cache?)")
         size = read_png(path)[:2]
         if size != want_size:
             raise CheckFailed(f"{f['filename']} is {size[0]}x{size[1]}, want {want_size[0]}x{want_size[1]}")
@@ -839,96 +937,151 @@ def check_t5() -> str:
     reported = rep.get("outputs")
     if not isinstance(reported, list) or {Path(str(r)).name for r in reported} != names:
         raise CheckFailed(f"report's outputs {reported!r} are not the files {job[:8]} saved to output/: {sorted(names)}")
-
-    # The relay's runnability check must agree with what happened: the run succeeded...
-    ran = runnability(name)
-    if ran.get("runnable") is not True:
-        raise CheckFailed(f"{job[:8]} succeeded, but comfyrelay says {name} is not runnable: {json.dumps(ran)}")
+    # The run completed, so the template does run here, and the report must say so.
     if rep.get("runnable") is not True:
-        raise CheckFailed(f"report says runnable={rep.get('runnable')!r}; comfyrelay says true")
-    # ...and a candidate that declares a model (none is on disk) must not be runnable.
-    needs_model = next(
-        (
-            n
-            for n in candidates
-            if index[n].get("openSource") is not False
-            and any((m.get("properties") or {}).get("models") for m in t5_template_nodes(n))
-        ),
-        None,
+        raise CheckFailed(f"report says runnable={rep.get('runnable')!r}, but {job[:8]} ran it to completion")
+    done = (
+        f"{name}: {job[:8]} completed with its nodes and settings, {len(saved)} new "
+        f"{want_size[0]}x{want_size[1]} PNG, and the report says runnable"
     )
-    if needs_model is None:
-        raise CheckFailed("no candidate declares a model, so the runnability check can't be tested both ways")
-    other = runnability(needs_model)
-    if other.get("runnable") is not False or not other.get("missing_models"):
-        raise CheckFailed(f"comfyrelay says {needs_model}, whose model isn't on disk, is runnable: {json.dumps(other)}")
-    return (
-        f"{name} is runnable per comfyrelay and {job[:8]} completed with its nodes and settings: "
-        f"{len(saved)} {want_size[0]}x{want_size[1]} PNG; {needs_model} is not runnable (missing models)"
-    )
+    # comfyrelay's own runnability verdicts, reported separately: they score
+    # comfyrelay's T5 (its template_get is the agent's source there), never
+    # another server's.
+    ok, selftest = t5_relay_selftest(name, index, candidates)
+    server = os.environ.get("HARNESS_SERVER", "comfyrelay")
+    if not ok and server == "comfyrelay":
+        raise CheckFailed(f"{done}; relay self-test FAILED: {selftest}")
+    return f"{done}; relay self-test {'ok' if ok else f'FAILED (not scored for {server})'}: {selftest}"
+
+
+def t5_relay_selftest(name: str, index: dict, candidates: list[str]) -> tuple[bool, str]:
+    """Whether comfyrelay's template_get calls the chosen template runnable (the run
+    succeeded) and a candidate that declares a model not runnable (none is on disk)."""
+    try:
+        ran = runnability(name)
+        if ran.get("runnable") is not True:
+            return False, f"comfyrelay says {name} is not runnable: {json.dumps(ran)}"
+        needs_model = next(
+            (
+                n
+                for n in candidates
+                if index[n].get("openSource") is not False
+                and any((m.get("properties") or {}).get("models") for m in t5_template_nodes(n))
+            ),
+            None,
+        )
+        if needs_model is None:
+            return False, "no candidate declares a model, so the runnability check can't be tested both ways"
+        other = runnability(needs_model)
+        if other.get("runnable") is not False or not other.get("missing_models"):
+            return False, f"comfyrelay says {needs_model}, whose model isn't on disk, is runnable: {json.dumps(other)}"
+    except CheckFailed as e:
+        return False, str(e)
+    return True, f"{name} is runnable and {needs_model} is not (missing models)"
 
 
 # --- External-agent mode (external.sh) -------------------------------------------
 
+# The same brief for every server: it names neither the server nor anything
+# about reaching it (no URL, command, environment or token). The harness-supplied
+# client has those, from the spec external.sh writes beside it.
 AGENT_PREAMBLE = """\
 You are being evaluated on a task against a ComfyUI instance. Your only way to reach it is
-the comfyrelay MCP server below. Nothing enforces these rules, so they are on you:
+an MCP server, through the client helper below. Nothing enforces these rules, so they are
+on you:
 
-- Use only that server. Don't call ComfyUI or any other URL, don't use other MCP servers
-  or tools that reach the network, and don't install or download anything.
-- Read only two things: the token file below, and your workspace, {workspace}.
-  Nothing else on this machine, the repository included.
-- Your workspace is your working directory. Put scratch files (a client script, saved
-  responses) anywhere in it, and your answers in its results/ directory.
+- Use only that server, through the helper. Don't call ComfyUI or any other URL, don't use
+  docker, other MCP servers or tools that reach the network, and don't install or download
+  anything.
+- Read only your workspace, {workspace}, and run only the helper. Nothing else on this
+  machine, the repository included. Don't look for the server's address, command or
+  credentials: the helper has what it needs.
+- Your workspace is your working directory. Put scratch files (saved responses, argument
+  files) anywhere in it, and your answers in its results/ directory.
 - If your own tooling saves a large tool result to a file outside the workspace, don't
   read that file: call the tool again with narrower arguments.
-- Send the token straight from its file on every request, and never print it, echo it, or
-  write it anywhere: -H "Authorization: Bearer $(cat {token_file})".
 
-The server speaks MCP (protocol version 2025-06-18) as JSON-RPC 2.0 over streamable HTTP:
-one POST per message to {url}, with the headers
-  Content-Type: application/json
-  Accept: application/json, text/event-stream
-  Authorization: Bearer <the token, read from the file as above>
-1. POST {{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-06-18","capabilities":{{}},"clientInfo":{{"name":"agent","version":"0"}}}}}}.
-   The response has an Mcp-Session-Id header (curl -D - shows it). On every later request,
-   also send the headers Mcp-Session-Id: <id> and MCP-Protocol-Version: 2025-06-18.
-2. POST {{"jsonrpc":"2.0","method":"notifications/initialized"}} (no id; the answer is empty).
-3. POST {{"jsonrpc":"2.0","id":2,"method":"tools/list"}} to see the tools and their input schemas.
-4. POST {{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"<tool>","arguments":{{...}}}}}}.
-   The tool's answer is JSON text in result.content[].text; result.isError true means it failed.
-A response may be a server-sent event stream: the JSON-RPC message is on the "data:" line
-whose id matches your request. curl or a short stdlib Python client both work. Big
-arguments are easier from a file (curl --data @file.json).
+The helper, {helper}, is read-only: run it, don't edit or copy it. It speaks MCP (protocol
+version 2025-06-18) to the server for you. `start` connects once and keeps that connection
+open across your calls, since the server may keep state between them; it sends initialize
+and notifications/initialized itself. Run every command from your workspace, where it keeps
+its socket and pid file (.mcp-client.*):
+  python3 {helper} start
+      connects (a first start can take a minute) and prints the server's initialize result
+  python3 {helper} list
+      tools/list: the tools and their input schemas
+  python3 {helper} call <tool> '<json arguments>'
+      tools/call; for big arguments, write them to a file and pass @file.json instead
+  python3 {helper} stop
+      when you are done
+`list` and `call` print the JSON-RPC result. A tool's answer is JSON text in content[].text;
+isError true (and exit status 1) means it failed.
 
 The task follows. Paths in it are relative to {workspace}.
 """
 
 
-def cmd_handoff(task: str, token_file: str, probe_json: str) -> None:
-    """Write the brief (the preamble, then the task's prompt) into the workspace as
-    TASK.md, and the handoff to RESULTS/<task>.handoff.json; print both. The agent
-    is never pointed at tasks/, which holds the answers."""
-    url = f"http://127.0.0.1:{os.environ['COMFYRELAY_PORT']}/mcp"
-    prompt = (HERE / "tasks" / task / "prompt.md").read_text()
-    brief = AGENT_PREAMBLE.format(workspace=WORKSPACE, token_file=token_file, url=url) + "\n" + prompt
+def task_prompt(task: str, server: str) -> Path:
+    """The task's prompt. A prompt that names comfyrelay's own tools has a neutral
+    variant, prompt.neutral.md, which every other server gets; the check is the same."""
+    neutral = HERE / "tasks" / task / "prompt.neutral.md"
+    return neutral if server != "comfyrelay" and neutral.exists() else HERE / "tasks" / task / "prompt.md"
+
+
+def write_spec(server: str, token_file: str, spec_file: str) -> dict:
+    """The client's spec for this server, from servers/<server>.json, written read-only."""
+    sys.path.insert(0, str(HERE / "servers"))
+    import probe  # noqa: PLC0415  (the harness's own MCP client, for its config expansion)
+
+    servers = json.loads((HERE / "servers" / f"{server}.json").read_text())["mcpServers"]
+    cfg = probe.expand(next(iter(servers.values())))
+    if cfg.get("type") in ("http", "streamable-http"):
+        spec = {"transport": "http", "url": cfg["url"], "token_file": token_file}  # never cfg["headers"]: the token
+    else:
+        # UV_OFFLINE: `up`'s probe filled uv's cache, so the launch reaches no package index.
+        env = {**cfg.get("env", {}), "UV_OFFLINE": "1"}
+        cwd = env.get("HOME", str(DATA))  # its own HOME under the scratch data, outside the workspace
+        Path(cwd).mkdir(parents=True, exist_ok=True)
+        # Not in the workspace, and not in RESULTS either: the spec is readable, and
+        # RESULTS holds the answer keys, so no spec path points there.
+        log = str(DATA / f"{server}.log")
+        spec = {"transport": "stdio", "command": [cfg["command"], *cfg.get("args", [])], "env": env, "cwd": cwd, "log": log}
+    p = Path(spec_file)
+    p.unlink(missing_ok=True)
+    p.write_text(json.dumps(spec, indent=2) + "\n")
+    p.chmod(0o444)
+    return spec
+
+
+def cmd_handoff(task: str, server: str, token_file: str, helper: str, spec_file: str, probe_json: str) -> None:
+    """Write the client's spec, the brief (the preamble, then the task's prompt) into
+    the workspace as TASK.md, and the handoff to RESULTS/<server>-<task>.handoff.json;
+    print both. The agent is never pointed at tasks/, which holds the answers."""
+    spec = write_spec(server, token_file, spec_file)
+    prompt = task_prompt(task, server)
+    brief = AGENT_PREAMBLE.format(workspace=WORKSPACE, helper=helper) + "\n" + prompt.read_text()
     brief_file = WORKSPACE / "TASK.md"
     brief_file.write_text(brief)
     handoff = {
         "task": task,
+        "server": server,
+        "prompt": str(prompt.relative_to(HERE)),
         "brief_file": str(brief_file),
         "brief": brief,
-        "mcp": {"server": "comfyrelay", "url": url, "token_file": token_file},
+        "client": helper,
+        "spec": spec,
         "workspace": str(WORKSPACE),
         "results_dir": str(WORKSPACE / "results"),
-        "relay_tools": json.loads(probe_json)["tools"],
+        "server_tools": json.loads(probe_json)["tools"],
         "confinement": "by instruction only: nothing stops the agent using other tools; see README",
-        "check": f"./external.sh check {task}",
+        "check": f"./external.sh check {task} --server {server}",
         "started": int(time.time()),
     }
-    out = RESULTS / f"{task}.handoff.json"
+    out = RESULTS / f"{server}-{task}.handoff.json"
     out.write_text(json.dumps(handoff, indent=2) + "\n")
-    print(f"== {task} is ready for an external agent. Give it the brief below, verbatim (also {brief_file}),")
-    print(f"== with {WORKSPACE} as its working directory. Then: ./external.sh check {task}")
+    print(f"== {task} on {server} is ready for an external agent. Give it the brief below, verbatim")
+    print(f"== (also {brief_file}), with {WORKSPACE} as its working directory.")
+    print(f"== Then: ./external.sh check {task} --server {server}")
     print(f"== handoff: {out}\n")
     print(brief)
 
@@ -1016,6 +1169,7 @@ CHECKS = {
     "t4": check_t4,
     "t5": check_t5,
     "t6": check_t6,
+    "t6-neutral": check_t6_neutral,
 }
 
 
@@ -1034,6 +1188,7 @@ COMMANDS = {
     "submit": cmd_submit,
     "derive-t3": cmd_derive_t3,
     "derive-t6": cmd_derive_t6,
+    "derive-t6-neutral": cmd_derive_t6_neutral,
     "setup-t2-refuse": cmd_setup_t2_refuse,
     "setup-t4": cmd_setup_t4,
     "setup-t5": cmd_setup_t5,

@@ -16,18 +16,18 @@ set -euo pipefail
 . "$(dirname "$0")/../lib.sh"
 
 VERSION="0.52.203"
-PORT=9100
+PORT="${ARTOKUN_PORT:-9100}"   # servers/artokun.json reads the same variable
 HOME_DIR="$HARNESS_DATA/artokun-home"
 PIDFILE="$RESULTS/artokun.pid"
 
 case "${1:-}" in
   up)
     "$0" down
-    mkdir -p "$HOME_DIR"
+    [ -d "$HOME_DIR" ] || { mkdir -p "$HOME_DIR"; created_by_harness artokun-home; }
     preset="${ARTOKUN_TOOL_PRESET:-}"
     env_args=(
       HOME="$HOME_DIR"
-      npm_config_cache="$HOME_DIR/.npm"
+      npm_config_cache="$HARNESS_DATA/npm-cache"   # outside HOME, so resetting HOME keeps the download
       npm_config_update_notifier=false
       MCP_TRANSPORT=http
       MCP_HOST=127.0.0.1
@@ -48,8 +48,11 @@ case "${1:-}" in
       env_args+=(COMFYUI_RESTART_COMMAND="curl -sS -o /dev/null --max-time 30 -X POST $COMFY_URL/v2/manager/reboot; rc=\$?; [ \"\$rc\" -eq 0 ] || [ \"\$rc\" -eq 52 ]")
     fi
     # setsid: its own process group, so `down` also stops the node process
-    # that npx spawns (it outlives npx otherwise).
-    setsid env "${env_args[@]}" npx -y "comfyui-mcp@$VERSION" \
+    # that npx spawns (it outlives npx otherwise). env -i: it gets PATH, TMPDIR
+    # and the locale (base_env) plus the list above, and nothing else from the
+    # operator's environment, which can hold credentials.
+    mapfile -t base < <(base_env)
+    setsid env -i "${base[@]}" "${env_args[@]}" npx -y "comfyui-mcp@$VERSION" \
       > "$RESULTS/artokun.log" 2>&1 < /dev/null &
     echo $! > "$PIDFILE"
     for _ in $(seq 180); do
