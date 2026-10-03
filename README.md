@@ -230,7 +230,6 @@ The separate `ghcr.io/pixeloven/comfyui/mcp` image is [comfyrelay](services/comf
 - **[Data Management](docs/user-guides/data.md)** - Models, workflows, and persistent storage
 - **[Performance Tuning](docs/user-guides/performance.md)** - CLI arguments and resource optimization
 - **[Runtime Contract](docs/user-guides/runtime-contract.md)** - Env vars, volumes, port, readiness and startup user that deployments rely on
-- **[Developing Custom Nodes](docs/user-guides/developing-nodes.md)** - Develop a node pack in its own repository against these images, with the [node-pack template](templates/node-pack/)
 
 **Advanced:**
 
@@ -336,7 +335,7 @@ Everything is stored in the `./data/` directory with subdirectories for models, 
 
 ### How do I add custom nodes?
 
-Install custom nodes through the ComfyUI interface or mount them to `./data/custom_nodes/`. See the [Data Management Guide](docs/user-guides/data.md) for details. To write your own, see [Developing Custom Nodes](docs/user-guides/developing-nodes.md).
+Install custom nodes through the ComfyUI interface or mount them to `./data/custom_nodes/`. See the [Data Management Guide](docs/user-guides/data.md) for details.
 
 ### Can I use my own models?
 

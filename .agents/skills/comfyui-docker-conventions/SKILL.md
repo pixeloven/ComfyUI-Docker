@@ -23,7 +23,6 @@ this skill disagree, the file is right, so fix the skill in the same change.
 | `comfy.yaml`, `comfy-lock.yaml`, `locks/` | The model manifest (intent), the generated lock (resolution), and the derived profile locks (`locks/preview.yaml`) |
 | `examples/{core-gpu,complete-gpu,core-cpu,core-amd,core-intel}/` | One standalone Compose deployment per profile, each with `.env.example` and `extra_model_paths.yaml` |
 | `examples/kubernetes/` | A generic Kubernetes deployment of `core:cpu-latest` (Deployment running as 1000:1000, seven PVCs, a ClusterIP Service), plus `with-mcp/`: an opt-in strategic-merge patch that adds the `mcp` sidecar, and a placeholder Secret for its token. `kubectl apply -f examples/kubernetes/` doesn't apply `with-mcp/` |
-| `templates/node-pack/` | Files a node pack copies into its own repo (#107): a compose file mounting `./` at `/app/custom_nodes/${PACK_NAME}`, a GPU overlay, `.env.example`, and `dev-check.sh`, the restart-and-check loop. Not an example: `make validate` resolves it with `--env-file .env.example`, and `tests/node-pack/run.sh` (CI's `node-pack` job) boots it |
 | `skills/`, `.claude-plugin/`, `package.json` | The **published** consumer skills plugin. See `skills/README.md`. |
 | `.agents/skills/` (and `.claude/skills/` symlinks) | Local skills for agents working on this repo. Not published. |
 | `VERSION`, `VERSIONING.md`, `CHANGELOG.md` | The single release line |
@@ -198,7 +197,7 @@ These match what CI runs:
 cd services && uv run --locked pytest -q         # every member; add -m "not network" offline; gated cases skip without HF_TOKEN
 cd services && uv run --locked comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml
 uvx --from ./services/comfyctl comfyctl fetch check comfy.yaml locks/preview.yaml --profile preview --parent comfy-lock.yaml
-make validate                                    # bake --print all, every example's and the node-pack template's compose config,
+make validate                                    # bake --print all, every example's compose config,
                                                  # kubeconform over examples/kubernetes, and the Deployment the with-mcp patch makes (needs kubectl)
 docker buildx bake <target|group> --load         # or make cuda / cpu / rocm / xpu
 make smoke                                       # builds core-cpu, boots it; SMOKE_NETWORK=host without a docker0 bridge
