@@ -2,18 +2,19 @@
 # Stop the harness instance and any MCP server it started. Keeps results/.
 # `./down.sh --purge` also deletes the scratch data the harness created: the
 # directories listed in $HARNESS_DATA/.harness-created (volume directories
-# up.sh made, the agent workspace, external.sh's bin/ for the stdio client, and
-# the servers' HOMEs) and the external agents' token files (comfyrelay's and
-# artokun's), then $HARNESS_DATA if that leaves it empty. The package caches
-# (npm-cache, uv-cache, uv-python) are kept. A directory the harness found
-# rather than made, such as a real models/ mounted on purpose, is never removed.
+# up.sh made, the agent workspace, external.sh's bin/ for the MCP client, and
+# the servers' HOMEs) and the files the harness writes beside them (the agents'
+# token files, and the client and its spec in a bin/ it found), then
+# $HARNESS_DATA if that leaves it empty. The package caches (npm-cache,
+# uv-cache, uv-python) are kept. A directory the harness found rather than
+# made, such as a real models/ mounted on purpose, is never removed.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
 for s in "$HARNESS_DIR"/servers/*.sh; do
   "$s" down >/dev/null 2>&1 || true
 done
-stop_stdio_clients
+stop_mcp_clients
 docker rm -f "$HARNESS_CONTAINER" >/dev/null 2>&1 || true
 
 if [ "${1:-}" = "--purge" ]; then
@@ -26,7 +27,7 @@ if [ "${1:-}" = "--purge" ]; then
       echo "not removing $HARNESS_DATA/$d: the harness didn't create it" >&2
     fi
   done
-  rm -f "$HARNESS_CREATED" "$COMFYRELAY_TOKEN_FILE" "$ARTOKUN_TOKEN_FILE"
+  rm -f "$HARNESS_CREATED" "$COMFYRELAY_TOKEN_FILE" "$ARTOKUN_TOKEN_FILE" "$MCP_CLIENT" "$MCP_SPEC"
   rmdir "$HARNESS_DATA" 2>/dev/null || true
   echo "removed what the harness created in $HARNESS_DATA"
 fi

@@ -8,37 +8,41 @@
 #                                 groundtruth.sh), reset the task (its setup.sh),
 #                                 stop every other server, start this one (default
 #                                 comfyrelay), and print the brief to give the agent:
-#                                 a preamble (how to reach the server, the rules), then
-#                                 the task's prompt. Also written to <workspace>/TASK.md
-#                                 and results/<server>-<task>.handoff.json
+#                                 the same preamble for every server (the rules, and the
+#                                 harness's MCP client to use), then the task's prompt.
+#                                 Also written to <workspace>/TASK.md and
+#                                 results/<server>-<task>.handoff.json
 #   (the agent does the task, and writes its results under the workspace)
 #   ./external.sh check <task> [--server ...]
 #                                 run the task's check.sh, append a scorecard row with
 #                                 the server and mode "external (not sandboxed)",
-#                                 exit 0 on PASS. Run it before the next `up`, which
-#                                 empties the workspace.
+#                                 exit 0 on PASS. It refuses (exit 2) a server the
+#                                 workspace wasn't set up for. Run it before the next
+#                                 `up`, which empties the workspace.
 #   ./external.sh down [--purge]  stop ComfyUI and every server (down.sh)
 #
 # Tasks: T1, T3, T4, T5 and T6-neutral on every server; T2-refuse and the full
-# T6 (with citations) on comfyrelay, T2 on the others. `up` can be repeated for the next task on the same instance; each
-# one restarts the server and empties the workspace and both servers' HOMEs,
-# so no task inherits another's state. comfy-mcp speaks stdio, so its agent
-# launches it, through a read-only copy of servers/stdio_client.py.
+# T6 (with citations) on comfyrelay, T2 on the others. `up` can be repeated for
+# the next task on the same instance. Each one restarts the server, empties the
+# workspace and both servers' HOMEs, removes a T2 pack, and drops ComfyUI's
+# execution cache; ComfyUI's volumes and /history carry over, and every check
+# counts only what is new since its setup. Every agent uses the same client, a
+# read-only copy of servers/mcp_client.py, whatever the server's transport.
 #
 # Nothing confines the agent: it is told to use only the server. The confined,
 # blind run is `claude -p` (HARNESS_RUN=1 ./run.sh).
 #
 # The images: HARNESS_IMAGE (core-cpu, default the local build from build.sh;
 # e.g. ghcr.io/pixeloven/comfyui/core:cpu-latest) and COMFYRELAY_IMAGE (default
-# ghcr.io/pixeloven/comfyui/mcp:local, built locally). T5's and T6's checks
-# use the relay image whatever the server. The containers use --network host
+# ghcr.io/pixeloven/comfyui/mcp:local, built locally). T5's, T6's and
+# T6-neutral's checks use the relay image whatever the server. The containers use --network host
 # and bind loopback. For several runs on one host, give each its own
 # HARNESS_CONTAINER (the prefix of the container names), COMFY_PORT,
 # COMFYRELAY_PORT, ARTOKUN_PORT, HARNESS_DATA and HARNESS_RESULTS.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
@@ -92,21 +96,31 @@ if [ "$cmd" = up ]; then
   fi
   # A fresh HARNESS_RESULTS on a reused instance has no dump yet; T3 needs one.
   [ -f "$RESULTS/object_info.json" ] || "$HARNESS_DIR/groundtruth.sh" >/dev/null
-  rm -f "$handoff"
-  # Only the server under test runs while the agent works, including any stdio
-  # server an earlier agent left running.
+  # This task's earlier handoffs go, whatever server they were for, so `check`
+  # can't score this run's workspace as another server's.
+  for s in comfyrelay artokun comfy-mcp; do rm -f "$RESULTS/$s-$task.handoff.json"; done
+  # Only the server under test runs while the agent works, including any
+  # server an earlier agent's client launched.
   for s in "$HARNESS_DIR"/servers/*.sh; do "$s" down >/dev/null 2>&1 || true; done
-  stop_stdio_clients
-  # ...and from a clean slate: whatever a server, or an agent through it, wrote
-  # into the servers' HOMEs during an earlier task goes (prepare_task empties
-  # the workspace the same way).
+  stop_mcp_clients
+  # What an earlier task left behind goes: the servers' HOMEs (what a server,
+  # or an agent through it, wrote there), and T2's pack, which an install
+  # leaves on the volume (T2's own setups remove it anyway). prepare_task then
+  # empties the workspace and drops ComfyUI's execution cache. ComfyUI's
+  # volumes and /history still carry over; checks count only what's new.
   for d in $SERVER_HOMES; do reset_harness_dir "$d"; done
+  case "$task" in T2|T2-refuse) ;; *) "$HARNESS_DIR/tasks/T2/reset.sh" --if-installed >/dev/null ;; esac
   export HARNESS_EXTERNAL=1   # setups that would fall back to committed answers fail instead
   prepare_task "$task"
+  # check refuses a --server that isn't the one this workspace was set up for.
+  printf '%s\n' "$server" > "$HARNESS_DATA/workspace/.harness-server"
 
-  # The token may come from the environment; the agent reads it from a file,
-  # kept beside the scratch data: outside the repo, results/ and the workspace.
-  token_file="" helper=""
+  # Every agent reaches its server through the same client, a read-only copy
+  # outside the workspace and the repo, beside the spec that tells it how.
+  [ -d "$HARNESS_DATA/bin" ] || { mkdir -p "$HARNESS_DATA/bin"; created_by_harness bin; }
+  rm -f "$MCP_CLIENT"
+  install -m 0444 "$HARNESS_DIR/servers/mcp_client.py" "$MCP_CLIENT"
+  token_file=""
   case "$server" in
     comfyrelay)
       "$HARNESS_DIR/servers/comfyrelay.sh" up
@@ -116,38 +130,39 @@ if [ "$cmd" = up ]; then
       "$HARNESS_DIR/servers/artokun.sh" up
       token_file="$ARTOKUN_TOKEN_FILE" token="$ARTOKUN_MCP_TOKEN"
       ;;
-    comfy-mcp)
-      # The agent runs this read-only copy, outside the workspace and the repo.
-      created_by_harness bin
-      mkdir -p "$(dirname "$STDIO_CLIENT")"
-      rm -f "$STDIO_CLIENT"
-      install -m 0444 "$HARNESS_DIR/servers/stdio_client.py" "$STDIO_CLIENT"
-      helper="$STDIO_CLIENT"
-      ;;
   esac
+  # The token may come from the environment; the client reads it from a file,
+  # kept beside the scratch data: outside the repo, results/ and the workspace.
   if [ -n "$token_file" ]; then
     [ "$(cat "$token_file" 2>/dev/null)" = "$token" ] \
       || (umask 077; printf '%s\n' "$token" > "$token_file")
     chmod 600 "$token_file"
   fi
   # The tool list, for the handoff. For comfy-mcp this also fills uv's cache,
-  # so the agent's own launch (UV_OFFLINE=1) needs no package index.
+  # so the client's launch (UV_OFFLINE=1) needs no package index.
   tools="$(python3 "$HARNESS_DIR/servers/probe.py" "$HARNESS_DIR/servers/$server.json")"
-  hpy handoff "$task" "$server" "$token_file" "$helper" "$tools"
+  hpy handoff "$task" "$server" "$token_file" "$MCP_CLIENT" "$MCP_SPEC" "$tools"
   exit 0
 fi
 
 # check
 [ -f "$handoff" ] || { echo "no $handoff; run ./external.sh up $task --server $server first" >&2; exit 2; }
+set_up_for="$(cat "$HARNESS_DATA/workspace/.harness-server" 2>/dev/null || true)"
+[ "$set_up_for" = "$server" ] || {
+  echo "the workspace was set up for ${set_up_for:-no server}, not $server; run ./external.sh up $task --server $server first" >&2
+  exit 2
+}
 started="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["started"])' "$handoff")"
 elapsed=$(( $(date +%s) - started ))
-# T5's check asks comfyrelay's template_get whether templates are runnable, so
-# that answer comes from the same oracle whatever the server. For another
-# server, the relay runs for the check only, after the agent has finished.
+# T5's check ends with a self-test of comfyrelay's runnability verdicts,
+# reported separately and scored for comfyrelay only. For another server, the
+# relay runs for that self-test only, after the agent has finished; if it
+# can't start, the self-test says so and the task's own result stands.
 if [ "$task" = T5 ] && [ "$server" != comfyrelay ]; then
-  "$HARNESS_DIR/servers/comfyrelay.sh" up
+  "$HARNESS_DIR/servers/comfyrelay.sh" up || echo "comfyrelay did not start for T5's self-test" >&2
   trap '"$HARNESS_DIR/servers/comfyrelay.sh" down' EXIT
 fi
+export HARNESS_SERVER="$server"
 set +e
 detail="$("$HARNESS_DIR/tasks/$task/check.sh" 2>&1 | tail -1)"
 rc=$?

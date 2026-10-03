@@ -35,8 +35,15 @@ reset_harness_dir() {
 # The servers' own HOMEs, where they (and an agent through them) keep config and
 # state. external.sh resets both on every `up`; their package caches live
 # outside them (npm-cache, uv-cache, uv-python), so a reset keeps the downloads.
-# shellcheck disable=SC2034 # used by external.sh and down.sh
+# Each is created, and listed in HARNESS_CREATED, here, before anything can
+# launch a server into it (claude -p's comfy-mcp included), so a reset or a
+# purge always knows it is the harness's. One that already exists unlisted is
+# left alone, and a reset refuses it.
 SERVER_HOMES="artokun-home comfy-mcp-home"
+for _home in $SERVER_HOMES; do
+  [ -e "$HARNESS_DATA/$_home" ] || { mkdir -p "$HARNESS_DATA/$_home"; created_by_harness "$_home"; }
+done
+unset _home
 COMFY_PORT="${COMFY_PORT:-8188}"
 COMFY_URL="${COMFY_URL:-http://127.0.0.1:$COMFY_PORT}"
 COMFYRELAY_PORT="${COMFYRELAY_PORT:-9200}"
@@ -76,15 +83,28 @@ if [ -z "${COMFYRELAY_MCP_TOKEN:-}" ]; then
 fi
 export COMFYRELAY_MCP_TOKEN
 
-# An external agent on a stdio server (comfy-mcp) launches it through this
-# read-only copy of servers/stdio_client.py, which external.sh installs. The
-# copy's path is unique to HARNESS_DATA, so stop_stdio_clients stops only the
-# servers this run's agents started: each runs in its client's process group.
-STDIO_CLIENT="$HARNESS_DATA/bin/stdio_client.py"
-stop_stdio_clients() {
+# Every external agent reaches its server through this read-only copy of
+# servers/mcp_client.py, which external.sh installs beside the server's spec
+# (MCP_SPEC). The copy's path is unique to HARNESS_DATA, so stop_mcp_clients
+# stops only the connections this run's agents opened, and any server one
+# launched: each runs in its client's process group.
+MCP_CLIENT="$HARNESS_DATA/bin/mcp_client.py"
+# shellcheck disable=SC2034 # used by external.sh and down.sh
+MCP_SPEC="$HARNESS_DATA/bin/server.json"
+stop_mcp_clients() {
   local pid
-  for pid in $(pgrep -f "$STDIO_CLIENT _serve" || true); do
+  for pid in $(pgrep -f "$MCP_CLIENT _serve" || true); do
     kill -TERM -- "-$pid" 2>/dev/null || true
+  done
+}
+
+# The environment a server the harness launches gets: PATH, TMPDIR and the
+# locale, as NAME=VALUE lines, and nothing else from the operator's shell,
+# which can hold credentials. Each launcher adds the variables it needs.
+base_env() {
+  local v
+  for v in PATH TMPDIR LANG LANGUAGE $(compgen -e | grep '^LC_' || true); do
+    [ -n "${!v+x}" ] && printf '%s=%s\n' "$v" "${!v}"
   done
 }
 
@@ -112,11 +132,17 @@ hpy() { python3 "$HARNESS_DIR/harness.py" "$@"; }
 # Reset a task. Run it before the server starts: T2's reset restarts ComfyUI,
 # and the server should meet the instance the agent will use. The workspace is
 # emptied too, so an agent never sees files an earlier run left behind; setup
-# then places this task's inputs.
+# then places this task's inputs. ComfyUI is asked to drop its execution cache
+# (POST /free with free_memory resets it, and unloads models), so a graph an
+# earlier task ran is executed again rather than served from the cache. Its
+# volumes and /history do carry over: every check counts only what is new
+# since its setup.
 prepare_task() {
   created_by_harness workspace
   rm -rf "$HARNESS_DATA/workspace"
   mkdir -p "$HARNESS_DATA/workspace/results" "$RESULTS/runs"
+  curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' \
+    -d '{"unload_models": true, "free_memory": true}' "$COMFY_URL/free"
   "$HARNESS_DIR/tasks/$1/setup.sh"
 }
 

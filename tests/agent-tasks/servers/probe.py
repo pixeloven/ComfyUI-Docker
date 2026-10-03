@@ -56,7 +56,12 @@ class Stdio:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env={**os.environ, **cfg.get("env", {})},
+            # PATH, TMPDIR and the locale only, plus the config's env: nothing
+            # from the operator's environment that could be a credential.
+            env={
+                **{k: v for k, v in os.environ.items() if k in ("PATH", "TMPDIR", "LANG", "LANGUAGE") or k.startswith("LC_")},
+                **cfg.get("env", {}),
+            },
             text=True,
         )
 
