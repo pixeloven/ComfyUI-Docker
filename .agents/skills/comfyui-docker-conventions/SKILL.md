@@ -22,6 +22,7 @@ this skill disagree, the file is right, so fix the skill in the same change.
 | `services/comfyctl/` | `comfyctl`, the umbrella CLI. It mounts comfyfetch's app as the `fetch` group rather than reimplementing it. Its README states the conventions every group shares: `--output auto\|plain\|json`, the result on stdout, and exits 0/1/2. It pins `comfyfetch==<VERSION>`. |
 | `comfy.yaml`, `comfy-lock.yaml`, `locks/` | The model manifest (intent), the generated lock (resolution), and the derived profile locks (`locks/preview.yaml`) |
 | `examples/{core-gpu,complete-gpu,core-cpu,core-amd,core-intel}/` | One standalone Compose deployment per profile, each with `.env.example` and `extra_model_paths.yaml` |
+| `examples/kubernetes/` | A generic Kubernetes deployment of `core:cpu-latest` (Deployment running as 1000:1000, seven PVCs, a ClusterIP Service), plus `with-mcp/`: an opt-in strategic-merge patch that adds the `mcp` sidecar, and a placeholder Secret for its token. `kubectl apply -f examples/kubernetes/` doesn't apply `with-mcp/` |
 | `templates/node-pack/` | Files a node pack copies into its own repo (#107): a compose file mounting `./` at `/app/custom_nodes/${PACK_NAME}`, a GPU overlay, `.env.example`, and `dev-check.sh`, the restart-and-check loop. Not an example: `make validate` resolves it with `--env-file .env.example`, and `tests/node-pack/run.sh` (CI's `node-pack` job) boots it |
 | `skills/`, `.claude-plugin/`, `package.json` | The **published** consumer skills plugin. See `skills/README.md`. |
 | `.agents/skills/` (and `.claude/skills/` symlinks) | Local skills for agents working on this repo. Not published. |
@@ -41,9 +42,10 @@ Images are `ghcr.io/pixeloven/comfyui/<name>`. The bake targets:
 | `mcp`, `fetch` | `mcp`, `fetch` | Independent of the runtime images |
 | `all` | all of the above | |
 
-The five examples map to `core:cuda`, `complete:cuda`, `core:cpu`, `core:rocm`
+The five Compose examples map to `core:cuda`, `complete:cuda`, `core:cpu`, `core:rocm`
 and `core:xpu`. `README.md` documents them, and `docs/user-guides/performance.md`
-has the SageAttention architecture table.
+has the SageAttention architecture table. `examples/kubernetes/` runs `core:cpu`, with
+the `mcp` image as an opt-in sidecar; its own `README.md` documents it.
 
 **Version coupling.** The SageAttention wheels come from
 `pixeloven/SageAttention-Wheels` and are built for **cu130, torch 2.13.0 and
@@ -109,7 +111,11 @@ There is no date tag.
   are world-writable, and `PYTHONDONTWRITEBYTECODE=1`. `complete` re-applies the
   venv permissions after its own installs, and any new install layer must do the same.
   `/app/ComfyUI/custom_nodes` is a symlink to `/app/custom_nodes`, so comfy-cli, which
-  installs into `<workspace>/custom_nodes`, lands on the volume (#126).
+  installs into `<workspace>/custom_nodes`, lands on the volume (#126). Run comfy-cli
+  as the runtime user (`docker exec -u <PUID>`): under root its installs are root-owned
+  and ComfyUI fails on them with `PermissionError`. Never bind-mount the symlink path
+  (it silently hides the volume) or list it in `extra_model_paths.yaml` (`folder_paths`
+  de-duplicates by string, not realpath, so every pack loads twice).
 - `dockerfile.comfy.core` also drops setuid/setgid bits from every file in its final
   stage, since nothing in the image needs them. The last two `RUN`s of `core` and of
   `complete` assert that no setuid/setgid file and no file with capabilities remain,
@@ -192,10 +198,12 @@ These match what CI runs:
 cd services && uv run --locked pytest -q         # every member; add -m "not network" offline; gated cases skip without HF_TOKEN
 cd services && uv run --locked comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml
 uvx --from ./services/comfyctl comfyctl fetch check comfy.yaml locks/preview.yaml --profile preview --parent comfy-lock.yaml
-make validate                                    # bake --print all + every example's compose config
+make validate                                    # bake --print all, every example's and the node-pack template's compose config,
+                                                 # kubeconform over examples/kubernetes, and the Deployment the with-mcp patch makes (needs kubectl)
 docker buildx bake <target|group> --load         # or make cuda / cpu / rocm / xpu
 make smoke                                       # builds core-cpu, boots it; SMOKE_NETWORK=host without a docker0 bridge
-IMAGE_LABEL=local docker buildx bake mcp --load  # the mcp image; its build probes the server
+IMAGE_LABEL=local docker buildx bake mcp --load  # the mcp image; its build probes the server. Without a docker0 bridge, bake's
+                                                 # network=host isn't honoured: docker buildx build --network host with the args from bake --print mcp
 tests/relay/run.sh [--network host] --comfyui <core-cpu image> ghcr.io/pixeloven/comfyui/mcp:local
 docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
 ```
