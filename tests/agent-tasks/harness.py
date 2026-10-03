@@ -662,6 +662,37 @@ def check_t6() -> str:
     return detail
 
 
+# T6-neutral (the owner, 2026-10-03): T6's questions that aren't about comfyrelay,
+# scored by answer alone so every server can be compared. The key is T6's own
+# derived answers, and the agent's note on where it found each one isn't checked.
+T6_NEUTRAL = ("q1", "q2", "q4")
+
+
+def check_t6_neutral() -> str:
+    questions = {q["id"]: q for q in json.loads((T6_DIR / "questions.json").read_text())}
+    want = {k: v for k, v in answers_for("T6").items() if k in T6_NEUTRAL}
+    p = WORKSPACE / "results" / "T6-neutral.json"
+    if not p.exists():
+        raise CheckFailed(f"{p} not written")
+    try:
+        got = json.loads(p.read_text())
+    except ValueError as e:
+        raise CheckFailed(f"T6-neutral.json is not JSON: {e}") from e
+    got = got if isinstance(got, dict) else {}
+    wrong = []
+    for qid, expected in want.items():
+        entry = got.get(qid)
+        answer = entry.get("answer") if isinstance(entry, dict) else entry
+        # The whole answer, normalised as T6 does: "either X or Y" is not X.
+        if answer is None or t6_norm(answer, questions[qid]) != t6_norm(expected["answer"], questions[qid]):
+            wrong.append(f"{qid} (want {expected['answer']!r}, got {answer!r})")
+    score = len(want) - len(wrong)
+    detail = f"{score}/{len(want)}" + (f"; wrong: {', '.join(wrong)}" if wrong else "") + drift("T6")
+    if wrong:
+        raise CheckFailed(detail)
+    return detail
+
+
 # T5 (#103): choose a template for a goal, and run it. The goal, in
 # tasks/T5/prompt.md, is an image at twice its width and height; the templates
 # for it are the ones ComfyUI's own index tags with T5_TAG.
@@ -1087,6 +1118,7 @@ CHECKS = {
     "t4": check_t4,
     "t5": check_t5,
     "t6": check_t6,
+    "t6-neutral": check_t6_neutral,
 }
 
 

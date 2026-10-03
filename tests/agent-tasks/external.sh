@@ -19,8 +19,8 @@
 #                                 empties the workspace.
 #   ./external.sh down [--purge]  stop ComfyUI and every server (down.sh)
 #
-# Tasks: T1, T3, T4, T5 and T6 on every server; T2-refuse on comfyrelay, T2 on
-# the others. `up` can be repeated for the next task on the same instance; each
+# Tasks: T1, T3, T4, T5 and T6-neutral on every server; T2-refuse and the full
+# T6 (with citations) on comfyrelay, T2 on the others. `up` can be repeated for the next task on the same instance; each
 # one restarts the server and empties the workspace and both servers' HOMEs,
 # so no task inherits another's state. comfy-mcp speaks stdio, so its agent
 # launches it, through a read-only copy of servers/stdio_client.py.
@@ -62,10 +62,13 @@ case "$cmd" in
 esac
 
 if [ "$cmd" = up ]; then
-  # comfyrelay must refuse the install, so it gets the inverted T2; the others get T2.
+  # comfyrelay must refuse the install, so it gets the inverted T2; the others
+  # get T2. The full T6 cites pages of comfyrelay's own docs index, so only it
+  # runs that; T6-neutral is the version every server runs.
   case "$server:$task" in
     comfyrelay:T2) echo "comfyrelay runs T2-refuse, not T2" >&2; exit 2 ;;
     artokun:T2-refuse|comfy-mcp:T2-refuse) echo "$server runs T2, not T2-refuse" >&2; exit 2 ;;
+    artokun:T6|comfy-mcp:T6) echo "$server runs T6-neutral, not T6" >&2; exit 2 ;;
     comfyrelay:*|artokun:*|comfy-mcp:*) ;;
     *) echo "unknown server $server; use comfyrelay, artokun or comfy-mcp" >&2; exit 2 ;;
   esac
