@@ -9,6 +9,42 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## 5.1.0 — 2026-10-04
+
+### ComfyUI v0.38.0
+
+The stable ComfyUI pin moves from `v0.37.0` to `v0.38.0`
+([upstream release](https://github.com/Comfy-Org/ComfyUI/releases/tag/v0.38.0),
+commit `6b747c0428c343e1417219641db93a4fb7cb69ae`). This includes MiniMax-H3
+Fun-ControlNet Union 2.0's ten-block injection and post-normalization inpainting
+mask support, H3 tiled-VAE blending and an offloaded-VAE crash fix. It also adds
+Qwen-Image 2.1 Fun Union ControlNet, tiny-VAE support, RGBA reference-image fixes,
+and optional `start_percent` / `end_percent` inputs on the Qwen
+DiffSynth and Fun ControlNet apply nodes. The frontend moves to 1.53.6 and
+workflow templates to 0.11.70; asset scanning and SQLite lock handling improve.
+
+**Workflow compatibility:** upstream removes the deprecated `OpenAIVideoSora2`
+partner-API node ([#16609](https://github.com/Comfy-Org/ComfyUI/pull/16609)).
+Existing workflows that use it will need migration; this pin bump does not
+promise compatibility for every historical upstream node.
+
+The CUDA base, torch index and architecture-specific SageAttention wheel URLs
+and checksums are unchanged. The image names, volume paths, UID behavior,
+credentials and MCP transport contract remain unchanged.
+
+### Changes since 5.0.0
+
+- `comfy-cli` installs now reach the custom-node volume through
+  `/app/ComfyUI/custom_nodes` → `/app/custom_nodes`. Do not mount over the symlink
+  or add it to `extra_model_paths.yaml`; install as the runtime UID, not root.
+- The published MCP image explicitly refuses the unimplemented `develop`
+  profile. The experimental node-pack development template and T7 are withdrawn
+  pending the scope review in [#180](https://github.com/pixeloven/ComfyUI-Docker/issues/180).
+- Consumer guides and local skills clarify workflow and custom-node boundaries.
+  The external-agent evaluation harness now supports artokun and comfy-mcp as
+  well as comfyrelay, resets task/server state, adds the neutral T6 comparison,
+  and avoids sending probe bearer tokens through environment-configured proxies.
+
 ## 5.0.0 — 2026-10-02
 
 ### Breaking: the `mcp` image is now comfyrelay
