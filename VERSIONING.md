@@ -114,6 +114,12 @@ Anything that breaks a consumer who changes nothing but the version they pull:
 - **A removed or renamed command, verb or flag.** `comfyfetch` becoming
   `comfyctl fetch` in 4.0.0 is the example: every script that typed the old
   name breaks.
+- **An MCP tool, or information one gives, removed.** Renaming or removing a
+  tool of the `mcp` image (comfyrelay) is major, and so is dropping information
+  a tool returns when no tool of the same server returns it any more. Changing
+  the *shape* of a tool's output is minor when the same information stays
+  reachable through the same server: `template_search` hits summarising their
+  runnability while `template_get` keeps the full lists (#167) is the example.
 
 Adding is never major: a new env var, volume, profile, or image is a minor.
 

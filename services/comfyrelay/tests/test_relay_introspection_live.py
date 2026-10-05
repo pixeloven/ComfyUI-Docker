@@ -148,3 +148,42 @@ async def test_a_template_input_is_reported_exactly_while_the_input_directory_la
     again = await call("template_get", {"name": hit["name"], "include_workflow": False})
     assert again["runnability"]["missing_inputs"] == []
     assert again["runnability"]["runnable"] is True
+
+
+async def test_template_search_runnable_only_returns_exactly_the_templates_this_instance_can_run():
+    """T5's setup (tests/agent-tasks): every template tagged Image Upscale gets the input images its index entry
+    names, so on a ComfyUI with no models only models, nodes and partner APIs decide which can run. runnable_only
+    must return exactly the ones template_get calls runnable, and there must be at least one
+    (utility_interpolation_image_upscale at templates 0.11.66), so the filter isn't checked against nothing."""
+    async with httpx2.AsyncClient(base_url=URL, timeout=30) as http:
+        index = {t["name"]: t for c in (await http.get("/templates/index.json")).json() for t in c["templates"]}
+    candidates = sorted(n for n, t in index.items() if "Image Upscale" in (t.get("tags") or []))
+    assert candidates, "no template is tagged Image Upscale"
+    inputs = {
+        i["file"]
+        for n in candidates
+        for i in (index[n].get("io") or {}).get("inputs", [])
+        if i.get("nodeType") == "LoadImage" and i.get("file") and "/" not in i["file"]
+    }
+    for name in inputs:
+        await upload(name)
+    runnable = set()
+    for name in candidates:
+        if (await call("template_get", {"name": name, "include_workflow": False}))["runnability"]["runnable"]:
+            runnable.add(name)
+    assert runnable, f"none of {candidates} can run here: does this ComfyUI have models, or did the templates change?"
+
+    # One relay, so the second search reads the requirements the first cached: this tests the filter, not the
+    # time a cold search may take.
+    args = {"query": "image upscale", "limit": 20}
+    server, _ = build_server(settings(comfyui_url=URL), comfyui=ComfyUIClient(URL))
+    async with Client(server, mode="legacy") as client:
+        first = await client.call_tool("template_search", args)
+        second = await client.call_tool("template_search", {**args, "runnable_only": True})
+    assert not first.is_error and not second.is_error, (first.content[0].text, second.content[0].text)
+    everything, only = first.structured_content, second.structured_content
+    assert only["unchecked"] == 0, "some templates went unchecked even with the requirements cached"
+    assert {h["runnability"]["runnable"] for h in only["results"]} == {True}
+    assert {h["name"] for h in only["results"]} & set(candidates) == runnable
+    assert any(h["runnability"]["runnable"] is False for h in everything["results"]), "no upscaler needs a model?"
+    assert only["total_matches"] + only["hidden_not_runnable"] == everything["total_matches"]
