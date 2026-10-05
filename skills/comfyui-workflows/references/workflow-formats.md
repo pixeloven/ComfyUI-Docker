@@ -59,9 +59,12 @@ conversion has to follow them too.
   removes comments first: `//` to the end of its line, and `/* ... */`, so a
   URL's `//` cuts off the rest of that line. Then it replaces every `{...}`
   group with one of its `|`-separated options, picked at random, even when
-  there is only one (`{cat}` becomes `cat`). Groups can nest. A backslash
-  keeps the next character from being parsed: `\{`, `\}` and `\|` come out
-  as the plain character, and any other backslash pair is left as written.
+  there is only one (`{cat}` becomes `cat`). Groups can nest. Outside a
+  group, a backslash keeps the next character from being parsed: `\{`, `\}`
+  and `\|` come out as the plain character, and any other backslash pair is
+  left as written. The option chosen from a group is parsed again on its own,
+  comments and escapes included, so each level of nesting undoes one more
+  level of escaping.
   Only the API graph gets the result; the widget, and the workflow saved with
   it, keep the braces. A hand conversion that copies such a text unchanged
   sends a different prompt from the one the editor would.

@@ -20,17 +20,21 @@ see `VERSIONING.md`.
   lists. That output change is minor under the new rule in `VERSIONING.md` → *What counts as major*: the
   same information is still returned by another tool of the same server, under the same capability profile.
   That rule also makes removing or renaming a tool argument major, and says the JSON shape of a tool's output
-  isn't a contract, so a script that parses it should pin a version. The result adds `hidden_not_runnable` and
+  isn't a contract, so a script that parses it should pin a version. Moving a tool to another capability
+  profile, adding a required argument, narrowing what an argument accepts, or changing its default is also
+  major; adding something optional stays minor. The result adds `hidden_not_runnable` and
   `unchecked`. Each template's requirements are cached in the relay per installed templates version, so
   only `/object_info` and `/models/<folder>` are read again on each search. The `comfyui-workflows`
   guide's *Converting UI to API* now states the rules the editor's own export follows.
 - **comfyrelay `template_search`: follow-ups from the #188 review.** A template whose graph uses a
   partner-API node stays hidden (unless `include_partner_api`) when a model folder it names can't be
   listed, instead of being shown unchecked. `/object_info` gets 15 seconds in `template_search`, after which
-  every match is `unchecked: timeout`; `template_get` is unchanged. One search fetches at most 4 templates
-  at once, under the relay-wide limit of 8, so a short search no longer waits behind a long cold one, and a
-  template another search is already fetching is waited for rather than fetched twice. An unexpected error
-  in the check marks the template `unchecked: check_failed` instead of failing the search.
+  every match is `unchecked: timeout`; `template_get` is unchanged. Each search takes a slot of its own
+  before it queues at the relay-wide limit of 8 template fetches, so a short search no longer waits behind
+  every template a long cold one still has to read, and a template another search is already fetching is
+  waited for rather than fetched twice. An unexpected error reading a template, or checking it against
+  `/object_info` (an entry of a shape the check doesn't expect), marks that template
+  `unchecked: check_failed` and is logged, instead of failing the search.
 - **`comfyui-workflows` guide corrections** (*Converting UI to API*, checked against frontend 1.52.7). A
   widget input linked from a muted node keeps its stored widget value; only a socket-only input is dropped.
   Dynamic prompts apply only to inputs whose spec sets `dynamicPrompts` (CLIPTextEncode's `text`); comments
