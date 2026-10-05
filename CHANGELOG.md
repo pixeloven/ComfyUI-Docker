@@ -18,10 +18,24 @@ see `VERSIONING.md`.
   names or `/object_info` couldn't be read in time, with `unchecked` saying why; the search still answers),
   and for each kind with something missing its `count` and first 3 names; `template_get` keeps the full
   lists. That output change is minor under the new rule in `VERSIONING.md` → *What counts as major*: the
-  same information stays reachable through the same server. The result adds `hidden_not_runnable` and
+  same information is still returned by another tool of the same server, under the same capability profile.
+  That rule also makes removing or renaming a tool argument major, and says the JSON shape of a tool's output
+  isn't a contract, so a script that parses it should pin a version. The result adds `hidden_not_runnable` and
   `unchecked`. Each template's requirements are cached in the relay per installed templates version, so
   only `/object_info` and `/models/<folder>` are read again on each search. The `comfyui-workflows`
   guide's *Converting UI to API* now states the rules the editor's own export follows.
+- **comfyrelay `template_search`: follow-ups from the #188 review.** A template whose graph uses a
+  partner-API node stays hidden (unless `include_partner_api`) when a model folder it names can't be
+  listed, instead of being shown unchecked. `/object_info` gets 15 seconds in `template_search`, after which
+  every match is `unchecked: timeout`; `template_get` is unchanged. One search fetches at most 4 templates
+  at once, under the relay-wide limit of 8, so a short search no longer waits behind a long cold one, and a
+  template another search is already fetching is waited for rather than fetched twice. An unexpected error
+  in the check marks the template `unchecked: check_failed` instead of failing the search.
+- **`comfyui-workflows` guide corrections** (*Converting UI to API*, checked against frontend 1.52.7). A
+  widget input linked from a muted node keeps its stored widget value; only a socket-only input is dropped.
+  Dynamic prompts apply only to inputs whose spec sets `dynamicPrompts` (CLIPTextEncode's `text`); comments
+  (`//`, `/* */`) are stripped first, any `{...}` is resolved even with one option, and only the API graph
+  is resolved, not the widget or the saved workflow.
 
 ## 5.0.0 — 2026-10-02
 
