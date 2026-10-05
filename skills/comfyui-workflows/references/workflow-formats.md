@@ -53,20 +53,29 @@ conversion has to follow them too.
 - **A list value is wrapped.** An input whose value is a JSON array is written
   as `{"__value__": [...]}`, so that ComfyUI doesn't take it for a link.
   ComfyUI unwraps it before the node runs.
+- **Dynamic prompts are resolved on export.** In a text widget, the editor
+  replaces each `{a|b|c}` group with one of its options, picked at random,
+  and stores the result in `widgets_values` too. A hand conversion that
+  copies the text with its braces sends a different prompt from the one the
+  editor would.
 - **Subgraphs are flattened.** Each node inside a subgraph instance (its
   definition is in `definitions.subgraphs`) moves to the top level, with the
-  id `<instance id>:<inner id>`, for example `"12:3"`. Links that crossed the
-  subgraph's edge are joined to the nodes outside.
+  id `<instance id>:<inner id>`, for example `"12:3"`. Nesting adds a level
+  per subgraph: `"12:3:7"` is node 7 inside instance 3, inside instance 12.
+  Links that crossed the subgraph's edge are joined to the nodes outside.
 - **Frontend-only nodes are dropped.** `Note`, `MarkdownNote`, `Reroute` and
   `PrimitiveNode` never reach `/prompt`. A link through a reroute goes
   straight from its source, and a primitive's value is written into each
   input it feeds.
 - **Muted and bypassed nodes are skipped.** A muted node (`mode` 2) is left
-  out. A bypassed one (`mode` 4) is left out as well, and the nodes that read
-  from it are wired to what fed it instead, matching by type.
-- **A socketless widget may take any value.** ImageCompare's `compare_view`
-  has no socket, and the node ignores its value, so validation passes
-  whatever is sent. The editor sends `{"__value__": ["", ""]}`; `null` passes
+  out, and so is every input linked from it: the node that read it gets no
+  value for that input at all, not its stored widget value. A bypassed node
+  (`mode` 4) is left out as well, and the nodes that read from it are wired to
+  what fed it instead, matching by type.
+- **A socketless widget must be there, with any value.** ImageCompare's
+  `compare_view` has no socket and the node ignores its value, but the input
+  is required, so the API graph must include it. Validation passes whatever
+  it holds: the editor sends `{"__value__": ["", ""]}`, and `null` passes
   too.
 
 When a graph is small it's often quicker to build the API form directly from
