@@ -677,9 +677,20 @@ async def test_template_search_ranks_and_checks_runnability():
     assert got["source"]["version"] == "0.11.66"
     # Every word matched first; "sd1.5" is rarer than "image", so it counts for more. A partial match comes last.
     assert [h["name"] for h in got["results"]] == ["sd15_simple", "flux_custom", "video_wan"]
-    assert got["hidden_partner_api"] == 1
+    counts = ("total_matches", "hidden_partner_api", "hidden_not_runnable", "unchecked")
+    assert [got[k] for k in counts] == [3, 1, 0, 0]
     runnable = got["results"][0]
-    assert runnable["runnability"] == {
+    # A hit's summary leaves out every kind with nothing missing.
+    assert runnable["runnability"] == {"runnable": True}
+    assert got["results"][1]["runnability"] == {
+        "runnable": False,
+        "missing_nodes": {"count": 2, "first": ["ImageRemoveAlpha+", "SAMLoader"]},
+        "missing_models": {"count": 2, "first": ["flux1-dev.safetensors", "sam_vit_b.pth"]},
+    }
+    assert runnable["category"] == "Foundation / Image"
+    assert runnable["model_families"] == ["SD1.5"]
+    full = await ok("template_get", {"name": "sd15_simple", "include_workflow": False})
+    assert full["runnability"] == {
         "runnable": True,
         "missing_nodes": [],
         "missing_models": [],
@@ -689,14 +700,10 @@ async def test_template_search_ranks_and_checks_runnability():
         "node_classes_checked": 3,
         "models_checked": 1,
     }
-    assert runnable["category"] == "Foundation / Image"
-    assert runnable["model_families"] == ["SD1.5"]
 
 
 async def test_template_runnability_reports_missing_nodes_and_models():
-    got = await ok("template_search", {"query": "flux"})
-    (hit,) = got["results"]
-    check = hit["runnability"]
+    check = (await ok("template_get", {"name": "flux_custom", "include_workflow": False}))["runnability"]
     assert check["runnable"] is False
     assert check["missing_nodes"] == [
         {"class_type": "ImageRemoveAlpha+", "pack": "comfyui_essentials", "count": 2},
@@ -726,7 +733,7 @@ async def test_template_search_partner_api_on_request():
     api = next(h for h in got["results"] if h["name"] == "api_dalle")
     assert api["partner_api"] is True
     assert api["runnability"]["runnable"] is False
-    assert api["runnability"]["api_nodes"] == ["OpenAIDalle3"]
+    assert api["runnability"]["api_nodes"] == {"count": 1, "first": ["OpenAIDalle3"]}
 
 
 async def test_template_runnability_reports_input_files_the_input_directory_lacks():
@@ -758,6 +765,224 @@ async def test_template_search_drops_hits_whose_graph_uses_partner_api_nodes():
     assert (got["hidden_partner_api"], got["total_matches"]) == (1, 1)
     shown = await ok("template_search", {"query": "restore", "include_partner_api": True})
     assert [h["name"] for h in shown["results"]] == ["restore_cloud", "restore_photo"]
+
+
+async def test_template_search_runnable_only_keeps_only_runnable_templates():
+    everything = await ok("template_search", {"query": "text"})
+    assert [h["name"] for h in everything["results"]] == ["sd15_simple", "video_wan", "flux_custom"]
+    got = await ok("template_search", {"query": "text", "runnable_only": True})
+    assert [h["name"] for h in got["results"]] == ["sd15_simple", "video_wan"]
+    assert {h["runnability"]["runnable"] for h in got["results"]} == {True}
+    assert (got["total_matches"], got["hidden_not_runnable"], got["hidden_partner_api"]) == (2, 1, 1)
+
+
+async def test_template_search_runnable_breaks_ties_between_equal_word_matches_only():
+    # "image" matches both titles alike, so flux_custom (usage 900) would lead on usage; sd15_simple runs here.
+    got = await ok("template_search", {"query": "image"})
+    assert [h["name"] for h in got["results"]] == ["sd15_simple", "flux_custom"]
+    # Matching more of the query still outranks being runnable.
+    more = await ok("template_search", {"query": "flux image"})
+    assert [h["name"] for h in more["results"]] == ["flux_custom", "sd15_simple"]
+
+
+async def test_template_search_caps_a_hits_runnability_summary():
+    many = {
+        "nodes": [node(f"Missing{i}" + "x" * 200) for i in range(5)]
+        + [node("CheckpointLoaderSimple", models=[model(f"m{i}" + "y" * 200, "checkpoints") for i in range(5)])]
+        + [{**node("LoadImage"), "widgets_values": [f"in{i}.png"]} for i in range(5)]
+    }
+    overrides = {"/templates/flux_custom.json": httpx2.Response(200, json=many)}
+    (hit,) = (await ok("template_search", {"query": "flux"}, **overrides))["results"]
+    summary = hit["runnability"]
+    assert summary["runnable"] is False
+    for kind in ("missing_nodes", "missing_models", "missing_inputs"):
+        assert summary[kind]["count"] == 5
+        assert len(summary[kind]["first"]) == 3
+        assert all(len(name) <= 80 for name in summary[kind]["first"])
+    assert len(summary["missing_nodes"]["first"][0]) == 80
+    # template_get still lists them all, uncut.
+    full = (await ok("template_get", {"name": "flux_custom", "include_workflow": False}, **overrides))["runnability"]
+    assert len(full["missing_nodes"]) == len(full["missing_models"]) == len(full["missing_inputs"]) == 5
+
+
+class Counting:
+    """One relay over a fake ComfyUI whose answers a test can change between calls, counting template fetches."""
+
+    def __init__(self, **overrides):
+        self.table = routes(**overrides)
+        self.fetched: list[str] = []
+        self.stats = json.loads(json.dumps(STATS))
+
+    async def handler(self, request: httpx2.Request) -> httpx2.Response:
+        path = request.url.raw_path.decode()
+        if path.startswith("/templates/") and path != "/templates/index.json":
+            self.fetched.append(path)
+        if path == "/system_stats":
+            return httpx2.Response(200, json=self.stats)
+        answer = self.table.get(path, httpx2.Response(404))
+        return await answer() if callable(answer) else answer
+
+    def server(self):
+        client = ComfyUIClient("http://comfyui.test:8188", transport=httpx2.MockTransport(self.handler))
+        return build_server(settings(profiles=("read",)), comfyui=client)
+
+
+async def search(mcp, args: dict) -> dict:
+    result = await mcp.call_tool("template_search", args)
+    assert not result.is_error, result.content[0].text
+    return result.structured_content
+
+
+async def test_template_requirements_are_cached_per_templates_version_and_rechecked_live():
+    fake = Counting()
+    server, relay = fake.server()
+    async with Client(server, mode="legacy") as mcp:
+        first = await search(mcp, {"query": "text"})
+        wanted = ["/templates/sd15_simple.json", "/templates/video_wan.json", "/templates/flux_custom.json"]
+        assert sorted(p for p in fake.fetched if p != "/templates/index.mcp.json") == sorted(wanted)
+        assert relay.template_requirements.version == "0.11.66" and len(relay.template_requirements) == 3
+        assert first["results"][0]["runnability"] == {"runnable": True}
+
+        # The same version: nothing fetched again, but the check is against what is on disk now.
+        fake.fetched.clear()
+        fake.table["/models/checkpoints"] = httpx2.Response(200, json=[])
+        again = await search(mcp, {"query": "text"})
+        assert [p for p in fake.fetched if p != "/templates/index.mcp.json"] == []
+        sd15 = next(h for h in again["results"] if h["name"] == "sd15_simple")
+        assert sd15["runnability"]["missing_models"] == {"count": 1, "first": ["sd15.safetensors"]}
+
+        # Another templates version empties the cache and fetches again.
+        fake.stats["system"]["installed_templates_version"] = "0.11.67"
+        await search(mcp, {"query": "text"})
+        assert sorted(p for p in fake.fetched if p != "/templates/index.mcp.json") == sorted(wanted)
+        assert relay.template_requirements.version == "0.11.67" and len(relay.template_requirements) == 3
+
+
+async def test_template_requirements_are_not_cached_without_a_templates_version():
+    fake = Counting()
+    del fake.stats["system"]["installed_templates_version"]
+    server, relay = fake.server()
+    async with Client(server, mode="legacy") as mcp:
+        await search(mcp, {"query": "flux"})
+        await search(mcp, {"query": "flux"})
+    assert fake.fetched.count("/templates/flux_custom.json") == 2
+    assert len(relay.template_requirements) == 0
+
+
+def test_the_template_cache_is_bounded_and_drops_the_least_recently_used():
+    cache = tools_introspection.TemplateCache(max_entries=2)
+    needs = tools_introspection._requirements({"nodes": [node("SaveImage")]})
+    cache.put("1", "a", needs)
+    cache.put("1", "b", needs)
+    assert cache.get("1", "a") is needs  # a is now the most recently used
+    cache.put("1", "c", needs)
+    assert (cache.get("1", "b"), len(cache)) == (None, 2)
+    assert cache.get("2", "a") is None  # another version is never answered from this one
+    cache.put("2", "d", needs)
+    assert (cache.get("1", "a"), cache.get("2", "d"), len(cache)) == (None, needs, 1)
+
+
+async def _stalled_template() -> httpx2.Response:
+    await asyncio.sleep(60)
+    raise AssertionError("the template fetch was waited for")
+
+
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [
+        (httpx2.Response(500), "comfyui_http_error"),
+        (httpx2.Response(200, json={"no": "nodes"}), "comfyui_bad_response"),
+        (httpx2.Response(200, json={"nodes": [{"type": "LoadImage", "inputs": 5}]}), "comfyui_bad_response"),
+        (_stalled_template, "timeout"),
+    ],
+    ids=["http-error", "no-nodes", "unreadable", "stalled"],
+)
+async def test_a_template_that_cannot_be_fetched_is_unchecked_and_runnable_only_leaves_it_out(
+    answer, reason, monkeypatch
+):
+    monkeypatch.setattr(tools_introspection, "TEMPLATE_FETCH_SECONDS", 0.5)
+    overrides = {"/templates/flux_custom.json": answer}
+    got = await ok("template_search", {"query": "text"}, **overrides)
+    flux = next(h for h in got["results"] if h["name"] == "flux_custom")
+    assert flux["runnability"] == {"runnable": None, "unchecked": reason}
+    assert (got["unchecked"], got["total_matches"]) == (1, 3)
+    # The others are checked as usual.
+    assert {h["name"]: h["runnability"]["runnable"] for h in got["results"]} == {
+        "sd15_simple": True,
+        "video_wan": True,
+        "flux_custom": None,
+    }
+    only = await ok("template_search", {"query": "text", "runnable_only": True}, **overrides)
+    assert [h["name"] for h in only["results"]] == ["sd15_simple", "video_wan"]
+    assert (only["unchecked"], only["hidden_not_runnable"], only["total_matches"]) == (1, 0, 2)
+
+
+async def _stalled_folder() -> httpx2.Response:
+    await asyncio.sleep(60)
+    raise AssertionError("the folder listing was waited for")
+
+
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [(httpx2.Response(500), "comfyui_http_error"), (_stalled_folder, "timeout")],
+    ids=["http-error", "stalled"],
+)
+async def test_a_model_folder_that_cannot_be_listed_leaves_only_its_templates_unchecked(answer, reason, monkeypatch):
+    monkeypatch.setattr(tools_introspection, "MODEL_FOLDERS_SECONDS", 0.5)
+    overrides = {"/models/checkpoints": answer}
+    got = await ok("template_search", {"query": "text"}, **overrides)
+    # sd15_simple and flux_custom declare checkpoints; video_wan declares no model.
+    assert {h["name"]: h["runnability"] for h in got["results"]} == {
+        "video_wan": {"runnable": True},
+        "sd15_simple": {"runnable": None, "unchecked": reason},
+        "flux_custom": {"runnable": None, "unchecked": reason},
+    }
+    assert got["unchecked"] == 2
+    only = await ok("template_search", {"query": "text", "runnable_only": True}, **overrides)
+    assert [h["name"] for h in only["results"]] == ["video_wan"]
+    assert (only["unchecked"], only["total_matches"]) == (2, 1)
+    # template_get still fails on it, as it always has: there the check is the answer, not enrichment.
+    if reason != "timeout":
+        assert (await error("template_get", {"name": "sd15_simple"}, **overrides))["code"] == reason
+
+
+@pytest.mark.parametrize(
+    "answer", [httpx2.Response(500), httpx2.Response(200, json=["KSampler"])], ids=["http-error", "malformed"]
+)
+async def test_template_search_answers_unchecked_when_object_info_fails(answer):
+    got = await ok("template_search", {"query": "text"}, **{"/object_info": answer})
+    assert {h["name"] for h in got["results"]} == {"sd15_simple", "flux_custom", "video_wan"}
+    reason = got["results"][0]["runnability"]["unchecked"]
+    assert reason in ("comfyui_http_error", "comfyui_bad_response")
+    assert {h["runnability"]["runnable"] for h in got["results"]} == {None}
+    assert got["unchecked"] == 3
+    only = await ok("template_search", {"query": "text", "runnable_only": True}, **{"/object_info": answer})
+    assert (only["results"], only["unchecked"]) == ([], 3)
+
+
+async def test_concurrent_cold_searches_share_one_limit_on_template_fetches():
+    index = [{"title": "T", "templates": [{"name": f"t{i}", "title": "thing"} for i in range(20)]}]
+    workflows = {f"/templates/t{i}.json": httpx2.Response(200, json={"nodes": [node("SaveImage")]}) for i in range(20)}
+    fake = Counting(**{"/templates/index.json": httpx2.Response(200, json=index)})
+    in_flight, peak = 0, 0
+
+    def slow(response: httpx2.Response):
+        async def answer() -> httpx2.Response:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.02)
+            in_flight -= 1
+            return response
+
+        return answer
+
+    fake.table.update({path: slow(r) for path, r in workflows.items()})
+    server, _ = fake.server()
+    async with Client(server, mode="legacy") as mcp:
+        got = await asyncio.gather(*(search(mcp, {"query": "thing", "limit": 20}) for _ in range(3)))
+    assert peak == tools_introspection.FETCH_CONCURRENCY
+    assert all(g["unchecked"] == 0 and len(g["results"]) == 20 for g in got)
 
 
 MCP_INDEX = [
@@ -891,9 +1116,11 @@ async def test_template_dot_segment_directories_and_names_are_never_requested():
     server, _ = build_server(settings(profiles=("read",)), comfyui=client)
     async with Client(server, mode="legacy") as mcp:
         result = await mcp.call_tool("template_search", {"query": "dots"})
+        detail = await mcp.call_tool("template_get", {"name": "dots", "include_workflow": False})
     assert not result.is_error, result.content[0].text
     assert [h["name"] for h in result.structured_content["results"]] == ["dots"]
-    assert result.structured_content["results"][0]["runnability"]["missing_models"][0]["folder_known"] is False
+    assert result.structured_content["results"][0]["runnability"]["missing_models"]["count"] == 1
+    assert detail.structured_content["runnability"]["missing_models"][0]["folder_known"] is False
     assert not [p for p in seen if p.startswith("/models/") or p == "/templates/...json"]
 
 
@@ -928,7 +1155,7 @@ async def test_an_unknown_template_suggests_close_names():
         ("model_list", {}, "/models/checkpoints", [{"name": "x"}]),
         ("template_search", {"query": "x"}, "/templates/index.json", {"templates": []}),
         ("template_search", {"query": "x"}, "/templates/index.json", [{"templates": [{"title": "no name"}]}]),
-        ("template_search", {"query": "flux"}, "/templates/flux_custom.json", {"no": "nodes"}),
+        ("template_get", {"name": "flux_custom"}, "/templates/flux_custom.json", {"no": "nodes"}),
         ("template_get", {"name": "sd15_simple"}, "/templates/sd15_simple.json", []),
     ],
     ids=[

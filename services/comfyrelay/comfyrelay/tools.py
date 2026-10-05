@@ -36,7 +36,7 @@ from .docs_index import DocsIndex
 from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
 from .tools_docs import DOCS_TOOLS
-from .tools_introspection import INTROSPECTION_TOOLS
+from .tools_introspection import INTROSPECTION_TOOLS, TemplateCache
 from .tools_workflow import WORKFLOW_TOOLS, reattach_refuse_cancel, reattach_status
 
 log = logging.getLogger("comfyrelay")
@@ -57,6 +57,8 @@ class Relay:
     # The docs index built into the image (#134), or None with why.
     docs: DocsIndex | None = None
     docs_error: str | None = None
+    # Each workflow template's requirements, for the installed templates version (template_search).
+    template_requirements: TemplateCache = field(default_factory=TemplateCache)
 
 
 @dataclass(frozen=True)

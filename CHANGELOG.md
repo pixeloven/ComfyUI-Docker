@@ -9,6 +9,20 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## Unreleased
+
+- **comfyrelay `template_search`: `runnable_only`, and runnability for every match**
+  ([#167](https://github.com/pixeloven/ComfyUI-Docker/issues/167)). `runnable_only: true` returns only
+  templates this instance can run now. Among templates matching as many query words, runnable ones rank
+  first. A hit's `runnability` is now a summary: `runnable` (`null` when the template, a model folder it
+  names or `/object_info` couldn't be read in time, with `unchecked` saying why; the search still answers),
+  and for each kind with something missing its `count` and first 3 names; `template_get` keeps the full
+  lists. That output change is minor under the new rule in `VERSIONING.md` → *What counts as major*: the
+  same information stays reachable through the same server. The result adds `hidden_not_runnable` and
+  `unchecked`. Each template's requirements are cached in the relay per installed templates version, so
+  only `/object_info` and `/models/<folder>` are read again on each search. The `comfyui-workflows`
+  guide's *Converting UI to API* now states the rules the editor's own export follows.
+
 ## 5.0.0 — 2026-10-02
 
 ### Breaking: the `mcp` image is now comfyrelay
