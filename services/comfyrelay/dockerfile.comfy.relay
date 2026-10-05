@@ -26,12 +26,17 @@ COPY pyproject.toml uv.lock ./
 COPY fetch/pyproject.toml fetch/
 COPY comfyctl/pyproject.toml comfyctl/README.md comfyctl/
 COPY comfyrelay/pyproject.toml comfyrelay/README.md comfyrelay/
-RUN uv sync --frozen --no-dev --all-packages --no-install-workspace
+# SPIKE (#167): RELAY_CONVERT=1 adds comfyrelay's `convert` extra (Playwright)
+# and, in the final stage, a headless Chromium. Unset, the image is as before.
+ARG RELAY_CONVERT=
+RUN uv sync --frozen --no-dev --all-packages --no-install-workspace \
+      $([ "$RELAY_CONVERT" = 1 ] && echo --extra convert)
 # Then the three workspace members themselves, not editable, so /src can go.
 COPY fetch/comfyfetch fetch/comfyfetch
 COPY comfyctl/comfyctl comfyctl/comfyctl
 COPY comfyrelay/comfyrelay comfyrelay/comfyrelay
-RUN uv sync --frozen --no-dev --all-packages --no-editable
+RUN uv sync --frozen --no-dev --all-packages --no-editable \
+      $([ "$RELAY_CONVERT" = 1 ] && echo --extra convert)
 # The SDK's own `mcp` command (mcp.cli: dev, run, install, which can write a
 # Claude Desktop config) comes with the SDK wheel whether or not its [cli]
 # extra is installed, and so does its --env-file dotenv loader. The relay uses
@@ -85,6 +90,15 @@ RUN groupadd -g "$APP_GID" comfy && \
     mkdir -p /app && chown comfy:comfy /app
 
 COPY --from=builder /opt/venv /opt/venv
+
+# SPIKE (#167): with RELAY_CONVERT=1, Chromium's headless shell and the system
+# libraries it needs, at /opt/playwright (convert.py looks there), readable by
+# any UID. Unset, this layer does nothing.
+ARG RELAY_CONVERT=
+RUN if [ "$RELAY_CONVERT" = 1 ]; then \
+      PLAYWRIGHT_BROWSERS_PATH=/opt/playwright /opt/venv/bin/playwright install --with-deps --only-shell chromium && \
+      rm -rf /var/lib/apt/lists/* /opt/playwright/ffmpeg-* && chmod -R a+rX /opt/playwright; \
+    fi
 
 # The docs index is a GPL-3.0 work, shipped with the English markdown it was built
 # from (/opt/docs/source), the GPL text and a NOTICE (/licenses). The server's

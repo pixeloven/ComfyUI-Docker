@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 from . import __version__
 from .comfyui import ComfyUIClient
+from .convert import Converter
 from .docs_index import DocsIndex, DocsIndexError
 from .jobs import SHUTDOWN_WAIT_SECONDS, JobStore
 from .settings import INSTANCE_ID_ENV, MAX_LARGE_REQUESTS_ENV, MCP_PATH, Settings, redact_url
@@ -60,6 +61,7 @@ def build_server(settings: Settings, *, comfyui: ComfyUIClient | None = None) ->
         settings=settings,
         comfyui=comfyui or ComfyUIClient(settings.comfyui_url),
         jobs=JobStore(max_in_flight=settings.max_jobs),
+        converter=Converter(settings.comfyui_url, pages=settings.convert_pages) if settings.convert else None,
     )
     try:
         relay.docs = DocsIndex(settings.docs_path)

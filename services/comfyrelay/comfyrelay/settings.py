@@ -25,6 +25,12 @@
     COMFYUI_MCP_DOCS        the docs index docs_search and docs_guide read
                             (default /opt/docs/docs.sqlite, where the image
                             builds it); without one those tools say so
+    COMFYUI_MCP_CONVERT     SPIKE (#167): 1 turns on UI-to-API conversion through
+                            the instance's own frontend in headless Chromium
+                            (convert.py). Default off.
+    COMFYUI_MCP_CONVERT_PAGES
+                            SPIKE: how many frontend tabs convert at once
+                            (default 2)
 
 The token, ComfyUI and listen variables are the ones the `mcp` image read
 before 5.0.0, when it packaged artokun/comfyui-mcp, so a deployment keeps them
@@ -48,6 +54,9 @@ MAX_JOBS_ENV = "COMFYUI_MCP_MAX_JOBS"
 MAX_LARGE_REQUESTS_ENV = "COMFYUI_MCP_MAX_LARGE_REQUESTS"
 DOCS_ENV = "COMFYUI_MCP_DOCS"
 DEFAULT_DOCS = "/opt/docs/docs.sqlite"
+CONVERT_ENV = "COMFYUI_MCP_CONVERT"
+CONVERT_PAGES_ENV = "COMFYUI_MCP_CONVERT_PAGES"
+DEFAULT_CONVERT_PAGES = 2
 DEFAULT_MAX_JOBS = 16
 DEFAULT_MAX_LARGE_REQUESTS = 2
 # The shortest token the server starts with (owner decision on #136): 32
@@ -172,6 +181,8 @@ class Settings:
     max_jobs: int = DEFAULT_MAX_JOBS
     max_large_requests: int = DEFAULT_MAX_LARGE_REQUESTS
     docs_path: str = DEFAULT_DOCS
+    convert: bool = False
+    convert_pages: int = DEFAULT_CONVERT_PAGES
 
     @classmethod
     def load(
@@ -213,6 +224,8 @@ class Settings:
             max_jobs=_at_least_one(env, MAX_JOBS_ENV, DEFAULT_MAX_JOBS),
             max_large_requests=_at_least_one(env, MAX_LARGE_REQUESTS_ENV, DEFAULT_MAX_LARGE_REQUESTS),
             docs_path=env.get(DOCS_ENV, "").strip() or DEFAULT_DOCS,
+            convert=env.get(CONVERT_ENV, "").strip().lower() in ("1", "true", "yes"),
+            convert_pages=_at_least_one(env, CONVERT_PAGES_ENV, DEFAULT_CONVERT_PAGES),
         )
 
 

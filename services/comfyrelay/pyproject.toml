@@ -13,6 +13,12 @@ requires-python = ">=3.11"
 # uv.lock fixes every version.
 dependencies = ["mcp==2.2.0", "httpx2>=2.5", "uvicorn>=0.31.1", "typer>=0.16.0"]
 
+# Spike for #167 (D1): the UI-to-API converter drives the instance's own
+# frontend in headless Chromium. Optional, and off unless COMFYUI_MCP_CONVERT=1;
+# the image installs it only when built with RELAY_CONVERT=1.
+[project.optional-dependencies]
+convert = ["playwright>=1.55"]
+
 # Not a wheel: comfyrelay ships as the mcp image (#136), and the release builds
 # only the comfyctl and comfyfetch wheels. No console script either: the command is `comfyctl relay`, which mounts
 # `comfyrelay.cli.app` as a group when this package is installed.

@@ -44,6 +44,7 @@ from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field, model_serializer
 
 from .comfyui import ComfyUIClient, ComfyUIError
+from .convert import unavailable as conversion_unavailable
 from .errors import RelayError
 from .workflow import (
     AUTOGROW,
@@ -731,8 +732,12 @@ class TemplateDetail(TemplateHit):
     author: str | None = None
     source: dict[str, Any]
     workflow: dict[str, Any] | None = Field(
-        default=None, description="The template in the frontend's UI format (nodes, links, subgraph definitions)"
+        default=None,
+        description="The template: in the frontend's UI format (nodes, links, subgraph definitions), or with "
+        "format='api' the API graph this instance's frontend converts it to",
     )
+    format: Literal["ui", "api"] = "ui"
+    converted_from_ui: bool = False
 
 
 def _active_nodes(workflow: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1111,6 +1116,11 @@ def _template_get(relay: Relay) -> Callable[..., Any]:
         include_workflow: bool = Field(
             default=True, description="false returns only the metadata and runnability, not the workflow"
         ),
+        format: Literal["ui", "api"] = Field(
+            default="ui",
+            description="ui: the editor's format. api: converted by this instance's own frontend, ready for "
+            "workflow_run; only when the server converts (COMFYUI_MCP_CONVERT=1), else conversion_unavailable",
+        ),
     ) -> TemplateDetail:
         """Fetch one ComfyUI workflow template by name: its metadata, a runnability check against the live
         instance (the same one template_search reports), and the workflow itself.
@@ -1136,6 +1146,17 @@ def _template_get(relay: Relay) -> Callable[..., Any]:
             )
         template, category = found
         workflow = await relay.comfyui.template(name)
+        ui_workflow = workflow
+        if format == "api" and include_workflow:
+            # SPIKE (#167, D5): no fallback converter. The error carries the UI graph when it fits.
+            fits = len(json.dumps(workflow, ensure_ascii=False)) <= WORKFLOW_MAX_CHARS
+            ui = {"workflow": workflow} if fits else {}
+            if relay.converter is None:
+                raise conversion_unavailable("this server does not convert (COMFYUI_MCP_CONVERT is off)", **ui)
+            try:
+                workflow = await relay.converter.convert(workflow)
+            except RelayError as exc:
+                raise RelayError(exc.code, exc.message, retryable=exc.retryable, **exc.detail, **ui) from None
         if include_workflow:
             size = len(json.dumps(workflow, indent=2, ensure_ascii=False))
             if size > WORKFLOW_MAX_CHARS:
@@ -1147,13 +1168,15 @@ def _template_get(relay: Relay) -> Callable[..., Any]:
                     size=size,
                     limit=WORKFLOW_MAX_CHARS,
                 )
-        folders = await _folder_files(relay.comfyui, [workflow])
+        folders = await _folder_files(relay.comfyui, [ui_workflow])
         return TemplateDetail(
             **_hit_fields(template, category, None),
             author=template.get("username") if isinstance(template.get("username"), str) else None,
             source=source,
-            runnability=_runnability(workflow, object_info, folders),
+            runnability=_runnability(ui_workflow, object_info, folders),
             workflow=workflow if include_workflow else None,
+            format="api" if workflow is not ui_workflow else "ui",
+            converted_from_ui=workflow is not ui_workflow,
         )
 
     return template_get

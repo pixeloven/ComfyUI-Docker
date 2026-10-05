@@ -44,6 +44,7 @@ from mcp_types import AudioContent, CallToolResult, ImageContent, TextContent, T
 from pydantic import BaseModel, Field
 
 from .comfyui import ComfyUIClient, ComfyUIError
+from .convert import is_ui_format
 from .errors import RelayError
 from .jobs import MAX_WAIT_SECONDS, AlreadyFinished, current_job, unknown_job
 from .workflow import Problem, Report, validate
@@ -138,13 +139,20 @@ class ValidationResult(BaseModel):
     partner_api_nodes: list[PartnerApiNode] = Field(description="workflow_run refuses a graph with any")
     output_nodes: list[str] = Field(description="Node ids ComfyUI would run the graph for")
     node_count: int
+    converted_from_ui: bool = Field(
+        default=False, description="The graph was sent in UI format and converted by this instance's frontend"
+    )
+    workflow: dict[str, Any] | None = Field(
+        default=None, description="When converted_from_ui: the API-format graph that was checked"
+    )
 
 
 WorkflowArg = Annotated[
     dict[str, Any],
     Field(
         description='The workflow in ComfyUI\'s API format: {"<node id>": {"class_type": "<node class>", '
-        '"inputs": {"<name>": <value> or ["<source node id>", <output index>]}}}. Not the editor\'s UI format.'
+        '"inputs": {"<name>": <value> or ["<source node id>", <output index>]}}}. The editor\'s UI format is '
+        "accepted only when this server converts it (COMFYUI_MCP_CONVERT=1); otherwise it is refused."
     ),
 ]
 
@@ -204,6 +212,14 @@ async def _shared(
     return await asyncio.shield(held.future)
 
 
+async def _as_api(relay: Relay, workflow: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """SPIKE (#167, D4): a UI-format graph, converted by the instance's own frontend, when conversion is on.
+    Anything else, or with conversion off, passes through unchanged, and validation treats it as before."""
+    if relay.converter is None or not is_ui_format(workflow):
+        return workflow, False
+    return await relay.converter.convert(workflow), True
+
+
 async def _validate(relay: Relay, workflow: dict[str, Any]) -> Report:
     # Shared for a few seconds: file-picker options and installed nodes change, but rarely within a run's setup;
     # an upload drops the copy (workflow_upload_input).
@@ -222,7 +238,11 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
         itself when workflow_run submits the graph, and come back as its errors. Changes nothing. workflow_run
         runs this same check first.
         """
-        return _result(await _validate(relay, workflow))
+        workflow, converted = await _as_api(relay, workflow)
+        result = _result(await _validate(relay, workflow))
+        if converted:
+            result.converted_from_ui, result.workflow = True, workflow
+        return result
 
     return workflow_validate
 
@@ -244,6 +264,9 @@ class RunStarted(BaseModel):
     )
     queue_number: float | None = None
     warnings: list[WorkflowProblem] = Field(description="From the validation; they did not stop the run")
+    converted_from_ui: bool = Field(
+        default=False, description="The graph was sent in UI format and converted by this instance's frontend"
+    )
 
 
 def refuse_partner_nodes(nodes: list[dict[str, Any]]) -> RelayError:
@@ -307,6 +330,7 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
         What the graph does is up to its nodes: this server reaches only ComfyUI, but a custom node installed there
         may write anywhere ComfyUI can, or reach the network. Only partner-API nodes are refused.
         """
+        workflow, converted = await _as_api(relay, workflow)
         report = await _validate(relay, workflow)
         if report.partner_api_nodes:
             raise refuse_partner_nodes(report.partner_api_nodes)
@@ -346,6 +370,7 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
             comfyui_state=progress["comfyui_state"],
             queue_number=answer.get("number"),
             warnings=[WorkflowProblem(**p) for p in [*_problems(report.warnings), *dropped]],
+            converted_from_ui=converted,
         )
 
     return workflow_run

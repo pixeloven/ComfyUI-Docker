@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .comfyui import ComfyUIClient, ComfyUIError
 from .consent import ConsentGate
+from .convert import Converter
 from .docs_index import DocsIndex
 from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
@@ -57,6 +58,8 @@ class Relay:
     # The docs index built into the image (#134), or None with why.
     docs: DocsIndex | None = None
     docs_error: str | None = None
+    # SPIKE (#167): UI-to-API conversion, when COMFYUI_MCP_CONVERT=1; None when it is off.
+    converter: Converter | None = None
 
 
 @dataclass(frozen=True)
