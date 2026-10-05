@@ -9,7 +9,9 @@ Every answer comes from the live ComfyUI this relay serves, through
                      pack's own under /extensions/<pack>/docs/) when it has one
     model_list       /models and /models/<folder>
     template_search  /templates/index.json, enriched from index.mcp.json when
-                     ComfyUI serves it, plus a runnability check per hit
+                     ComfyUI serves it, plus a runnability check per match
+                     (from requirements cached per templates version), with
+                     a compact summary of it per hit
     template_get     /templates/<name>.json, plus the same check
 
 All of them are read-only (#103: no writes, no installs, and no calls to
@@ -35,8 +37,9 @@ import difflib
 import json
 import math
 import re
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote
 
@@ -678,6 +681,63 @@ class Runnability(BaseModel):
     models_checked: int = Field(description="Models the template declares on its nodes; only these are checked")
 
 
+# What a search hit keeps of a runnability check: a count per kind and its first few names, each cut.
+HIT_NAMES_MAX, HIT_NAME_MAX_CHARS = 3, 80
+
+
+class Missing(BaseModel):
+    count: int
+    first: list[str] = Field(
+        description=f"The first {HIT_NAMES_MAX}, each cut to {HIT_NAME_MAX_CHARS} characters; template_get lists "
+        "them all"
+    )
+
+
+class RunnabilitySummary(BaseModel):
+    """template_search's short form of template_get's runnability check. A kind with nothing missing is left out,
+    so a runnable template's summary is {"runnable": true}."""
+
+    @model_serializer(mode="wrap")
+    def _drop_none(self, handler: Callable[[Any], dict[str, Any]]) -> dict[str, Any]:
+        return {k: v for k, v in handler(self).items() if v is not None or k == "runnable"}
+
+    runnable: bool | None = Field(
+        description="As template_get's runnability.runnable. null: the template couldn't be checked; unchecked says why"
+    )
+    unchecked: str | None = Field(
+        default=None,
+        description="Why runnable is null: `timeout` (not fetched in time; a later search may check it), or the "
+        "error code fetching or reading the template gave",
+    )
+    missing_nodes: Missing | None = Field(default=None, description="Node classes this instance lacks")
+    missing_models: Missing | None = Field(default=None, description="Declared models not on disk, by file name")
+    models_need_value_change: Missing | None = Field(
+        default=None, description="Declared models on disk only in a subfolder, by file name"
+    )
+    missing_inputs: Missing | None = Field(default=None, description="Input files the input directory lacks")
+    api_nodes: Missing | None = Field(default=None, description="Partner-API node classes")
+
+
+def _missing(names: list[str]) -> Missing | None:
+    if not names:
+        return None
+    return Missing(count=len(names), first=[_capped(n, HIT_NAME_MAX_CHARS) for n in names[:HIT_NAMES_MAX]])
+
+
+def _summary(check: Runnability | str) -> RunnabilitySummary:
+    """The hit's summary of a check, or of why there is none (a str)."""
+    if isinstance(check, str):
+        return RunnabilitySummary(runnable=None, unchecked=check)
+    return RunnabilitySummary(
+        runnable=check.runnable,
+        missing_nodes=_missing([m.class_type for m in check.missing_nodes]),
+        missing_models=_missing([m.name for m in check.missing_models]),
+        models_need_value_change=_missing([m.name for m in check.models_need_value_change]),
+        missing_inputs=_missing([m.file for m in check.missing_inputs]),
+        api_nodes=_missing(check.api_nodes),
+    )
+
+
 class TemplateHit(_Compact):
     name: str = Field(description="Pass it to template_get")
     title: str
@@ -689,12 +749,13 @@ class TemplateHit(_Compact):
     partner_api: bool = Field(description="The index marks it as using partner-API (paid) nodes")
     min_comfyui_version: str | None = None
     tutorial_url: str | None = None
-    runnability: Runnability
 
 
 class TemplateSearchHit(TemplateHit):
-    """A template_search hit. The fields below come from /templates/index.mcp.json, when ComfyUI serves it and
+    """A template_search hit. task to freshness come from /templates/index.mcp.json, when ComfyUI serves it and
     lists the template."""
+
+    runnability: RunnabilitySummary
 
     task: str | None = Field(default=None, description="What it does, in a few words: 'Image to Video'")
     inputs: list[str] | None = Field(default=None, description="What it takes, in prose: 'image: Starting frame'")
@@ -710,8 +771,12 @@ class TemplateSearchHit(TemplateHit):
 
 class TemplateSearchResult(BaseModel):
     query: str
-    total_matches: int
+    total_matches: int = Field(description="Matches left after the partner-API and runnable_only filters")
     hidden_partner_api: int = Field(description="Matches left out because they use partner-API nodes")
+    hidden_not_runnable: int = Field(description="Matches runnable_only left out because their check found a gap")
+    unchecked: int = Field(
+        description="Matches whose runnability couldn't be checked (runnable null); runnable_only leaves them out"
+    )
     source: dict[str, Any] = Field(
         description="The templates package, and `index`: index.mcp.json when ComfyUI's agent index added to at "
         "least one template (hits it lists carry task, inputs, outputs, capabilities, recommend and freshness), "
@@ -728,6 +793,7 @@ WORKFLOW_MAX_CHARS = 80_000
 
 
 class TemplateDetail(TemplateHit):
+    runnability: Runnability
     author: str | None = None
     source: dict[str, Any]
     workflow: dict[str, Any] | None = Field(
@@ -795,14 +861,23 @@ def _combo_values(spec: Any) -> list[Any] | None:
     return opts.get("options") if isinstance(opts.get("options"), list) else None
 
 
-def _missing_inputs(nodes: list[dict[str, Any]], object_info: dict[str, Any]) -> list[MissingInput]:
-    missing: dict[tuple[str, str], MissingInput] = {}
+@dataclass(frozen=True)
+class Requirements:
+    """What a template needs, read from its workflow alone, so it holds for as long as the templates version does
+    (TemplateCache). _runnability checks it against the live instance."""
+
+    uses: dict[str, int]  # active node class -> how many nodes of it
+    packs: dict[str, str]  # node class -> the pack (cnr_id) the template names for it
+    models: tuple[dict[str, Any], ...]  # declared models: name, directory and url
+    inputs: tuple[tuple[str, str, str], ...]  # (loader class, input, file) for each loader value not fed by a link
+
+
+def _loader_inputs(nodes: list[dict[str, Any]]) -> tuple[tuple[str, str, str], ...]:
+    found: dict[tuple[str, str], tuple[str, str, str]] = {}
     for node in nodes:
         kind = node["type"]
         field = INPUT_LOADERS.get(kind)
-        spec = ((object_info.get(kind) or {}).get("input") or {}).get("required", {}).get(field) if field else None
-        available = _combo_values(spec)
-        if available is None:
+        if field is None:
             continue
         linked = any(
             isinstance(i, dict) and i.get("name") == field and i.get("link") is not None
@@ -813,27 +888,42 @@ def _missing_inputs(nodes: list[dict[str, Any]], object_info: dict[str, Any]) ->
             value = named[field]
         else:
             value = values[0] if isinstance(values, list) and values else None
-        if linked or not isinstance(value, str) or not value or value in available:
-            continue
-        missing.setdefault((kind, value), MissingInput(class_type=kind, input=field, file=value))
-    return list(missing.values())
+        if not linked and isinstance(value, str) and value:
+            found.setdefault((kind, value), (kind, field, value))
+    return tuple(found.values())
 
 
-def _runnability(
-    workflow: dict[str, Any], object_info: dict[str, Any], folders: dict[str, list[str] | None]
-) -> Runnability:
+def _requirements(workflow: dict[str, Any]) -> Requirements:
     nodes = _active_nodes(workflow)
-    uses = Counter(n["type"] for n in nodes)
     packs: dict[str, str] = {}
     for node in nodes:
         props = node.get("properties") if isinstance(node.get("properties"), dict) else {}
         if isinstance(props.get("cnr_id"), str):
             packs.setdefault(node["type"], props["cnr_id"])
+    models = tuple(
+        {"name": m["name"], "directory": m["directory"], "url": m.get("url") if isinstance(m.get("url"), str) else None}
+        for m in _declared_models(nodes)
+    )
+    return Requirements(dict(Counter(n["type"] for n in nodes)), packs, models, _loader_inputs(nodes))
+
+
+def _missing_inputs(inputs: Iterable[tuple[str, str, str]], object_info: dict[str, Any]) -> list[MissingInput]:
+    missing = []
+    for kind, field, value in inputs:
+        spec = ((object_info.get(kind) or {}).get("input") or {}).get("required", {}).get(field)
+        available = _combo_values(spec)
+        if available is not None and value not in available:
+            missing.append(MissingInput(class_type=kind, input=field, file=value))
+    return missing
+
+
+def _runnability(needs: Requirements, object_info: dict[str, Any], folders: dict[str, list[str] | None]) -> Runnability:
+    uses = needs.uses
     missing_nodes = [
-        MissingNode(class_type=t, pack=packs.get(t), count=c) for t, c in uses.items() if t not in object_info
+        MissingNode(class_type=t, pack=needs.packs.get(t), count=c) for t, c in uses.items() if t not in object_info
     ]
     api_nodes = sorted(t for t in uses if partner_signals(object_info.get(t)))
-    models = _declared_models(nodes)
+    models = needs.models
     missing_models, misplaced = [], []
     for m in models:
         found = _on_disk(m["name"], folders.get(m["directory"]) or [])
@@ -855,7 +945,7 @@ def _runnability(
                     needs_value_change=f"set the loader's value from {m['name']!r} to {found!r}",
                 )
             )
-    missing_inputs = _missing_inputs(nodes, object_info)
+    missing_inputs = _missing_inputs(needs.inputs, object_info)
     return Runnability(
         runnable=not (missing_nodes or missing_models or misplaced or missing_inputs or api_nodes),
         missing_nodes=missing_nodes,
@@ -868,9 +958,9 @@ def _runnability(
     )
 
 
-async def _folder_files(comfyui: ComfyUIClient, workflows: list[dict[str, Any]]) -> dict[str, list[str] | None]:
-    """The files in every folder the workflows' models name, fetched once each; None for a folder ComfyUI lacks."""
-    wanted = sorted({m["directory"] for w in workflows for m in _declared_models(_active_nodes(w))} - DOT_SEGMENTS)
+async def _folder_files(comfyui: ComfyUIClient, needs: Iterable[Requirements]) -> dict[str, list[str] | None]:
+    """The files in every folder the templates' models name, fetched once each; None for a folder ComfyUI lacks."""
+    wanted = sorted({m["directory"] for n in needs for m in n.models} - DOT_SEGMENTS)
 
     async def files(folder: str) -> list[str] | None:
         try:
@@ -881,6 +971,87 @@ async def _folder_files(comfyui: ComfyUIClient, workflows: list[dict[str, Any]])
             raise
 
     return dict(zip(wanted, await _gather_limited(lambda f=f: files(f) for f in wanted), strict=True))
+
+
+# Requirements are cached for one templates version at a time: comfyui-workflow-templates 0.11.66 serves 564
+# templates, so this bounds the cache well above a whole package without letting it grow unchecked.
+TEMPLATE_CACHE_MAX = 2048
+# Checking every match is optional (it only ranks and filters), so fetching the templates the cache lacks never
+# holds a search up longer than this; whatever is still unfetched is reported unchecked. Fetching all 564 of
+# 0.11.66 from a local ComfyUI took about half a second at FETCH_CONCURRENCY.
+TEMPLATE_FETCH_SECONDS = 5.0
+
+
+class TemplateCache:
+    """Each template's Requirements, by name, for the one templates version (installed_templates_version in
+    /system_stats) they were read from. A template's file never changes within a version, so only the live side
+    of a check (/object_info, /models/<folder>) is read again on each search. Another version empties the cache;
+    an unknown version is never cached. At most max_entries, least recently used dropped first."""
+
+    def __init__(self, max_entries: int = TEMPLATE_CACHE_MAX) -> None:
+        self.max_entries = max_entries
+        self.version: str | None = None
+        self._entries: OrderedDict[str, Requirements] = OrderedDict()
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def get(self, version: str | None, name: str) -> Requirements | None:
+        if version is None or version != self.version or name not in self._entries:
+            return None
+        self._entries.move_to_end(name)
+        return self._entries[name]
+
+    def put(self, version: str | None, name: str, needs: Requirements) -> None:
+        if version is None:
+            return
+        if version != self.version:
+            self._entries.clear()
+            self.version = version
+        self._entries[name] = needs
+        self._entries.move_to_end(name)
+        while len(self._entries) > self.max_entries:
+            self._entries.popitem(last=False)
+
+
+async def _requirements_of(
+    comfyui: ComfyUIClient, cache: TemplateCache, version: str | None, names: list[str]
+) -> dict[str, Requirements | str]:
+    """Each named template's Requirements, from the cache or else fetched (FETCH_CONCURRENCY at a time, in the
+    order given, for at most TEMPLATE_FETCH_SECONDS), or a str saying why there are none: `timeout`, or the error
+    code fetching it gave. Never raises for a template."""
+    out: dict[str, Requirements | str] = {}
+    todo = []
+    for name in names:
+        cached = cache.get(version, name)
+        if cached is None:
+            todo.append(name)
+        else:
+            out[name] = cached
+    gate = asyncio.Semaphore(FETCH_CONCURRENCY)
+
+    async def fetch(name: str) -> None:
+        async with gate:
+            try:
+                needs = _requirements(await comfyui.template(name))
+            except ComfyUIError as exc:
+                out[name] = exc.code
+                return
+            except (AttributeError, KeyError, TypeError, ValueError):  # a workflow shaped unlike any template
+                out[name] = "comfyui_bad_response"
+                return
+        cache.put(version, name, needs)
+        out[name] = needs
+
+    tasks = [asyncio.ensure_future(fetch(n)) for n in todo]
+    try:
+        if tasks:
+            await asyncio.wait(tasks, timeout=TEMPLATE_FETCH_SECONDS)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    return {name: out.get(name, "timeout") for name in names}
 
 
 def _index_entries(index: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
@@ -1036,9 +1207,13 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
         include_partner_api: bool = Field(
             default=False, description="Also return templates built on partner-API (paid) nodes"
         ),
+        runnable_only: bool = Field(
+            default=False,
+            description="Return only templates this instance can run now (runnable true); unchecked ones are left out",
+        ),
     ) -> TemplateSearchResult:
         """Find ComfyUI workflow templates (the ones the ComfyUI frontend's template browser offers) for a goal,
-        by title, name, tags, model family, description and category, and check each hit against the live
+        by title, name, tags, model family, description and category, and check each match against the live
         instance.
 
         When ComfyUI serves its agent index (/templates/index.mcp.json; v0.37.0 does), the search also matches
@@ -1046,11 +1221,14 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
         recommend and freshness, to choose by. source.index says whether it was used; if ComfyUI can't serve it,
         the search runs on index.json alone.
 
-        Each hit's runnability lists what this instance is missing for it: node classes, declared models (with
-        their folder and source URL), models that are on disk only under another path, input files its loaders
-        name, and partner-API nodes. runnable is true only when none of those is found; it does not validate the
-        graph itself, models named only in widget values, or memory. Templates built on partner-API nodes, which
-        spend credits, are left out unless include_partner_api is true. Fetch one with template_get.
+        Hits are ranked by how many query words they match, then runnable before not, then relevance. Each hit's
+        runnability summarises what this instance is missing for it: counts and the first few names of node
+        classes, declared models, models on disk only under another path, input files its loaders name, and
+        partner-API nodes; template_get gives the full lists. runnable is true only when none of those is found;
+        it does not validate the graph itself, models named only in widget values, or memory. runnable is null
+        when the template couldn't be fetched in time (unchecked says why). runnable_only keeps only runnable
+        templates. Templates built on partner-API nodes, which spend credits, are left out unless
+        include_partner_api is true. Fetch one with template_get.
         """
         words = _words(query)
         if not words:
@@ -1079,27 +1257,46 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
                 hidden += 1
                 continue
             usage = template.get("usage") if isinstance(template.get("usage"), int) else 0
-            scored.append(((-matched, -score, -usage), template, category))
-        scored.sort(key=lambda s: s[0])
-        top = scored[:limit]
-        workflows = await _gather_limited(lambda t=t: relay.comfyui.template(t["name"]) for _, t, _ in top)
-        folders = await _folder_files(relay.comfyui, workflows)
-        results = [
-            TemplateSearchHit(
-                **_hit_fields(t, c, 240, mcp.get(t["name"])), runnability=_runnability(w, object_info, folders)
-            )
-            for (_, t, c), w in zip(top, workflows, strict=True)
-        ]
-        if not include_partner_api:
-            # The index's openSource flag is the index's word; the check's api_nodes is the graph's.
-            kept = [h for h in results if not h.runnability.api_nodes]
-            hidden, results = hidden + len(results) - len(kept), kept
+            scored.append(((matched, score, usage), template, category))
+        # Fetched best first, so a search cut short by TEMPLATE_FETCH_SECONDS has checked its likeliest hits.
+        scored.sort(key=lambda s: (-s[0][0], -s[0][1], -s[0][2]))
+        version = source.get("version") if isinstance(source.get("version"), str) else None
+        needs = await _requirements_of(
+            relay.comfyui, relay.template_requirements, version, [t["name"] for _, t, _ in scored]
+        )
+        folders = await _folder_files(relay.comfyui, (n for n in needs.values() if isinstance(n, Requirements)))
+        checks = {
+            name: _runnability(n, object_info, folders) if isinstance(n, Requirements) else n
+            for name, n in needs.items()
+        }
+        kept, not_runnable, unchecked = [], 0, 0
+        for rank, template, category in scored:
+            check = checks[template["name"]]
+            if isinstance(check, str):
+                unchecked += 1
+                if runnable_only:
+                    continue
+            elif check.api_nodes and not include_partner_api:
+                # The index's openSource flag is the index's word; the check's api_nodes is the graph's.
+                hidden += 1
+                continue
+            elif runnable_only and not check.runnable:
+                not_runnable += 1
+                continue
+            kept.append((rank, template, category, check))
+        # Runnable only breaks ties between templates that match as many query words: never outright first.
+        kept.sort(key=lambda k: (-k[0][0], not (isinstance(k[3], Runnability) and k[3].runnable), -k[0][1], -k[0][2]))
         return TemplateSearchResult(
             query=query,
-            total_matches=len(scored) - (len(top) - len(results)),
+            total_matches=len(kept),
             hidden_partner_api=hidden,
+            hidden_not_runnable=not_runnable,
+            unchecked=unchecked,
             source=source,
-            results=results,
+            results=[
+                TemplateSearchHit(**_hit_fields(t, c, 240, mcp.get(t["name"])), runnability=_summary(check))
+                for _, t, c, check in kept[:limit]
+            ],
         )
 
     return template_search
@@ -1147,12 +1344,13 @@ def _template_get(relay: Relay) -> Callable[..., Any]:
                     size=size,
                     limit=WORKFLOW_MAX_CHARS,
                 )
-        folders = await _folder_files(relay.comfyui, [workflow])
+        needs = _requirements(workflow)
+        folders = await _folder_files(relay.comfyui, [needs])
         return TemplateDetail(
             **_hit_fields(template, category, None),
             author=template.get("username") if isinstance(template.get("username"), str) else None,
             source=source,
-            runnability=_runnability(workflow, object_info, folders),
+            runnability=_runnability(needs, object_info, folders),
             workflow=workflow if include_workflow else None,
         )
 

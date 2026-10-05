@@ -28,17 +28,46 @@ export it in API format ("Export (API)" in the workflow menu). The editor knows
 each node's widget order, resolves primitives and reroutes, and flattens
 subgraphs, so its export is what `/prompt` expects.
 
-Converting by hand is possible but easy to get wrong:
+Converting by hand is possible but easy to get wrong. These are the rules the
+editor's own export follows, checked against frontend 1.52.7; a hand
+conversion has to follow them too.
 
-- `widgets_values` is positional. Map it to input names with the node's
-  definition (`/object_info/<class>`), in the order the inputs are declared.
-- A seed-like input with a "control after generate" widget has an extra value
-  after it in `widgets_values` (`"fixed"`, `"randomize"` and so on). That value
-  isn't an input, so skip it.
-- An input fed by a link has no widget value to copy. Follow the link instead:
-  `links` entries hold the source node and its output slot.
-- Nodes inside a subgraph (`definitions.subgraphs`) must be brought up to the
-  top level, with ids that stay unique.
+- **`widgets_values` is positional, in `input_order`.** Pair its entries with
+  the input names that `/object_info/<class>` lists under `input_order`
+  (required, then optional). Inputs that only accept a link, such as an IMAGE
+  or MODEL socket, take no position in the list, so skip them when counting.
+- **When a widget input is linked, the link wins.** Its entry in
+  `widgets_values` usually stays, but the API graph gets
+  `["<source node id>", <output index>]`, found through the `links` array,
+  instead of the stored value.
+- **Some entries aren't inputs, so leave them out.**
+  - A seed-like input with a "control after generate" setting is followed by
+    one extra entry (`"fixed"`, `"randomize"` and so on). That setting belongs
+    to the editor.
+  - LoadImage's second entry (usually `"image"`) belongs to its upload button.
+    The editor never sends that widget; only the file name is an input.
+- **A dynamic combo expands into dotted names.** Its entry is the selected
+  option, followed by the inputs that option adds. In the API graph the
+  selector keeps its own name, and each added input is named
+  `<selector>.<input>`, for example `resize_type.width`.
+- **A list value is wrapped.** An input whose value is a JSON array is written
+  as `{"__value__": [...]}`, so that ComfyUI doesn't take it for a link.
+  ComfyUI unwraps it before the node runs.
+- **Subgraphs are flattened.** Each node inside a subgraph instance (its
+  definition is in `definitions.subgraphs`) moves to the top level, with the
+  id `<instance id>:<inner id>`, for example `"12:3"`. Links that crossed the
+  subgraph's edge are joined to the nodes outside.
+- **Frontend-only nodes are dropped.** `Note`, `MarkdownNote`, `Reroute` and
+  `PrimitiveNode` never reach `/prompt`. A link through a reroute goes
+  straight from its source, and a primitive's value is written into each
+  input it feeds.
+- **Muted and bypassed nodes are skipped.** A muted node (`mode` 2) is left
+  out. A bypassed one (`mode` 4) is left out as well, and the nodes that read
+  from it are wired to what fed it instead, matching by type.
+- **A socketless widget may take any value.** ImageCompare's `compare_view`
+  has no socket, and the node ignores its value, so validation passes
+  whatever is sent. The editor sends `{"__value__": ["", ""]}`; `null` passes
+  too.
 
 When a graph is small it's often quicker to build the API form directly from
 the node definitions (`/object_info/<class>`): pick the classes, fill every
