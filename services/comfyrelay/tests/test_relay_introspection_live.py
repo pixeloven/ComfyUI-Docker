@@ -173,10 +173,16 @@ async def test_template_search_runnable_only_returns_exactly_the_templates_this_
             runnable.add(name)
     assert runnable, f"none of {candidates} can run here: does this ComfyUI have models, or did the templates change?"
 
+    # One relay, so the second search reads the requirements the first cached: this tests the filter, not the
+    # time a cold search may take.
     args = {"query": "image upscale", "limit": 20}
-    everything = await call("template_search", args)
-    only = await call("template_search", {**args, "runnable_only": True})
-    assert only["unchecked"] == 0, "some templates went unchecked: TEMPLATE_FETCH_SECONDS was too short here"
+    server, _ = build_server(settings(comfyui_url=URL), comfyui=ComfyUIClient(URL))
+    async with Client(server, mode="legacy") as client:
+        first = await client.call_tool("template_search", args)
+        second = await client.call_tool("template_search", {**args, "runnable_only": True})
+    assert not first.is_error and not second.is_error, (first.content[0].text, second.content[0].text)
+    everything, only = first.structured_content, second.structured_content
+    assert only["unchecked"] == 0, "some templates went unchecked even with the requirements cached"
     assert {h["runnability"]["runnable"] for h in only["results"]} == {True}
     assert {h["name"] for h in only["results"]} & set(candidates) == runnable
     assert any(h["runnability"]["runnable"] is False for h in everything["results"]), "no upscaler needs a model?"

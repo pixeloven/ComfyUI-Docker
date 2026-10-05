@@ -917,6 +917,74 @@ async def test_a_template_that_cannot_be_fetched_is_unchecked_and_runnable_only_
     assert (only["unchecked"], only["hidden_not_runnable"], only["total_matches"]) == (1, 0, 2)
 
 
+async def _stalled_folder() -> httpx2.Response:
+    await asyncio.sleep(60)
+    raise AssertionError("the folder listing was waited for")
+
+
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [(httpx2.Response(500), "comfyui_http_error"), (_stalled_folder, "timeout")],
+    ids=["http-error", "stalled"],
+)
+async def test_a_model_folder_that_cannot_be_listed_leaves_only_its_templates_unchecked(answer, reason, monkeypatch):
+    monkeypatch.setattr(tools_introspection, "MODEL_FOLDERS_SECONDS", 0.5)
+    overrides = {"/models/checkpoints": answer}
+    got = await ok("template_search", {"query": "text"}, **overrides)
+    # sd15_simple and flux_custom declare checkpoints; video_wan declares no model.
+    assert {h["name"]: h["runnability"] for h in got["results"]} == {
+        "video_wan": {"runnable": True},
+        "sd15_simple": {"runnable": None, "unchecked": reason},
+        "flux_custom": {"runnable": None, "unchecked": reason},
+    }
+    assert got["unchecked"] == 2
+    only = await ok("template_search", {"query": "text", "runnable_only": True}, **overrides)
+    assert [h["name"] for h in only["results"]] == ["video_wan"]
+    assert (only["unchecked"], only["total_matches"]) == (2, 1)
+    # template_get still fails on it, as it always has: there the check is the answer, not enrichment.
+    if reason != "timeout":
+        assert (await error("template_get", {"name": "sd15_simple"}, **overrides))["code"] == reason
+
+
+@pytest.mark.parametrize(
+    "answer", [httpx2.Response(500), httpx2.Response(200, json=["KSampler"])], ids=["http-error", "malformed"]
+)
+async def test_template_search_answers_unchecked_when_object_info_fails(answer):
+    got = await ok("template_search", {"query": "text"}, **{"/object_info": answer})
+    assert {h["name"] for h in got["results"]} == {"sd15_simple", "flux_custom", "video_wan"}
+    reason = got["results"][0]["runnability"]["unchecked"]
+    assert reason in ("comfyui_http_error", "comfyui_bad_response")
+    assert {h["runnability"]["runnable"] for h in got["results"]} == {None}
+    assert got["unchecked"] == 3
+    only = await ok("template_search", {"query": "text", "runnable_only": True}, **{"/object_info": answer})
+    assert (only["results"], only["unchecked"]) == ([], 3)
+
+
+async def test_concurrent_cold_searches_share_one_limit_on_template_fetches():
+    index = [{"title": "T", "templates": [{"name": f"t{i}", "title": "thing"} for i in range(20)]}]
+    workflows = {f"/templates/t{i}.json": httpx2.Response(200, json={"nodes": [node("SaveImage")]}) for i in range(20)}
+    fake = Counting(**{"/templates/index.json": httpx2.Response(200, json=index)})
+    in_flight, peak = 0, 0
+
+    def slow(response: httpx2.Response):
+        async def answer() -> httpx2.Response:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            await asyncio.sleep(0.02)
+            in_flight -= 1
+            return response
+
+        return answer
+
+    fake.table.update({path: slow(r) for path, r in workflows.items()})
+    server, _ = fake.server()
+    async with Client(server, mode="legacy") as mcp:
+        got = await asyncio.gather(*(search(mcp, {"query": "thing", "limit": 20}) for _ in range(3)))
+    assert peak == tools_introspection.FETCH_CONCURRENCY
+    assert all(g["unchecked"] == 0 and len(g["results"]) == 20 for g in got)
+
+
 MCP_INDEX = [
     {
         "category": "Video",
