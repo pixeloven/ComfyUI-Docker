@@ -987,6 +987,29 @@ async def test_template_search_answers_unchecked_when_object_info_fails(answer, 
     assert (only["results"], only["unchecked"]) == ([], 3)
 
 
+async def test_a_check_that_fails_on_odd_object_info_leaves_only_its_template_unchecked(caplog):
+    """/object_info is untrusted: a shape no check expects marks that template check_failed, logged, and the
+    search still answers."""
+    odd = {**OBJECT_INFO, "LoadImage": {**OBJECT_INFO["LoadImage"], "input": {"required": []}}}
+    got = await ok("template_search", {"query": "restore"}, **{"/object_info": httpx2.Response(200, json=odd)})
+    assert {h["name"]: h["runnability"] for h in got["results"]} == {
+        "restore_photo": {"runnable": None, "unchecked": "check_failed"}
+    }
+    assert (got["unchecked"], got["hidden_partner_api"]) == (1, 1)
+    assert "the check of 'restore_photo' failed" in caplog.text
+
+
+async def test_a_template_whose_reading_raises_unexpectedly_is_check_failed(monkeypatch, caplog):
+    def broken(workflow):
+        raise RuntimeError("a bug")
+
+    monkeypatch.setattr(tools_introspection, "_requirements", broken)
+    got = await ok("template_search", {"query": "text"})
+    assert {h["runnability"]["unchecked"] for h in got["results"]} == {"check_failed"}
+    assert got["unchecked"] == 3
+    assert "RuntimeError: a bug" in caplog.text
+
+
 async def test_concurrent_cold_searches_share_one_limit_on_template_fetches():
     index = [{"title": "T", "templates": [{"name": f"t{i}", "title": "thing"} for i in range(20)]}]
     workflows = {f"/templates/t{i}.json": httpx2.Response(200, json={"nodes": [node("SaveImage")]}) for i in range(20)}

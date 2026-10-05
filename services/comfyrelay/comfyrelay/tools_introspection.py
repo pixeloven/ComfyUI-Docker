@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
+import logging
 import math
 import re
 from collections import Counter, OrderedDict
@@ -62,6 +63,8 @@ from .workflow import (
 
 if TYPE_CHECKING:
     from .tools import Relay
+
+log = logging.getLogger("comfyrelay")
 
 READ = frozenset({"read"})
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
@@ -990,9 +993,11 @@ MODEL_FOLDERS_SECONDS = 5.0
 # /object_info is 1.8 MB at v0.37.0, and more with many custom nodes, so template_search gives it longer than the
 # other reads; without it every match is unchecked. template_get waits for it as long as the client allows.
 OBJECT_INFO_SECONDS = 15.0
-# One search fetches at most this many templates at once, so another search finds slots free at the shared gate
-# rather than queued behind every template the first one still has to read.
-SEARCH_FETCH_CONCURRENCY = FETCH_CONCURRENCY // 2
+# A search takes one of its own slots before it queues at the shared gate (cache.gate), so at most this many of
+# its fetches wait there at once. Another search's fetches then queue behind those few, not behind every template
+# the first one still has to read: the two-level gate gives the fairness, so this can equal the shared limit and
+# a lone search still fetches at full concurrency.
+SEARCH_FETCH_CONCURRENCY = FETCH_CONCURRENCY
 
 
 class TemplateCache:
@@ -1044,6 +1049,7 @@ async def _bounded(jobs: dict[str, Callable[[], Awaitable[Any]]], seconds: float
         except RelayError as exc:
             out[key] = exc.code
         except Exception:  # a bug in a check is that check's answer, not the call's failure
+            log.exception("template_search: the check of %r failed", key)
             out[key] = "check_failed"
 
     tasks = [asyncio.ensure_future(run(k, j)) for k, j in jobs.items()]
@@ -1136,18 +1142,28 @@ async def _object_info_or_why(comfyui: ComfyUIClient) -> dict[str, dict[str, Any
 
 def _checks(
     needs: dict[str, Requirements | str], object_info: dict[str, Any], folders: dict[str, Any]
-) -> dict[str, Runnability | str]:
-    """Each template's runnability, or why it has none: its own fetch failed, or a folder its models name
-    couldn't be listed."""
+) -> tuple[dict[str, Runnability | str], set[str]]:
+    """Each template's runnability, or why it has none: its own fetch failed, a folder its models name couldn't
+    be listed, or checking it against ComfyUI's data failed (`check_failed`). And the templates whose graph uses
+    a partner-API node, known whenever the template and /object_info were read, even if a folder wasn't."""
     listed = {f: files for f, files in folders.items() if not isinstance(files, str)}
     out: dict[str, Runnability | str] = {}
+    partner: set[str] = set()
     for name, n in needs.items():
         if isinstance(n, str):
             out[name] = n
             continue
-        failed = next((folders[m["directory"]] for m in n.models if isinstance(folders.get(m["directory"]), str)), None)
-        out[name] = failed or _runnability(n, object_info, listed)
-    return out
+        try:
+            if _api_nodes(n, object_info):
+                partner.add(name)
+            failed = next(
+                (folders[m["directory"]] for m in n.models if isinstance(folders.get(m["directory"]), str)), None
+            )
+            out[name] = failed or _runnability(n, object_info, listed)
+        except Exception:  # /object_info is untrusted: a shape no check expects is that template's answer
+            log.exception("template_search: the check of %r failed", name)
+            out[name] = "check_failed"
+    return out, partner
 
 
 def _index_entries(index: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
@@ -1359,8 +1375,7 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
         scored.sort(key=lambda s: (-s[0][0], -s[0][1], -s[0][2]))
         names = [t["name"] for _, t, _ in scored]
         checks: dict[str, Runnability | str]
-        # The index's openSource flag is the index's word; a graph's partner-API nodes are the graph's. Known
-        # whenever the template and /object_info were read, even if a model folder it names wasn't.
+        # The index's openSource flag is the index's word; a graph's partner-API nodes are the graph's.
         partner: set[str] = set()
         if isinstance(object_info, str):  # no live side to check against: every match is unchecked
             checks = dict.fromkeys(names, object_info)
@@ -1370,8 +1385,7 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
             folders = await _folder_files_or_why(
                 relay.comfyui, (n for n in needs.values() if isinstance(n, Requirements))
             )
-            checks = _checks(needs, object_info, folders)
-            partner = {k for k, n in needs.items() if isinstance(n, Requirements) and _api_nodes(n, object_info)}
+            checks, partner = _checks(needs, object_info, folders)
         kept, not_runnable, unchecked = [], 0, 0
         for rank, template, category in scored:
             check = checks[template["name"]]
