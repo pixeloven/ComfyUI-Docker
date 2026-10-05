@@ -706,9 +706,9 @@ class RunnabilitySummary(BaseModel):
     )
     unchecked: str | None = Field(
         default=None,
-        description="Why runnable is null: `timeout` (the template, or a model folder it names, wasn't read in "
-        "time; a later search may check it), or the error code reading the template, one of those folders or "
-        "/object_info gave",
+        description="Why runnable is null: `timeout` (the template, a model folder it names, or /object_info wasn't "
+        "read in time; a later search may check it), the error code reading the template, one of those folders or "
+        "/object_info gave, or `check_failed` (the relay's own check failed)",
     )
     missing_nodes: Missing | None = Field(default=None, description="Node classes this instance lacks")
     missing_models: Missing | None = Field(default=None, description="Declared models not on disk, by file name")
@@ -918,12 +918,16 @@ def _missing_inputs(inputs: Iterable[tuple[str, str, str]], object_info: dict[st
     return missing
 
 
+def _api_nodes(needs: Requirements, object_info: dict[str, Any]) -> list[str]:
+    return sorted(t for t in needs.uses if partner_signals(object_info.get(t)))
+
+
 def _runnability(needs: Requirements, object_info: dict[str, Any], folders: dict[str, list[str] | None]) -> Runnability:
     uses = needs.uses
     missing_nodes = [
         MissingNode(class_type=t, pack=needs.packs.get(t), count=c) for t, c in uses.items() if t not in object_info
     ]
-    api_nodes = sorted(t for t in uses if partner_signals(object_info.get(t)))
+    api_nodes = _api_nodes(needs, object_info)
     models = needs.models
     missing_models, misplaced = [], []
     for m in models:
@@ -983,6 +987,12 @@ TEMPLATE_CACHE_MAX = 2048
 # second at FETCH_CONCURRENCY.
 TEMPLATE_FETCH_SECONDS = 5.0
 MODEL_FOLDERS_SECONDS = 5.0
+# /object_info is 1.8 MB at v0.37.0, and more with many custom nodes, so template_search gives it longer than the
+# other reads; without it every match is unchecked. template_get waits for it as long as the client allows.
+OBJECT_INFO_SECONDS = 15.0
+# One search fetches at most this many templates at once, so another search finds slots free at the shared gate
+# rather than queued behind every template the first one still has to read.
+SEARCH_FETCH_CONCURRENCY = FETCH_CONCURRENCY // 2
 
 
 class TemplateCache:
@@ -992,13 +1002,15 @@ class TemplateCache:
     an unknown version is never cached. At most max_entries, least recently used dropped first.
 
     `gate` is the relay's one limit on template fetches, shared by every search, so concurrent cold searches still
-    ask ComfyUI for at most FETCH_CONCURRENCY templates at once."""
+    ask ComfyUI for at most FETCH_CONCURRENCY templates at once. `fetching` holds the templates being read right
+    now, so a search that wants one of them waits for that read instead of making its own."""
 
     def __init__(self, max_entries: int = TEMPLATE_CACHE_MAX) -> None:
         self.max_entries = max_entries
         self.version: str | None = None
         self._entries: OrderedDict[str, Requirements] = OrderedDict()
         self.gate = asyncio.Semaphore(FETCH_CONCURRENCY)
+        self.fetching: dict[str, asyncio.Event] = {}
 
     def __len__(self) -> int:
         return len(self._entries)
@@ -1021,38 +1033,36 @@ class TemplateCache:
             self._entries.popitem(last=False)
 
 
-async def _bounded(
-    jobs: dict[str, Callable[[], Awaitable[Any]]], gate: asyncio.Semaphore, seconds: float
-) -> dict[str, Any]:
-    """Each job's answer, run under `gate` in the order given; a job not done within `seconds` in all is cancelled
-    and answers `timeout`. A job answers its own expected failures; anything else it raises is raised here."""
+async def _bounded(jobs: dict[str, Callable[[], Awaitable[Any]]], seconds: float) -> dict[str, Any]:
+    """Each job's answer. A job not done within `seconds` in all is cancelled and answers `timeout`, and a job that
+    raises answers why: a RelayError's code, or `check_failed` for anything else. No job fails the caller."""
     out: dict[str, Any] = {}
 
     async def run(key: str, job: Callable[[], Awaitable[Any]]) -> None:
-        async with gate:
+        try:
             out[key] = await job()
+        except RelayError as exc:
+            out[key] = exc.code
+        except Exception:  # a bug in a check is that check's answer, not the call's failure
+            out[key] = "check_failed"
 
     tasks = [asyncio.ensure_future(run(k, j)) for k, j in jobs.items()]
-    done: set[asyncio.Future[None]] = set()
     try:
         if tasks:
-            done, _ = await asyncio.wait(tasks, timeout=seconds)
+            await asyncio.wait(tasks, timeout=seconds)
     finally:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-    for task in done:
-        if not task.cancelled() and task.exception() is not None:
-            raise task.exception()  # type: ignore[misc]
     return {k: out.get(k, "timeout") for k in jobs}
 
 
 async def _requirements_of(
     comfyui: ComfyUIClient, cache: TemplateCache, version: str | None, names: list[str]
 ) -> dict[str, Requirements | str]:
-    """Each named template's Requirements, from the cache or else fetched (through cache.gate, in the order
-    given, for at most TEMPLATE_FETCH_SECONDS), or a str saying why there are none: `timeout`, or the error code
-    fetching it gave. Never raises for a template."""
+    """Each named template's Requirements, from the cache or else fetched (in the order given, at most
+    SEARCH_FETCH_CONCURRENCY at once and through cache.gate, for at most TEMPLATE_FETCH_SECONDS), or a str saying
+    why there are none: `timeout`, or the error code fetching it gave. Never raises for a template."""
     out: dict[str, Requirements | str] = {}
     todo = []
     for name in names:
@@ -1061,11 +1071,9 @@ async def _requirements_of(
             todo.append(name)
         else:
             out[name] = cached
+    own = asyncio.Semaphore(SEARCH_FETCH_CONCURRENCY)
 
-    async def fetch(name: str) -> Requirements | str:
-        cached = cache.get(version, name)  # another search may have read it while this one waited at the gate
-        if cached is not None:
-            return cached
+    async def read(name: str) -> Requirements | str:
         try:
             needs = _requirements(await comfyui.template(name))
         except ComfyUIError as exc:
@@ -1075,7 +1083,26 @@ async def _requirements_of(
         cache.put(version, name, needs)
         return needs
 
-    out.update(await _bounded({n: lambda n=n: fetch(n) for n in todo}, cache.gate, TEMPLATE_FETCH_SECONDS))
+    async def fetch(name: str) -> Requirements | str:
+        while True:
+            cached = cache.get(version, name)  # another search may have read it meanwhile
+            if cached is not None:
+                return cached
+            running = cache.fetching.get(name)
+            if running is not None:  # another search is reading it: wait for that, holding no slot
+                await running.wait()
+                continue
+            async with own, cache.gate:
+                if name in cache.fetching or cache.get(version, name) is not None:
+                    continue  # read, or started, while this one waited at the gates
+                cache.fetching[name] = done = asyncio.Event()
+                try:
+                    return await read(name)
+                finally:
+                    del cache.fetching[name]
+                    done.set()
+
+    out.update(await _bounded({n: lambda n=n: fetch(n) for n in todo}, TEMPLATE_FETCH_SECONDS))
     return {name: out[name] for name in names}
 
 
@@ -1083,21 +1110,26 @@ async def _folder_files_or_why(comfyui: ComfyUIClient, needs: Iterable[Requireme
     """As _folder_files, for at most MODEL_FOLDERS_SECONDS, but a folder ComfyUI fails to list (any status but
     404, a bad answer, no answer in time) answers a str saying why instead of failing the call."""
     wanted = sorted({m["directory"] for n in needs for m in n.models} - DOT_SEGMENTS)
+    gate = asyncio.Semaphore(FETCH_CONCURRENCY)
 
     async def files(folder: str) -> list[str] | str | None:
-        try:
-            return await comfyui.model_files(folder)
-        except ComfyUIError as exc:
-            return None if exc.detail.get("status") == 404 else exc.code
+        async with gate:
+            try:
+                return await comfyui.model_files(folder)
+            except ComfyUIError as exc:
+                return None if exc.detail.get("status") == 404 else exc.code
 
     jobs = {f: lambda f=f: files(f) for f in wanted}
-    return await _bounded(jobs, asyncio.Semaphore(FETCH_CONCURRENCY), MODEL_FOLDERS_SECONDS)
+    return await _bounded(jobs, MODEL_FOLDERS_SECONDS)
 
 
 async def _object_info_or_why(comfyui: ComfyUIClient) -> dict[str, dict[str, Any]] | str:
-    """/object_info, or the error code reading it gave: template_search then reports every match unchecked."""
+    """/object_info within OBJECT_INFO_SECONDS, or why not: `timeout`, or the error code reading it gave.
+    template_search then reports every match unchecked."""
     try:
-        return _checked_object_info(await comfyui.object_info())
+        return _checked_object_info(await asyncio.wait_for(comfyui.object_info(), OBJECT_INFO_SECONDS))
+    except TimeoutError:
+        return "timeout"
     except ComfyUIError as exc:
         return exc.code
 
@@ -1327,6 +1359,9 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
         scored.sort(key=lambda s: (-s[0][0], -s[0][1], -s[0][2]))
         names = [t["name"] for _, t, _ in scored]
         checks: dict[str, Runnability | str]
+        # The index's openSource flag is the index's word; a graph's partner-API nodes are the graph's. Known
+        # whenever the template and /object_info were read, even if a model folder it names wasn't.
+        partner: set[str] = set()
         if isinstance(object_info, str):  # no live side to check against: every match is unchecked
             checks = dict.fromkeys(names, object_info)
         else:
@@ -1336,17 +1371,17 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
                 relay.comfyui, (n for n in needs.values() if isinstance(n, Requirements))
             )
             checks = _checks(needs, object_info, folders)
+            partner = {k for k, n in needs.items() if isinstance(n, Requirements) and _api_nodes(n, object_info)}
         kept, not_runnable, unchecked = [], 0, 0
         for rank, template, category in scored:
             check = checks[template["name"]]
+            if template["name"] in partner and not include_partner_api:
+                hidden += 1
+                continue
             if isinstance(check, str):
                 unchecked += 1
                 if runnable_only:
                     continue
-            elif check.api_nodes and not include_partner_api:
-                # The index's openSource flag is the index's word; the check's api_nodes is the graph's.
-                hidden += 1
-                continue
             elif runnable_only and not check.runnable:
                 not_runnable += 1
                 continue

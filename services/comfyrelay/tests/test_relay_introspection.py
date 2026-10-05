@@ -767,6 +767,22 @@ async def test_template_search_drops_hits_whose_graph_uses_partner_api_nodes():
     assert [h["name"] for h in shown["results"]] == ["restore_cloud", "restore_photo"]
 
 
+async def test_a_partner_api_template_stays_hidden_when_a_model_folder_it_names_fails():
+    """The graph's API node is known from the template and /object_info alone, so a folder that can't be listed
+    doesn't turn a hidden template into a shown, unchecked one."""
+    cloud = {"nodes": [node("OpenAIDalle3", models=[model("sd15.safetensors", "checkpoints")]), node("SaveImage")]}
+    overrides = {
+        "/templates/restore_cloud.json": httpx2.Response(200, json=cloud),
+        "/models/checkpoints": httpx2.Response(500),
+    }
+    got = await ok("template_search", {"query": "restore"}, **overrides)
+    assert [h["name"] for h in got["results"]] == ["restore_photo"]
+    assert (got["hidden_partner_api"], got["unchecked"]) == (1, 0)
+    shown = await ok("template_search", {"query": "restore", "include_partner_api": True}, **overrides)
+    cloud_hit = next(h for h in shown["results"] if h["name"] == "restore_cloud")
+    assert cloud_hit["runnability"] == {"runnable": None, "unchecked": "comfyui_http_error"}
+
+
 async def test_template_search_runnable_only_keeps_only_runnable_templates():
     everything = await ok("template_search", {"query": "text"})
     assert [h["name"] for h in everything["results"]] == ["sd15_simple", "video_wan", "flux_custom"]
@@ -946,14 +962,25 @@ async def test_a_model_folder_that_cannot_be_listed_leaves_only_its_templates_un
         assert (await error("template_get", {"name": "sd15_simple"}, **overrides))["code"] == reason
 
 
+async def _stalled_object_info() -> httpx2.Response:
+    await asyncio.sleep(60)
+    raise AssertionError("/object_info was waited for")
+
+
 @pytest.mark.parametrize(
-    "answer", [httpx2.Response(500), httpx2.Response(200, json=["KSampler"])], ids=["http-error", "malformed"]
+    ("answer", "reason"),
+    [
+        (httpx2.Response(500), "comfyui_http_error"),
+        (httpx2.Response(200, json=["KSampler"]), "comfyui_bad_response"),
+        (_stalled_object_info, "timeout"),
+    ],
+    ids=["http-error", "malformed", "stalled"],
 )
-async def test_template_search_answers_unchecked_when_object_info_fails(answer):
+async def test_template_search_answers_unchecked_when_object_info_fails(answer, reason, monkeypatch):
+    monkeypatch.setattr(tools_introspection, "OBJECT_INFO_SECONDS", 0.5)
     got = await ok("template_search", {"query": "text"}, **{"/object_info": answer})
     assert {h["name"] for h in got["results"]} == {"sd15_simple", "flux_custom", "video_wan"}
-    reason = got["results"][0]["runnability"]["unchecked"]
-    assert reason in ("comfyui_http_error", "comfyui_bad_response")
+    assert {h["runnability"]["unchecked"] for h in got["results"]} == {reason}
     assert {h["runnability"]["runnable"] for h in got["results"]} == {None}
     assert got["unchecked"] == 3
     only = await ok("template_search", {"query": "text", "runnable_only": True}, **{"/object_info": answer})
@@ -983,6 +1010,32 @@ async def test_concurrent_cold_searches_share_one_limit_on_template_fetches():
         got = await asyncio.gather(*(search(mcp, {"query": "thing", "limit": 20}) for _ in range(3)))
     assert peak == tools_introspection.FETCH_CONCURRENCY
     assert all(g["unchecked"] == 0 and len(g["results"]) == 20 for g in got)
+    # Each template is read about once, not once per search.
+    workflow_fetches = [p for p in fake.fetched if p in workflows]
+    assert len(workflow_fetches) <= 20 + tools_introspection.FETCH_CONCURRENCY
+
+
+async def test_a_short_search_is_not_starved_by_a_long_cold_one(monkeypatch):
+    monkeypatch.setattr(tools_introspection, "TEMPLATE_FETCH_SECONDS", 1.0)
+    index = [
+        {"title": "A", "templates": [{"name": f"a{i}", "title": "alpha"} for i in range(200)]},
+        {"title": "B", "templates": [{"name": f"b{i}", "title": "beta"} for i in range(2)]},
+    ]
+    fake = Counting(**{"/templates/index.json": httpx2.Response(200, json=index)})
+
+    async def slow() -> httpx2.Response:
+        await asyncio.sleep(0.1)
+        return httpx2.Response(200, json={"nodes": [node("SaveImage")]})
+
+    fake.table.update({f"/templates/{t['name']}.json": slow for c in index for t in c["templates"]})
+    server, _ = fake.server()
+    async with Client(server, mode="legacy") as mcp:
+        long = asyncio.ensure_future(search(mcp, {"query": "alpha", "limit": 20}))
+        await asyncio.sleep(0.02)
+        short = await search(mcp, {"query": "beta"})
+        await long
+    assert short["unchecked"] == 0
+    assert [h["runnability"] for h in short["results"]] == [{"runnable": True}] * 2
 
 
 MCP_INDEX = [
