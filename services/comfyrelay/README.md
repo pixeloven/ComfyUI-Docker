@@ -105,7 +105,9 @@ image read before 5.0.0, so a deployment keeps them.
 
 `serve` takes the same settings as flags (`--comfyui-url`, `--host`, `--port`, `--profiles`),
 except the token, which it reads only from the environment so it never appears in a process
-list. `-o json` turns its log lines into JSON.
+list. Once it has read its settings, `serve` removes the token, and a `COMFYUI_URL` that carries
+credentials, from its own environment, so nothing it starts later (the converter's browser and its
+Playwright driver) inherits them. `-o json` turns its log lines into JSON.
 
 ## Capability profiles
 

@@ -43,7 +43,7 @@ from __future__ import annotations
 import os
 import re
 import socket
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 from typing import Literal
 from urllib.parse import urlsplit
@@ -232,6 +232,21 @@ class Settings:
             convert=env.get(CONVERT_ENV, "").strip() == "1",
             convert_pages=convert_pages,
         )
+
+
+def drop_secrets(env: MutableMapping[str, str] = os.environ) -> list[str]:
+    """Remove the secrets the server has already read from its own environment, so nothing it starts later (the
+    converter's Playwright driver and browser, any subprocess) inherits them: the token, and COMFYUI_URL when it
+    carries credentials. Call it once Settings.load has succeeded; nothing reads them from the environment after.
+    Returns the names it removed."""
+    dropped = []
+    if env.pop(TOKEN_ENV, None) is not None:
+        dropped.append(TOKEN_ENV)
+    url = env.get("COMFYUI_URL", "")
+    if "@" in url.partition("://")[2].partition("/")[0]:
+        del env["COMFYUI_URL"]
+        dropped.append("COMFYUI_URL")
+    return dropped
 
 
 def _at_least_one(env: Mapping[str, str], name: str, default: int) -> int:

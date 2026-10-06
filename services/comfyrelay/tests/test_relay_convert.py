@@ -933,3 +933,44 @@ async def test_the_export_waits_for_the_tabs_fetches_to_settle_but_not_forever(m
     t0 = loop.time()
     await stuck.settle()
     assert 0.55 < loop.time() - t0 < 0.8  # SETTLE_MAX_SECONDS, then it exports anyway
+
+
+def test_the_instructions_say_how_a_ui_workflow_gets_to_workflow_run(monkeypatch):
+    without, _ = build_server(settings())
+    assert 'docs_guide("workflow-formats")' in without.instructions and "{formats}" not in without.instructions
+    monkeypatch.setattr(conv, "installed", lambda: True)
+    with_conversion, _ = build_server(settings(convert=True))
+    assert "straight to workflow_validate or workflow_run" in with_conversion.instructions
+    assert 'docs_guide("workflow-formats")' not in with_conversion.instructions
+
+
+@pytest.mark.parametrize(
+    ("url", "dropped"),
+    [
+        ("http://comfyui:8188", ["COMFYUI_MCP_HTTP_TOKEN"]),
+        ("http://user:secret@comfyui:8188/", ["COMFYUI_MCP_HTTP_TOKEN", "COMFYUI_URL"]),
+    ],
+)
+def test_the_servers_secrets_leave_its_environment_once_read(url, dropped):
+    from comfyrelay.settings import drop_secrets
+
+    env = {"COMFYUI_MCP_HTTP_TOKEN": TOKEN, "COMFYUI_URL": url, "MCP_PORT": "9000", "PATH": "/usr/bin"}
+    assert drop_secrets(env) == dropped
+    assert "COMFYUI_MCP_HTTP_TOKEN" not in env and env["MCP_PORT"] == "9000" and env["PATH"] == "/usr/bin"
+    assert ("COMFYUI_URL" in env) == ("COMFYUI_URL" not in dropped)
+    assert drop_secrets(env) == []  # nothing left to drop
+
+
+def test_serve_drops_them_after_loading_its_settings(monkeypatch):
+    """`comfyctl relay serve`: the settings are read, then the secrets leave os.environ, then the server starts."""
+    import os
+
+    from comfyrelay import cli, server
+
+    seen = {}
+    monkeypatch.setenv("COMFYUI_MCP_HTTP_TOKEN", TOKEN)
+    monkeypatch.setenv("COMFYUI_URL", "http://user:secret@comfyui:8188")
+    monkeypatch.setattr(server, "serve", lambda s: seen.update(token=s.token, env=dict(os.environ)))
+    cli.serve(comfyui_url="http://user:secret@comfyui:8188", host="127.0.0.1", port=9000, profiles="read,run")
+    assert seen["token"] == TOKEN  # the server has it
+    assert "COMFYUI_MCP_HTTP_TOKEN" not in seen["env"] and "COMFYUI_URL" not in seen["env"]  # its children won't
