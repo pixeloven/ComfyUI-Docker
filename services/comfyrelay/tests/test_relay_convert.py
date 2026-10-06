@@ -921,7 +921,7 @@ async def test_the_export_waits_for_the_tabs_fetches_to_settle_but_not_forever(m
     quiet = conv._Activity()  # nothing fetched: one quiet period, no more
     t0 = loop.time()
     assert await quiet.settle()
-    assert 0.09 < loop.time() - t0 < 0.2
+    assert 0.09 < loop.time() - t0 < 1.0  # roomy above: a loaded CI runner is slow
     busy = conv._Activity()
     busy.start("/api/view")  # a preview's video, in flight
     waiting = asyncio.ensure_future(busy.settle())

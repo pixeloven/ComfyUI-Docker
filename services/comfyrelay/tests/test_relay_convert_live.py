@@ -609,7 +609,17 @@ async def test_large_answers_are_refused_and_never_balloon_the_relay(standin):
     assert peak - before < 300, (before, peak)
 
 
-PREVIEW_CLIP = os.path.join(os.path.dirname(__file__), "data", "convert-preview.mp4")  # 2 s, 128x128, about 4 KB
+# 2 s, 128x128, 24 frames of a moving gradient, about 4 KB. Made with PyAV (libx264) in the core-cpu image, which
+# has no ffmpeg CLI:
+#   docker run --rm -v "$PWD":/out --entrypoint python3 ghcr.io/pixeloven/comfyui/core:cpu-latest -c "
+#   import av, numpy as np
+#   c = av.open('/out/convert-preview.mp4', 'w'); s = c.add_stream('libx264', rate=12)
+#   s.width = s.height = 128; s.pix_fmt = 'yuv420p'; y, x = np.mgrid[0:128, 0:128]
+#   for i in range(24):
+#       img = np.stack([(x * 2 + i * 8) % 256, (y * 2) % 256, np.full_like(x, 128)], -1).astype(np.uint8)
+#       [c.mux(p) for p in s.encode(av.VideoFrame.from_ndarray(img, format='rgb24'))]
+#   [c.mux(p) for p in s.encode()]; c.close()"
+PREVIEW_CLIP = os.path.join(os.path.dirname(__file__), "data", "convert-preview.mp4")
 # The oracle for a graph with a preview: the frontend's own export, once every LoadVideo's preview widget exists,
 # however long that takes, rather than once the network is quiet, which is what the relay waits for.
 EXPORT_AFTER_PREVIEWS = """async (wf) => {

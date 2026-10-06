@@ -682,7 +682,9 @@ the templates name (546 of them), on 8 CPUs of a Ryzen 7 5825U:
 Large inputs don't change that: `LoadVideo` graphs whose input is a 410 MB video, one at a time and
 six at once, peaked the cgroup at 1.97 GB, every one exporting its `video-preview` as the editor
 does. Before the fetch was bounded, a 300 MB input video ran a 3 GiB container out of memory. A graph
-with nothing to preview converts faster (median 0.26 s, against a ComfyUI with no input files).
+with nothing to preview converts faster, but every conversion waits at least 0.3 s for the tab's
+network to go quiet (the review after the settle wait measured a median of about 0.37 s for a
+template with no loaders).
 
 Give it a memory limit of at least 3 GiB with 2 tabs, and about 265 MB more for each extra tab.
 The image is 304 MB compressed and 872 MB unpacked, against 63 MB and 217 MB for `mcp`.
