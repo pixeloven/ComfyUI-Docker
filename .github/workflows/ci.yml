@@ -364,6 +364,7 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-rocm"
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-xpu"
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "mcp-convert"
         docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
 
   # COMFY_DOCS_SHA must be a commit on Comfy-Org/docs `main` (#134, #136).
@@ -777,7 +778,11 @@ jobs:
   # The mcp image: comfyrelay since 5.0.0 (#136). bake has declared the target
   # since #43, and VERSIONING.md counts it in the image family.
   #
-  # It publishes only after the relay job has probed this commit's image
+  # mcp-convert (#167) is the same server with a headless Chromium, from the
+  # same Dockerfile with RELAY_CONVERT=1. It publishes here too, under the same
+  # tags, after mcp, with a cache scope of its own.
+  #
+  # It publishes only after the relay job has probed this commit's images
   # against a booted ComfyUI, so a commit whose server fails that never reaches
   # GHCR. What it pushes is its own build of the same commit, inputs and pins:
   # equivalent to the probed image, but not byte-identical to it. It runs
@@ -816,6 +821,27 @@ jobs:
         set: |
           *.cache-from=type=gha
           *.cache-to=type=gha,mode=max
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
+        IMAGE_LABEL: ${{ needs.context.outputs.image_label }}
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
+        IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
+        PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
+        GIT_SHA: ${{ github.sha }}
+
+    - name: Build the mcp-convert image
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: mcp-convert
+        push: ${{ github.event_name == 'push' }}
+        no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-from=type=gha,scope=mcp-convert
+          *.cache-to=type=gha,mode=max,scope=mcp-convert
         provenance: false
         sbom: false
       env:
@@ -985,10 +1011,13 @@ jobs:
   # build already checks that it refuses to start without a token and passes a
   # probe with no ComfyUI. This boots a core-cpu and probes the image against it
   # for real, as UID 12345 on a read-only root filesystem, then times its
-  # SIGTERM stop (`tests/relay/run.sh`, the same script locally). Then it runs the live
+  # SIGTERM stop (`tests/relay/run.sh`, the same script locally). It does the
+  # same for mcp-convert (#167), where run.sh also converts a template through
+  # the relay and checks it against the frontend's own export. Then it runs the live
   # tests (*_live.py) against a fresh core-cpu: the only check that the relay
   # and a real ComfyUI agree (cancel, SIGTERM survival, /prompt errors), and
-  # that the unit tests' FakeComfyUI behaves like the real one (#147).
+  # that the unit tests' FakeComfyUI behaves like the real one (#147), and the
+  # converter's lockdown, allowlist and conversions (test_relay_convert_live.py).
   relay:
     name: comfyrelay probes a booted core-cpu
     runs-on: ubuntu-latest
@@ -1073,8 +1102,36 @@ jobs:
         docker image inspect "${COMFYUI_IMAGE}" >/dev/null 2>&1 || docker pull -q "${COMFYUI_IMAGE}"
         tests/relay/run.sh --comfyui "${COMFYUI_IMAGE}" "${RELAY_IMAGE}"
 
+    # Never pushed either: build-mcp publishes its own build.
+    - name: Build the mcp-convert image
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: mcp-convert
+        load: true
+        push: false
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
+        IMAGE_LABEL: ci
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
+        GIT_SHA: ${{ github.sha }}
+
+    - name: Probe mcp-convert, and convert a template through it
+      env:
+        COMFYUI_IMAGE: ${{ steps.comfyui.outputs.image }}
+        RELAY_IMAGE: ${{ needs.context.outputs.registry_url }}mcp-convert:ci
+      run: tests/relay/run.sh --comfyui "${COMFYUI_IMAGE}" --out tests/relay/results/convert "${RELAY_IMAGE}"
+
     - name: Install uv
       uses: astral-sh/setup-uv@v10.0.1
+
+    # For test_relay_convert_live.py: the Chromium build the pinned Playwright
+    # names, as the mcp-convert image has, with the libraries it needs.
+    - name: Install the converter's browser
+      working-directory: services
+      run: uv run --locked --extra convert playwright install --with-deps --only-shell chromium
 
     # On the runner, from the uv environment, as a contributor runs them: the
     # SIGTERM test starts `comfyctl relay serve` from it on a free loopback
@@ -1107,7 +1164,7 @@ jobs:
           sleep 2
         done
         echo "ComfyUI (${COMFYUI_IMAGE}) answered after $(( $(date +%s) - start ))s"
-        COMFYRELAY_LIVE_COMFYUI_URL="${url}" uv run --locked pytest -v -rs -o log_level=INFO \
+        COMFYRELAY_LIVE_COMFYUI_URL="${url}" uv run --locked --extra convert pytest -v -rs -o log_level=INFO \
           --junitxml "${LIVE_OUT}/junit.xml" comfyrelay/tests/test_*_live.py 2>&1 | tee "${LIVE_OUT}/pytest.log"
         python3 - "${LIVE_OUT}/junit.xml" <<'PY'
         import sys
@@ -1140,6 +1197,9 @@ jobs:
       run: |
         if [ -f tests/relay/results/summary.json ]; then
           { echo '### comfyrelay probe'; echo '```json'; cat tests/relay/results/summary.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        if [ -f tests/relay/results/convert/summary.json ]; then
+          { echo '### comfyrelay probe, mcp-convert'; echo '```json'; cat tests/relay/results/convert/summary.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
         fi
 
     # With the live tests' in live/: ComfyUI's log, pytest's output (the
