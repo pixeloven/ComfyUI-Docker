@@ -16,8 +16,8 @@ see `VERSIONING.md`.
 `ghcr.io/pixeloven/comfyui/mcp-convert` is comfyrelay with a headless Chromium,
 so agents can hand it the editor's UI-format workflows. It converts them with
 the instance's own frontend, which makes each conversion what Export (API)
-would write. It is published with the same tags as `mcp`. The `mcp` image is
-unchanged and has no browser; opting in means switching the image.
+would write. It is published with the same tags as `mcp`. The `mcp` image has
+no browser; opting in means switching the image.
 
 - `template_get` takes `format: "api"` and returns the template converted.
 - `workflow_validate` and `workflow_run` take a UI-format graph, convert it
@@ -31,6 +31,17 @@ unchanged and has no browser; opting in means switching the image.
 - On the `mcp` image these tools behave as before: a UI graph is refused as
   `invalid_workflow`, and `template_get` with `format: "api"` fails with
   `conversion_unavailable`.
+
+**Also in the `mcp` image,** which shares the server:
+
+- The tools gain the `format` argument and the `converted_from_ui`, `workflow`
+  and `workflow_omitted` fields, and `server_info.capabilities.conversion`
+  says the server doesn't convert, and why.
+- The server instructions name the `workflow-formats` guide
+  (`docs_guide("workflow-formats")`) for converting a UI workflow by hand.
+- Once `serve` has read its settings, it removes `COMFYUI_MCP_HTTP_TOKEN`, and
+  a `COMFYUI_URL` with credentials, from its own environment, so nothing it
+  starts inherits them.
 
 **The browser is locked down.** It has no network of its own: the relay
 fetches the paths the frontend needs from `COMFYUI_URL` with `GET`s and hands

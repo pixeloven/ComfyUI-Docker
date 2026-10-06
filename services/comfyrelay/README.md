@@ -573,7 +573,9 @@ does, and every request the stand-in received from it was an allowlisted `GET` t
    and the checked path, with a few request headers such as `Accept` and `Comfy-User`, no body, a
    cookie jar that keeps nothing, and no redirect followed. It streams the answer and gives up on
    one over 32 MiB (the page gets an abort); at most 6 run at once, and only one of those may hold
-   more than 4 MiB, so what the relay buffers for the tabs stays well under 100 MB. A ranged request
+   more than 4 MiB. A 32 MiB answer is copied a few times on its way to the page (about 150 MB at
+   once); the live test holds the relay process's growth under 300 MB while it is sent 600 MB of
+   large answers and 24 smaller ones at once. A ranged request
    (a video preview's, `Range: bytes=0-`) is passed on with its range cut to 4 MiB, so an input
    video of any size is read in pieces of at most 4 MiB, as far as the preview asks for. One refused
    request is answered rather than aborted: a `POST` of the frontend's own settings
@@ -604,10 +606,14 @@ would then load every template's thumbnail, about 250 MB a tab, for nothing a co
 `/api/view` (a loader's input file, for its preview) has to stay: once a video's preview has loaded,
 `LoadVideo` exports a `video-preview` input it lacks otherwise (62 templates differ without it, with
 their input files present). That makes the editor's own export depend on how fast the preview loads,
-so after loading a graph the relay waits until the tab's fetches have been quiet for 0.3 s, at most
-10 s (the frontend gives a preview 8.2 s), before it exports. A graph with nothing to preview waits
-for nothing. With all 546 input files the templates name present, every template converts the same
-as the frontend's own export.
+so after loading a graph the relay waits until the tab's fetches have been quiet for 0.3 s, counted
+from when the wait began or the last fetch, whichever is later, and at most 10 s (the frontend gives
+a preview 8.2 s), before it exports. When the 10 s run out with fetches still in flight, it exports
+anyway and logs a warning naming them. On a host starved of CPU, a preview can take longer than that:
+the export then lacks a UI-only input such as `video-preview` (a review at 0.25 CPU lost 3 or 4 of
+20). ComfyUI ignores that input, so the run is the same. With a real file for each of the 546 inputs the templates name,
+every template converts the same as the frontend's own export made after waiting for each
+`LoadVideo`'s preview widget itself, not for the network (573 of 573; 62 carry `video-preview`).
 
 What the frontend asks for that is refused, and it converts without: `api.comfy.org`
 (release notes), `huggingface.co` (it checks the template's model links with `HEAD`), ComfyUI's
@@ -623,8 +629,11 @@ export writes; it runs under the same lockdown, and a custom node whose graphs n
 routes elsewhere won't convert. **The browser runs without its sandbox** (`--no-sandbox`):
 Docker's default seccomp profile with `no-new-privileges` leaves it none it can use. A
 compromised renderer would run as the relay's UID, in the container that holds
-`COMFYUI_MCP_HTTP_TOKEN`, though not with it: the browser is launched with a few variables of the
-environment (`PATH`, `HOME`, `TMPDIR`, the locale and the time zone) and none of the relay's. A
+`COMFYUI_MCP_HTTP_TOKEN`. The browser and the Playwright driver don't inherit the token: the server
+removes it from its own environment once read, and the browser is launched with only `PATH`, `HOME`,
+`TMPDIR`, the locale and the time zone. But it is still readable by any process with the relay's UID,
+a compromised renderer included: in the server's own `/proc/<pid>/environ`, which keeps the
+environment the process started with, and in PID 1's. A
 `COMFYUI_URL` with credentials in it is refused for conversion (`unavailable`), so they never
 reach the browser; the server still uses them. The page never queues a prompt, so no
 `extra_data` reaches ComfyUI from it.
