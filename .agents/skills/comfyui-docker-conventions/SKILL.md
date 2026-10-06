@@ -39,7 +39,7 @@ Images are `ghcr.io/pixeloven/comfyui/<name>`. The bake targets:
 | `cuda` | `runtime-cuda`, `core-cuda`, `complete-cuda` | `complete` = core + `extra-requirements.txt`, portable across CUDA GPUs |
 | `cuda-arch` | `complete-cuda-sm{80,86,89,90,120}` | Complete + one SageAttention 2.2.0 wheel per compute capability. Built separately so an ABI break cannot block the generic CUDA images. |
 | `mcp`, `fetch` | `mcp`, `fetch` | Independent of the runtime images |
-| (none) | `mcp-convert` | `mcp` plus Playwright and Chromium's headless shell, for UI-to-API conversion (#167): the same Dockerfile with `RELAY_CONVERT=1`, conversion on (`COMFYUI_MCP_CONVERT=1`). In `all`; CI's `relay` job probes it and `build-mcp` publishes it beside `mcp` |
+| (none) | `mcp-convert` | `mcp` plus Playwright and Chromium's headless shell, for UI-to-API conversion (#167): the same Dockerfile with `RELAY_CONVERT=1`, conversion on (`COMFYUI_MCP_CONVERT=1`). In `all`; CI's `relay-convert` job probes it and `build-mcp-convert` publishes it, apart from `relay` and `build-mcp`, so it never holds back `mcp`; the release needs all four |
 | `all` | all of the above | |
 
 The five Compose examples map to `core:cuda`, `complete:cuda`, `core:cpu`, `core:rocm`

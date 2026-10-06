@@ -540,38 +540,46 @@ frontend version's rules, bugs included. There is no fallback converter.
   too, so such a graph gets `partner_api_nodes_refused`, never a conversion error. An
   API-format graph is never converted.
 - **When it can't convert**, the call fails with `conversion_unavailable` (conversion is off,
-  this image has no browser, the browser didn't start, the frontend didn't load, or every tab
-  stayed busy for 60 seconds) or `conversion_failed` (the frontend threw, or didn't answer
-  within 30 seconds), each with the reason. `template_get`'s error carries the UI graph in
+  this image has no browser, the browser didn't start, the frontend didn't load, the tab or the
+  browser went away mid-conversion, or every tab stayed busy for 60 seconds; retryable but for
+  the first two) or `conversion_failed` (the frontend threw, or didn't answer within 30 seconds),
+  each with the reason. `template_get`'s error carries the UI graph in
   `workflow` when it fits 80,000 characters, and `workflow_omitted` otherwise.
 - **`server_info.capabilities.conversion`** reports `state`: `off` (with why: no browser in
   this image, or `COMFYUI_MCP_CONVERT` isn't `1`), `unavailable` (a `COMFYUI_URL` it won't lock
   to, below), `ready` (the browser starts on the first conversion), `running`, `backing_off`
-  (with `retry_in_seconds`) or `stopped`, plus `pages` and `conversions`.
+  (with `retry_in_seconds`) or `stopped`, plus `pages`, `conversions` and, once a tab has
+  loaded it, `frontend_version`.
 
-**The lockdown** keeps the browser to reading from ComfyUI. Each layer is in code and tested
-against a real ComfyUI and Chromium (`tests/test_relay_convert_live.py`, with a negative control:
-the same escapes from a plain browser, which get out, all but a preconnect, which the headless
-shell doesn't make even unblocked):
+**The lockdown** keeps the browser off the network entirely: the relay fetches what the frontend
+may read and hands it over. It is tested against a real Chromium (`tests/test_relay_convert_live.py`),
+with the ComfyUI it converts against replaced by a stand-in that forwards plain `GET`s to a real
+ComfyUI and records every request it receives. A page script tries every way out: writes to
+ComfyUI, a `GET` off the allowlist, another origin, websockets from the page and from a worker, a
+worker's and a nested worker's fetch, a `SharedWorker` (also one taken from a fresh `about:blank` or
+`srcdoc` iframe), speculation-rules prefetch and prerender, a beacon, an iframe, a popup, a
+preconnect, WebRTC and WebTransport. In a plain browser each gets out (the negative control; all
+but the preconnect, which the headless shell doesn't make even unblocked). In a converter tab none
+does, and every request the stand-in received from it was an allowlisted `GET` the relay sent.
 
-1. **Requests.** A route on each tab lets a request through only when it is a `GET` to the
-   `COMFYUI_URL` origin for a path on the allowlist below (relative to `COMFYUI_URL`'s path),
-   and aborts everything else. It sees the page's requests, its iframes', popups' and
-   dedicated workers'. A path with `..`, an encoded `.` or a backslash is refused. One refused
+1. **Requests.** A route on each tab takes every request it sees. A `GET` to the `COMFYUI_URL`
+   origin for a path on the allowlist below (relative to `COMFYUI_URL`'s path, compared as ComfyUI
+   will decode it; a `.` or `..` segment or a backslash is refused) is fetched by the relay itself
+   (`httpx2`: that `GET`, a few request headers such as `Accept` and `Comfy-User`, no body, no
+   redirect followed) and the page gets ComfyUI's answer. Everything else is aborted. One refused
    request is answered rather than aborted: a `POST` of the frontend's own settings
    (`/api/settings`, `/api/settings/<id>`), which it makes as it starts (`Comfy.InstalledVersion`,
-   on a ComfyUI no browser has opened) and without which it stops loading. It gets an empty
-   `200` from the browser and never reaches ComfyUI.
-2. **Page APIs.** Every page websocket is closed before it connects. An init script, run before
-   any page script, removes `SharedWorker`, `RTCPeerConnection`, `RTCDataChannel` and
+   on a ComfyUI no browser has opened) and without which it stops loading. It gets an empty `200`
+   from the relay and is never sent. Every page websocket is closed before it connects.
+2. **Page APIs.** An init script, run before any page script in every frame, `about:blank` and
+   `srcdoc` iframes included, removes `SharedWorker`, `RTCPeerConnection`, `RTCDataChannel` and
    `WebTransport`, and makes `navigator.sendBeacon` refuse. Dedicated workers stay, because the
-   frontend starts two from `blob:` URLs as it loads; their requests meet layer 1, and layer 3
-   stops their websockets.
-3. **The network.** Everything but `http(s)://<ComfyUI host:port>` goes to a proxy whose name
-   never resolves, so a websocket (to ComfyUI's `/ws` too), a preconnect, or anything layers 1
-   and 2 missed reaches no one. Chromium's resolver answers `NOTFOUND` for every name but
-   ComfyUI's, so a DNS prefetch or preconnect sends no lookup. WebRTC may not use UDP outside a
-   proxy, and QUIC is off.
+   frontend starts two from `blob:` URLs as it loads.
+3. **The network.** Chromium itself reaches nothing, ComfyUI included: every connection goes to a
+   proxy whose name never resolves, and its resolver answers `NOTFOUND` for every name. So what
+   the route doesn't see goes nowhere: a worker's websocket, a speculation-rules prefetch or
+   prerender (both measured reaching ComfyUI when its origin went direct), a preconnect, a DNS
+   prefetch. WebRTC may not use UDP outside a proxy, and QUIC is off.
 
 The allowlist, measured over every template ComfyUI v0.38.0 serves (frontend 1.53.6):
 
@@ -589,10 +597,13 @@ What the frontend asks for that is refused, and it converts without: `api.comfy.
 `/ws`, and `POST /api/upload/image` from Load3D, which makes those graphs fail with
 `conversion_failed`.
 
-**What stays reachable** is the allowlist, which only reads. Custom-node JavaScript under
-`/extensions/` loads and runs in the page, because a custom node's widgets can change what the
-export writes; it runs under the same lockdown, and a custom node whose graphs need its own
-`GET` routes won't convert. **The browser runs without its sandbox** (`--no-sandbox`):
+**What stays reachable** is the allowlist, as ComfyUI implements it: every route on it only
+reads on a bare ComfyUI v0.38.0, checked in its handlers. Query strings aren't checked, so a
+parameter such as `/api/view`'s `filename` is left to ComfyUI's own path checks. Under
+`/extensions/`, any `GET` route a custom node registers there is reachable, and custom-node
+JavaScript loads and runs in the page, because a custom node's widgets can change what the
+export writes; it runs under the same lockdown, and a custom node whose graphs need its own `GET`
+routes elsewhere won't convert. **The browser runs without its sandbox** (`--no-sandbox`):
 Docker's default seccomp profile with `no-new-privileges` leaves it none it can use. A
 compromised renderer would run as the relay's UID, beside `COMFYUI_MCP_HTTP_TOKEN`. A
 `COMFYUI_URL` with credentials in it is refused for conversion (`unavailable`), so they never
@@ -607,20 +618,37 @@ replaced after 25 conversions, the first ones staggered so the tabs don't reload
 after any failure. The Playwright driver grows too, so after 500 conversions the browser and
 driver are retired once their conversions finish, and started again. A browser that fails to
 launch backs off (5 seconds, doubling to 5 minutes) instead of every call retrying it, and
-one that went away is started again. On `SIGTERM` the server closes it.
+one that went away is started again. A tab or browser that goes away under a conversion
+(a crashed renderer, a killed browser) is `conversion_unavailable`, retryable, not the graph's
+failure. On `SIGTERM` the server closes it.
+
+**What it is tested against.** The frontend `COMFYUI_URL` serves does the conversion, so its
+version decides the result, and the allowlist was derived on one: frontend 1.53.6, which ComfyUI
+v0.38.0, this image's pin, serves. `capabilities.conversion.frontend_version` reports the one in
+use. Against `core:nightly`, or a ComfyUI started with another `--front-end-version`, it is
+untested; a frontend that needs a path the allowlist lacks fails to load, as
+`conversion_unavailable`. A ComfyUI started with `--multi-user` isn't supported: the frontend waits
+for someone to choose a user, so every conversion is `conversion_unavailable` after about 30
+seconds. CI's `relay-convert` job runs the image's probe and these live tests, apart from the
+`relay` job, so a failure here never holds back the `mcp` image.
+
+**Updates.** The Chromium build is pinned by the Playwright version, and checked by a hash over
+its files, which pins integrity, not freshness: Chromium's security fixes reach the image when
+Playwright moves, which is meant to follow each Playwright release, about monthly
+(`dockerfile.comfy.relay`).
 
 **Sizing**, measured with the image as UID 54321 on a read-only root with a tmpfs on `/tmp`,
 against a booted core-cpu a browser had never opened, on 8 CPUs of a Ryzen 7 5825U:
 
 | With 2 tabs | Memory (PSS, every process) | Time |
 |---|---|---|
-| Before the first conversion | 99 MB | |
-| The first conversion, which starts the browser | 1.14 GB | 3.6 s |
-| Idle once warm | 1.05 GB | |
-| 40 conversions in a row (`workflow_validate`) | 1.37 GB peak | median 0.26 s, p95 0.48 s; the same call on the API graph takes 0.007 s |
-| 6 at once | 1.37 GB peak | 1.4 s for all six (0.23 to 1.42 s each) |
-| 200 more in a row | 2.22 GB peak (2.68 GB RSS) | median 0.23 s, p95 0.61 s |
-| Idle after those | 1.34 GB (the driver has grown to 383 MB) | |
+| Before the first conversion | 93 MB | |
+| The first conversion, which starts the browser | 1.26 GB | 4.7 s |
+| Idle once warm | 1.17 GB | |
+| 40 conversions in a row (`workflow_validate`) | 1.55 GB peak | median 0.26 s, p95 0.59 s; the same call on the API graph takes 0.007 s |
+| 6 at once | 1.49 GB peak | 2.0 s for all six (0.45 to 2.03 s each) |
+| 200 more in a row | 2.43 GB peak (2.87 GB RSS; the cgroup's own peak 2.38 GB) | median 0.24 s, p95 0.71 s |
+| Idle after those | 1.50 GB (the driver has grown to 346 MB) | |
 
 Give it a memory limit of at least 3 GiB with 2 tabs, and about 265 MB more for each extra tab.
 The image is 304 MB compressed and 872 MB unpacked, against 63 MB and 217 MB for `mcp`.

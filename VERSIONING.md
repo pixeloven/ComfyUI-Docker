@@ -149,6 +149,12 @@ git commit -am "release 1.2.3"
 git tag v1.2.3 && git push --tags
 ```
 
+**Check a new image's GHCR package is public, once.** A package GHCR creates
+on CI's first push can start private. After the first `main` push that
+publishes a new image (`mcp-convert` is the latest), check its package's
+visibility on GitHub, and make it public before the release that announces it;
+otherwise every consumer's pull fails with `unauthorized`.
+
 A release rebuilds every image rather than reusing digests. It is ~60 minutes
 and it happens rarely; the alternative is a release whose images came from a
 different commit than its wheel.

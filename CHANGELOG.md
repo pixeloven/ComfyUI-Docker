@@ -32,16 +32,20 @@ unchanged and has no browser; opting in means switching the image.
   `invalid_workflow`, and `template_get` with `format: "api"` fails with
   `conversion_unavailable`.
 
-**The browser is locked down.** It may only `GET` the paths the frontend needs
-from `COMFYUI_URL`; every other request, host, websocket and connection is
-refused, so it never writes to ComfyUI and never reaches another host. A
-Load3D graph, which uploads as it is exported, fails to convert for that
-reason. Chromium runs without its sandbox, beside the relay's token. The
+**The browser is locked down.** It has no network of its own: the relay
+fetches the paths the frontend needs from `COMFYUI_URL` with `GET`s and hands
+them over, and refuses everything else, so it never writes to ComfyUI and
+never reaches another host. A Load3D graph, which uploads as it is exported,
+fails to convert for that reason. Chromium runs without its sandbox, beside
+the relay's token. A ComfyUI started with `--multi-user` isn't supported. The
 runtime contract's *The `mcp-convert` Image* has the details.
 
+`mcp-convert` is probed and published by CI jobs of its own, so a failure in
+it never holds back the `mcp` image.
+
 **Sizing.** About 304 MB to pull (`mcp`: 63 MB). It idles at about 100 MB
-until the first conversion starts the browser (about 4 seconds), then at about
-1.1 GB with the default 2 tabs, up to 2.2 GB over a long run. Give it at least
+until the first conversion starts the browser (about 5 seconds), then at about
+1.2 GB with the default 2 tabs, up to 2.4 GB over a long run. Give it at least
 3 GiB. It needs a writable `/tmp`; with a read-only root, mount a tmpfs there.
 New variables: `COMFYUI_MCP_CONVERT` (on in this image) and
 `COMFYUI_MCP_CONVERT_PAGES` (default 2).
