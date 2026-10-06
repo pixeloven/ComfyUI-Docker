@@ -2,9 +2,9 @@
 
 ComfyUI has no conversion route, so the relay drives a headless Chromium
 against the frontend that COMFYUI_URL serves, loads the UI graph with
-`app.loadGraphData(wf, true, false, null)` and returns
-`(await app.graphToPrompt()).output`, through JSON as the editor's Export (API)
-writes it. It is the editor's own conversion, so there is no fallback
+`app.loadGraphData(wf, true, false, null)`, lets the previews it starts
+settle, and returns `(await app.graphToPrompt()).output`, through JSON as the
+editor's Export (API) writes it. It is the editor's own conversion, so there is no fallback
 converter (D5): a failure is `conversion_unavailable` (no browser, no
 frontend, or conversion is off) or `conversion_failed` (the frontend threw),
 with the reason.
@@ -23,9 +23,16 @@ receives was an allowlisted GET:
 
 1. Requests. A route on each tab's context takes every request it sees. A GET
    to the COMFYUI_URL origin for a path on ALLOWED_PATHS or under
-   ALLOWED_PREFIXES is fetched by the relay (httpx2: that GET, a few headers,
-   no body, no redirects followed) and fulfilled with ComfyUI's answer;
-   everything else is aborted (fail closed). One refused request is answered
+   ALLOWED_PREFIXES is fetched by the relay and fulfilled with ComfyUI's
+   answer; everything else is aborted (fail closed). The relay's fetch is that
+   GET at a URL it rebuilds from COMFYUI_URL and the checked path, with a few
+   request headers, no body, no cookies kept, no redirect followed. It streams
+   the answer and gives up on one over MAX_FETCH_BYTES (the page gets an
+   abort), and runs at most FETCH_CONCURRENCY at once, of which only one may
+   hold more than LARGE_FETCH_BYTES, so what it buffers stays bounded. A
+   ranged request (a video preview's) is passed on with its range cut to
+   RANGE_BYTES, so a large input video is read a few MiB at a time, as the
+   browser asks for it, never whole. One refused request is answered
    rather than aborted: a POST of the frontend's own settings (/api/settings),
    which it makes as it starts and without which it stops loading. It gets an
    empty 200 from the route and never reaches ComfyUI. Every page websocket is
@@ -48,8 +55,10 @@ The relay sends ComfyUI only GETs on the allowlist, so no write, no
 carries credentials is refused for conversion.
 
 What stays reachable: the GET routes on the allowlist, as ComfyUI implements
-them. Query strings aren't checked, so a parameter like /api/view's filename
-is left to ComfyUI's own path checks. Under /extensions/ any GET a custom node
+them. Query strings aren't checked, so a parameter like /api/userdata's dir is
+left to ComfyUI's own path checks. /api/view serves input files for the
+editor's previews, and it has to: once a video's preview has loaded, LoadVideo
+exports a `video-preview` input it lacks otherwise. Under /extensions/ any GET a custom node
 registers there is reachable, and custom-node JavaScript runs in the page
 under the same limits; a custom node whose graphs need its own GET routes
 elsewhere won't convert. "Only reads" was checked against a bare ComfyUI
@@ -80,7 +89,10 @@ import asyncio
 import collections
 import importlib.util
 import logging
+import os
 import re
+import weakref
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -102,9 +114,8 @@ CLOSE_SECONDS = 2.0
 # What the frontend GETs from ComfyUI to load and convert, relative to COMFYUI_URL's path: every path it asked
 # for while converting each of the 578 templates ComfyUI v0.38.0 serves (frontend 1.53.6), on a ComfyUI a browser
 # had opened before and on one none had, and nothing else. Every one of these routes only reads. Anything else is
-# refused, including two it asks for and doesn't need: on a ComfyUI no browser has opened, its first-run template
-# browser reads /api/workflow_templates and then every template's thumbnail under /templates/, which cost about
-# 250 MB a tab and change no conversion.
+# refused, including what it asks for and doesn't need: on a ComfyUI no browser has opened, its first-run template
+# browser reads /api/workflow_templates and then every template's thumbnail under /templates/, about 250 MB a tab.
 ALLOWED_PATHS = frozenset(
     {
         "/",
@@ -121,7 +132,9 @@ ALLOWED_PATHS = frozenset(
         "/api/system_stats",
         "/api/userdata",
         "/api/users",
-        "/api/view",  # the preview of a loader's input file
+        # A loader's input file, for its preview. Needed: once a video's preview has loaded, LoadVideo exports a
+        # `video-preview` input (62 templates differ without it). Large videos come in ranges (RANGE_BYTES).
+        "/api/view",
         "/internal/folder_paths",
     }
 )
@@ -149,8 +162,22 @@ DEAD_PROXY = "http://proxy.invalid:9"
 NO_BYPASS = "<-loopback>"
 # What the relay passes on from the page's request to ComfyUI, and what it drops from ComfyUI's answer (httpx2
 # hands over the body decoded and whole).
-FORWARD_HEADERS = frozenset({"accept", "accept-language", "comfy-user", "range", "if-none-match", "if-modified-since"})
-DROP_HEADERS = frozenset({"content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive"})
+FORWARD_HEADERS = frozenset({"accept", "accept-language", "comfy-user", "if-none-match", "if-modified-since"})
+DROP_HEADERS = frozenset(
+    {"content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive", "set-cookie"}
+)
+# The relay's fetches for the tabs hold each answer in memory until the page has it, so they are bounded: an answer
+# over MAX_FETCH_BYTES is refused (the largest the frontend reads on a bare ComfyUI v0.38.0 is /api/object_info,
+# about 2 MB; a frontend bundle is under 5 MB), at most FETCH_CONCURRENCY run at once, and only one of those may
+# hold more than LARGE_FETCH_BYTES.
+MAX_FETCH_BYTES = 32 * 1024 * 1024
+LARGE_FETCH_BYTES = 4 * 1024 * 1024
+FETCH_CONCURRENCY = 6
+# The most of a file one ranged request (a video preview's: `Range: bytes=0-`) reads. The browser asks for the next
+# range when it needs it, so a video of any size is read in pieces this big, and only as far as the preview goes.
+RANGE_BYTES = 4 * 1024 * 1024
+# All the browser's environment: nothing of the relay's own (COMFYUI_MCP_HTTP_TOKEN above all) reaches it.
+BROWSER_ENV = ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ", "FONTCONFIG_FILE", "FONTCONFIG_PATH")
 
 # Before any page script, in every frame. Dedicated workers stay (see the module docstring).
 INIT_SCRIPT = """(() => {
@@ -166,15 +193,21 @@ INIT_SCRIPT = """(() => {
 })();"""
 _READY = "() => !!(window.app && window.app.graphToPrompt && window.app.loadGraphData && window.app.vueAppReady)"
 _FRONTEND_VERSION = "() => window.__COMFYUI_FRONTEND_VERSION__ || null"
-# What Playwright raises when the page, its context or the browser is gone: a crashed renderer, a killed browser,
-# a closed target. The conversion never ran to an answer, so it's unavailable (retryable), not failed.
-_GONE = ("Target crashed", "has been closed", "Target closed", "Browser closed", "browser has disconnected")
 # Through JSON, as the editor's Export (API) writes it: a key whose value is undefined (class_type of a node
-# type this instance lacks) is dropped, where Playwright would hand it over as null.
+# type this instance lacks) is dropped, where Playwright would hand it over as null. _CONVERT is the two in one, as
+# a person would run them, for the tests' oracle.
+_LOAD = "async (wf) => { await window.app.loadGraphData(wf, true, false, null); }"
+_EXPORT = "async () => JSON.parse(JSON.stringify((await window.app.graphToPrompt()).output))"
 _CONVERT = """async (wf) => {
   await window.app.loadGraphData(wf, true, false, null);
   return JSON.parse(JSON.stringify((await window.app.graphToPrompt()).output));
 }"""
+# What graphToPrompt writes can depend on a preview having loaded: a LoadVideo adds its `video-preview` input only
+# once its video has (frontend 1.53.6 waits up to 8.2 s for it, then retries once). So between loading a graph and
+# exporting it, the relay waits until the tab's fetches have been quiet for SETTLE_QUIET_SECONDS, at most
+# SETTLE_MAX_SECONDS. A graph with nothing to preview has nothing in flight, and waits for nothing.
+SETTLE_QUIET_SECONDS = 0.3
+SETTLE_MAX_SECONDS = 10.0
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
@@ -223,16 +256,42 @@ def _origin(url: str) -> tuple[str, str, int] | None:
     return parts.scheme, parts.hostname.lower(), port
 
 
-def _gone(exc: BaseException, page: Any, browser: Any) -> bool:
-    """Whether a failed evaluate means the browser or tab went away, rather than the frontend rejecting the graph."""
-    if type(exc).__name__ == "TargetClosedError":
+def _gone(exc: BaseException, page: Any, browser: Any, crashed: Any) -> bool:
+    """Whether a failed evaluate means the tab or the browser went away (a crashed renderer, a closed target, a
+    killed browser) rather than the frontend rejecting the graph. Judged by what Playwright knows, never by the
+    error's text, which the frontend's own errors could match."""
+    if type(exc).__name__ == "TargetClosedError" or page in crashed:
         return True
     try:
-        if page.is_closed() or not browser.is_connected():
-            return True
+        return page.is_closed() or not browser.is_connected()
     except Exception:
         return True
-    return any(marker in str(exc) for marker in _GONE)
+
+
+class _Activity:
+    """A tab's fetches through the relay: how many are in flight, and when the last one started or ended."""
+
+    __slots__ = ("inflight", "changed")
+
+    def __init__(self) -> None:
+        self.inflight = 0
+        self.changed = 0.0
+
+    def touch(self, delta: int) -> None:
+        self.inflight += delta
+        self.changed = asyncio.get_running_loop().time()
+
+    async def settle(self) -> None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + SETTLE_MAX_SECONDS
+        while loop.time() < deadline:
+            if self.inflight == 0 and loop.time() - self.changed >= SETTLE_QUIET_SECONDS:
+                return
+            await asyncio.sleep(0.05)
+
+
+class _TooLarge(Exception):
+    """An answer over MAX_FETCH_BYTES: the relay stops reading it, and the page gets an abort."""
 
 
 def _why(exc: BaseException) -> str:
@@ -285,6 +344,8 @@ class Converter:
         self.origin = _origin(comfyui_url)
         parts = urlsplit(comfyui_url)
         self.base = parts.path.rstrip("/")
+        # What the relay's fetches are built on: COMFYUI_URL's scheme, host and port, and its path.
+        self.root = f"{parts.scheme}://{parts.netloc}{self.base}"
         self.refused: str | None = None
         if parts.username or parts.password:
             self.refused = "COMFYUI_URL carries credentials, and the converter never hands them to a browser"
@@ -298,6 +359,10 @@ class Converter:
         # The frontend version the tabs loaded, once one has (window.__COMFYUI_FRONTEND_VERSION__).
         self.frontend_version: str | None = None
         self._http: Any = None
+        self._fetches = asyncio.Semaphore(FETCH_CONCURRENCY)
+        self._large = asyncio.Lock()
+        self._crashed: weakref.WeakSet[Any] = weakref.WeakSet()  # tabs whose renderer crashed
+        self._activity: weakref.WeakKeyDictionary[Any, _Activity] = weakref.WeakKeyDictionary()
         self._lock = asyncio.Lock()
         self._session: _Session | None = None
         self._closed = False
@@ -308,25 +373,42 @@ class Converter:
 
     # -- lockdown (D3) --------------------------------------------------------
 
-    def _path(self, url: str) -> str | None:
-        """`url`'s path relative to COMFYUI_URL's, as ComfyUI will see it (percent-decoded), or None when it isn't on
-        the COMFYUI_URL origin under its path, or could step out of where it points once decoded (a `.` or `..`
-        segment, a backslash)."""
+    def _paths(self, url: str) -> tuple[str, str] | None:
+        """`url`'s path relative to COMFYUI_URL's, decoded (to match the allowlist) and as sent (to rebuild the
+        fetch), or None when it isn't on the COMFYUI_URL origin under its path, or could step out of where it
+        points: a `%25` (an encoded `%`, so a second decode, which some ComfyUI routes do, decodes again), or a
+        `.` or `..` segment or a backslash once decoded once or twice."""
         if self.origin is None or _origin(url) != self.origin:
             return None
-        path = unquote(urlsplit(url).path)
-        if "\\" in path or any(segment in (".", "..") for segment in path.split("/")):
+        raw = urlsplit(url).path
+        if "%25" in raw:
             return None
         if self.base:
-            if path != self.base and not path.startswith(self.base + "/"):
+            if raw != self.base and not raw.startswith(self.base + "/"):
                 return None
-            path = path[len(self.base) :] or "/"
-        return path
+            raw = raw[len(self.base) :] or "/"
+        once = unquote(raw)
+        for decoded in (once, unquote(once)):
+            if "\\" in decoded or any(segment in (".", "..") for segment in decoded.split("/")):
+                return None
+        return once, raw
+
+    def _path(self, url: str) -> str | None:
+        paths = self._paths(url)
+        return paths[0] if paths else None
 
     def allowed(self, method: str, url: str) -> bool:
         """Layer 1: a GET to the COMFYUI_URL origin, for a path on the allowlist. Anything else is refused."""
         path = self._path(url) if method == "GET" else None
         return path is not None and (path in ALLOWED_PATHS or path.startswith(ALLOWED_PREFIXES))
+
+    def fetch_url(self, url: str) -> str:
+        """The URL the relay fetches for an allowed `url`: rebuilt from COMFYUI_URL and the checked path, with the
+        query as sent and no fragment, so nothing else of the page's URL reaches ComfyUI."""
+        paths = self._paths(url)
+        assert paths is not None
+        query = urlsplit(url).query
+        return f"{self.root}{paths[1]}" + (f"?{query}" if query else "")
 
     def settings_write(self, method: str, url: str) -> bool:
         """A write of the frontend's own settings to ComfyUI. Refused like every other write, but answered: the
@@ -335,15 +417,15 @@ class Converter:
         path = self._path(url) if method == "POST" else None
         return path is not None and (path == "/api/settings" or path.startswith("/api/settings/"))
 
-    async def _gate(self, route: Any, request: Any) -> None:
+    async def _gate(self, route: Any, request: Any, activity: _Activity | None = None) -> None:
         if self.allowed(request.method, request.url):
+            if activity is not None:
+                activity.touch(+1)
             try:
-                answer = await self._fetch(request)
-            except Exception as exc:  # ComfyUI unreachable, or the tab closed meanwhile
-                log.debug("could not fetch %s for a converter tab: %s", request.url, _why(exc))
-                await _quietly(route.abort("failed"))
-                return
-            await _quietly(route.fulfill(**answer))
+                await self._relay(route, request)
+            finally:
+                if activity is not None:
+                    activity.touch(-1)
             return
         self.blocked.append((request.method, request.url))
         log.debug("blocked %s %s", request.method, request.url)
@@ -352,24 +434,74 @@ class Converter:
         else:
             await _quietly(route.abort("blockedbyclient"))
 
-    async def _fetch(self, request: Any) -> dict[str, Any]:
-        """The one way a converter tab reaches ComfyUI: the relay GETs the allowed URL itself."""
-        if self._http is None:
-            import httpx2
+    async def _relay(self, route: Any, request: Any) -> None:
+        """Fetch an allowed request for the page, within the fetch limits, and hand it the answer."""
+        async with self._fetches:
+            large = False
+            try:
+                answer, large = await self._fetch(request)
+                await _quietly(route.fulfill(**answer))
+            except _TooLarge:
+                self.blocked.append((request.method, request.url))
+                log.warning("refused %s for a converter tab: over %d bytes", request.url, MAX_FETCH_BYTES)
+                await _quietly(route.abort("failed"))
+            except Exception as exc:  # ComfyUI unreachable, or the tab closed meanwhile
+                log.debug("could not fetch %s for a converter tab: %s", request.url, _why(exc))
+                await _quietly(route.abort("failed"))
+            finally:
+                if large:
+                    self._large.release()
 
-            self._http = httpx2.AsyncClient(timeout=PAGE_LOAD_SECONDS, follow_redirects=False)
+    async def _fetch(self, request: Any) -> tuple[dict[str, Any], bool]:
+        """The one way a converter tab reaches ComfyUI: the relay GETs the allowed URL itself, streaming the answer
+        and giving up past MAX_FETCH_BYTES. Returns the answer for route.fulfill, and whether it took the one slot
+        for a large answer, which the caller releases once the page has it."""
+        if self._http is None:
+            self._http = _client()
         headers = {k: v for k, v in request.headers.items() if k.lower() in FORWARD_HEADERS}
-        answer = await self._http.get(request.url, headers=headers)
-        return {
-            "status": answer.status_code,
-            "headers": {k: v for k, v in answer.headers.items() if k.lower() not in DROP_HEADERS},
-            "body": answer.content,
-        }
+        wanted = next((v for k, v in request.headers.items() if k.lower() == "range"), None)
+        ranged = self._range(wanted) if wanted else None
+        if ranged:
+            headers["range"] = ranged
+        large = False
+        try:
+            async with self._http.stream("GET", self.fetch_url(request.url), headers=headers) as answer:
+                declared = answer.headers.get("content-length", "")
+                if declared.isdigit() and int(declared) > MAX_FETCH_BYTES:
+                    raise _TooLarge
+                body = bytearray()
+                async for chunk in answer.aiter_bytes():
+                    body += chunk
+                    if len(body) > MAX_FETCH_BYTES:
+                        raise _TooLarge
+                    if not large and len(body) > LARGE_FETCH_BYTES:
+                        await self._large.acquire()
+                        large = True
+                status = answer.status_code
+                kept = {k: v for k, v in answer.headers.items() if k.lower() not in DROP_HEADERS}
+        except BaseException:
+            if large:
+                self._large.release()
+            raise
+        return {"status": status, "headers": kept, "body": bytes(body)}, large
 
     async def _gate_ws(self, ws: Any) -> None:
         # Not calling connect_to_server means the socket never reaches its server.
         self.blocked.append(("WS", ws.url))
         await ws.close()
+
+    @staticmethod
+    def _range(value: str) -> str | None:
+        """A page's Range header, cut to at most RANGE_BYTES; None (send no Range) for one it can't read."""
+        start_end = re.fullmatch(r"bytes=(\d+)-(\d*)", value.strip())
+        if start_end:
+            start = int(start_end[1])
+            end = start + RANGE_BYTES - 1
+            if start_end[2]:
+                end = min(end, int(start_end[2]))
+            return f"bytes={start}-{end}"
+        suffix = re.fullmatch(r"bytes=-(\d+)", value.strip())
+        return f"bytes=-{min(int(suffix[1]), RANGE_BYTES)}" if suffix else None
 
     def _launch_options(self) -> dict[str, Any]:
         # No bypass: the browser reaches nothing, ComfyUI included. The route fetches what it allows.
@@ -377,6 +509,7 @@ class Converter:
             "headless": True,
             "args": [*LAUNCH_ARGS, "--host-resolver-rules=MAP * ~NOTFOUND"],
             "proxy": {"server": DEAD_PROXY, "bypass": NO_BYPASS},
+            "env": {name: os.environ[name] for name in BROWSER_ENV if name in os.environ},
         }
 
     # -- lifecycle -------------------------------------------------------------
@@ -473,9 +606,12 @@ class Converter:
         context = await session.browser.new_context(service_workers="block", accept_downloads=False)
         try:
             await context.add_init_script(INIT_SCRIPT)
-            await context.route("**/*", self._gate)
+            activity = _Activity()
+            await context.route("**/*", lambda route, request: self._gate(route, request, activity))
             await context.route_web_socket(re.compile(r".*"), self._gate_ws)
             page = await context.new_page()
+            page.on("crash", self._crashed.add)
+            self._activity[page] = activity
         except BaseException:
             await _close_page_and_context(context)
             raise
@@ -560,11 +696,11 @@ class Converter:
             session.served += 1
             self.conversions += 1
             try:
-                output = await asyncio.wait_for(tab.page.evaluate(_CONVERT, workflow), CONVERT_SECONDS)
+                output = await asyncio.wait_for(self._evaluate(tab.page, workflow), CONVERT_SECONDS)
             except TimeoutError:
                 raise failed(f"no answer in {CONVERT_SECONDS:.0f}s") from None
             except Exception as exc:
-                if _gone(exc, tab.page, session.browser):
+                if _gone(exc, tab.page, session.browser, self._crashed):
                     raise unavailable(f"the converter's browser tab went away ({_why(exc)})", retryable=True) from None
                 raise failed(_why(exc)) from None
             if not isinstance(output, dict):
@@ -576,6 +712,14 @@ class Converter:
             self._release(session, tab, converted)
             if session.busy == 0:
                 session.drained.set()
+
+    async def _evaluate(self, page: Any, workflow: dict[str, Any]) -> Any:
+        """Load the graph, let the previews it started settle, and export it."""
+        await page.evaluate(_LOAD, workflow)
+        activity = self._activity.get(page)
+        if activity is not None:
+            await activity.settle()
+        return await page.evaluate(_EXPORT)
 
     def _release(self, session: _Session, tab: _Tab, converted: bool) -> None:
         if tab.page is None or (converted and tab.uses < tab.limit):
@@ -589,6 +733,15 @@ class Converter:
             task = asyncio.ensure_future(self._retire(session))
             self._retiring.add(task)
             task.add_done_callback(self._retiring.discard)
+
+
+def _client(**options: Any) -> Any:
+    """The relay's client for the tabs' fetches. Its cookie jar accepts nothing, so a cookie ComfyUI sets is never
+    sent back, from any tab."""
+    import httpx2
+
+    jar = CookieJar(policy=DefaultCookiePolicy(allowed_domains=[]))
+    return httpx2.AsyncClient(timeout=PAGE_LOAD_SECONDS, follow_redirects=False, cookies=jar, **options)
 
 
 async def _quietly(awaitable: Any) -> None:

@@ -36,8 +36,8 @@ URL = "http://comfyui.test:8188"
         f"{URL}/api/object_info",
         f"{URL}/api/userdata?dir=workflows&recurse=true",
         f"{URL}/api/userdata/workflows%2Fx.json",
-        f"{URL}/api/view?filename=example.png&type=input",
         f"{URL}/user.css",
+        f"{URL}/api/view?filename=example.png&type=input",
     ],
 )
 def test_the_frontends_gets_to_comfyui_are_allowed(url):
@@ -72,6 +72,9 @@ def test_the_frontends_gets_to_comfyui_are_allowed(url):
         ("GET", f"{URL}/assets/%2e%2e/api/interrupt"),
         ("GET", f"{URL}/assets/%5C..%5Capi"),
         ("GET", f"{URL}/api/userdata/./x"),
+        # Decoded twice, as ComfyUI's /userdata does: a %25 never passes.
+        ("GET", f"{URL}/api/userdata/%252e%252e%252fcomfy.settings.json"),
+        ("GET", f"{URL}/api/userdata/x%25y"),
     ],
 )
 def test_everything_else_is_refused(method, url):
@@ -120,7 +123,7 @@ async def test_the_gate_answers_a_settings_write_and_aborts_the_rest():
 
     async def fetch(request):
         fetched.append((request.method, request.url))
-        return {"status": 200, "headers": {}, "body": b"{}"}
+        return {"status": 200, "headers": {}, "body": b"{}"}, False
 
     c._fetch = fetch
     for method, path, did in [
@@ -152,6 +155,14 @@ def test_the_browser_itself_reaches_nothing_not_even_comfyui():
     assert "--disable-quic" in options["args"]
 
 
+def test_the_browser_gets_none_of_the_relays_environment(monkeypatch):
+    monkeypatch.setenv("COMFYUI_MCP_HTTP_TOKEN", "x" * 40)
+    monkeypatch.setenv("SOME_OTHER_SECRET", "y")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    env = conv.Converter(URL)._launch_options()["env"]
+    assert env["PATH"] == "/usr/bin" and set(env) <= set(conv.BROWSER_ENV)
+
+
 async def test_the_relay_fetches_an_allowed_request_with_a_get_and_a_few_headers():
     seen = []
 
@@ -165,12 +176,157 @@ async def test_the_relay_fetches_an_allowed_request_with_a_get_and_a_few_headers
 
     c = conv.Converter(URL)
     c._http = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
-    answer = await c._fetch(Request())
-    assert answer["status"] == 200 and json.loads(answer["body"]) == {"ok": 1}
+    answer, large = await c._fetch(Request())
+    assert answer["status"] == 200 and json.loads(answer["body"]) == {"ok": 1} and not large
     assert answer["headers"]["x-kept"] == "1" and "connection" not in answer["headers"]
     method, url, headers = seen[0]
     assert (method, url) == ("GET", f"{URL}/api/object_info")
     assert headers["comfy-user"] == "u1" and "cookie" not in headers and "authorization" not in headers
+    await c.close()
+
+
+def _request(path: str, *, base: str = URL):
+    class Request:
+        method, url, headers = "GET", f"{base}{path}", {}
+
+    return Request()
+
+
+@pytest.mark.parametrize(
+    ("asked", "sent"),
+    [
+        ("bytes=0-", f"bytes=0-{4 * 1024 * 1024 - 1}"),
+        ("bytes=100-200", "bytes=100-200"),
+        ("bytes=10-999999999", f"bytes=10-{10 + 4 * 1024 * 1024 - 1}"),
+        ("bytes=-500", "bytes=-500"),
+        ("bytes=-999999999", f"bytes=-{4 * 1024 * 1024}"),
+        ("bytes=0-1,5-9", None),
+        ("items=0-1", None),
+    ],
+)
+def test_a_range_is_cut_to_a_few_mib(asked, sent):
+    assert conv.Converter._range(asked) == sent
+
+
+async def test_a_ranged_fetch_asks_comfyui_for_the_cut_range():
+    seen = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request.headers.get("range"))
+        return httpx2.Response(206, content=b"x" * 10)
+
+    class Request:
+        method, url = "GET", f"{URL}/api/view?filename=v.mp4&type=input"
+        headers = {"Range": "bytes=0-"}
+
+    c = conv.Converter(URL)
+    c._http = conv._client(transport=httpx2.MockTransport(handler))
+    answer, _ = await c._fetch(Request())
+    assert answer["status"] == 206 and seen == [f"bytes=0-{conv.RANGE_BYTES - 1}"]
+    await c.close()
+
+
+def test_the_fetch_url_is_rebuilt_from_comfyui_url_and_the_checked_path():
+    c = conv.Converter("http://comfyui.test:8188/comfy/")
+    assert (
+        c.fetch_url("http://comfyui.test:8188/comfy/api/userdata/workflows%2Fx.json?a=1#frag")
+        == "http://comfyui.test:8188/comfy/api/userdata/workflows%2Fx.json?a=1"
+    )
+    assert c.fetch_url("http://COMFYUI.test:8188/comfy/") == "http://comfyui.test:8188/comfy/"
+
+
+async def test_comfyuis_cookies_are_never_kept_or_sent_back():
+    seen = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request.headers.get("cookie"))
+        return httpx2.Response(200, text="x", headers={"set-cookie": "session=abc; Path=/"})
+
+    c = conv.Converter(URL)
+    c._http = conv._client(transport=httpx2.MockTransport(handler))
+    for _ in range(3):
+        answer, _ = await c._fetch(_request("/api/object_info"))
+        assert "set-cookie" not in {k.lower() for k in answer["headers"]}
+    assert seen == [None, None, None]
+    await c.close()
+
+
+@pytest.mark.parametrize("declared", [True, False], ids=["content-length", "streamed"])
+async def test_an_answer_over_the_cap_is_given_up_without_reading_it_all(monkeypatch, declared):
+    monkeypatch.setattr(conv, "MAX_FETCH_BYTES", 1000)
+    sent = []
+
+    async def chunks():
+        for _ in range(100):
+            sent.append(500)
+            yield b"x" * 500
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if declared:
+            return httpx2.Response(200, headers={"content-length": "50000"}, content=b"x" * 50000)
+        return httpx2.Response(200, content=chunks())
+
+    c = conv.Converter(URL)
+    c._http = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    with pytest.raises(conv._TooLarge):
+        await c._fetch(_request("/assets/huge.js"))
+    if not declared:
+        assert sum(sent) <= 1500  # stopped as soon as it passed the cap
+    assert not c._large.locked()
+    await c.close()
+
+
+async def test_fetches_are_bounded_in_number_and_only_one_holds_a_large_answer(monkeypatch):
+    monkeypatch.setattr(conv, "LARGE_FETCH_BYTES", 100)
+    gate = asyncio.Event()
+    in_flight = [0, 0]  # now, most
+
+    async def body(size):
+        in_flight[0] += 1
+        in_flight[1] = max(in_flight[1], in_flight[0])
+        await gate.wait()
+        yield b"x" * size
+        in_flight[0] -= 1
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        size = 1000 if "big" in request.url.path else 10
+        return httpx2.Response(200, content=body(size))
+
+    class Route:
+        async def fulfill(self, **kw):
+            pass
+
+        async def abort(self, why):
+            raise AssertionError(why)
+
+    c = conv.Converter(URL)
+    c._http = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    small = [c._gate(Route(), _request(f"/assets/{i}.js")) for i in range(conv.FETCH_CONCURRENCY + 4)]
+    tasks = [asyncio.ensure_future(t) for t in small]
+    await settle()
+    assert in_flight[0] == conv.FETCH_CONCURRENCY  # the rest wait for a slot
+    gate.set()
+    await asyncio.gather(*tasks)
+    assert in_flight[1] == conv.FETCH_CONCURRENCY
+
+    holders = []
+    real_acquire = c._large.acquire
+
+    async def acquire():
+        await real_acquire()
+        holders.append(1)
+        assert len(holders) - releases[0] == 1  # never two large answers at once
+
+    releases = [0]
+    real_release = c._large.release
+
+    def release():
+        releases[0] += 1
+        real_release()
+
+    c._large.acquire, c._large.release = acquire, release
+    await asyncio.gather(*(c._gate(Route(), _request(f"/assets/big{i}.js")) for i in range(3)))
+    assert len(holders) == 3 and releases[0] == 3 and not c._large.locked()
     await c.close()
 
 
@@ -216,6 +372,10 @@ class FakePage:
         self.browser = browser
         self.context = context
         self.converted = 0
+        self.handlers: dict[str, list] = {}
+
+    def on(self, event, handler):
+        self.handlers.setdefault(event, []).append(handler)
 
     @property
     def closed(self) -> bool:
@@ -231,13 +391,22 @@ class FakePage:
     async def evaluate(self, script, workflow=None):
         if script == conv._FRONTEND_VERSION:
             return "1.53.6"
+        if script == conv._LOAD:
+            self.loaded = workflow
+            return None
+        assert script == conv._EXPORT, script
+        workflow = self.loaded
         self.converted += 1
         if self.browser.gate is not None:
             await self.browser.gate.wait()
         if workflow.get("throw"):
             raise RuntimeError("Error: DataCloneError")
         if workflow.get("crash"):
+            for handler in self.handlers.get("crash", []):
+                handler(self)
             raise RuntimeError("Page.evaluate: Target crashed")
+        if workflow.get("looks_closed"):  # the frontend's own error, whatever its words
+            raise RuntimeError("Error: Target page, context or browser has been closed")
         if workflow.get("kill"):
             self.browser.closed = True
             raise RuntimeError("Page.evaluate: Connection closed")
@@ -389,6 +558,13 @@ async def test_a_tab_or_browser_that_goes_away_is_unavailable_and_retryable_not_
     await settle()
     assert await c.convert(UI) == API  # a new tab, or a new browser
     assert len(launches.browsers) == (2 if how == "kill" else 1)
+
+
+async def test_a_frontend_error_that_reads_like_a_closed_tab_is_still_the_graphs_failure(monkeypatch):
+    c, _ = converter(monkeypatch)
+    with pytest.raises(RelayError) as caught:
+        await c.convert({**UI, "looks_closed": True})
+    assert caught.value.code == "conversion_failed"
 
 
 async def test_a_slow_conversion_times_out_as_failed(monkeypatch):
@@ -735,3 +911,25 @@ async def test_the_tool_schemas_offer_conversion_honestly_either_way():
         "server_info.capabilities.conversion"
         in tools["workflow_run"].input_schema["properties"]["workflow"]["description"]
     )
+
+
+async def test_the_export_waits_for_the_tabs_fetches_to_settle_but_not_forever(monkeypatch):
+    monkeypatch.setattr(conv, "SETTLE_QUIET_SECONDS", 0.1)
+    monkeypatch.setattr(conv, "SETTLE_MAX_SECONDS", 0.6)
+    loop = asyncio.get_running_loop()
+    quiet = conv._Activity()  # nothing fetched: no wait
+    t0 = loop.time()
+    await quiet.settle()
+    assert loop.time() - t0 < 0.05
+    busy = conv._Activity()
+    busy.touch(+1)  # a preview's video, in flight
+    waiting = asyncio.ensure_future(busy.settle())
+    await asyncio.sleep(0.2)
+    assert not waiting.done()
+    busy.touch(-1)
+    await asyncio.wait_for(waiting, 0.3)  # done once quiet for SETTLE_QUIET_SECONDS
+    stuck = conv._Activity()
+    stuck.touch(+1)  # never finishes
+    t0 = loop.time()
+    await stuck.settle()
+    assert 0.55 < loop.time() - t0 < 0.8  # SETTLE_MAX_SECONDS, then it exports anyway

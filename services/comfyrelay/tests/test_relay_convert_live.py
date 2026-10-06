@@ -26,10 +26,11 @@ import asyncio
 import importlib.util
 import json
 import os
+import re
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import httpx2
 import pytest
@@ -157,6 +158,8 @@ class StandIn(ThreadingHTTPServer):
 
     def __init__(self, port: int) -> None:
         self.requests: list[tuple[str, str]] = []
+        self.sent: dict[str, int] = {}  # bytes of each large body it got out before the client stopped reading
+        self.views: list[int] = []  # the size of each /api/view answer
         self.local = threading.local()
         super().__init__(("127.0.0.1", port), _StandInHandler)
 
@@ -189,6 +192,9 @@ class _StandInHandler(BaseHTTPRequestHandler):
         if self.command != "GET" or upgrade or path.startswith("/escape/"):
             self._answer(200, b"{}", {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"})
             return
+        if path.startswith("/assets/large-") or path == "/api/view":
+            self._large(path, parse_qs(urlsplit(self.path).query))
+            return
         http = getattr(self.server.local, "http", None)
         if http is None:
             http = self.server.local.http = httpx2.Client(timeout=60)
@@ -199,6 +205,46 @@ class _StandInHandler(BaseHTTPRequestHandler):
         self._answer(
             answer.status_code, answer.content, {k: v for k, v in answer.headers.items() if k.lower() not in drop}
         )
+
+    def _large(self, path: str, query: dict) -> None:
+        """A body of `mb` MB (default 300), as a large input video would be: with a Content-Length, or chunked, or
+        for /api/view the range asked for, as ComfyUI serves an input file."""
+        size = int(query.get("mb", ["300"])[0]) * 1024 * 1024
+        chunked = "chunked" in query
+        wanted = re.fullmatch(r"bytes=(\d+)-(\d*)", self.headers.get("Range") or "")
+        if path == "/api/view" and wanted:
+            start = int(wanted[1])
+            end = min(int(wanted[2]) if wanted[2] else size - 1, size - 1)
+            self.server.views.append(end - start + 1)
+            self.send_response(206)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.end_headers()
+            try:
+                self.wfile.write(b"\0" * (end - start + 1))
+            except (ConnectionResetError, BrokenPipeError):
+                pass
+            return
+        if path == "/api/view":
+            self.server.views.append(size)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Transfer-Encoding" if chunked else "Content-Length", "chunked" if chunked else str(size))
+        self.end_headers()
+        block, sent = b"\0" * (1024 * 1024), 0
+        key = f"{path}?{urlsplit(self.path).query}"
+        try:
+            while sent < size:
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(block), block) if chunked else block)
+                sent += len(block)
+                self.server.sent[key] = sent
+            if chunked:
+                self.wfile.write(b"0\r\n\r\n")
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        self.close_connection = True
 
     do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _any
 
@@ -509,3 +555,52 @@ async def test_load3d_cant_upload_while_converting_so_it_fails():
         await converter.close()
     assert uploads, "no Load3D template tried to upload"
     assert failures and all(code == "conversion_failed" for _, code in failures), failures
+
+
+def _rss_mb(field: str) -> float:
+    with open("/proc/self/status") as f:
+        return next(int(line.split()[1]) for line in f if line.startswith(field)) / 1024
+
+
+async def test_large_answers_are_refused_and_never_balloon_the_relay(standin):
+    """What once OOM-killed the relay (#191): a LoadVideo graph whose input file is hundreds of MB, and many answers
+    at once. The preview's video comes in ranges cut to RANGE_BYTES. An answer over the cap is given up on as it
+    streams, chunked or not, and the page gets an abort; answers under it are fetched a few at a time. The relay
+    runs in this process, so its own peak memory is measured here."""
+    (_, workflow), *_ = await templates(limit=1, need=lambda wf: '"LoadVideo"' in json.dumps(wf))
+    nodes = list(workflow["nodes"]) + [
+        n for g in (workflow.get("definitions") or {}).get("subgraphs") or [] for n in g["nodes"]
+    ]
+    for node in nodes:
+        if node.get("type") == "LoadVideo":
+            node["widgets_values"][0] = "huge.mp4"
+    converter = conv.Converter(url_of(standin), pages=1)
+    try:
+        await converter.convert(workflow)  # loads the frontend, and the graph with its 300 MB "input"
+        with open("/proc/self/clear_refs", "w") as f:
+            f.write("5")  # reset this process's peak RSS
+        before = _rss_mb("VmRSS:")
+        tab = await converter._session.idle.get()
+        try:
+            results = await tab.page.evaluate(
+                """async (comfy) => {
+                  const get = (p) => fetch(comfy + p).then(r => r.arrayBuffer())
+                    .then(b => b.byteLength, e => 'aborted');
+                  const big = [get('/assets/large-1.bin?mb=300'), get('/assets/large-2.bin?mb=300&chunked=1')];
+                  const many = Array.from({length: 24}, (_, i) => get(`/assets/large-m${i}.bin?mb=20`));
+                  return {big: await Promise.all(big), many: await Promise.all(many)};
+                }""",
+                url_of(standin),
+            )
+        finally:
+            converter._session.idle.put_nowait(tab)
+        peak = _rss_mb("VmHWM:")
+    finally:
+        await converter.close()
+    assert results["big"] == ["aborted", "aborted"], results["big"]
+    assert results["many"] == [20 * 1024 * 1024] * 24, results["many"]
+    assert standin.views and max(standin.views) <= conv.RANGE_BYTES, standin.views  # the video, a range at a time
+    for key in ("/assets/large-1.bin?mb=300", "/assets/large-2.bin?mb=300&chunked=1"):
+        assert standin.sent.get(key, 0) < 200 * 1024 * 1024, (key, standin.sent.get(key))  # it stopped reading
+    # Unbounded, the two large answers alone were 600 MB, and the 24 others 480 MB more.
+    assert peak - before < 300, (before, peak)
