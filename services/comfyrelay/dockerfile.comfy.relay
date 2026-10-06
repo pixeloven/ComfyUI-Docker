@@ -86,7 +86,7 @@ RUN /opt/venv/bin/comfyctl relay docs build --docs-sha "$COMFY_DOCS_SHA" --skill
 # The hash pins integrity, not freshness: Chromium's security fixes reach this
 # image only when Playwright moves. Move it with each Playwright release (about
 # monthly), and at least once a month: the playwright== pin and the lock, these
-# two values, and the apt pins below if its build needs other libraries.
+# two values, and the package names below if its build needs other libraries.
 FROM deps AS browser
 ARG CHROMIUM_REVISION=1243
 ARG CHROMIUM_TREE_SHA256=7310e9a7f48efd6d1a9a93be874f39dd0f8bdbcf56e3f83a3ebc4597448df8ba
@@ -114,32 +114,20 @@ FROM venv-${RELAY_CONVERT} AS venv
 # mcp-convert's base: the browser, then the system libraries it links against
 # and the one font family it needs to render (without fontconfig and a font its
 # renderer crashes on page load), before any app code. Not Playwright's
-# --with-deps set, which is about 115 MB more (X server bits, more fonts). Every
-# package is pinned to the version Debian 13 serves, its dependencies included,
-# as tini is below: a Debian update makes this fail loudly rather than install
-# another build. To move them, list what the unpinned names install on this
-# base (`apt-get install --no-install-recommends` with the names alone, then
-# `dpkg-query -W`), and check the ldd step still passes.
+# --with-deps set, which is about 115 MB more (X server bits, more fonts). The
+# names are pinned, their versions are not (owner decision on #191): they come
+# from the digest-pinned base image's Debian sources at build time, as the core
+# images' packages do, so a rebuild picks up Debian's security fixes. Integrity
+# comes from that base and the hash-checked Chromium build; freshness from
+# rebuilding and from the Playwright cadence above. The ldd check fails the
+# build if Chromium ever links a library this set doesn't provide.
 FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS runtime-1
 COPY --from=browser /opt/playwright /opt/playwright
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      at-spi2-common=2.56.2-1+deb13u2 fontconfig=2.15.0-2.3 fontconfig-config=2.15.0-2.3 \
-      fonts-liberation=1:2.1.5-3 libasound2-data=1.2.14-1+deb13u1 libasound2t64=1.2.14-1+deb13u1 \
-      libatk-bridge2.0-0t64=2.56.2-1+deb13u2 libatk1.0-0t64=2.56.2-1+deb13u2 libatomic1=14.2.0-19 \
-      libatspi2.0-0t64=2.56.2-1+deb13u2 libbrotli1=1.1.0-2+b7 libdbus-1-3=1.16.2-2 \
-      libdrm-amdgpu1=2.4.124-2 libdrm-common=2.4.124-2 libdrm-intel1=2.4.124-2 libdrm2=2.4.124-2 \
-      libedit2=3.1-20250104-1 libelf1t64=0.192-4 libexpat1=2.8.3-1~deb13u1 libfontconfig1=2.15.0-2.3 \
-      libfreetype6=2.13.3+dfsg-1+deb13u1 libgbm1=25.0.7-2+deb13u1 libglib2.0-0t64=2.84.4-3~deb13u5 \
-      libllvm19=1:19.1.7-3+b1 libnspr4=2:4.36-1 libnss3=2:3.110-1+deb13u4 libpciaccess0=0.17-3+b3 \
-      libpng16-16t64=1.6.48-1+deb13u6 libsensors-config=1:3.6.2-2 libsensors5=1:3.6.2-2 \
-      libwayland-server0=1.23.1-3 libx11-6=2:1.8.12-1 libx11-data=2:1.8.12-1 libx11-xcb1=2:1.8.12-1 \
-      libxau6=1:1.0.11-1 libxcb-dri3-0=1.17.0-2+b1 libxcb-present0=1.17.0-2+b1 libxcb-randr0=1.17.0-2+b1 \
-      libxcb-sync1=1.17.0-2+b1 libxcb-xfixes0=1.17.0-2+b1 libxcb1=1.17.0-2+b1 libxcomposite1=1:0.4.6-1 \
-      libxdamage1=1:1.1.6-1+b2 libxdmcp6=1:1.1.5-1 libxext6=2:1.3.4-1+b3 libxfixes3=1:6.0.0-2+b4 \
-      libxi6=2:1.8.2-1 libxkbcommon0=1.7.0-2 libxml2=2.12.7+dfsg+really2.9.14-2.1+deb13u3 \
-      libxrandr2=2:1.5.4-1+b3 libxrender1=1:0.9.12-1 libxshmfence1=1.3.3-1 libz3-4=4.13.3-1 \
-      mesa-libgallium=25.0.7-2+deb13u1 xkb-data=2.42-1 && \
+      libglib2.0-0t64 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libdbus-1-3 libx11-6 \
+      libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libgbm1 libexpat1 libxcb1 libxkbcommon0 \
+      libasound2t64 libatspi2.0-0t64 fontconfig fonts-liberation && \
     rm -rf /var/lib/apt/lists/* && \
     ! ldd /opt/playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell | grep 'not found'
 # convert.py finds the browser here. COMFYUI_MCP_CONVERT=0 turns conversion off.

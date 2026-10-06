@@ -152,7 +152,7 @@ There is no date tag.
   `COMFY_DOCS_SHA` (CI's `docs-pin` job fails a PR whose pin isn't on Comfy-Org/docs `main`),
   comfyrelay's exact `mcp==` pin and `services/uv.lock`, `tini`'s apt version in
   `dockerfile.comfy.relay`, and for `mcp-convert` its exact `playwright==` pin, the Chromium
-  revision and tree hash, and every apt version its `runtime-1` stage installs, the `sam2` commit in `extra-requirements.txt`, and GitHub Action versions
+  revision and tree hash (its apt packages are named but unpinned, from the digest-pinned base's sources; Playwright moves about monthly for Chromium's fixes), the `sam2` commit in `extra-requirements.txt`, and GitHub Action versions
   (exact semver tags, bumped by Dependabot).
 
 ## Project invariants

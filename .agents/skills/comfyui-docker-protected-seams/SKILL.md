@@ -88,8 +88,12 @@ registry is what they check against.
   `services/*/dockerfile.*` and `services/comfy/*/dockerfile.*` (including the `mcp`
   image's `ghcr.io/astral-sh/uv` build stage), the `mcp-convert` image's exact
   `playwright==` pin (comfyrelay's `convert` extra), its `CHROMIUM_REVISION` and
-  `CHROMIUM_TREE_SHA256` checks, and every apt version its `runtime-1` stage pins,
-  the `mcp` image's `tini` apt version
+  `CHROMIUM_TREE_SHA256` checks, and the package names its `runtime-1` stage
+  installs (names only: their versions come unpinned from the digest-pinned
+  base's Debian sources, owner decision on #191; integrity is the base digest
+  and the Chromium tree hash, freshness is rebuilding and moving Playwright about
+  monthly, so flag a change that pins a version, drops the hash check, or lets
+  the Playwright pin go stale), the `mcp` image's `tini` apt version
   and its builder step that strips the SDK's `mcp` CLI from the venv and fails the
   build if `mcp.cli` or `dotenv` can be imported, `COMFY_DOCS_SHA` in
   `docker-bake.hcl` (the Comfy-Org/docs commit the relay's docs index covers:
