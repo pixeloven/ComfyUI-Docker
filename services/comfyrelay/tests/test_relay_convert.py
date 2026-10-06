@@ -65,11 +65,13 @@ def test_the_frontends_gets_to_comfyui_are_allowed(url):
         ("GET", f"{URL}/object_info"),
         ("GET", f"{URL}/custom_route"),
         ("GET", f"{URL}/api/userdataX"),
-        # Out of an allowed prefix once decoded.
+        # Out of an allowed prefix once ComfyUI decodes it.
         ("GET", f"{URL}/assets/../api/interrupt"),
         ("GET", f"{URL}/extensions/..%2Fmanager%2Freboot"),
+        ("GET", f"{URL}/extensions/x/%2E%2E/%2E%2E/manager/reboot"),
         ("GET", f"{URL}/assets/%2e%2e/api/interrupt"),
         ("GET", f"{URL}/assets/%5C..%5Capi"),
+        ("GET", f"{URL}/api/userdata/./x"),
     ],
 )
 def test_everything_else_is_refused(method, url):
@@ -80,6 +82,9 @@ def test_settings_writes_are_answered_in_the_browser_and_nothing_else_is():
     c = conv.Converter(URL)
     assert c.settings_write("POST", f"{URL}/api/settings/Comfy.InstalledVersion")
     assert c.settings_write("POST", f"{URL}/api/settings")
+    behind = conv.Converter("http://proxy.test/comfy")
+    assert behind.settings_write("POST", "http://proxy.test/comfy/api/settings/x")
+    assert not behind.settings_write("POST", "http://proxy.test/api/settings/x")  # not under COMFYUI_URL's path
     assert not c.allowed("POST", f"{URL}/api/settings/Comfy.InstalledVersion")  # still never sent
     for method, url in [
         ("POST", f"{URL}/api/upload/image"),
@@ -108,11 +113,18 @@ async def test_the_gate_answers_a_settings_write_and_aborts_the_rest():
 
     class Request:
         def __init__(self, method, url):
-            self.method, self.url = method, url
+            self.method, self.url, self.headers = method, url, {}
 
     c = conv.Converter(URL)
+    fetched = []
+
+    async def fetch(request):
+        fetched.append((request.method, request.url))
+        return {"status": 200, "headers": {}, "body": b"{}"}
+
+    c._fetch = fetch
     for method, path, did in [
-        ("GET", "/api/object_info", "continue"),
+        ("GET", "/api/object_info", ("fulfill", 200)),
         ("POST", "/api/settings/Comfy.InstalledVersion", ("fulfill", 200)),
         ("POST", "/api/upload/image", "abort"),
         ("GET", "/api/prompt", "abort"),
@@ -121,6 +133,7 @@ async def test_the_gate_answers_a_settings_write_and_aborts_the_rest():
         await c._gate(route, Request(method, f"{URL}{path}"))
         assert route.did == did, (method, path)
     assert [m for m, _ in c.blocked] == ["POST", "POST", "GET"]
+    assert fetched == [("GET", f"{URL}/api/object_info")]  # the only request the relay sent on
 
 
 def test_a_comfyui_behind_a_path_allows_only_under_it():
@@ -131,17 +144,34 @@ def test_a_comfyui_behind_a_path_allows_only_under_it():
     assert not c.allowed("GET", "http://proxy.test/comfyx/api/object_info")
 
 
-def test_the_launch_sends_everything_but_comfyuis_http_origin_to_a_dead_proxy():
+def test_the_browser_itself_reaches_nothing_not_even_comfyui():
     options = conv.Converter("http://comfyui:8188")._launch_options()
-    assert options["proxy"] == {"server": conv.DEAD_PROXY, "bypass": "<-loopback>,http://comfyui:8188"}
-    assert "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE comfyui" in options["args"]
+    assert options["proxy"] == {"server": conv.DEAD_PROXY, "bypass": "<-loopback>"}
+    assert "--host-resolver-rules=MAP * ~NOTFOUND" in options["args"]
     assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in options["args"]
     assert "--disable-quic" in options["args"]
-    assert (
-        conv.Converter("https://comfy.example")
-        ._launch_options()["proxy"]["bypass"]
-        .endswith("https://comfy.example:443")
-    )
+
+
+async def test_the_relay_fetches_an_allowed_request_with_a_get_and_a_few_headers():
+    seen = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append((request.method, str(request.url), dict(request.headers)))
+        return httpx2.Response(200, json={"ok": 1}, headers={"x-kept": "1", "connection": "close"})
+
+    class Request:
+        method, url = "GET", f"{URL}/api/object_info"
+        headers = {"accept": "application/json", "comfy-user": "u1", "cookie": "secret", "authorization": "x"}
+
+    c = conv.Converter(URL)
+    c._http = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    answer = await c._fetch(Request())
+    assert answer["status"] == 200 and json.loads(answer["body"]) == {"ok": 1}
+    assert answer["headers"]["x-kept"] == "1" and "connection" not in answer["headers"]
+    method, url, headers = seen[0]
+    assert (method, url) == ("GET", f"{URL}/api/object_info")
+    assert headers["comfy-user"] == "u1" and "cookie" not in headers and "authorization" not in headers
+    await c.close()
 
 
 @pytest.mark.parametrize(
@@ -198,13 +228,29 @@ class FakePage:
     async def wait_for_function(self, *a, **kw):
         pass
 
-    async def evaluate(self, script, workflow):
+    async def evaluate(self, script, workflow=None):
+        if script == conv._FRONTEND_VERSION:
+            return "1.53.6"
         self.converted += 1
         if self.browser.gate is not None:
             await self.browser.gate.wait()
         if workflow.get("throw"):
             raise RuntimeError("Error: DataCloneError")
+        if workflow.get("crash"):
+            raise RuntimeError("Page.evaluate: Target crashed")
+        if workflow.get("kill"):
+            self.browser.closed = True
+            raise RuntimeError("Page.evaluate: Connection closed")
+        if workflow.get("closed"):
+            raise TargetClosedError("Page.evaluate: Target page, context or browser has been closed")
         return API
+
+    def is_closed(self) -> bool:
+        return self.closed
+
+
+class TargetClosedError(Exception):
+    """Named as Playwright's own."""
 
 
 class FakeContext:
@@ -299,7 +345,7 @@ async def test_one_browser_serves_every_conversion(monkeypatch):
     # Each tab is a context of its own, locked down before its page loads.
     contexts = {p.context for p in launches.browsers[0].pages}
     assert len(contexts) == 2 and all(c.locked == ["init", "route", "websocket"] for c in contexts)
-    assert c.status() == {"state": "running", "pages": 2, "conversions": 5}
+    assert c.status() == {"state": "running", "pages": 2, "conversions": 5, "frontend_version": "1.53.6"}
 
 
 async def test_tabs_are_recycled_staggered(monkeypatch):
@@ -330,6 +376,19 @@ async def test_a_failed_conversion_says_why_and_replaces_its_tab(monkeypatch):
     first, second = launches.browsers[0].pages
     assert first.closed and not second.closed
     assert await c.convert(UI) == API
+
+
+@pytest.mark.parametrize("how", ["crash", "kill", "closed"])
+async def test_a_tab_or_browser_that_goes_away_is_unavailable_and_retryable_not_failed(monkeypatch, how):
+    c, launches = converter(monkeypatch)
+    await c.convert(UI)
+    with pytest.raises(RelayError) as caught:
+        await c.convert({**UI, how: True})
+    assert caught.value.code == "conversion_unavailable" and caught.value.retryable, caught.value.message
+    assert "went away" in caught.value.message
+    await settle()
+    assert await c.convert(UI) == API  # a new tab, or a new browser
+    assert len(launches.browsers) == (2 if how == "kill" else 1)
 
 
 async def test_a_slow_conversion_times_out_as_failed(monkeypatch):
@@ -563,7 +622,7 @@ async def test_template_get_api_returns_what_the_frontend_converts():
         converter=fake,
         comfyui=template_comfyui(),
     )
-    assert "workflow" not in lean and len(fake.given) == 1  # nothing to convert
+    assert "workflow" not in lean and "format" not in lean and len(fake.given) == 1  # nothing converted, or said
 
 
 async def test_template_get_api_without_conversion_is_unavailable_with_the_ui_graph():

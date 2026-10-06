@@ -13,40 +13,49 @@ On when COMFYUI_MCP_CONVERT=1, which the mcp-convert image sets. It needs the
 `convert` extra (Playwright) and Chromium's headless shell, which only that
 image installs (dockerfile.comfy.relay, RELAY_CONVERT=1).
 
-LOCKDOWN (D3). Three layers, each enforced here and tested live
-(tests/test_relay_convert_live.py):
+LOCKDOWN (D3). The browser has no network: Chromium sends every request,
+ComfyUI's included, to a proxy whose name never resolves. The only way
+anything reaches ComfyUI is the relay's own Python, which fetches what the
+route below allows and hands the answer to the page. Each layer is enforced
+here and tested live (tests/test_relay_convert_live.py), where the ComfyUI
+the converter talks to is a recording stand-in that checks every request it
+receives was an allowlisted GET:
 
-1. Requests. A context-wide route lets a request through only when it is a
-   GET to the COMFYUI_URL origin whose path is on ALLOWED_PATHS or under
-   ALLOWED_PREFIXES; everything else is aborted (fail closed). It sees the
-   page's requests, its iframes', popups' and dedicated workers'. One kind of
-   refused request is answered rather than aborted: a POST of the frontend's
-   own settings (/api/settings), which it makes as it starts and without
-   which it stops loading. It gets an empty 200 from the browser itself and
-   never reaches ComfyUI. Every page websocket is closed before it connects
-   (route_web_socket).
-2. Page APIs. An init script, run before any page script in every frame,
-   removes SharedWorker, RTCPeerConnection, RTCDataChannel and WebTransport,
-   and makes navigator.sendBeacon refuse. Dedicated workers stay: the
-   frontend starts two from blob: URLs as it loads (frontend 1.53.6), so it
-   can't run without them. Their HTTP requests meet layer 1; route_web_socket
-   doesn't see their websockets, which layer 3 stops.
-3. The network. Chromium sends everything but http(s)://<ComfyUI host:port>
-   to a proxy that can't be reached (its name never resolves), so websockets
-   (ws:// to ComfyUI included), preconnects and anything layer 1 or 2 missed
-   go nowhere; its resolver answers NOTFOUND for every name but ComfyUI's, so
-   DNS prefetch and preconnect send no lookup; WebRTC may not use UDP outside
-   a proxy, and QUIC is off.
+1. Requests. A route on each tab's context takes every request it sees. A GET
+   to the COMFYUI_URL origin for a path on ALLOWED_PATHS or under
+   ALLOWED_PREFIXES is fetched by the relay (httpx2: that GET, a few headers,
+   no body, no redirects followed) and fulfilled with ComfyUI's answer;
+   everything else is aborted (fail closed). One refused request is answered
+   rather than aborted: a POST of the frontend's own settings (/api/settings),
+   which it makes as it starts and without which it stops loading. It gets an
+   empty 200 from the route and never reaches ComfyUI. Every page websocket is
+   closed before it connects (route_web_socket).
+2. Page APIs. An init script, run before any page script in every frame
+   (about:blank and srcdoc iframes included), removes SharedWorker,
+   RTCPeerConnection, RTCDataChannel and WebTransport, and makes
+   navigator.sendBeacon refuse. Dedicated workers stay: the frontend starts
+   two from blob: URLs as it loads (frontend 1.53.6), so it can't run without
+   them.
+3. The network. What the route doesn't see goes to the dead proxy:
+   websockets from workers, speculation-rules prefetch and prerender (both
+   measured getting past a route that let ComfyUI's origin go direct), and
+   preconnects. The resolver answers NOTFOUND for every name, so a DNS
+   prefetch sends no lookup; WebRTC may not use UDP outside a proxy, and QUIC
+   is off.
 
-The page never queues a prompt (layer 1 refuses every POST), so no
+The relay sends ComfyUI only GETs on the allowlist, so no write, no
 `extra_data` and no credentials reach ComfyUI from here. A COMFYUI_URL that
-carries credentials is refused, so they never reach the browser.
+carries credentials is refused for conversion.
 
-What stays reachable: the GET routes on the allowlist, which only read. Under
-/extensions/ that includes custom-node JavaScript, which runs in the page with
-the same limits; a custom node whose graphs need its own GET routes won't
-convert. Chromium runs without its sandbox (Docker's default seccomp profile
-and no-new-privileges leave it no usable one), in the relay's container.
+What stays reachable: the GET routes on the allowlist, as ComfyUI implements
+them. Query strings aren't checked, so a parameter like /api/view's filename
+is left to ComfyUI's own path checks. Under /extensions/ any GET a custom node
+registers there is reachable, and custom-node JavaScript runs in the page
+under the same limits; a custom node whose graphs need its own GET routes
+elsewhere won't convert. "Only reads" was checked against a bare ComfyUI
+v0.38.0's handlers. Chromium runs without its sandbox (Docker's default
+seccomp profile and no-new-privileges leave it no usable one), in the relay's
+container.
 
 LIFECYCLE. One browser per relay, launched on first use and reused. It holds
 `pages` tabs, each with the frontend loaded; a conversion takes one, so at
@@ -73,7 +82,7 @@ import importlib.util
 import logging
 import re
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from .errors import RelayError
 from .settings import CONVERT_ENV, MAX_CONVERT_PAGES, redact_url
@@ -134,9 +143,14 @@ LAUNCH_ARGS = [
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     "--disable-quic",
 ]
-# Every request the bypass rule below doesn't cover goes here, and the name never resolves (the resolver rule
-# maps every name but ComfyUI's to NOTFOUND), so nothing it is sent leaves the container.
+# Every request the browser itself makes goes here, and the name never resolves (the resolver rule maps every name
+# to NOTFOUND), so nothing it is sent leaves the container. Loopback too: Chromium never proxies it unless told.
 DEAD_PROXY = "http://proxy.invalid:9"
+NO_BYPASS = "<-loopback>"
+# What the relay passes on from the page's request to ComfyUI, and what it drops from ComfyUI's answer (httpx2
+# hands over the body decoded and whole).
+FORWARD_HEADERS = frozenset({"accept", "accept-language", "comfy-user", "range", "if-none-match", "if-modified-since"})
+DROP_HEADERS = frozenset({"content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive"})
 
 # Before any page script, in every frame. Dedicated workers stay (see the module docstring).
 INIT_SCRIPT = """(() => {
@@ -151,6 +165,10 @@ INIT_SCRIPT = """(() => {
   } catch (e) {}
 })();"""
 _READY = "() => !!(window.app && window.app.graphToPrompt && window.app.loadGraphData && window.app.vueAppReady)"
+_FRONTEND_VERSION = "() => window.__COMFYUI_FRONTEND_VERSION__ || null"
+# What Playwright raises when the page, its context or the browser is gone: a crashed renderer, a killed browser,
+# a closed target. The conversion never ran to an answer, so it's unavailable (retryable), not failed.
+_GONE = ("Target crashed", "has been closed", "Target closed", "Browser closed", "browser has disconnected")
 # Through JSON, as the editor's Export (API) writes it: a key whose value is undefined (class_type of a node
 # type this instance lacks) is dropped, where Playwright would hand it over as null.
 _CONVERT = """async (wf) => {
@@ -203,6 +221,18 @@ def _origin(url: str) -> tuple[str, str, int] | None:
     if parts.scheme not in _DEFAULT_PORTS or not parts.hostname or port is None:
         return None
     return parts.scheme, parts.hostname.lower(), port
+
+
+def _gone(exc: BaseException, page: Any, browser: Any) -> bool:
+    """Whether a failed evaluate means the browser or tab went away, rather than the frontend rejecting the graph."""
+    if type(exc).__name__ == "TargetClosedError":
+        return True
+    try:
+        if page.is_closed() or not browser.is_connected():
+            return True
+    except Exception:
+        return True
+    return any(marker in str(exc) for marker in _GONE)
 
 
 def _why(exc: BaseException) -> str:
@@ -265,6 +295,9 @@ class Converter:
         # What the lockdown stopped, newest last: (method, or "WS", url). The live test reads it.
         self.blocked: collections.deque[tuple[str, str]] = collections.deque(maxlen=200)
         self.conversions = 0
+        # The frontend version the tabs loaded, once one has (window.__COMFYUI_FRONTEND_VERSION__).
+        self.frontend_version: str | None = None
+        self._http: Any = None
         self._lock = asyncio.Lock()
         self._session: _Session | None = None
         self._closed = False
@@ -275,41 +308,63 @@ class Converter:
 
     # -- lockdown (D3) --------------------------------------------------------
 
-    def allowed(self, method: str, url: str) -> bool:
-        """Layer 1: a GET to the COMFYUI_URL origin, for a path on the allowlist. Anything else is refused."""
-        if method != "GET" or self.origin is None or _origin(url) != self.origin:
-            return False
-        path = urlsplit(url).path
-        # Nothing that could step out of an allowed prefix once ComfyUI decodes it.
-        if ".." in path or "\\" in path or "%2e" in path.lower() or "%5c" in path.lower():
-            return False
+    def _path(self, url: str) -> str | None:
+        """`url`'s path relative to COMFYUI_URL's, as ComfyUI will see it (percent-decoded), or None when it isn't on
+        the COMFYUI_URL origin under its path, or could step out of where it points once decoded (a `.` or `..`
+        segment, a backslash)."""
+        if self.origin is None or _origin(url) != self.origin:
+            return None
+        path = unquote(urlsplit(url).path)
+        if "\\" in path or any(segment in (".", "..") for segment in path.split("/")):
+            return None
         if self.base:
             if path != self.base and not path.startswith(self.base + "/"):
-                return False
+                return None
             path = path[len(self.base) :] or "/"
-        return path in ALLOWED_PATHS or path.startswith(ALLOWED_PREFIXES)
+        return path
+
+    def allowed(self, method: str, url: str) -> bool:
+        """Layer 1: a GET to the COMFYUI_URL origin, for a path on the allowlist. Anything else is refused."""
+        path = self._path(url) if method == "GET" else None
+        return path is not None and (path in ALLOWED_PATHS or path.startswith(ALLOWED_PREFIXES))
 
     def settings_write(self, method: str, url: str) -> bool:
         """A write of the frontend's own settings to ComfyUI. Refused like every other write, but answered: the
         frontend stores a setting as it starts (Comfy.InstalledVersion, on a ComfyUI no browser has opened yet)
         and stops loading if that fails."""
-        if method != "POST" or self.origin is None or _origin(url) != self.origin:
-            return False
-        path = urlsplit(url).path
-        if self.base:
-            path = path.removeprefix(self.base)
-        return path == "/api/settings" or (path.startswith("/api/settings/") and ".." not in path)
+        path = self._path(url) if method == "POST" else None
+        return path is not None and (path == "/api/settings" or path.startswith("/api/settings/"))
 
     async def _gate(self, route: Any, request: Any) -> None:
         if self.allowed(request.method, request.url):
-            await route.continue_()
+            try:
+                answer = await self._fetch(request)
+            except Exception as exc:  # ComfyUI unreachable, or the tab closed meanwhile
+                log.debug("could not fetch %s for a converter tab: %s", request.url, _why(exc))
+                await _quietly(route.abort("failed"))
+                return
+            await _quietly(route.fulfill(**answer))
             return
         self.blocked.append((request.method, request.url))
         log.debug("blocked %s %s", request.method, request.url)
         if self.settings_write(request.method, request.url):
-            await route.fulfill(status=200, body="")  # answered here; ComfyUI never sees it
+            await _quietly(route.fulfill(status=200, body=""))  # answered here; ComfyUI never sees it
         else:
-            await route.abort("blockedbyclient")
+            await _quietly(route.abort("blockedbyclient"))
+
+    async def _fetch(self, request: Any) -> dict[str, Any]:
+        """The one way a converter tab reaches ComfyUI: the relay GETs the allowed URL itself."""
+        if self._http is None:
+            import httpx2
+
+            self._http = httpx2.AsyncClient(timeout=PAGE_LOAD_SECONDS, follow_redirects=False)
+        headers = {k: v for k, v in request.headers.items() if k.lower() in FORWARD_HEADERS}
+        answer = await self._http.get(request.url, headers=headers)
+        return {
+            "status": answer.status_code,
+            "headers": {k: v for k, v in answer.headers.items() if k.lower() not in DROP_HEADERS},
+            "body": answer.content,
+        }
 
     async def _gate_ws(self, ws: Any) -> None:
         # Not calling connect_to_server means the socket never reaches its server.
@@ -317,15 +372,11 @@ class Converter:
         await ws.close()
 
     def _launch_options(self) -> dict[str, Any]:
-        assert self.origin is not None
-        scheme, host, port = self.origin
+        # No bypass: the browser reaches nothing, ComfyUI included. The route fetches what it allows.
         return {
             "headless": True,
-            "args": [*LAUNCH_ARGS, f"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE {host}"],
-            # <-loopback> first: Chromium never proxies loopback unless told to, and the last rule that
-            # matches wins, so ComfyUI's own http(s) origin is the one thing that goes direct. Its ws:// does
-            # not match an http:// rule, so websockets to ComfyUI hit the dead proxy too.
-            "proxy": {"server": DEAD_PROXY, "bypass": f"<-loopback>,{scheme}://{host}:{port}"},
+            "args": [*LAUNCH_ARGS, "--host-resolver-rules=MAP * ~NOTFOUND"],
+            "proxy": {"server": DEAD_PROXY, "bypass": NO_BYPASS},
         }
 
     # -- lifecycle -------------------------------------------------------------
@@ -344,6 +395,8 @@ class Converter:
         else:
             state, reason = "running", None
         info: dict[str, Any] = {"state": state, "pages": self.pages, "conversions": self.conversions}
+        if self.frontend_version:
+            info["frontend_version"] = self.frontend_version
         if reason:
             info["reason"] = reason
         if state == "backing_off":
@@ -429,9 +482,12 @@ class Converter:
         try:
             await page.goto(self.url, wait_until="load", timeout=PAGE_LOAD_SECONDS * 1000)
             await page.wait_for_function(_READY, polling=250, timeout=PAGE_LOAD_SECONDS * 1000)
+            version = await page.evaluate(_FRONTEND_VERSION)
         except BaseException:
             await _close_page_and_context(context)
             raise
+        if isinstance(version, str):
+            self.frontend_version = version[:40]
         return page
 
     async def _fill(self, session: _Session, tab: _Tab, old: Any = None) -> None:
@@ -464,6 +520,9 @@ class Converter:
         session, self._session = self._session, None
         if session is not None:
             await session.close()
+        http, self._http = self._http, None
+        if http is not None:
+            await _quietly(http.aclose())
 
     # -- conversion ------------------------------------------------------------
 
@@ -505,6 +564,8 @@ class Converter:
             except TimeoutError:
                 raise failed(f"no answer in {CONVERT_SECONDS:.0f}s") from None
             except Exception as exc:
+                if _gone(exc, tab.page, session.browser):
+                    raise unavailable(f"the converter's browser tab went away ({_why(exc)})", retryable=True) from None
                 raise failed(_why(exc)) from None
             if not isinstance(output, dict):
                 raise failed(f"graphToPrompt returned {type(output).__name__}, not an object")
@@ -528,6 +589,14 @@ class Converter:
             task = asyncio.ensure_future(self._retire(session))
             self._retiring.add(task)
             task.add_done_callback(self._retiring.discard)
+
+
+async def _quietly(awaitable: Any) -> None:
+    """Await a route action whose tab may already be gone."""
+    try:
+        await awaitable
+    except Exception:
+        pass
 
 
 async def _close_page_and_context(context: Any) -> None:

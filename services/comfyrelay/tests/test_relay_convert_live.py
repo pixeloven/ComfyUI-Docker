@@ -7,12 +7,17 @@ names a ComfyUI and Playwright (the `convert` extra) and its Chromium are instal
     COMFYRELAY_LIVE_COMFYUI_URL=http://127.0.0.1:8188 \\
       uv run --locked --extra convert pytest -q comfyrelay/tests/test_relay_convert_live.py
 
-The lockdown test runs a page script that tries every way out it can, first in a plain browser (the negative
-control: each one must get out, or the test proves nothing), then in a converter tab, where each must fail: POST,
-PUT and DELETE to ComfyUI, a GET ComfyUI serves but the frontend doesn't need, GET to another origin (a canary
-this test runs), api.comfy.org, websockets from the page and from a dedicated worker, a worker's fetch, a beacon,
-a cross-origin iframe, a popup, a preconnect, WebRTC to a UDP socket this test holds, and WebTransport from a
-worker. DNS prefetch isn't observable here: the resolver rule keeps it from sending any lookup by construction.
+The lockdown tests point the converter, and a plain browser for the negative control, at a stand-in ComfyUI this
+test runs in front of the real one. It records every request it receives, forwards plain GETs to the real ComfyUI,
+and answers everything else itself, so nothing here ever writes to ComfyUI. A page script then tries every way out
+it can find: POST, PUT and DELETE to ComfyUI and a GET it serves but the frontend doesn't need; GET to another
+origin (a canary this test runs) and to api.comfy.org; websockets from the page and from a dedicated worker; a
+worker's fetch, and a fetch from a worker a worker started; a SharedWorker, including one taken from a fresh
+about:blank or srcdoc iframe; speculation-rules prefetch and prerender; a beacon, a cross-origin iframe, a popup, a
+preconnect; WebRTC to a UDP socket this test holds, and WebTransport from a worker. In the plain browser each one
+gets out (but the preconnect: the headless shell makes none). In a converter tab none does, and every request
+the stand-in received from it was an allowlisted GET. DNS prefetch isn't observable here: the resolver rule keeps
+it from sending any lookup by construction.
 """
 
 from __future__ import annotations
@@ -40,7 +45,6 @@ pytestmark = [
 ]
 
 CANARY_FILE = "convert-lockdown-canary.json"
-CONTROL_FILE = "convert-lockdown-control.json"
 
 ESCAPES = """async ([comfy, canary, file, udp, fresh]) => {
   const worker = (src) => new Promise((ok, no) => {
@@ -50,6 +54,20 @@ ESCAPES = """async ([comfy, canary, file, udp, fresh]) => {
   });
   const ws = (u) => `try { const s = new WebSocket(${JSON.stringify(u)}); s.onopen = () => postMessage('ok open');
     s.onerror = () => postMessage('error'); } catch (e) { postMessage('threw ' + e); }`;
+  const post = (tag, say = 'postMessage') => `fetch(${JSON.stringify(comfy)} + '/api/userdata/escape-${tag}.json',
+    {method: 'POST', body: '{}'}).then(r => ${say}('ok ' + r.status), e => ${say}('blocked: ' + e))`;
+  const sharedFrom = (attrs, tag) => new Promise((ok, no) => {
+    const f = document.createElement('iframe'); Object.assign(f, attrs); document.body.appendChild(f);
+    setTimeout(() => {
+      const SW = f.contentWindow.SharedWorker;
+      if (!SW) return no(new Error('no SharedWorker in the iframe'));
+      const src = 'onconnect = e => { const p = e.ports[0]; ' + post(tag, 'p.postMessage') + '; };';
+      const w = new SW(URL.createObjectURL(new Blob([src], {type: 'text/javascript'})));
+      w.port.onmessage = e => e.data.startsWith('ok') ? ok(e.data) : no(new Error(e.data));
+      w.port.start();
+      setTimeout(() => no(new Error('timeout')), 5000);
+    }, 300);
+  });
   const tries = {
     post_comfyui: () => fetch(comfy + '/api/userdata/' + file, {method: 'POST', body: '{"leaked": true}'}),
     put_comfyui: () => fetch(comfy + '/api/userdata/' + file, {method: 'PUT', body: '{}'}),
@@ -58,7 +76,7 @@ ESCAPES = """async ([comfy, canary, file, udp, fresh]) => {
     get_other_origin: () => fetch(canary + '/fetch'),
     get_api_comfy_org: () => fetch('https://api.comfy.org/'),
     websocket_comfyui: () => new Promise((ok, no) => {
-      const s = new WebSocket(comfy.replace(/^http/, 'ws') + '/ws');
+      const s = new WebSocket(comfy.replace(/^http/, 'ws') + '/escape/ws-page');
       s.onopen = () => ok('open');
       s.onerror = () => no(new Error('ws error'));
       s.onclose = () => no(new Error('ws closed'));
@@ -66,13 +84,25 @@ ESCAPES = """async ([comfy, canary, file, udp, fresh]) => {
     }),
     worker_fetch_other_origin: () => worker(`fetch(${JSON.stringify(canary + '/worker')})
       .then(() => postMessage('ok'), e => postMessage('blocked: ' + e))`),
-    worker_websocket_comfyui: () => worker(ws(comfy.replace(/^http/, 'ws') + '/ws')),
+    worker_websocket_comfyui: () => worker(ws(comfy.replace(/^http/, 'ws') + '/escape/ws-worker')),
     worker_websocket_other_origin: () => worker(ws(canary.replace(/^http/, 'ws') + '/worker-ws')),
     worker_webtransport: () => worker(`try { const t = new WebTransport('https://127.0.0.1:${udp}/');
       t.ready.then(() => postMessage('ok'), e => postMessage('failed ' + e)); }
       catch (e) { postMessage('threw ' + e); }`),
+    nested_worker_post_comfyui: () => worker(`const w = new Worker(URL.createObjectURL(
+      new Blob([${JSON.stringify(post('nested'))}], {type: 'text/javascript'})));
+      w.onmessage = e => postMessage(e.data);`),
     shared_worker: async () => { new SharedWorker(URL.createObjectURL(new Blob([''], {type: 'text/javascript'})));
                                  return 'started'; },
+    shared_worker_from_blank_iframe: () => sharedFrom({}, 'shared-blank'),
+    shared_worker_from_srcdoc_iframe: () => sharedFrom({srcdoc: '<p>x</p>'}, 'shared-srcdoc'),
+    speculation_rules: async () => {
+      const s = document.createElement('script'); s.type = 'speculationrules';
+      s.textContent = JSON.stringify({prefetch: [{source: 'list', urls: [comfy + '/escape/prefetch']}],
+                                      prerender: [{source: 'list', urls: [comfy + '/escape/prerender']}]});
+      document.head.appendChild(s);
+      return 'inserted';
+    },
     beacon_other_origin: async () => {
       if (!navigator.sendBeacon(canary + '/beacon', 'x')) throw new Error('beacon refused');
       return 'queued';
@@ -100,11 +130,80 @@ ESCAPES = """async ([comfy, canary, file, udp, fresh]) => {
     try { const r = await attempt(); out[name] = 'reached: ' + (r && r.status !== undefined ? r.status : r); }
     catch (e) { out[name] = 'blocked: ' + String(e).slice(0, 120); }
   }
-  await new Promise(r => setTimeout(r, 1500));  // let beacons, iframes, popups and preconnects go, or not
+  // Let beacons, iframes, popups, preconnects and speculation rules go, or not.
+  await new Promise(r => setTimeout(r, 3000));
   return out;
 }"""
-# Tries whose fate the page can't see (it only inserts or opens something); the canary can.
-ONLY_THE_CANARY_KNOWS = {"iframe_other_origin", "popup_other_origin", "preconnect_other_origin"}
+# Tries whose fate the page can't see (it only inserts or opens something); the stand-in and the canaries can.
+ONLY_THE_SERVERS_KNOW = {"iframe_other_origin", "popup_other_origin", "preconnect_other_origin", "speculation_rules"}
+# What a plain browser gets to ComfyUI that a converter tab must not: the stand-in records each.
+ESCAPED_TO_COMFYUI = {
+    ("POST", "/api/userdata/escape-shared-blank.json"),
+    ("POST", "/api/userdata/escape-shared-srcdoc.json"),
+    ("POST", "/api/userdata/escape-nested.json"),
+    ("GET", "/escape/prefetch"),
+    ("GET", "/escape/prerender"),
+    ("GET", "/api/prompt"),
+    ("WS", "/escape/ws-page"),
+    ("WS", "/escape/ws-worker"),
+}
+
+
+class StandIn(ThreadingHTTPServer):
+    """A ComfyUI the lockdown tests point at: it records (method, path) of every request, "WS" for a websocket
+    upgrade, forwards plain GETs to the real ComfyUI so the frontend loads, and answers everything else itself."""
+
+    daemon_threads = True
+
+    def __init__(self, port: int) -> None:
+        self.requests: list[tuple[str, str]] = []
+        self.local = threading.local()
+        super().__init__(("127.0.0.1", port), _StandInHandler)
+
+
+class _StandInHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server: StandIn
+
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except (ConnectionResetError, BrokenPipeError):  # a browser closing its connections
+            pass
+
+    def _answer(self, status: int, body: bytes, headers: dict[str, str]) -> None:
+        self.send_response(status)
+        for k, v in headers.items():
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _any(self) -> None:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
+        upgrade = "websocket" in (self.headers.get("Upgrade") or "").lower()
+        path = urlsplit(self.path).path
+        self.server.requests.append(("WS" if upgrade else self.command, path))
+        if self.command != "GET" or upgrade or path.startswith("/escape/"):
+            self._answer(200, b"{}", {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"})
+            return
+        http = getattr(self.server.local, "http", None)
+        if http is None:
+            http = self.server.local.http = httpx2.Client(timeout=60)
+        keep = ("accept", "accept-language", "comfy-user", "range")
+        headers = {k: v for k, v in self.headers.items() if k.lower() in keep}
+        answer = http.get(URL + self.path, headers={**headers, "accept-encoding": "identity"})
+        drop = {"content-length", "content-encoding", "transfer-encoding", "connection", "keep-alive"}
+        self._answer(
+            answer.status_code, answer.content, {k: v for k, v in answer.headers.items() if k.lower() not in drop}
+        )
+
+    do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _any
+
+    def log_message(self, *args: object) -> None:
+        pass
 
 
 class Canary(ThreadingHTTPServer):
@@ -136,10 +235,22 @@ class _CanaryHandler(BaseHTTPRequestHandler):
         pass
 
 
+def _serve(server):
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+@pytest.fixture
+def standin():
+    server = _serve(StandIn(free_port()))
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
 @pytest.fixture
 def canary():
-    server = Canary(free_port())
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    server = _serve(Canary(free_port()))
     yield server
     server.shutdown()
     server.server_close()
@@ -149,8 +260,7 @@ def canary():
 def fresh():
     """A second canary, for the preconnect alone: Chromium preconnects only to an origin it holds no idle
     connection to."""
-    server = Canary(free_port())
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    server = _serve(Canary(free_port()))
     yield server
     server.shutdown()
     server.server_close()
@@ -175,6 +285,10 @@ def datagrams(sock: socket.socket) -> int:
         n += 1
 
 
+def url_of(server) -> str:
+    return f"http://127.0.0.1:{server.server_address[1]}"
+
+
 async def templates(*, limit: int, max_chars: int = 60_000, need=lambda wf: True) -> list[tuple[str, dict]]:
     """Open-source templates this ComfyUI serves, in index order, that fit `max_chars` and pass `need`."""
     found = []
@@ -196,63 +310,92 @@ async def comfyui_status(path: str) -> int:
 
 
 async def export(workflows: list[dict]) -> list[dict]:
-    """The oracle: the frontend's own Export (API) in a plain browser, nothing blocked, a fresh context each."""
+    """The oracle: the frontend's own Export (API) in a plain browser, nothing blocked, a fresh context each. It
+    loads through a stand-in, so the settings the frontend writes as it starts never reach ComfyUI."""
     from playwright.async_api import async_playwright
 
     out = []
+    standin = _serve(StandIn(free_port()))
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
         try:
             for wf in workflows:
                 context = await browser.new_context()
                 page = await context.new_page()
-                await page.goto(URL, wait_until="load")
+                await page.goto(url_of(standin), wait_until="load")
                 await page.wait_for_function(conv._READY, polling=250, timeout=60_000)
                 out.append(await page.evaluate(conv._CONVERT, wf))
                 await context.close()
         finally:
             await browser.close()
+            standin.shutdown()
+            standin.server_close()
     return out
 
 
-async def escape_from_plain_browser(canary: Canary, fresh: Canary, sock: socket.socket) -> dict:
+def escape_args(standin, canary, fresh, udp) -> list:
+    return [url_of(standin), url_of(canary), CANARY_FILE, udp.getsockname()[1], url_of(fresh)]
+
+
+async def test_the_negative_control_gets_out_so_the_lockdown_test_can_fail(standin, canary, fresh, udp):
+    """A plain browser, the same script: everything gets out, so the lockdown test below can fail. If this stops
+    being true (a Chromium change), that test would pass for the wrong reason. Nothing is written to ComfyUI: the
+    stand-in answers every write itself."""
     from playwright.async_api import async_playwright
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
         try:
             page = await browser.new_page()
-            await page.goto(URL, wait_until="load")
+            await page.goto(url_of(standin), wait_until="load")
             await page.wait_for_function(conv._READY, polling=250, timeout=60_000)
-            return await page.evaluate(
-                ESCAPES, [URL, canary_url(canary), CONTROL_FILE, sock.getsockname()[1], canary_url(fresh)]
-            )
+            results = await page.evaluate(ESCAPES, escape_args(standin, canary, fresh, udp))
         finally:
             await browser.close()
+    for name in (
+        "post_comfyui",
+        "put_comfyui",
+        "delete_comfyui",
+        "get_comfyui_off_allowlist",
+        "get_other_origin",
+        "nested_worker_post_comfyui",
+        "shared_worker_from_blank_iframe",
+        "shared_worker_from_srcdoc_iframe",
+    ):
+        assert results[name].startswith("reached"), (name, results[name])
+    # The websockets reach the stand-in (ESCAPED_TO_COMFYUI), which doesn't upgrade them, so the page sees them fail.
+    assert results["shared_worker"] == "reached: started" and results["beacon_other_origin"] == "reached: queued"
+    got = set(standin.requests)
+    assert ESCAPED_TO_COMFYUI <= got, ESCAPED_TO_COMFYUI - got
+    assert {("POST", f"/api/userdata/{CANARY_FILE}"), ("PUT", f"/api/userdata/{CANARY_FILE}")} <= got
+    seen = set(canary.requests)
+    assert {"GET /fetch", "GET /worker", "POST /beacon", "GET /iframe", "GET /popup"} <= seen, seen
+    assert any(r.startswith("GET /worker-ws") for r in seen), seen
+    # Not asserted: the preconnect. Chromium's headless shell, as Playwright launches it, opened no connection for
+    # one even here (measured with Playwright 1.63.0), so there is nothing to compare. The lockdown test still checks
+    # that none is made.
+    assert datagrams(udp) > 0  # WebRTC's STUN, and WebTransport's QUIC
 
 
-def canary_url(canary: Canary) -> str:
-    return f"http://127.0.0.1:{canary.server_address[1]}"
-
-
-async def test_the_lockdown_blocks_every_escape_and_conversion_still_works(canary, fresh, udp):
+async def test_the_lockdown_blocks_every_escape_and_conversion_still_works(standin, canary, fresh, udp):
     (name, workflow), *_ = await templates(limit=1, max_chars=30_000)
-    converter = conv.Converter(URL, pages=1)
+    converter = conv.Converter(url_of(standin), pages=1)
     try:
         before = await converter.convert(workflow)
         assert before and all("class_type" in n for n in before.values()), name
         tab = await converter._session.idle.get()  # the one tab, with the frontend loaded
         try:
-            results = await tab.page.evaluate(
-                ESCAPES, [URL, canary_url(canary), CANARY_FILE, udp.getsockname()[1], canary_url(fresh)]
-            )
+            results = await tab.page.evaluate(ESCAPES, escape_args(standin, canary, fresh, udp))
         finally:
             converter._session.idle.put_nowait(tab)
         await asyncio.sleep(1)
 
-        for k in ONLY_THE_CANARY_KNOWS:
+        for k in ONLY_THE_SERVERS_KNOW:
             results.pop(k)
         assert all(r.startswith("blocked") for r in results.values()), json.dumps(results, indent=1)
+        # Every request that reached "ComfyUI", from any channel, was an allowlisted GET the relay sent.
+        unexpected = [(m, p) for m, p in standin.requests if not converter.allowed(m, url_of(standin) + p)]
+        assert unexpected == [], unexpected
         assert canary.requests == [] and canary.connections == 0, (canary.requests, canary.connections)
         assert fresh.connections == 0
         assert datagrams(udp) == 0
@@ -260,14 +403,36 @@ async def test_the_lockdown_blocks_every_escape_and_conversion_still_works(canar
 
         blocked = set(converter.blocked)
         for method in ("POST", "PUT", "DELETE"):
-            assert (method, f"{URL}/api/userdata/{CANARY_FILE}") in blocked
-        assert ("GET", f"{URL}/api/prompt") in blocked  # ComfyUI's, GET, but not on the allowlist
-        assert ("GET", f"{canary_url(canary)}/fetch") in blocked
-        assert ("GET", f"{canary_url(canary)}/worker") in blocked
-        assert ("POST", f"{canary_url(canary)}/beacon") not in blocked  # sendBeacon is gone: nothing was sent
+            assert (method, f"{url_of(standin)}/api/userdata/{CANARY_FILE}") in blocked
+        assert ("GET", f"{url_of(standin)}/api/prompt") in blocked  # ComfyUI's, GET, but not on the allowlist
+        assert ("GET", f"{url_of(canary)}/fetch") in blocked
+        assert ("GET", f"{url_of(canary)}/worker") in blocked
+        assert ("POST", f"{url_of(canary)}/beacon") not in blocked  # sendBeacon is gone: nothing was sent
         assert any(m == "WS" for m, _ in blocked)
 
         assert await converter.convert(workflow) == before
+    finally:
+        await converter.close()
+
+
+async def test_a_crashed_tab_is_unavailable_and_retryable_then_replaced():
+    """R2 against a real browser: a renderer that crashes under a conversion is the browser's failure, not the
+    graph's, so it is conversion_unavailable and retryable, and the next call gets a fresh tab."""
+    (_, workflow), *_ = await templates(limit=1, max_chars=30_000)
+    converter = conv.Converter(URL, pages=1)
+    try:
+        want = await converter.convert(workflow)
+        tab = await converter._session.idle.get()
+        cdp = await tab.page.context.new_cdp_session(tab.page)
+        try:
+            await asyncio.wait_for(cdp.send("Page.crash"), 5)
+        except Exception:
+            pass  # the target it was sent to is gone
+        converter._session.idle.put_nowait(tab)
+        with pytest.raises(RelayError) as caught:
+            await converter.convert(workflow)
+        assert caught.value.code == "conversion_unavailable" and caught.value.retryable, caught.value.message
+        assert await converter.convert(workflow) == want
     finally:
         await converter.close()
 
@@ -344,31 +509,3 @@ async def test_load3d_cant_upload_while_converting_so_it_fails():
         await converter.close()
     assert uploads, "no Load3D template tried to upload"
     assert failures and all(code == "conversion_failed" for _, code in failures), failures
-
-
-async def test_the_negative_control_gets_out_so_the_lockdown_test_can_fail(canary, fresh, udp):
-    """Without the lockdown, the same script reaches ComfyUI's write routes and the canaries. If this stops being
-    true (a Chromium change, a sandbox), the lockdown test would pass for the wrong reason. Last in the file: a
-    plain browser stores the frontend's settings in ComfyUI, and the converter tests above should meet a ComfyUI
-    no browser has opened, as CI's is, where the frontend writes settings as it starts."""
-    results = await escape_from_plain_browser(canary, fresh, udp)
-    try:
-        for name in ("post_comfyui", "get_comfyui_off_allowlist", "get_other_origin", "websocket_comfyui"):
-            assert results[name].startswith("reached"), (name, results[name])
-        assert results["worker_websocket_comfyui"] == "reached: ok open"
-        # The POST wrote the file, and the DELETE removed it: ComfyUI answered both.
-        assert results["post_comfyui"] == "reached: 200" and results["delete_comfyui"] in (
-            "reached: 200",
-            "reached: 204",
-        )
-        seen = set(canary.requests)
-        assert {"GET /fetch", "GET /worker", "POST /beacon", "GET /iframe", "GET /popup"} <= seen, seen
-        assert any(r.startswith("GET /worker-ws") for r in seen), seen
-        # Not asserted: the preconnect. Chromium's headless shell, as Playwright launches it, opened no connection
-        # for one even here (measured with Playwright 1.63.0), so there is nothing to compare. The lockdown test
-        # still checks that none is made.
-        assert results["shared_worker"] == "reached: started" and results["beacon_other_origin"] == "reached: queued"
-        assert datagrams(udp) > 0  # WebRTC's STUN, and WebTransport's QUIC
-    finally:
-        async with httpx2.AsyncClient(base_url=URL, timeout=10) as http:
-            await http.delete(f"/api/userdata/{CONTROL_FILE}")

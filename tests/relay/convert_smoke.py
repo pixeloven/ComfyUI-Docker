@@ -82,8 +82,17 @@ async def main() -> None:
             again = await call(mcp, "template_get", {"name": name, "format": "api"})
             warm = time.monotonic() - t0
             checked = await call(mcp, "workflow_validate", {"workflow": wf})
+            after = (await call(mcp, "server_info", {}))["capabilities"]["conversion"]
     want = await export(wf)
-    out = {"template": name, "nodes": len(want), "cold_s": round(cold, 2), "warm_s": round(warm, 2)}
+    out = {
+        "template": name,
+        "nodes": len(want),
+        "cold_s": round(cold, 2),
+        "warm_s": round(warm, 2),
+        "frontend_version": after.get("frontend_version"),
+    }
+    if not out["frontend_version"]:
+        fail("server_info does not report the frontend version the converter loaded", **out)
     if not (got["converted_from_ui"] and got["format"] == "api"):
         fail("template_get did not say it converted", **out)
     if got["workflow"] != want or again["workflow"] != want:

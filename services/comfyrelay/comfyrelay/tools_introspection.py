@@ -808,7 +808,9 @@ class TemplateDetail(TemplateHit):
         description="The template: in the frontend's UI format (nodes, links, subgraph definitions), or with "
         "format='api' in the API format /prompt takes, as this instance's frontend converts it",
     )
-    format: Literal["ui", "api"] = Field(default="ui", description="The format `workflow` was asked for in")
+    format: Literal["ui", "api"] | None = Field(
+        default=None, description="The format `workflow` is in; absent with no workflow"
+    )
     converted_from_ui: bool = Field(
         default=False, description="`workflow` is the API graph this instance's frontend converted the template to"
     )
@@ -1513,7 +1515,7 @@ def _template_get(relay: Relay) -> Callable[..., Any]:
             source=source,
             runnability=_runnability(needs, object_info, folders),
             workflow=returned if include_workflow else None,
-            format=format,
+            format=format if include_workflow else None,
             converted_from_ui=returned is not workflow,
         )
 
