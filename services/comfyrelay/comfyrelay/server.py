@@ -77,7 +77,9 @@ def build_server(settings: Settings, *, comfyui: ComfyUIClient | None = None) ->
     except DocsIndexError as exc:
         relay.docs_error = str(exc)
         log.warning("docs_search and docs_guide have no docs index: %s", exc)
-    instructions = INSTRUCTIONS.replace("{formats}", CONVERTS if relay.converter else CONVERTS_NOT)
+    # A converter that refused to start (a COMFYUI_URL with credentials, no browser in the image) converts nothing.
+    converts = relay.converter is not None and not relay.converter.refused
+    instructions = INSTRUCTIONS.replace("{formats}", CONVERTS if converts else CONVERTS_NOT)
     server = MCPServer(SERVER_NAME, version=__version__, instructions=instructions)
     register(server, relay)
     return server, relay

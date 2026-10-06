@@ -269,25 +269,36 @@ def _gone(exc: BaseException, page: Any, browser: Any, crashed: Any) -> bool:
 
 
 class _Activity:
-    """A tab's fetches through the relay: how many are in flight, and when the last one started or ended."""
+    """A tab's fetches through the relay: the paths in flight, and when the last one started or ended."""
 
-    __slots__ = ("inflight", "changed")
+    __slots__ = ("changed", "inflight")
 
     def __init__(self) -> None:
-        self.inflight = 0
+        self.inflight: collections.Counter[str] = collections.Counter()
         self.changed = 0.0
 
-    def touch(self, delta: int) -> None:
-        self.inflight += delta
+    def start(self, path: str) -> None:
+        self.inflight[path] += 1
         self.changed = asyncio.get_running_loop().time()
 
-    async def settle(self) -> None:
+    def end(self, path: str) -> None:
+        self.inflight[path] -= 1
+        if self.inflight[path] <= 0:
+            del self.inflight[path]
+        self.changed = asyncio.get_running_loop().time()
+
+    async def settle(self) -> bool:
+        """Wait until nothing has been in flight for SETTLE_QUIET_SECONDS, counted from the later of the last
+        change and this call (so a preview whose fetch starts just after the graph loaded is still waited for), at
+        most SETTLE_MAX_SECONDS. False when the cap ran out first."""
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + SETTLE_MAX_SECONDS
+        began = loop.time()
+        deadline = began + SETTLE_MAX_SECONDS
         while loop.time() < deadline:
-            if self.inflight == 0 and loop.time() - self.changed >= SETTLE_QUIET_SECONDS:
-                return
+            if not self.inflight and loop.time() - max(self.changed, began) >= SETTLE_QUIET_SECONDS:
+                return True
             await asyncio.sleep(0.05)
+        return False
 
 
 class _TooLarge(Exception):
@@ -419,13 +430,14 @@ class Converter:
 
     async def _gate(self, route: Any, request: Any, activity: _Activity | None = None) -> None:
         if self.allowed(request.method, request.url):
+            path = urlsplit(request.url).path
             if activity is not None:
-                activity.touch(+1)
+                activity.start(path)
             try:
                 await self._relay(route, request)
             finally:
                 if activity is not None:
-                    activity.touch(-1)
+                    activity.end(path)
             return
         self.blocked.append((request.method, request.url))
         log.debug("blocked %s %s", request.method, request.url)
@@ -717,8 +729,14 @@ class Converter:
         """Load the graph, let the previews it started settle, and export it."""
         await page.evaluate(_LOAD, workflow)
         activity = self._activity.get(page)
-        if activity is not None:
-            await activity.settle()
+        if activity is not None and not await activity.settle():
+            # Exported anyway: a UI-only preview input (LoadVideo's video-preview) may be missing; ComfyUI ignores it.
+            log.warning(
+                "a converter tab's fetches were still in flight after %.0fs (%d: %s); exported without waiting longer",
+                SETTLE_MAX_SECONDS,
+                sum(activity.inflight.values()),
+                ", ".join(sorted(activity.inflight)[:5]),
+            )
         return await page.evaluate(_EXPORT)
 
     def _release(self, session: _Session, tab: _Tab, converted: bool) -> None:

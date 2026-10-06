@@ -495,6 +495,7 @@ class Launches:
 
 def converter(monkeypatch, pages: int = 1) -> tuple[conv.Converter, Launches]:
     monkeypatch.setattr(conv, "installed", lambda: True)  # the browser is faked; Playwright needn't be there
+    monkeypatch.setattr(conv, "SETTLE_QUIET_SECONDS", 0)  # a fake tab fetches nothing to wait for
     c = conv.Converter(URL, pages=pages)
     launches = Launches()
     monkeypatch.setattr(c, "_browser", launches)
@@ -917,22 +918,67 @@ async def test_the_export_waits_for_the_tabs_fetches_to_settle_but_not_forever(m
     monkeypatch.setattr(conv, "SETTLE_QUIET_SECONDS", 0.1)
     monkeypatch.setattr(conv, "SETTLE_MAX_SECONDS", 0.6)
     loop = asyncio.get_running_loop()
-    quiet = conv._Activity()  # nothing fetched: no wait
+    quiet = conv._Activity()  # nothing fetched: one quiet period, no more
     t0 = loop.time()
-    await quiet.settle()
-    assert loop.time() - t0 < 0.05
+    assert await quiet.settle()
+    assert 0.09 < loop.time() - t0 < 0.2
     busy = conv._Activity()
-    busy.touch(+1)  # a preview's video, in flight
+    busy.start("/api/view")  # a preview's video, in flight
     waiting = asyncio.ensure_future(busy.settle())
     await asyncio.sleep(0.2)
     assert not waiting.done()
-    busy.touch(-1)
-    await asyncio.wait_for(waiting, 0.3)  # done once quiet for SETTLE_QUIET_SECONDS
+    busy.end("/api/view")
+    assert await asyncio.wait_for(waiting, 0.3)  # done once quiet for SETTLE_QUIET_SECONDS
     stuck = conv._Activity()
-    stuck.touch(+1)  # never finishes
+    stuck.start("/api/view")  # never finishes
     t0 = loop.time()
-    await stuck.settle()
+    assert not await stuck.settle()
     assert 0.55 < loop.time() - t0 < 0.8  # SETTLE_MAX_SECONDS, then it exports anyway
+
+
+async def test_a_preview_that_starts_just_after_the_graph_loads_is_waited_for(monkeypatch):
+    """The quiet period counts from when the wait began, not only from the last fetch: an old fetch long finished
+    must not let a preview requested a moment after loadGraphData returned slip past."""
+    monkeypatch.setattr(conv, "SETTLE_QUIET_SECONDS", 0.2)
+    activity = conv._Activity()
+    activity.start("/assets/x.js")
+    activity.end("/assets/x.js")
+    await asyncio.sleep(0.3)  # that fetch ended long ago
+    waiting = asyncio.ensure_future(activity.settle())
+    await asyncio.sleep(0.05)
+    activity.start("/api/view")  # the preview's request, a moment after the load
+    await asyncio.sleep(0.3)
+    assert not waiting.done()
+    activity.end("/api/view")
+    assert await asyncio.wait_for(waiting, 0.5)
+
+
+async def test_hitting_the_settle_cap_is_logged_with_what_was_in_flight(monkeypatch, caplog):
+    monkeypatch.setattr(conv, "SETTLE_MAX_SECONDS", 0.2)
+    c = conv.Converter(URL)
+
+    class Page:
+        async def evaluate(self, script, arg=None):
+            return {"1": {}} if script == conv._EXPORT else None
+
+    page = Page()
+    activity = c._activity[page] = conv._Activity()
+    activity.start("/api/view")
+    with caplog.at_level("WARNING", logger="comfyrelay.convert"):
+        assert await c._evaluate(page, UI) == {"1": {}}
+    assert "still in flight after" in caplog.text and "/api/view" in caplog.text and "(1: " in caplog.text
+
+
+@pytest.mark.parametrize(
+    "why", ["credentials", "no-browser"], ids=["a COMFYUI_URL with credentials", "no browser in the image"]
+)
+def test_a_refused_converter_doesnt_tell_agents_to_send_ui_graphs(monkeypatch, why):
+    monkeypatch.setattr(conv, "installed", lambda: why != "no-browser")
+    url = "http://user:secret@comfyui.test:8188" if why == "credentials" else "http://comfyui.test:8188"
+    server, relay = build_server(settings(convert=True, comfyui_url=url))
+    assert relay.converter is not None and relay.converter.refused
+    assert 'docs_guide("workflow-formats")' in server.instructions
+    assert "straight to workflow_validate" not in server.instructions
 
 
 def test_the_instructions_say_how_a_ui_workflow_gets_to_workflow_run(monkeypatch):

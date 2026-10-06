@@ -192,8 +192,11 @@ class _StandInHandler(BaseHTTPRequestHandler):
         if self.command != "GET" or upgrade or path.startswith("/escape/"):
             self._answer(200, b"{}", {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"})
             return
-        if path.startswith("/assets/large-") or path == "/api/view":
-            self._large(path, parse_qs(urlsplit(self.path).query))
+        query = parse_qs(urlsplit(self.path).query)
+        if path.startswith("/assets/large-") or (
+            path == "/api/view" and query.get("filename", [""])[0].startswith("huge")
+        ):
+            self._large(path, query)
             return
         http = getattr(self.server.local, "http", None)
         if http is None:
@@ -604,3 +607,63 @@ async def test_large_answers_are_refused_and_never_balloon_the_relay(standin):
         assert standin.sent.get(key, 0) < 200 * 1024 * 1024, (key, standin.sent.get(key))  # it stopped reading
     # Unbounded, the two large answers alone were 600 MB, and the 24 others 480 MB more.
     assert peak - before < 300, (before, peak)
+
+
+PREVIEW_CLIP = os.path.join(os.path.dirname(__file__), "data", "convert-preview.mp4")  # 2 s, 128x128, about 4 KB
+# The oracle for a graph with a preview: the frontend's own export, once every LoadVideo's preview widget exists,
+# however long that takes, rather than once the network is quiet, which is what the relay waits for.
+EXPORT_AFTER_PREVIEWS = """async (wf) => {
+  await window.app.loadGraphData(wf, true, false, null);
+  const videos = () => window.app.graph.nodes.filter(n => n.type === 'LoadVideo');
+  const t0 = Date.now();
+  while (Date.now() - t0 < 30000) {
+    if (videos().every(n => (n.widgets || []).some(w => w.name === 'video-preview'))) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return JSON.parse(JSON.stringify((await window.app.graphToPrompt()).output));
+}"""
+
+
+async def test_a_graph_whose_video_preview_loads_converts_as_the_editor_exports_it(standin):
+    """A LoadVideo whose input file exists exports a `video-preview` input once its preview has loaded, so the relay
+    waits for the tab's fetches to settle before it exports. This uploads a small clip to the test ComfyUI's input
+    folder (the one write any of these tests makes) and checks the relay's conversion against an export that waits
+    for the preview widget itself."""
+    with open(PREVIEW_CLIP, "rb") as f:
+        clip = f.read()
+    async with httpx2.AsyncClient(base_url=URL, timeout=30) as http:
+        uploaded = await http.post(
+            "/upload/image",
+            files={"image": ("convert-preview.mp4", clip, "video/mp4")},
+            data={"type": "input", "overwrite": "true"},
+        )
+    assert uploaded.status_code == 200, uploaded.text
+    name = uploaded.json()["name"]
+    (_, workflow), *_ = await templates(
+        limit=1, need=lambda wf: any(n.get("type") == "LoadVideo" for n in wf.get("nodes") or [])
+    )
+    for node in workflow["nodes"]:
+        if node.get("type") == "LoadVideo":
+            node["widgets_values"][0] = name
+
+    converter = conv.Converter(url_of(standin), pages=1)
+    try:
+        got = await converter.convert(workflow)
+    finally:
+        await converter.close()
+
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            page = await (await browser.new_context()).new_page()
+            await page.goto(url_of(standin), wait_until="load")
+            await page.wait_for_function(conv._READY, polling=250, timeout=60_000)
+            want = await page.evaluate(EXPORT_AFTER_PREVIEWS, workflow)
+        finally:
+            await browser.close()
+
+    videos = [n for n in want.values() if n["class_type"] == "LoadVideo"]
+    assert videos and all("video-preview" in n["inputs"] for n in videos), videos  # the oracle saw the preview load
+    assert got == want
