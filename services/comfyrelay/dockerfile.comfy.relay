@@ -80,7 +80,13 @@ RUN /opt/venv/bin/comfyctl relay docs build --docs-sha "$COMFY_DOCS_SHA" --skill
 # code, so a code change doesn't fetch it again. Playwright decides which build
 # it fetches, and checks no hash, so this checks both: the revision Playwright
 # 1.63.0 names, and a hash over every file of that build. Moving Playwright
-# moves both; take the new values from a build's failure message.
+# moves both; take the new values from a build's failure message. CI's
+# relay-convert job reads both ARG lines below to check its own copy.
+#
+# The hash pins integrity, not freshness: Chromium's security fixes reach this
+# image only when Playwright moves. Move it with each Playwright release (about
+# monthly), and at least once a month: the playwright== pin and the lock, these
+# two values, and the apt pins below if its build needs other libraries.
 FROM deps AS browser
 ARG CHROMIUM_REVISION=1243
 ARG CHROMIUM_TREE_SHA256=7310e9a7f48efd6d1a9a93be874f39dd0f8bdbcf56e3f83a3ebc4597448df8ba
