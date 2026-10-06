@@ -117,19 +117,29 @@ FROM venv-${RELAY_CONVERT} AS venv
 # --with-deps set, which is about 115 MB more (X server bits, more fonts). The
 # names are pinned, their versions are not (owner decision on #191): they come
 # from the digest-pinned base image's Debian sources at build time, as the core
-# images' packages do, so a rebuild picks up Debian's security fixes. Integrity
-# comes from that base and the hash-checked Chromium build; freshness from
-# rebuilding and from the Playwright cadence above. The ldd check fails the
-# build if Chromium ever links a library this set doesn't provide.
+# images' packages do, so a rebuild picks up Debian's security fixes. A cached
+# layer would not, so APT_REFRESH, a stamp bake computes that changes weekly
+# (docker-bake.hcl), invalidates this layer's cache: CI's cached builds
+# reinstall these packages at least once a week. Integrity comes from that base
+# and the hash-checked Chromium build; freshness from that and from the
+# Playwright cadence above. The ldd check fails the build if Chromium links a
+# library this set doesn't provide, and if the browser isn't where it should be.
 FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS runtime-1
 COPY --from=browser /opt/playwright /opt/playwright
-RUN apt-get update && \
+ARG APT_REFRESH=
+RUN set -eu; \
+    echo "apt packages as of ${APT_REFRESH:-this build}"; \
+    apt-get update; \
     apt-get install -y --no-install-recommends \
       libglib2.0-0t64 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libdbus-1-3 libx11-6 \
       libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libgbm1 libexpat1 libxcb1 libxkbcommon0 \
-      libasound2t64 libatspi2.0-0t64 fontconfig fonts-liberation && \
-    rm -rf /var/lib/apt/lists/* && \
-    ! ldd /opt/playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell | grep 'not found'
+      libasound2t64 libatspi2.0-0t64 fontconfig fonts-liberation; \
+    rm -rf /var/lib/apt/lists/*; \
+    set -- /opt/playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell; \
+    if [ "$#" -ne 1 ] || [ ! -x "$1" ]; then echo "no single chrome-headless-shell under /opt/playwright: $*" >&2; exit 1; fi; \
+    ldd "$1" > /tmp/ldd.txt; \
+    if grep 'not found' /tmp/ldd.txt; then echo "chrome-headless-shell links libraries this image lacks" >&2; exit 1; fi; \
+    rm /tmp/ldd.txt
 # convert.py finds the browser here. COMFYUI_MCP_CONVERT=0 turns conversion off.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
     COMFYUI_MCP_CONVERT=1

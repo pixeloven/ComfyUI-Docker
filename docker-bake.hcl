@@ -385,6 +385,13 @@ group "mcp" {
     targets = ["mcp"]
 }
 
+// A stamp that changes weekly (the month, and the week of it), which invalidates
+// mcp-convert's cached apt layer so its unpinned Debian packages are reinstalled,
+// with their security fixes, at least once a week. Set it to force a refresh.
+variable "APT_REFRESH" {
+    default = ""
+}
+
 // The same server with a headless Chromium, so it converts UI-format workflows
 // through ComfyUI's own frontend (#167). From the same Dockerfile with
 // RELAY_CONVERT=1, and conversion is on by default in it. A separate image so
@@ -401,6 +408,7 @@ target "mcp-convert" {
     cache-from = ["type=registry,ref=${REGISTRY_URL}mcp-convert:cache,optional=true"]
     args = {
         RELAY_CONVERT = "1"
+        APT_REFRESH = APT_REFRESH != "" ? APT_REFRESH : "${formatdate("YYYY-MM", timestamp())}-w${floor((parseint(formatdate("D", timestamp()), 10) - 1) / 7)}"
     }
 }
 
