@@ -45,7 +45,7 @@ it never holds back the `mcp` image.
 
 **Sizing.** About 304 MB to pull (`mcp`: 63 MB). It idles at about 100 MB
 until the first conversion starts the browser (about 5 seconds), then at about
-1.2 GB with the default 2 tabs, up to 2.4 GB over a long run. Give it at least
+1.1 GB with the default 2 tabs, up to 2.4 GB over a long run. Give it at least
 3 GiB. It needs a writable `/tmp`; with a read-only root, mount a tmpfs there.
 New variables: `COMFYUI_MCP_CONVERT` (on in this image) and
 `COMFYUI_MCP_CONVERT_PAGES` (default 2).

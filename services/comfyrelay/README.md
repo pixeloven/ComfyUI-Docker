@@ -563,10 +563,17 @@ but the preconnect, which the headless shell doesn't make even unblocked). In a 
 does, and every request the stand-in received from it was an allowlisted `GET` the relay sent.
 
 1. **Requests.** A route on each tab takes every request it sees. A `GET` to the `COMFYUI_URL`
-   origin for a path on the allowlist below (relative to `COMFYUI_URL`'s path, compared as ComfyUI
-   will decode it; a `.` or `..` segment or a backslash is refused) is fetched by the relay itself
-   (`httpx2`: that `GET`, a few request headers such as `Accept` and `Comfy-User`, no body, no
-   redirect followed) and the page gets ComfyUI's answer. Everything else is aborted. One refused
+   origin for a path on the allowlist below is fetched by the relay itself, and the page gets
+   ComfyUI's answer; everything else is aborted. The path is checked relative to `COMFYUI_URL`'s,
+   percent-decoded once and twice (some ComfyUI routes, `/api/userdata`'s among them, decode a
+   second time): a `%25` anywhere refuses it, and so does a `.` or `..` segment or a backslash after
+   either decode. The relay's fetch (`httpx2`) is a `GET` of a URL it rebuilds from `COMFYUI_URL`
+   and the checked path, with a few request headers such as `Accept` and `Comfy-User`, no body, a
+   cookie jar that keeps nothing, and no redirect followed. It streams the answer and gives up on
+   one over 32 MiB (the page gets an abort); at most 6 run at once, and only one of those may hold
+   more than 4 MiB, so what the relay buffers for the tabs stays well under 100 MB. A ranged request
+   (a video preview's, `Range: bytes=0-`) is passed on with its range cut to 4 MiB, so an input
+   video of any size is read in pieces of at most 4 MiB, as far as the preview asks for. One refused
    request is answered rather than aborted: a `POST` of the frontend's own settings
    (`/api/settings`, `/api/settings/<id>`), which it makes as it starts (`Comfy.InstalledVersion`,
    on a ComfyUI no browser has opened) and without which it stops loading. It gets an empty `200`
@@ -592,6 +599,14 @@ Each of those routes only reads. The frontend asks for one more ComfyUI path, re
 a ComfyUI no browser has opened, its first-run template browser reads `/api/workflow_templates`, and
 would then load every template's thumbnail, about 250 MB a tab, for nothing a conversion needs.
 
+`/api/view` (a loader's input file, for its preview) has to stay: once a video's preview has loaded,
+`LoadVideo` exports a `video-preview` input it lacks otherwise (62 templates differ without it, with
+their input files present). That makes the editor's own export depend on how fast the preview loads,
+so after loading a graph the relay waits until the tab's fetches have been quiet for 0.3 s, at most
+10 s (the frontend gives a preview 8.2 s), before it exports. A graph with nothing to preview waits
+for nothing. With all 546 input files the templates name present, every template converts the same
+as the frontend's own export.
+
 What the frontend asks for that is refused, and it converts without: `api.comfy.org`
 (release notes), `huggingface.co` (it checks the template's model links with `HEAD`), ComfyUI's
 `/ws`, and `POST /api/upload/image` from Load3D, which makes those graphs fail with
@@ -599,13 +614,15 @@ What the frontend asks for that is refused, and it converts without: `api.comfy.
 
 **What stays reachable** is the allowlist, as ComfyUI implements it: every route on it only
 reads on a bare ComfyUI v0.38.0, checked in its handlers. Query strings aren't checked, so a
-parameter such as `/api/view`'s `filename` is left to ComfyUI's own path checks. Under
+parameter such as `/api/userdata`'s `dir` is left to ComfyUI's own path checks. Under
 `/extensions/`, any `GET` route a custom node registers there is reachable, and custom-node
 JavaScript loads and runs in the page, because a custom node's widgets can change what the
 export writes; it runs under the same lockdown, and a custom node whose graphs need its own `GET`
 routes elsewhere won't convert. **The browser runs without its sandbox** (`--no-sandbox`):
 Docker's default seccomp profile with `no-new-privileges` leaves it none it can use. A
-compromised renderer would run as the relay's UID, beside `COMFYUI_MCP_HTTP_TOKEN`. A
+compromised renderer would run as the relay's UID, in the container that holds
+`COMFYUI_MCP_HTTP_TOKEN`, though not with it: the browser is launched with a few variables of the
+environment (`PATH`, `HOME`, `TMPDIR`, the locale and the time zone) and none of the relay's. A
 `COMFYUI_URL` with credentials in it is refused for conversion (`unavailable`), so they never
 reach the browser; the server still uses them. The page never queues a prompt, so no
 `extra_data` reaches ComfyUI from it.
@@ -637,18 +654,24 @@ its files, which pins integrity, not freshness: Chromium's security fixes reach 
 Playwright moves, which is meant to follow each Playwright release, about monthly
 (`dockerfile.comfy.relay`).
 
-**Sizing**, measured with the image as UID 54321 on a read-only root with a tmpfs on `/tmp`,
-against a booted core-cpu a browser had never opened, on 8 CPUs of a Ryzen 7 5825U:
+**Sizing**, measured with the image as UID 54321 on a read-only root with a tmpfs on `/tmp` and
+`--memory 3g`, against a booted core-cpu whose input directory holds a real file for every input
+the templates name (546 of them), on 8 CPUs of a Ryzen 7 5825U:
 
 | With 2 tabs | Memory (PSS, every process) | Time |
 |---|---|---|
-| Before the first conversion | 93 MB | |
-| The first conversion, which starts the browser | 1.26 GB | 4.7 s |
-| Idle once warm | 1.17 GB | |
-| 40 conversions in a row (`workflow_validate`) | 1.55 GB peak | median 0.26 s, p95 0.59 s; the same call on the API graph takes 0.007 s |
-| 6 at once | 1.49 GB peak | 2.0 s for all six (0.45 to 2.03 s each) |
-| 200 more in a row | 2.43 GB peak (2.87 GB RSS; the cgroup's own peak 2.38 GB) | median 0.24 s, p95 0.71 s |
-| Idle after those | 1.50 GB (the driver has grown to 346 MB) | |
+| Before the first conversion | 99 MB | |
+| The first conversion, which starts the browser | 1.13 GB | 5.3 s |
+| Idle once warm | 1.12 GB | |
+| 40 conversions in a row (`workflow_validate`) | 1.50 GB peak | median 0.56 s, p95 0.89 s (previews settle); the same call on the API graph takes 0.004 s |
+| 6 at once | 1.55 GB peak | 2.9 s for all six (0.53 to 2.87 s each) |
+| 200 more in a row | 2.39 GB peak (the cgroup's own peak, over the whole run: 2.32 GB) | median 0.55 s, p95 1.05 s |
+| Idle after those | 1.41 GB (the driver has grown to 330 MB) | |
+
+Large inputs don't change that: `LoadVideo` graphs whose input is a 410 MB video, one at a time and
+six at once, peaked the cgroup at 1.97 GB, every one exporting its `video-preview` as the editor
+does. Before the fetch was bounded, a 300 MB input video ran a 3 GiB container out of memory. A graph
+with nothing to preview converts faster (median 0.26 s, against a ComfyUI with no input files).
 
 Give it a memory limit of at least 3 GiB with 2 tabs, and about 265 MB more for each extra tab.
 The image is 304 MB compressed and 872 MB unpacked, against 63 MB and 217 MB for `mcp`.

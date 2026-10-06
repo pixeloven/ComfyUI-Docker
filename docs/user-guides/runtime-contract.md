@@ -365,8 +365,8 @@ where this table says otherwise.
 | Writable paths | `/tmp`, which must be writable: the browser keeps its profile there and the Playwright driver its scratch files (a few hundred KB). A read-only root filesystem works with a tmpfs on `/tmp`. Without one, every conversion fails with `conversion_unavailable` |
 | User | `1000:1000` by default, and any UID works, as for `mcp` |
 | Tabs | `COMFYUI_MCP_CONVERT_PAGES` (default `2`, at most `8`) frontend tabs convert at once; more conversions wait for one, up to 60 seconds. Each tab costs about 265 MB |
-| Memory | About 100 MB until the first conversion starts the browser. Then, with the default 2 tabs, about 1.2 GB idle, 1.5 GB with 6 conversions at once, and up to 2.4 GB over a long run of conversions (the container's cgroup peaked at 2.38 GB). Set a limit of at least 3 GiB with 2 tabs, and about 265 MB more for each extra tab |
-| Latency | The first conversion starts the browser and takes about 5 seconds. After that a conversion adds about 0.25 seconds to the call (median; 0.6 s at p95), measured on 8 CPUs |
+| Memory | About 100 MB until the first conversion starts the browser. Then, with the default 2 tabs, about 1.1 GB idle, 1.5 GB with 6 conversions at once, and up to 2.4 GB over a long run of conversions (the container's cgroup peaked at 2.32 GB, with a real input file for every template input). Input files don't add to that: graphs whose input is a 410 MB video peaked at 1.97 GB. Set a limit of at least 3 GiB with 2 tabs, and about 265 MB more for each extra tab |
+| Latency | The first conversion starts the browser and takes about 5 seconds. After that a conversion adds about 0.25 seconds to the call (median), and about 0.55 seconds when the graph's input files exist, since the relay lets their previews load first (a loaded video preview changes what the export holds); measured on 8 CPUs |
 | Size | About 304 MB compressed and 872 MB unpacked, against 63 MB and 217 MB for `mcp` |
 | Stopping | `SIGTERM` closes the browser along with the server, within the `mcp` image's budget |
 
@@ -388,15 +388,18 @@ conversion (the server itself still uses it).
 
 **What stays reachable, and the browser's posture.** The `GET` routes on the
 allowlist, as ComfyUI implements them, which on a bare ComfyUI v0.38.0 only
-read. Query strings aren't checked, so a parameter such as `/api/view`'s file
-name is left to ComfyUI's own path checks. Under `/extensions/` any `GET` a
+read. Query strings aren't checked, so a parameter such as `/api/userdata`'s
+`dir` is left to ComfyUI's own path checks. An input file for a preview
+(`/api/view`) is read in ranges of at most 4 MiB, so an input video of any size
+stays cheap, and every other answer is capped at 32 MiB. Under `/extensions/` any `GET` a
 custom node registers there is reachable, and custom-node JavaScript loads and
 runs in the page, because a custom node's widgets can change what the export
 writes; it runs under the same lockdown. Chromium runs without its sandbox
 (`--no-sandbox`): Docker's default seccomp profile together with
 `no-new-privileges` leaves it none it can use. A renderer compromised by a
 page would run as the relay's UID, in the container that holds
-`COMFYUI_MCP_HTTP_TOKEN`. If that is not acceptable for a deployment, run
+`COMFYUI_MCP_HTTP_TOKEN`; the browser's own environment doesn't carry it. If that
+is not acceptable for a deployment, run
 `mcp` instead. Chromium's security fixes reach the image when its Playwright
 pin moves, which is meant to follow each Playwright release, about monthly.
 
