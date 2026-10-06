@@ -5,7 +5,8 @@ variables, the volume paths, the port, the readiness endpoint, and how the conta
 behaves depending on the user it starts as.
 
 The separate `mcp` image has a shorter contract of its own, in
-[The `mcp` Image](#the-mcp-image).
+[The `mcp` Image](#the-mcp-image), and so does `mcp-convert`, in
+[The `mcp-convert` Image](#the-mcp-convert-image).
 
 A deployment that works on one release must keep working on the next. Changing
 anything on this page in a way that breaks one is a **major** version (see
@@ -341,6 +342,54 @@ The other variables (`COMFYUI_MCP_INSTANCE_ID`, `COMFYUI_MCP_MAX_JOBS` and
 Kubernetes, set `resources.limits.memory: 256Mi` on the container, as the opt-in sidecar in
 [`examples/kubernetes/with-mcp/`](../../examples/kubernetes/README.md#adding-the-mcp-sidecar-opt-in) does, and raise it with
 `COMFYUI_MCP_MAX_LARGE_REQUESTS` or with the number of clients that upload large files.
+
+## The `mcp-convert` Image
+
+`ghcr.io/pixeloven/comfyui/mcp-convert` is the same server with a headless
+Chromium added, so it can convert the editor's UI-format workflows into the API
+format `/prompt` takes ([#167](https://github.com/pixeloven/ComfyUI-Docker/issues/167)).
+It runs the instance's own frontend, so a conversion is what the editor's
+Export (API) would write. It is built from the same Dockerfile with
+`RELAY_CONVERT=1` and published with the same tags as `mcp`. Opting in means
+changing the image; the `mcp` image has no browser.
+
+Everything in [The `mcp` Image](#the-mcp-image) holds for it too, except
+where this table says otherwise.
+
+| Contract | Value |
+|----------|-------|
+| Conversion | On (`COMFYUI_MCP_CONVERT=1`, set by the image). `0` turns it off, and the server then answers as the `mcp` image does. `server_info.capabilities.conversion` reports the state (`ready`, `running`, `backing_off`, `unavailable`, `stopped` or `off`) and, when it can't convert, why |
+| Tools | The same tool names and profiles. `template_get` takes `format: "api"`; `workflow_validate` and `workflow_run` also take a UI-format graph, convert it first and report `converted_from_ui`; `workflow_validate` returns the converted graph, up to 80,000 characters. A conversion that can't run fails with `conversion_unavailable`, and one the frontend rejects with `conversion_failed`; there is no fallback converter. `workflow_run` checks a UI graph for partner-API nodes before it converts it |
+| Writable paths | `/tmp`, which must be writable: the browser keeps its profile there and the Playwright driver its scratch files (a few hundred KB). A read-only root filesystem works with a tmpfs on `/tmp`. Without one, every conversion fails with `conversion_unavailable` |
+| User | `1000:1000` by default, and any UID works, as for `mcp` |
+| Tabs | `COMFYUI_MCP_CONVERT_PAGES` (default `2`, at most `8`) frontend tabs convert at once; more conversions wait for one, up to 60 seconds. Each tab costs about 265 MB |
+| Memory | About 100 MB until the first conversion starts the browser. Then, with the default 2 tabs, about 1.1 GB idle, 1.4 GB with 6 conversions at once, and up to 2.2 GB (2.7 GB RSS) over a long run of conversions. Set a limit of at least 3 GiB with 2 tabs, and about 265 MB more for each extra tab |
+| Latency | The first conversion starts the browser and takes about 4 seconds. After that a conversion adds about 0.25 seconds to the call (median; 0.5 s at p95), measured on 8 CPUs |
+| Size | About 304 MB compressed and 872 MB unpacked, against 63 MB and 217 MB for `mcp` |
+| Stopping | `SIGTERM` closes the browser along with the server, within the `mcp` image's budget |
+
+**The lockdown.** The browser may do one thing: send `GET` requests to the
+`COMFYUI_URL` origin for the paths the frontend needs, which the relay's README
+lists. Every other request is refused, fail closed: any other method, any
+other host, any other path. The page never queues a prompt, so no `extra_data`
+and no credentials reach ComfyUI from it, and a `COMFYUI_URL` that carries
+credentials is refused for conversion (the server itself still uses it).
+Websockets, `SharedWorker`, WebRTC, WebTransport, QUIC and `sendBeacon` are
+blocked, and every connection to another host, and every DNS lookup of another
+name, goes nowhere. The frontend's own settings writes, which it makes as it
+starts, are answered inside the browser and never reach ComfyUI. Because only
+reads are let through, a graph whose frontend code uploads while it is
+exported (Load3D does) always fails with `conversion_failed`.
+
+**What stays reachable, and the browser's posture.** The `GET` routes on the
+allowlist, which only read. Custom-node JavaScript served under `/extensions/`
+loads and runs in the page, because a custom node's widgets can change what the
+export writes; it runs under the same lockdown. Chromium runs without its
+sandbox (`--no-sandbox`): Docker's default seccomp profile together with
+`no-new-privileges` leaves it none it can use. A renderer compromised by a
+page would run as the relay's UID, in the container that holds
+`COMFYUI_MCP_HTTP_TOKEN`. If that is not acceptable for a deployment, run
+`mcp` instead.
 
 ## What Counts as a Breaking Change
 

@@ -13,6 +13,7 @@ GitHub Release:
 |---|---|---|
 | `complete` / `core` / `runtime` images | GHCR | `@sha256:…`, reads the semver tag |
 | `mcp` image (comfyrelay) | GHCR | `@sha256:…` |
+| `mcp-convert` image (comfyrelay with a headless Chromium) | GHCR | `@sha256:…` |
 | `fetch` image (`comfyctl fetch`) | GHCR | `@sha256:…` |
 | `comfyctl` and `comfyfetch` **wheels** | release assets, installed as a pair | URL + the published `SHA256SUMS` |
 | skills plugin | the git tag | `@v1.2.3` |
@@ -23,7 +24,7 @@ The version lives in `VERSION`. `services/fetch/pyproject.toml`,
 `package.json`, and the `comfyfetch`, `comfyctl` and `comfyrelay` entries in
 `services/uv.lock` must state the same number — checked on **every push**, not
 at release time, because drift found on the tag is drift found too late.
-comfyrelay ships as the `mcp` image, not as a wheel, and that image reports
+comfyrelay ships as the `mcp` and `mcp-convert` images, not as a wheel, and they report
 its version, so it moves with the others.
 
 ### Why not a line per component

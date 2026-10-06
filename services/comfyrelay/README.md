@@ -10,8 +10,12 @@ comfyrelay is an independent project. It isn't affiliated with or endorsed by Co
 ([#136](https://github.com/pixeloven/ComfyUI-Docker/issues/136)), with the same tags as the
 other images: `mcp:X.Y.Z` for a release, `mcp:<sha8>` and `mcp:latest` for a build of `main`.
 Before 5.0.0 that image packaged artokun/comfyui-mcp; `CHANGELOG.md` → *5.0.0* has the migration
-notes. comfyrelay ships only as that image: there's no comfyrelay wheel, and the released
-`comfyctl` has no `relay` group.
+notes. comfyrelay ships only as that image and `mcp-convert`: there's no comfyrelay wheel, and
+the released `comfyctl` has no `relay` group.
+
+**`ghcr.io/pixeloven/comfyui/mcp-convert`** is the same server with a headless Chromium, so it
+converts the editor's UI-format workflows to API format through ComfyUI's own frontend (#167). It
+has the same tags. See *UI-to-API conversion* below.
 
 ## Running it
 
@@ -96,6 +100,8 @@ image read before 5.0.0, so a deployment keeps them.
 | `COMFYUI_MCP_MAX_LARGE_REQUESTS` | `2` | How many `POST` requests with a body over 1 MiB (in practice, `workflow_upload_input` calls) are handled at once. No other method is limited: a `GET` opens the standing event stream, whatever it carries. One more waits up to 5 seconds for a slot, then gets HTTP `503` with `Retry-After: 2` and `{"error": {"code": "server_busy", ..., "retryable": true}}`. Every chunked `POST` counts as large, whatever its `Content-Length` says. Requests under 1 MiB never wait. While it holds a slot, a large request's body must keep arriving, so a stalled client can't hold one: no data for 30 seconds gets `408` (`request_timeout`, retryable), and a body not complete within 120 seconds of taking the slot gets `408` marked not retryable, since that is a minimum throughput (about 1 Mbit/s for a maximum-size upload) and a retry over the same link would fail again. Either way the slot is released. See *Memory* below. |
 | `COMFYUI_VERSION` | set by the image | The ComfyUI version the image was built for, from the bake pin |
 | `COMFYUI_MCP_DOCS` | `/opt/docs/docs.sqlite` | The docs index `docs_search` and `docs_guide` read. The image builds it there; without one those tools fail with `docs_unavailable`, and `server_info.docs` says why. |
+| `COMFYUI_MCP_CONVERT` | `1` in `mcp-convert`, unset elsewhere | `1` converts UI-format workflows through the instance's own frontend (see *UI-to-API conversion*). Only `mcp-convert` has the browser it needs; anything but `1` turns it off. |
+| `COMFYUI_MCP_CONVERT_PAGES` | `2` | How many frontend tabs convert at once, from 1 to 8; each costs about 265 MB. More conversions wait up to 60 seconds for a tab. |
 
 `serve` takes the same settings as flags (`--comfyui-url`, `--host`, `--port`, `--profiles`),
 except the token, which it reads only from the environment so it never appears in a process
@@ -207,7 +213,7 @@ recalled from a bundled copy.
 | **`node_describe`** | `/object_info/<class>`, and the node's help page | One class's full spec: each input (required first, in the node's order) with its type, default, min, max, step, tooltip and COMBO values; hidden inputs; outputs in socket order with names and list flags; `output_node` and `api_node`. Dynamic inputs are named as a graph must name them (below). COMBO values and Autogrow names are cut to `max_options` (default 20), with a total. An unknown class fails with `unknown_node_class` and `suggestions`; `.` and `..` are never sent to ComfyUI. `help` is the node's help page, the English markdown the editor shows, fetched live where the editor fetches it (frontend 1.52): `/docs/<class>/en.md` for ComfyUI's own nodes, which ComfyUI serves from its pinned `comfyui-embedded-docs`, and a custom node pack's own `/extensions/<pack>/docs/<class>/en.md`, then `<class>.md`. At most 64 KB of it is read; a longer page is cut there, with `help_truncated: true`. It's absent when ComfyUI has none (a 404, or an HTML page in its place) or can't serve it (any other error or a timeout): the help never fails the call. |
 | **`model_list`** | `/models`, `/models/<folder>` | Files on disk per folder type, or for one `folder`: at most `max_files` per folder (default 50) and 400 in all, with the full `count` and `truncated`. `custom_nodes` and `download_model_base` (an `extra_model_paths.yaml` key that ComfyUI lists as a folder type, naming the whole models root) are left out. An unknown folder fails with `unknown_model_folder` and the known ones. Nothing is downloaded. |
 | **`template_search`** | `/templates/index.json`, and `/templates/index.mcp.json` when ComfyUI serves it; then each match's `/templates/<name>.json` (cached), `/object_info` and `/models/<folder>` | Workflow templates for a goal, ranked by how many query words match, weighted by field (title and name; then tags, model families, and the agent index's task, model and capabilities; then descriptions, the agent index's inputs and outputs, and category) and by how rare the word is across the index. A hit the agent index lists also carries its `task`, `inputs` and `outputs` (prose, at most 4 lines of 120 characters each), `capabilities` (at most 8), `recommend` and `freshness`; those single words are cut to 40 characters. The agent index only adds to a search and never fails one: any error fetching it (a 404 or any other status, a body that isn't an index, no connection), or no answer within 5 seconds, and the search runs on `index.json` alone. `source.index` is `index.mcp.json` when the agent index added to at least one template, and `index.json` otherwise. Partner-API templates are left out unless `include_partner_api` is set: those the index marks `openSource: false`, and any match whose graph uses a partner-API node, which is known once the template and `/object_info` are read, even if a model folder it names can't be listed. `hidden_partner_api` counts both. When `/object_info` fails or times out, or the template itself can't be fetched or isn't fetched in time, a partner-API template the index doesn't flag can't be detected, so it is returned, unchecked. Every match gets the runnability check (below), and it breaks ties: among matches of as many query words, runnable ones come first, but a runnable template never outranks one that matches more of the query. With a one-word query every match ties on words matched, so runnable templates come first. `runnable_only: true` returns only runnable templates; `hidden_not_runnable` counts those it left out. A hit carries a summary of its check: `runnable`, and for each kind with something missing (`missing_nodes`, `missing_models`, `models_need_value_change`, `missing_inputs`, `api_nodes`) its `count` and `first` 3 names, each cut to 80 characters. `template_get` gives the full lists. **Checking every match is optional work and never fails a search.** A template is reported with `runnable: null` and `unchecked` (`timeout`, the error code, or `check_failed` when reading the template or checking it against ComfyUI's data fails in a way the relay doesn't expect, such as an `/object_info` entry of an odd shape; the relay logs it) when it can't be fetched (any error, or a workflow it can't read) or isn't fetched within 5 seconds, when a model folder it declares can't be listed (any status but 404) or isn't listed within another 5 seconds, or, for every match, when `/object_info` fails or doesn't answer within 15 seconds (`template_get` waits for it as long as any other read). `unchecked` on the result counts them, and `runnable_only` leaves them out. Templates are fetched best match first, at most 8 at a time across every search the relay is running. Each search takes a slot of its own before it queues for one of those 8, so only a few of its fetches wait there at once and a short search isn't queued behind every template a long one still has to read; a template another search is already fetching is waited for, not fetched again. |
-| **`template_get`** | the same, for one template | Its metadata, the runnability check, and the workflow in the frontend's UI format (`include_workflow: false` leaves it out). A workflow over 80,000 characters as JSON fails with `workflow_too_large` (`size`, `limit`); `include_workflow: false` still answers. An unknown name fails with `unknown_template` and `suggestions`. |
+| **`template_get`** | the same, for one template | Its metadata, the runnability check, and the workflow in the frontend's UI format (`include_workflow: false` leaves it out). With `format: "api"` the workflow is converted by this instance's own frontend, where the server converts (`mcp-convert`; see *UI-to-API conversion*), and `converted_from_ui` says so; elsewhere `format: "api"` fails with `conversion_unavailable`. The runnability check is always the UI graph's. A workflow over 80,000 characters as JSON, as returned, fails with `workflow_too_large` (`size`, `limit`); `include_workflow: false` still answers. An unknown name fails with `unknown_template` and `suggestions`. |
 
 **Dynamic inputs** (ComfyUI's V3 `comfy_api/latest/_io.py`). Inside one, every input's name is
 fully qualified with dots, as ComfyUI's `finalize_prefix` joins them, and a graph must use those
@@ -285,7 +291,8 @@ upgraded on its own) leave stale requirements until the relay restarts. Against 
 The `run` profile's tools for ComfyUI workflows in **API format**
 (`{"<node id>": {"class_type": ..., "inputs": {...}}}`, where an input is a constant or a link
 `["<node id>", <output index>]`). The editor's UI-format save file, which `template_get`
-returns, is refused with directions to export the API format. The code is
+returns, is refused with directions to export the API format, except by `mcp-convert`, which
+converts it first (see *UI-to-API conversion*). The code is
 `comfyrelay/tools_workflow.py`, with the checks in `comfyrelay/workflow.py` (#132).
 
 - **`workflow_validate`** checks what can be known about a graph without submitting it, against
@@ -515,6 +522,108 @@ per token*), so this adds no reader who couldn't already follow the relay's own 
 comes back is mapped: the graph and its `extra_data` aren't returned. A deployment that must
 keep other clients' runs from the relay's agents entirely should give the relay its own
 ComfyUI.
+
+## UI-to-API conversion
+
+The `mcp-convert` image (#167; `comfyrelay/convert.py`). ComfyUI has no conversion route, so the
+relay drives a headless Chromium against the frontend `COMFYUI_URL` serves: it loads the UI
+graph with `app.loadGraphData` and returns `app.graphToPrompt()`'s output, through JSON as the
+editor's Export (API) writes it. The conversion is the editor's own, so it follows that
+frontend version's rules, bugs included. There is no fallback converter.
+
+- **`template_get`** takes `format: "api"`.
+- **`workflow_validate`** and **`workflow_run`** take a UI-format graph (a top-level `nodes`
+  list and `links`) and convert it first; the result says `converted_from_ui`.
+  `workflow_validate` returns the API graph it checked in `workflow`, unless it is over 80,000
+  characters as JSON (`workflow_omitted` says so). `workflow_run` refuses a UI graph with a
+  partner-API node before converting it, from the graph's own node types, inside subgraphs
+  too, so such a graph gets `partner_api_nodes_refused`, never a conversion error. An
+  API-format graph is never converted.
+- **When it can't convert**, the call fails with `conversion_unavailable` (conversion is off,
+  this image has no browser, the browser didn't start, the frontend didn't load, or every tab
+  stayed busy for 60 seconds) or `conversion_failed` (the frontend threw, or didn't answer
+  within 30 seconds), each with the reason. `template_get`'s error carries the UI graph in
+  `workflow` when it fits 80,000 characters, and `workflow_omitted` otherwise.
+- **`server_info.capabilities.conversion`** reports `state`: `off` (with why: no browser in
+  this image, or `COMFYUI_MCP_CONVERT` isn't `1`), `unavailable` (a `COMFYUI_URL` it won't lock
+  to, below), `ready` (the browser starts on the first conversion), `running`, `backing_off`
+  (with `retry_in_seconds`) or `stopped`, plus `pages` and `conversions`.
+
+**The lockdown** keeps the browser to reading from ComfyUI. Each layer is in code and tested
+against a real ComfyUI and Chromium (`tests/test_relay_convert_live.py`, with a negative control:
+the same escapes from a plain browser, which get out, all but a preconnect, which the headless
+shell doesn't make even unblocked):
+
+1. **Requests.** A route on each tab lets a request through only when it is a `GET` to the
+   `COMFYUI_URL` origin for a path on the allowlist below (relative to `COMFYUI_URL`'s path),
+   and aborts everything else. It sees the page's requests, its iframes', popups' and
+   dedicated workers'. A path with `..`, an encoded `.` or a backslash is refused. One refused
+   request is answered rather than aborted: a `POST` of the frontend's own settings
+   (`/api/settings`, `/api/settings/<id>`), which it makes as it starts (`Comfy.InstalledVersion`,
+   on a ComfyUI no browser has opened) and without which it stops loading. It gets an empty
+   `200` from the browser and never reaches ComfyUI.
+2. **Page APIs.** Every page websocket is closed before it connects. An init script, run before
+   any page script, removes `SharedWorker`, `RTCPeerConnection`, `RTCDataChannel` and
+   `WebTransport`, and makes `navigator.sendBeacon` refuse. Dedicated workers stay, because the
+   frontend starts two from `blob:` URLs as it loads; their requests meet layer 1, and layer 3
+   stops their websockets.
+3. **The network.** Everything but `http(s)://<ComfyUI host:port>` goes to a proxy whose name
+   never resolves, so a websocket (to ComfyUI's `/ws` too), a preconnect, or anything layers 1
+   and 2 missed reaches no one. Chromium's resolver answers `NOTFOUND` for every name but
+   ComfyUI's, so a DNS prefetch or preconnect sends no lookup. WebRTC may not use UDP outside a
+   proxy, and QUIC is off.
+
+The allowlist, measured over every template ComfyUI v0.38.0 serves (frontend 1.53.6):
+
+| Kind | Paths |
+|---|---|
+| Exact | `/`, `/user.css`, `/materialdesignicons.min.css`, `/internal/folder_paths`, and `/api/` + `object_info`, `settings`, `system_stats`, `users`, `userdata`, `i18n`, `extensions`, `features`, `experiment/models`, `global_subgraphs`, `jobs`, `view` |
+| Under | `/assets/`, `/fonts/`, `/api/global_subgraphs/`, `/api/userdata/`, `/extensions/` (custom-node JavaScript; none on a bare ComfyUI) |
+
+Each of those routes only reads. The frontend asks for one more ComfyUI path, refused on purpose: on
+a ComfyUI no browser has opened, its first-run template browser reads `/api/workflow_templates`, and
+would then load every template's thumbnail, about 250 MB a tab, for nothing a conversion needs.
+
+What the frontend asks for that is refused, and it converts without: `api.comfy.org`
+(release notes), `huggingface.co` (it checks the template's model links with `HEAD`), ComfyUI's
+`/ws`, and `POST /api/upload/image` from Load3D, which makes those graphs fail with
+`conversion_failed`.
+
+**What stays reachable** is the allowlist, which only reads. Custom-node JavaScript under
+`/extensions/` loads and runs in the page, because a custom node's widgets can change what the
+export writes; it runs under the same lockdown, and a custom node whose graphs need its own
+`GET` routes won't convert. **The browser runs without its sandbox** (`--no-sandbox`):
+Docker's default seccomp profile with `no-new-privileges` leaves it none it can use. A
+compromised renderer would run as the relay's UID, beside `COMFYUI_MCP_HTTP_TOKEN`. A
+`COMFYUI_URL` with credentials in it is refused for conversion (`unavailable`), so they never
+reach the browser; the server still uses them. The page never queues a prompt, so no
+`extra_data` reaches ComfyUI from it.
+
+**Lifecycle.** One browser per relay, started on the first conversion and reused. Each tab is
+a browser context of its own, with storage of its own: the frontend saves the open workflow to
+storage, and a tab that shared it restored the previous tab's workflow over the one it was
+asked to convert. The frontend keeps every graph it loads (about 5 MB each), so a tab is
+replaced after 25 conversions, the first ones staggered so the tabs don't reload together, and
+after any failure. The Playwright driver grows too, so after 500 conversions the browser and
+driver are retired once their conversions finish, and started again. A browser that fails to
+launch backs off (5 seconds, doubling to 5 minutes) instead of every call retrying it, and
+one that went away is started again. On `SIGTERM` the server closes it.
+
+**Sizing**, measured with the image as UID 54321 on a read-only root with a tmpfs on `/tmp`,
+against a booted core-cpu a browser had never opened, on 8 CPUs of a Ryzen 7 5825U:
+
+| With 2 tabs | Memory (PSS, every process) | Time |
+|---|---|---|
+| Before the first conversion | 99 MB | |
+| The first conversion, which starts the browser | 1.14 GB | 3.6 s |
+| Idle once warm | 1.05 GB | |
+| 40 conversions in a row (`workflow_validate`) | 1.37 GB peak | median 0.26 s, p95 0.48 s; the same call on the API graph takes 0.007 s |
+| 6 at once | 1.37 GB peak | 1.4 s for all six (0.23 to 1.42 s each) |
+| 200 more in a row | 2.22 GB peak (2.68 GB RSS) | median 0.23 s, p95 0.61 s |
+| Idle after those | 1.34 GB (the driver has grown to 383 MB) | |
+
+Give it a memory limit of at least 3 GiB with 2 tabs, and about 265 MB more for each extra tab.
+The image is 304 MB compressed and 872 MB unpacked, against 63 MB and 217 MB for `mcp`.
 
 ## Docs tools
 

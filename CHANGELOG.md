@@ -1,13 +1,50 @@
 # Changelog
 
 Everything this repo publishes, under one version: the ComfyUI images
-(`complete`, `core`, `runtime`), the `mcp` image, the `fetch` image **and the
+(`complete`, `core`, `runtime`), the `mcp` and `mcp-convert` images, the `fetch` image **and the
 `comfyctl` and `comfyfetch` wheels**, and the skills plugin. Released as `vX.Y.Z`; the version lives in
 `VERSION`, and every manifest that states it must agree.
 
 This is **our packaging version**, not what is inside the image. `COMFYUI_VERSION`
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
+
+## Unreleased
+
+### A new image: `mcp-convert` (#167)
+
+`ghcr.io/pixeloven/comfyui/mcp-convert` is comfyrelay with a headless Chromium,
+so agents can hand it the editor's UI-format workflows. It converts them with
+the instance's own frontend, which makes each conversion what Export (API)
+would write. It is published with the same tags as `mcp`. The `mcp` image is
+unchanged and has no browser; opting in means switching the image.
+
+- `template_get` takes `format: "api"` and returns the template converted.
+- `workflow_validate` and `workflow_run` take a UI-format graph, convert it
+  first and report `converted_from_ui`; `workflow_validate` returns the API
+  graph it checked. `workflow_run` refuses a UI graph with partner-API nodes
+  before it converts it.
+- A conversion that can't run fails with `conversion_unavailable`, and one the
+  frontend rejects with `conversion_failed`, each with the reason. There is no
+  fallback converter. `server_info.capabilities.conversion` says whether the
+  server converts, and if not, why.
+- On the `mcp` image these tools behave as before: a UI graph is refused as
+  `invalid_workflow`, and `template_get` with `format: "api"` fails with
+  `conversion_unavailable`.
+
+**The browser is locked down.** It may only `GET` the paths the frontend needs
+from `COMFYUI_URL`; every other request, host, websocket and connection is
+refused, so it never writes to ComfyUI and never reaches another host. A
+Load3D graph, which uploads as it is exported, fails to convert for that
+reason. Chromium runs without its sandbox, beside the relay's token. The
+runtime contract's *The `mcp-convert` Image* has the details.
+
+**Sizing.** About 304 MB to pull (`mcp`: 63 MB). It idles at about 100 MB
+until the first conversion starts the browser (about 4 seconds), then at about
+1.1 GB with the default 2 tabs, up to 2.2 GB over a long run. Give it at least
+3 GiB. It needs a writable `/tmp`; with a read-only root, mount a tmpfs there.
+New variables: `COMFYUI_MCP_CONVERT` (on in this image) and
+`COMFYUI_MCP_CONVERT_PAGES` (default 2).
 
 ## 5.1.0 — 2026-10-04
 
