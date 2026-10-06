@@ -12,7 +12,9 @@ Every answer comes from the live ComfyUI this relay serves, through
                      ComfyUI serves it, plus a runnability check per match
                      (from requirements cached per templates version), with
                      a compact summary of it per hit
-    template_get     /templates/<name>.json, plus the same check
+    template_get     /templates/<name>.json, plus the same check; with
+                     format="api", converted by the instance's own frontend
+                     (convert.py), where this server converts
 
 All of them are read-only (#103: no writes, no installs, and no calls to
 anything but the configured ComfyUI). Templates are not bundled here: ComfyUI
@@ -48,6 +50,7 @@ from mcp_types import ToolAnnotations
 from pydantic import BaseModel, Field, model_serializer
 
 from .comfyui import ComfyUIClient, ComfyUIError
+from .convert import off_reason, unavailable
 from .errors import RelayError
 from .workflow import (
     AUTOGROW,
@@ -801,8 +804,30 @@ class TemplateDetail(TemplateHit):
     author: str | None = None
     source: dict[str, Any]
     workflow: dict[str, Any] | None = Field(
-        default=None, description="The template in the frontend's UI format (nodes, links, subgraph definitions)"
+        default=None,
+        description="The template: in the frontend's UI format (nodes, links, subgraph definitions), or with "
+        "format='api' in the API format /prompt takes, as this instance's frontend converts it",
     )
+    format: Literal["ui", "api"] = Field(default="ui", description="The format `workflow` was asked for in")
+    converted_from_ui: bool = Field(
+        default=False, description="`workflow` is the API graph this instance's frontend converted the template to"
+    )
+
+
+def workflow_chars(workflow: Any) -> int:
+    """A workflow's size as the pretty-printed JSON the SDK sends, which WORKFLOW_MAX_CHARS caps."""
+    return len(json.dumps(workflow, indent=2, ensure_ascii=False))
+
+
+def with_ui_graph(exc: RelayError, workflow: dict[str, Any]) -> RelayError:
+    """A conversion error carrying the UI graph it was given, when that fits WORKFLOW_MAX_CHARS (D5)."""
+    size = workflow_chars(workflow)
+    extra: dict[str, Any] = (
+        {"workflow": workflow, "workflow_format": "ui"}
+        if size <= WORKFLOW_MAX_CHARS
+        else {"workflow_omitted": f"the UI graph is {size} characters as JSON, over {WORKFLOW_MAX_CHARS}"}
+    )
+    return RelayError(exc.code, exc.message, retryable=exc.retryable, **exc.detail, **extra)
 
 
 def _active_nodes(workflow: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1424,14 +1449,24 @@ def _template_get(relay: Relay) -> Callable[..., Any]:
         include_workflow: bool = Field(
             default=True, description="false returns only the metadata and runnability, not the workflow"
         ),
+        format: Literal["ui", "api"] = Field(
+            default="ui",
+            description="ui: the template as the editor stores it. api: the graph workflow_run takes, converted "
+            "by this instance's own frontend. Only where this server converts (server_info.capabilities."
+            "conversion); elsewhere api fails with conversion_unavailable",
+        ),
     ) -> TemplateDetail:
         """Fetch one ComfyUI workflow template by name: its metadata, a runnability check against the live
         instance (the same one template_search reports), and the workflow itself.
 
         The workflow is in the frontend's UI format (nodes with widgets_values, links, subgraph definitions), as
-        the ComfyUI frontend loads it, not the API format /prompt takes. A workflow too large to return (over
-        80,000 characters as JSON) fails with `workflow_too_large`; include_workflow=false still returns its
-        metadata and runnability. An unknown name fails with `unknown_template` and close matches.
+        the ComfyUI frontend loads it, not the API format /prompt takes. With format="api", this instance's own
+        frontend converts it, as the editor's Export (API) would, where this server converts
+        (server_info.capabilities.conversion). A conversion that can't run fails with conversion_unavailable, and
+        one the frontend rejects with conversion_failed; each says why and carries the UI graph when it fits.
+        There is no fallback converter. A workflow too large to return (over 80,000 characters as JSON) fails
+        with `workflow_too_large`; include_workflow=false still returns its metadata and runnability. An unknown
+        name fails with `unknown_template` and close matches.
         """
         name = name.removesuffix(".json")
         index, object_info, source = await asyncio.gather(
@@ -1449,14 +1484,24 @@ def _template_get(relay: Relay) -> Callable[..., Any]:
             )
         template, category = found
         workflow = await relay.comfyui.template(name)
+        returned = workflow
+        if include_workflow and format == "api":
+            # No fallback converter (D5): the error says why, with the UI graph when it fits.
+            try:
+                if relay.converter is None:
+                    raise unavailable(off_reason())
+                returned = await relay.converter.convert(workflow)
+            except RelayError as exc:
+                raise with_ui_graph(exc, workflow) from None
         if include_workflow:
-            size = len(json.dumps(workflow, indent=2, ensure_ascii=False))
+            size = workflow_chars(returned)
             if size > WORKFLOW_MAX_CHARS:
                 raise RelayError(
                     "workflow_too_large",
-                    f"Template {name!r} is {size} characters as JSON, over the {WORKFLOW_MAX_CHARS} this tool "
-                    "returns: most MCP clients cut a result that long. Call it again with include_workflow=false "
-                    "for its metadata and runnability, or choose a smaller template.",
+                    f"Template {name!r} is {size} characters as JSON{' once converted' if format == 'api' else ''}, "
+                    f"over the {WORKFLOW_MAX_CHARS} this tool returns: most MCP clients cut a result that long. Call "
+                    "it again with include_workflow=false for its metadata and runnability, or choose a smaller "
+                    "template.",
                     size=size,
                     limit=WORKFLOW_MAX_CHARS,
                 )
@@ -1467,7 +1512,9 @@ def _template_get(relay: Relay) -> Callable[..., Any]:
             author=template.get("username") if isinstance(template.get("username"), str) else None,
             source=source,
             runnability=_runnability(needs, object_info, folders),
-            workflow=workflow if include_workflow else None,
+            workflow=returned if include_workflow else None,
+            format=format,
+            converted_from_ui=returned is not workflow,
         )
 
     return template_get

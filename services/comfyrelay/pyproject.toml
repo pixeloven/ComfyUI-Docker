@@ -13,6 +13,14 @@ requires-python = ">=3.11"
 # uv.lock fixes every version.
 dependencies = ["mcp==2.2.0", "httpx2>=2.5", "uvicorn>=0.31.1", "typer>=0.16.0"]
 
+# UI-to-API conversion (#167) drives the instance's own frontend in headless
+# Chromium, so it needs Playwright. Only the mcp-convert image installs it
+# (built with RELAY_CONVERT=1); the mcp image does not. Pinned EXACTLY: the
+# Playwright version decides the Chromium build `playwright install` fetches,
+# and dockerfile.comfy.relay checks that build's revision and hash.
+[project.optional-dependencies]
+convert = ["playwright==1.63.0"]
+
 # Not a wheel: comfyrelay ships as the mcp image (#136), and the release builds
 # only the comfyctl and comfyfetch wheels. No console script either: the command is `comfyctl relay`, which mounts
 # `comfyrelay.cli.app` as a group when this package is installed.

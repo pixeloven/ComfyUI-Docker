@@ -18,6 +18,13 @@ A run's job id is its prompt id, so a restarted relay re-attaches to it: an id
 this server does not hold is looked up on ComfyUI, the source of truth (#146,
 "re-attach" below).
 
+Where this server converts (convert.py, #167), workflow_validate and
+workflow_run also take the editor's UI format: the instance's own frontend
+converts it first, and the result says `converted_from_ui`. workflow_run
+refuses a UI graph with partner-API nodes before converting it, so such a
+graph gets the partner refusal rather than a conversion error. Without
+conversion, a UI graph is refused as an `invalid_workflow`, as before.
+
 Must-never (#103): a graph with a partner-API node is refused before anything
 is submitted, and nothing here talks to anything but COMFYUI_URL. The only
 thing written is ComfyUI's input directory, through its own upload API.
@@ -44,9 +51,11 @@ from mcp_types import AudioContent, CallToolResult, ImageContent, TextContent, T
 from pydantic import BaseModel, Field
 
 from .comfyui import ComfyUIClient, ComfyUIError
+from .convert import is_ui_format
 from .errors import RelayError
 from .jobs import MAX_WAIT_SECONDS, AlreadyFinished, current_job, unknown_job
-from .workflow import Problem, Report, validate
+from .tools_introspection import FRONTEND_ONLY, INACTIVE_MODES, WORKFLOW_MAX_CHARS, workflow_chars
+from .workflow import Problem, Report, partner_signals, validate
 
 if TYPE_CHECKING:
     from .tools import Relay
@@ -138,13 +147,23 @@ class ValidationResult(BaseModel):
     partner_api_nodes: list[PartnerApiNode] = Field(description="workflow_run refuses a graph with any")
     output_nodes: list[str] = Field(description="Node ids ComfyUI would run the graph for")
     node_count: int
+    converted_from_ui: bool = Field(
+        default=False, description="The graph came in UI format, and this instance's frontend converted it"
+    )
+    workflow: dict[str, Any] | None = Field(
+        default=None,
+        description="When converted_from_ui: the API graph that was checked, which workflow_run takes as it is. "
+        "Left out when over 80,000 characters as JSON (workflow_omitted says so)",
+    )
+    workflow_omitted: str | None = None
 
 
 WorkflowArg = Annotated[
     dict[str, Any],
     Field(
         description='The workflow in ComfyUI\'s API format: {"<node id>": {"class_type": "<node class>", '
-        '"inputs": {"<name>": <value> or ["<source node id>", <output index>]}}}. Not the editor\'s UI format.'
+        '"inputs": {"<name>": <value> or ["<source node id>", <output index>]}}}. The editor\'s UI format is '
+        "converted first where this server converts (server_info.capabilities.conversion), and refused elsewhere."
     ),
 ]
 
@@ -204,11 +223,64 @@ async def _shared(
     return await asyncio.shield(held.future)
 
 
-async def _validate(relay: Relay, workflow: dict[str, Any]) -> Report:
+async def _object_info_shared(relay: Relay) -> Any:
     # Shared for a few seconds: file-picker options and installed nodes change, but rarely within a run's setup;
     # an upload drops the copy (workflow_upload_input).
-    info = await _shared(_object_info, relay.comfyui, OBJECT_INFO_TTL_SECONDS, relay.comfyui.object_info)
-    return validate(workflow, info)
+    return await _shared(_object_info, relay.comfyui, OBJECT_INFO_TTL_SECONDS, relay.comfyui.object_info)
+
+
+async def _validate(relay: Relay, workflow: dict[str, Any]) -> Report:
+    return validate(workflow, await _object_info_shared(relay))
+
+
+def ui_partner_nodes(workflow: dict[str, Any], info: dict[str, Any]) -> list[dict[str, Any]]:
+    """A UI graph's partner-API nodes, from its node types, before any conversion: the nodes that run (muted and
+    bypassed ones don't), top level and inside subgraphs, named by the id the API graph would give them
+    (`<instance id>:<inner id>`)."""
+    definitions = workflow.get("definitions") if isinstance(workflow.get("definitions"), dict) else {}
+    subgraphs = {
+        s["id"]: s["nodes"]
+        for s in definitions.get("subgraphs") or []
+        if isinstance(s, dict) and isinstance(s.get("id"), str) and isinstance(s.get("nodes"), list)
+    }
+    found: list[dict[str, Any]] = []
+
+    def walk(nodes: list[Any], prefix: str, inside: frozenset[str]) -> None:
+        for node in nodes:
+            if not isinstance(node, dict) or node.get("mode") in INACTIVE_MODES:
+                continue
+            kind, node_id = node.get("type"), f"{prefix}{node.get('id')}"
+            if kind in subgraphs:
+                if kind not in inside:
+                    walk(subgraphs[kind], f"{node_id}:", inside | {kind})
+            elif isinstance(kind, str) and kind not in FRONTEND_ONLY:
+                signals = partner_signals(info.get(kind))
+                if signals:
+                    found.append(
+                        {
+                            "node_id": node_id,
+                            "class_type": kind,
+                            "category": info[kind].get("category"),
+                            "signals": signals,
+                        }
+                    )
+
+    walk(workflow["nodes"], "", frozenset())
+    return found
+
+
+async def _as_api(
+    relay: Relay, workflow: dict[str, Any], *, refuse_partner: bool = False
+) -> tuple[dict[str, Any], bool]:
+    """A UI-format graph, converted by the instance's own frontend, where this server converts. Anything else, or
+    with conversion off, passes through unchanged, and validation treats it as before."""
+    if relay.converter is None or not is_ui_format(workflow):
+        return workflow, False
+    if refuse_partner:
+        partner = ui_partner_nodes(workflow, await _object_info_shared(relay))
+        if partner:
+            raise refuse_partner_nodes(partner)
+    return await relay.converter.convert(workflow), True
 
 
 def _workflow_validate(relay: Relay) -> Callable[..., Any]:
@@ -221,8 +293,22 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
         (required inputs, COMBO choices, number ranges): ComfyUI has no dry run, so those are checked by ComfyUI
         itself when workflow_run submits the graph, and come back as its errors. Changes nothing. workflow_run
         runs this same check first.
+
+        Where this server converts (server_info.capabilities.conversion), a UI-format graph is converted first by
+        this instance's own frontend, and the result returns the API graph it checked, with converted_from_ui. A
+        conversion that can't run fails with conversion_unavailable, and one the frontend rejects with
+        conversion_failed; there is no fallback converter.
         """
-        return _result(await _validate(relay, workflow))
+        workflow, converted = await _as_api(relay, workflow)
+        result = _result(await _validate(relay, workflow))
+        if converted:
+            result.converted_from_ui = True
+            size = workflow_chars(workflow)
+            if size <= WORKFLOW_MAX_CHARS:
+                result.workflow = workflow
+            else:
+                result.workflow_omitted = f"the converted graph is {size} characters as JSON, over {WORKFLOW_MAX_CHARS}"
+        return result
 
     return workflow_validate
 
@@ -244,6 +330,9 @@ class RunStarted(BaseModel):
     )
     queue_number: float | None = None
     warnings: list[WorkflowProblem] = Field(description="From the validation; they did not stop the run")
+    converted_from_ui: bool = Field(
+        default=False, description="The graph came in UI format, and this instance's frontend converted it"
+    )
 
 
 def refuse_partner_nodes(nodes: list[dict[str, Any]]) -> RelayError:
@@ -306,7 +395,13 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
 
         What the graph does is up to its nodes: this server reaches only ComfyUI, but a custom node installed there
         may write anywhere ComfyUI can, or reach the network. Only partner-API nodes are refused.
+
+        Where this server converts (server_info.capabilities.conversion), a UI-format graph is converted first by
+        this instance's own frontend, after its node types pass the partner-API check, and the result says
+        converted_from_ui. A conversion that can't run fails with conversion_unavailable, and one the frontend
+        rejects with conversion_failed; nothing is submitted then.
         """
+        workflow, converted = await _as_api(relay, workflow, refuse_partner=True)
         report = await _validate(relay, workflow)
         if report.partner_api_nodes:
             raise refuse_partner_nodes(report.partner_api_nodes)
@@ -346,6 +441,7 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
             comfyui_state=progress["comfyui_state"],
             queue_number=answer.get("number"),
             warnings=[WorkflowProblem(**p) for p in [*_problems(report.warnings), *dropped]],
+            converted_from_ui=converted,
         )
 
     return workflow_run
