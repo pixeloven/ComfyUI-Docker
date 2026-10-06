@@ -53,11 +53,21 @@ conversion has to follow them too.
 - **A list value is wrapped.** An input whose value is a JSON array is written
   as `{"__value__": [...]}`, so that ComfyUI doesn't take it for a link.
   ComfyUI unwraps it before the node runs.
-- **Dynamic prompts are resolved on export.** In a text widget, the editor
-  replaces each `{a|b|c}` group with one of its options, picked at random,
-  and stores the result in `widgets_values` too. A hand conversion that
-  copies the text with its braces sends a different prompt from the one the
-  editor would.
+- **Dynamic prompts are resolved in the API graph.** This applies only to a
+  widget whose input spec in `/object_info` sets `dynamicPrompts: true`
+  (CLIPTextEncode's `text` does), not to every text widget. The editor
+  removes comments first: `//` to the end of its line, and `/* ... */`, so a
+  URL's `//` cuts off the rest of that line. Then it replaces every `{...}`
+  group with one of its `|`-separated options, picked at random, even when
+  there is only one (`{cat}` becomes `cat`). Groups can nest. Outside a
+  group, a backslash keeps the next character from being parsed: `\{`, `\}`
+  and `\|` come out as the plain character, and any other backslash pair is
+  left as written. The option chosen from a group is parsed again on its own,
+  comments and escapes included, so each level of nesting undoes one more
+  level of escaping.
+  Only the API graph gets the result; the widget, and the workflow saved with
+  it, keep the braces. A hand conversion that copies such a text unchanged
+  sends a different prompt from the one the editor would.
 - **Subgraphs are flattened.** Each node inside a subgraph instance (its
   definition is in `definitions.subgraphs`) moves to the top level, with the
   id `<instance id>:<inner id>`, for example `"12:3"`. Nesting adds a level
@@ -68,8 +78,10 @@ conversion has to follow them too.
   straight from its source, and a primitive's value is written into each
   input it feeds.
 - **Muted and bypassed nodes are skipped.** A muted node (`mode` 2) is left
-  out, and so is every input linked from it: the node that read it gets no
-  value for that input at all, not its stored widget value. A bypassed node
+  out, and its outputs feed nothing. What that does to a node that read from
+  it depends on the input. An input that is only a socket, with no widget,
+  is dropped: the API graph has no entry for it. A widget input keeps its
+  stored widget value, as if the link weren't there. A bypassed node
   (`mode` 4) is left out as well, and the nodes that read from it are wired to
   what fed it instead, matching by type.
 - **A socketless widget must be there, with any value.** ImageCompare's

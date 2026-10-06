@@ -114,14 +114,24 @@ Anything that breaks a consumer who changes nothing but the version they pull:
 - **A removed or renamed command, verb or flag.** `comfyfetch` becoming
   `comfyctl fetch` in 4.0.0 is the example: every script that typed the old
   name breaks.
-- **An MCP tool, or information one gives, removed.** Renaming or removing a
-  tool of the `mcp` image (comfyrelay) is major, and so is dropping information
-  a tool returns when no tool of the same server returns it any more. Changing
-  the *shape* of a tool's output is minor when the same information stays
-  reachable through the same server: `template_search` hits summarising their
-  runnability while `template_get` keeps the full lists (#167) is the example.
+- **An MCP tool, an argument of one, or information one gives, removed or
+  narrowed.** Renaming or removing a tool of the `mcp` image (comfyrelay) is
+  major, and so is moving a tool to a different capability profile
+  (`COMFYUI_MCP_PROFILES`): a deployment that enabled only the old profile
+  loses it. So is renaming or removing one of a tool's arguments, adding a
+  required argument, narrowing what an argument accepts (its range or its
+  allowed values), or changing an argument's default. Dropping information a
+  tool returns is major unless the same information is still **returned by
+  another tool of the same server, under the same capability profile**
+  (`COMFYUI_MCP_PROFILES`). `template_search` hits summarising their
+  runnability while `template_get`, also in `read`, keeps the full lists (#167)
+  is the example. The JSON shape of a tool's output is deliberately not a
+  contract, which makes it the one exception to the definition above: an agent
+  reads the output, and a reshape that keeps the information is minor. A script that
+  parses a tool's output should pin an image version.
 
-Adding is never major: a new env var, volume, profile, or image is a minor.
+Adding something optional is never major: a new env var, volume, profile,
+image, tool, or optional tool argument is a minor.
 
 ## Releasing
 
