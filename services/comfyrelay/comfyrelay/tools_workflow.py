@@ -1013,8 +1013,9 @@ def _workflow_outputs(relay: Relay) -> Callable[..., Any]:
         nothing.
 
         Lists each file (node, filename, subfolder, type, size) and non-file outputs such as text, for failed or
-        cancelled runs too, and after this server restarts (looked up on ComfyUI, source "comfyui"). Nothing is
-        sent unless fetch names a file.
+        cancelled runs too, and after this server restarts (looked up on ComfyUI, source "comfyui"). size_bytes
+        is null past the first 32 files (when fetching, for all but that file). Nothing is sent unless fetch names
+        a file: view_path works only for a client that reaches ComfyUI directly, so through this server use fetch.
         """
         job = relay.jobs.find(job_id)
         if job is None:  # not held here: look the run up on ComfyUI (#146); how it ended comes from /history below

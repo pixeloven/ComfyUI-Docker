@@ -529,10 +529,13 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
 
         Use each input's `name` as its key in a graph. A dynamic input's inputs are qualified with dots: a
         COMFY_DYNAMICCOMBO_V3 `resize_type` lists options as {value, inputs}, and set to one adds
-        `resize_type.width`; a COMFY_AUTOGROW_V3 `images` takes `images.image0`, `images.image1`, ... An output's
-        `index` is the one a link [node_id, index] uses; hidden_inputs are ComfyUI's, never set in a graph. Lists
-        are cut to max_options, with a total. `help` is the node's help page, when it has one. An unknown class
-        fails with `unknown_node_class` and close `suggestions`.
+        `resize_type.width`; a COMFY_AUTOGROW_V3 `images` takes `images.image0`, `images.image1`, ... (the first
+        autogrow.min names are required); a COMFY_DYNAMICSLOT_V3 adds its slot_inputs once something is linked to
+        it. A COMFY_MATCHTYPE_V3 input takes any of match_type.allowed_types; an output whose same_type_as names
+        that input (by its match_type.template_id) carries the type linked to it. An output's `index` is the one a
+        link [node_id, index] uses; hidden_inputs are ComfyUI's, never set in a graph. Lists are cut to
+        max_options, with a total. `help` is the node's help page, when it has one (help_truncated: cut at 64 KB).
+        An unknown class fails with `unknown_node_class` and close `suggestions`.
         """
         found = {} if class_type in DOT_SEGMENTS else await relay.comfyui.object_info(class_type)
         if class_type in found:
@@ -1358,7 +1361,7 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
         instance lacks for it (counts and first names of node classes, declared models, models only under another
         path, input files, partner-API nodes); template_get has the full lists. runnable is true only when nothing
         is missing; it doesn't validate the graph, models named only in widget values, or memory. null: not
-        checked in time (unchecked says why). Partner-API templates, which spend credits, are left out unless
+        checked (unchecked says why). Partner-API templates, which spend credits, are left out unless
         include_partner_api. Fetch one with template_get.
         """
         words = _words(query)
@@ -1456,7 +1459,7 @@ def _template_get(relay: Relay) -> Callable[..., Any]:
         conversion_unavailable, one the frontend rejects with conversion_failed; each says why, with the UI graph
         when it fits. There is no fallback converter. In runnability, a model in models_need_value_change is on
         disk at found_at, the value its loader needs; missing_inputs need uploading; missing_models are for a
-        human to add through the manifest. Over 80,000 characters as JSON fails with `workflow_too_large`
+        human to add through the manifest (folder_known false: this ComfyUI has no such folder type). Over 80,000 characters as JSON fails with `workflow_too_large`
         (include_workflow=false still returns the rest). An unknown name fails with `unknown_template` and close
         matches.
         """

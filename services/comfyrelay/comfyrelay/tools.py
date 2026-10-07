@@ -205,8 +205,8 @@ def _job_status(relay: Relay) -> Callable[..., Any]:
 
         A wait returns when the job finishes or after timeout_seconds; the job keeps running, so call again rather
         than wait longer. While it works, progress gives a workflow run's comfyui_state and queue_position (0 is
-        next). A run's job_id is its ComfyUI prompt_id: a run this server no longer holds (it restarted) is looked
-        up on ComfyUI, with source "comfyui". To stop a job, use job_cancel.
+        next). On ComfyUI v0.37.0 and later a run's job_id is its prompt_id, so a run this server no longer holds
+        (it restarted) is looked up on ComfyUI, with source "comfyui". To stop a job, use job_cancel.
         """
         if relay.jobs.find(job_id) is None:  # not held here: a workflow run is looked up on ComfyUI (#146)
             return JobView(**await reattach_status(relay.comfyui, job_id, timeout_seconds))
