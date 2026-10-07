@@ -12,7 +12,8 @@
 #   - the mcp-convert bake target as it resolves, which carries the
 #     COMFYUI_VERSION pin, so a ComfyUI bump runs it (and so does any other
 #     change to that target, such as COMFY_DOCS_SHA);
-#   - convert.py, the Dockerfile mcp-convert is built from, or this job's
+#   - the relay's code (convert.py and the tools that call it), the lock its
+#     image installs, the Dockerfile mcp-convert is built from, or this job's
 #     own files: the workflow, the scripts and tests it runs, and the oracle
 #     it shares with test_relay_convert_live.py.
 name: mcp-convert template corpus
@@ -52,7 +53,8 @@ jobs:
       with:
         filters: |
           corpus:
-            - 'services/comfyrelay/comfyrelay/convert.py'
+            - 'services/comfyrelay/comfyrelay/**'
+            - 'services/uv.lock'
             - 'services/comfyrelay/dockerfile.comfy.relay'
             - 'services/comfyrelay/tests/test_relay_convert_corpus.py'
             - 'services/comfyrelay/tests/test_relay_convert_live.py'

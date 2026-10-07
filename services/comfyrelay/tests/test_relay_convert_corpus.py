@@ -4,7 +4,8 @@ tests/relay/corpus.sh runs it: it boots a core-cpu with empty model and input fo
 tests/relay/validate_only.py loaded, starts the mcp-convert image beside it, and sets the environment below.
 Skipped without COMFYRELAY_CORPUS_RELAY_URL.
 
-The templates are those the index doesn't mark as partner templates (openSource false).
+The templates are every one the index doesn't mark as a partner template (openSource false), and each must be in
+UI format by the relay's own test, so that test can't quietly drop one.
 
 1. Placeholders, before anything converts. Every model a template declares becomes an empty file in its folder,
    and every file a loader names (LoadImage, LoadImageMask, LoadAudio, LoadVideo, muted ones included) a small
@@ -15,11 +16,18 @@ The templates are those the index doesn't mark as partner templates (openSource 
 3. The oracle: the frontend's own Export (API) in a plain browser tab, a fresh context each, once every
    LoadVideo's `video-preview` widget exists (test_relay_convert_live.export with EXPORT_AFTER_PREVIEWS, not a
    network-quiet wait). The relay's graph must be the same, but for floats that differ only in rounding (the
-   frontend's own run-to-run noise in a 3D camera position); the report lists those. A template the frontend
-   itself fails to export must fail in the relay as conversion_failed, and nothing else may.
+   frontend's own run-to-run noise in a 3D camera position); the report lists those. Every LoadVideo in it must
+   carry `video-preview`, so a preview the oracle gave up on fails rather than matching a relay that didn't wait.
 4. ComfyUI accepts the converted graph: /prompt answers 200 with no node errors. The prompt is marked
-   validate-only, so validate_only.py keeps it off the queue and nothing runs. REFUSED_UPSTREAM lists the
-   templates ComfyUI refuses even as the editor exports them; a listed one it accepts fails the run.
+   validate-only, so validate_only.py keeps it off the queue and nothing runs.
+
+Every template must pass all four, but those named in one of three lists, each of which must hold exactly: a
+template that does something else fails, and so does a listed one that no longer does what its list says.
+
+    FRONTEND_FAILS     the frontend's own export throws, and the relay fails with conversion_failed naming the
+                       same exception
+    REFUSED_UPSTREAM   identical to the editor's export, which ComfyUI refuses with exactly these node errors
+    TOO_LARGE          converted, but over workflow_validate's 80,000 characters, so it returns no graph
 
 This checks our converter against the frontend, and what it returns against ComfyUI; the frontend and ComfyUI
 are the reference, not under test. corpus.json in COMFYRELAY_CORPUS_OUT has every template's outcome.
@@ -58,14 +66,25 @@ pytestmark = [
     pytest.mark.skipif(not (RELAY and URL), reason="COMFYRELAY_CORPUS_RELAY_URL is not set (tests/relay/corpus.sh)"),
 ]
 
-# Open templates ComfyUI refuses as the editor itself exports them, at the pin (v0.38.0, templates 0.11.70). The
-# relay must still match the editor's export of each. The subgraph instance's widgets_values (a legacy list, no
-# proxyWidgets) land on the wrong promoted widgets, so the loaders get ckpt_name 'person' and unet_name 2.
+# The lists, at the pin (ComfyUI v0.38.0, frontend 1.53.6, templates 0.11.70).
+#
+# The frontend's own export throws, with this exception.
+FRONTEND_FAILS = {"basic_image_color_adjustment": "DataCloneError"}
+# Open templates ComfyUI refuses as the editor itself exports them, with the (node id, input) of every node error.
+# Each subgraph instance's widgets_values is a legacy list of 14 values for its 12 promoted widgets, with no
+# proxyWidgets, and the frontend assigns it by position, so the values land on the wrong widgets: the checkpoint
+# loader gets 'person', the UNET loader a number, the detector a threshold, the keypoint drawer a point size. The
+# Templates browser's own load, loadGraphData(json, true, true, <name>, {openSource: 'template'}), exports the
+# same graph for all three, so this is the editor's doing, not the relay's (checked for #195).
+_SDPOSE = {":672": "score_threshold", ":673": "ckpt_name", ":677": "unet_name", ":678": "class_name"}
 REFUSED_UPSTREAM = {
-    "utility_sdpose_multi_person": "the frontend puts subgraph 675's widget values on the wrong inputs",
-    "utility_sdpose_multi_person_video": "the frontend puts subgraph 675's widget values on the wrong inputs",
-    "video_minimax_h3_fun_controlnet_union": "the frontend puts subgraph 700's widget values on the wrong inputs",
+    "utility_sdpose_multi_person": {("675" + node, field) for node, field in _SDPOSE.items()},
+    "utility_sdpose_multi_person_video": {("675" + node, field) for node, field in _SDPOSE.items()},
+    "video_minimax_h3_fun_controlnet_union": {("700" + node, field) for node, field in _SDPOSE.items()},
 }
+# Converted graphs over workflow_validate's 80,000 characters: none.
+TOO_LARGE: set[str] = set()
+
 VALIDATE_ONLY = "comfyrelay_validate_only"  # tests/relay/validate_only.py's MARK
 VIDEO = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
 AUDIO = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".opus"}
@@ -99,8 +118,8 @@ def _input_bytes(name: str) -> bytes:
 
 
 def _place(root: Path, name: str, data: bytes) -> bool:
-    """Write a placeholder at `name` under `root` unless one is there. A name is template data, so one that would
-    land outside `root` fails the run."""
+    """Write a placeholder at `name` under `root` unless one is there. A name (for a model, its folder and file
+    name together) is template data, so one that would land outside `root` fails the run."""
     path = (root / name).resolve()
     assert path.is_relative_to(root.resolve()), f"a template names a file outside its folder: {name!r}"
     if path.exists():
@@ -133,8 +152,8 @@ def _difference(got: dict[str, Any], want: dict[str, Any]) -> str:
     if got.keys() != want.keys():
         only_got, only_want = sorted(got.keys() - want.keys())[:5], sorted(want.keys() - got.keys())[:5]
         return f"node ids only in the relay's {only_got}, only in the oracle's {only_want}"
-    for node_id in want:
-        g, w = got[node_id], want[node_id]
+    for node_id, w in want.items():
+        g = got[node_id]
         if _same(g, w):
             continue
         if g.get("class_type") != w.get("class_type"):
@@ -148,10 +167,28 @@ def _difference(got: dict[str, Any], want: dict[str, Any]) -> str:
     return "no difference"
 
 
-def _video_previews(graph: dict[str, Any]) -> int:
-    return sum(
-        n.get("class_type") == "LoadVideo" and "video-preview" in (n.get("inputs") or {}) for n in graph.values()
-    )
+def _videos(graph: dict[str, Any]) -> tuple[int, list[str]]:
+    """How many LoadVideo nodes an API graph has (its subgraphs' nodes are in it), and those without
+    `video-preview`."""
+    videos = [k for k, n in graph.items() if n.get("class_type") == "LoadVideo"]
+    return len(videos), [k for k in videos if "video-preview" not in (graph[k].get("inputs") or {})]
+
+
+def _refusal(body: dict[str, Any]) -> set[tuple[str, str]]:
+    """(node id, input) for each of /prompt's node errors; "" for an error that names no input."""
+    return {
+        (node_id, (e.get("extra_info") or {}).get("input_name") or "")
+        for node_id, errors in (body.get("node_errors") or {}).items()
+        for e in errors.get("errors") or [{}]
+    }
+
+
+def _expected(name: str) -> str:
+    if name in FRONTEND_FAILS:
+        return "frontend_fails_too"
+    if name in REFUSED_UPSTREAM:
+        return "refused_upstream"
+    return "too_large" if name in TOO_LARGE else "pass"
 
 
 async def test_every_open_template_converts_as_the_editor_exports_it_and_comfyui_accepts_it():
@@ -168,15 +205,21 @@ async def test_every_open_template_converts_as_the_editor_exports_it_and_comfyui
     t0 = time.monotonic()
 
     corpus = dict(await templates(limit=None, max_chars=math.inf))
-    assert corpus, "ComfyUI serves no open template"
-    assert not REFUSED_UPSTREAM.keys() - corpus.keys(), f"no longer served: {REFUSED_UPSTREAM.keys() - corpus.keys()}"
+    async with httpx2.AsyncClient(base_url=URL, timeout=60) as http:
+        index = (await http.get("/templates/index.json")).json()
+    open_names = {t["name"] for c in index for t in c.get("templates", []) if t.get("openSource") is not False}
+    assert open_names, "ComfyUI serves no open template"
+    # templates() keeps what the relay's is_ui_format calls UI format: it must keep every one.
+    assert open_names == corpus.keys(), f"open templates not in UI format: {sorted(open_names - corpus.keys())}"
+    listed = FRONTEND_FAILS.keys() | REFUSED_UPSTREAM.keys() | TOO_LARGE
+    assert listed <= corpus.keys(), f"listed, but no longer served: {sorted(listed - corpus.keys())}"
 
     # 1. Placeholders.
     placed = {"models": 0, "inputs": 0}
     for workflow in corpus.values():
         nodes = _all_nodes(workflow)
         for m in _declared_models(nodes):
-            placed["models"] += _place(models / m["directory"], m["name"], b"")
+            placed["models"] += _place(models, os.path.join(m["directory"], m["name"]), b"")
         for _, _, value in _loader_inputs(nodes):
             file = ANNOTATION.sub("", value)
             placed["inputs"] += _place(inputs, file, _input_bytes(file))
@@ -209,53 +252,61 @@ async def test_every_open_template_converts_as_the_editor_exports_it_and_comfyui
     oracle = dict(zip(corpus, await export(list(corpus.values()), EXPORT_AFTER_PREVIEWS, tabs=tabs), strict=True))
     timings["oracle"] = time.monotonic() - t
 
-    # 4. Compare, and have ComfyUI validate what matched.
+    # 4. Compare, and have ComfyUI validate what matched. Each template gets an outcome, then is held to its list.
+    async def outcome(name: str, entry: dict[str, Any], comfyui: httpx2.AsyncClient) -> tuple[str, str]:
+        relay, error, want = entry.pop("relay", None), entry.pop("relay_error", None), oracle[name]
+        if error:
+            entry["relay_error"] = f"{error.get('code')}: {error.get('message')}"[:500]
+        if isinstance(want, Exception):
+            entry["oracle_error"] = str(want).splitlines()[0][:300]
+            if not error or error.get("code") != "conversion_failed":
+                did = f"failed with {error.get('code')}" if error else "converted it"
+                return "fail", f"the frontend's own export fails, and the relay {did}"
+            exception = FRONTEND_FAILS.get(name)
+            if exception and not (exception in entry["oracle_error"] and exception in entry["relay_error"]):
+                return "fail", f"both fail, but not both with {exception}"
+            return "frontend_fails_too", ""
+        if error:
+            return "fail", f"the relay failed: {entry['relay_error']}"
+        if not relay.get("converted_from_ui"):
+            return "fail", "workflow_validate did not convert it"
+        if relay.get("workflow") is None:
+            entry["workflow_omitted"] = relay.get("workflow_omitted")
+            return "too_large", ""
+        got = relay["workflow"]
+        if not _same(got, want):
+            return "fail", "differs from the frontend's export: " + _difference(got, want)
+        entry["rounding_only"] = got != want
+        entry["videos"], unpreviewed = _videos(got)
+        if unpreviewed:
+            return "fail", f"LoadVideo {unpreviewed} lacks video-preview in both: its preview never loaded"
+        if not relay["valid"]:
+            return "fail", f"the relay's workflow_validate refused it: {relay['errors']}"
+        answer = await comfyui.post("/prompt", json={"prompt": got, "extra_data": {VALIDATE_ONLY: True}})
+        body = answer.json()
+        if answer.status_code == 200 and not body.get("node_errors"):
+            return "pass", ""
+        entry["refusal"] = sorted(_refusal(body))
+        if _refusal(body) == REFUSED_UPSTREAM.get(name):
+            return "refused_upstream", ""
+        details = json.dumps({"error": body.get("error"), "node_errors": body.get("node_errors")})[:2000]
+        return "fail", f"ComfyUI refused it ({answer.status_code}): {details}"
+
     t = time.monotonic()
     async with httpx2.AsyncClient(base_url=URL, timeout=120) as comfyui:
         for name, entry in report.items():
-            relay, error, want = entry.pop("relay", None), entry.pop("relay_error", None), oracle[name]
-            if isinstance(want, Exception):
-                entry["oracle_error"] = str(want).splitlines()[0][:300]
-                if error and error.get("code") == "conversion_failed":
-                    entry["result"] = "frontend_fails_too"
-                else:
-                    did = f"failed with {error.get('code')}" if error else "converted it"
-                    entry.update(result="fail", why=f"the frontend's own export fails, and the relay {did}")
-                continue
-            if error:
-                entry.update(result="fail", why=f"the relay failed with {error.get('code')}: {error.get('message')}")
-                continue
-            if not relay.get("converted_from_ui"):
-                entry.update(result="fail", why="workflow_validate did not convert it")
-                continue
-            if relay.get("workflow") is None:
-                entry.update(result="too_large", why=relay.get("workflow_omitted"))
-                continue
-            got = relay["workflow"]
-            if not _same(got, want):
-                entry.update(result="fail", why="differs from the frontend's export: " + _difference(got, want))
-                continue
-            entry["rounding_only"] = got != want
-            entry["video_previews"] = _video_previews(got)
-            if not relay["valid"]:
-                entry.update(result="fail", why=f"the relay's workflow_validate refused it: {relay['errors']}")
-                continue
-            answer = await comfyui.post("/prompt", json={"prompt": got, "extra_data": {VALIDATE_ONLY: True}})
-            body = answer.json()
-            refused = answer.status_code != 200 or bool(body.get("node_errors"))
-            if refused != (name in REFUSED_UPSTREAM):
-                why = (
-                    f"ComfyUI refused it ({answer.status_code}): "
-                    + json.dumps({"error": body.get("error"), "node_errors": body.get("node_errors")})[:2000]
-                    if refused
-                    else "ComfyUI accepts it now: remove it from REFUSED_UPSTREAM"
-                )
-                entry.update(result="fail", why=why)
-                continue
-            entry["result"] = "refused_upstream" if refused else "pass"
+            result, why = await outcome(name, entry, comfyui)
+            expected = _expected(name)
+            if result not in ("fail", expected):
+                result, why = "fail", f"listed as {expected}, but it is {result}: correct the list"
+            elif result == "fail" and expected != "pass":
+                why = f"listed as {expected}, but: {why}"
+            entry["result"] = result
+            if why:
+                entry["why"] = why
     timings["comfyui"] = time.monotonic() - t
 
-    def named(result: str, key: str = "result") -> list[str]:
+    def named(result: Any, key: str = "result") -> list[str]:
         return sorted(n for n, e in report.items() if e.get(key) == result)
 
     summary = {
@@ -266,7 +317,7 @@ async def test_every_open_template_converts_as_the_editor_exports_it_and_comfyui
         "frontend_fails_too": named("frontend_fails_too"),
         "too_large_to_return": named("too_large"),
         "failed": named("fail"),
-        "carry_video_preview": sum(1 for e in report.values() if e.get("video_previews")),
+        "with_loadvideo_every_one_previewed": sum(1 for e in report.values() if e.get("videos")),
         "placeholders_written": placed,
         "seconds": {k: round(v, 1) for k, v in timings.items()} | {"total": round(time.monotonic() - t0, 1)},
     }
@@ -274,5 +325,3 @@ async def test_every_open_template_converts_as_the_editor_exports_it_and_comfyui
     (out / "corpus.json").write_text(json.dumps({"summary": summary, "templates": report}, indent=1) + "\n")
     print(json.dumps(summary, indent=1))
     assert not summary["failed"], json.dumps({n: report[n]["why"] for n in summary["failed"]}, indent=1)
-    # The settle wait is checked only on graphs whose preview loaded: if no placeholder video loaded, none did.
-    assert summary["carry_video_preview"], "no conversion carries a LoadVideo video-preview input"

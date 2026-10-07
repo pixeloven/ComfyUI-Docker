@@ -117,8 +117,13 @@ until curl -fsS --max-time 10 "$url/system_stats" >/dev/null 2>&1; do
   sleep 2
 done
 echo "corpus: ComfyUI ($comfyui) answered after $(( $(date +%s) - start ))s"
-docker logs "$comfy" 2>&1 | grep -q 'comfyrelay_validate_only: installed' \
-  || fail "ComfyUI did not load tests/relay/validate_only.py, so /prompt would queue what it validates"
+# The log is read whole first: `grep -q` quits at its match, and under pipefail
+# a `docker logs` killed by SIGPIPE would fail the check it just passed.
+log="$(docker logs "$comfy" 2>&1)"
+case "$log" in
+  *'comfyrelay_validate_only: installed'*) ;;
+  *) fail "ComfyUI did not load tests/relay/validate_only.py, so /prompt would queue what it validates" ;;
+esac
 
 # 2. The relay.
 docker run -d --name "$side" --network host \
