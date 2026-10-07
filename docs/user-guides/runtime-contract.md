@@ -5,7 +5,8 @@ variables, the volume paths, the port, the readiness endpoint, and how the conta
 behaves depending on the user it starts as.
 
 The separate `mcp` image has a shorter contract of its own, in
-[The `mcp` Image](#the-mcp-image).
+[The `mcp` Image](#the-mcp-image), and so does `mcp-convert`, in
+[The `mcp-convert` Image](#the-mcp-convert-image).
 
 A deployment that works on one release must keep working on the next. Changing
 anything on this page in a way that breaks one is a **major** version (see
@@ -341,6 +342,66 @@ The other variables (`COMFYUI_MCP_INSTANCE_ID`, `COMFYUI_MCP_MAX_JOBS` and
 Kubernetes, set `resources.limits.memory: 256Mi` on the container, as the opt-in sidecar in
 [`examples/kubernetes/with-mcp/`](../../examples/kubernetes/README.md#adding-the-mcp-sidecar-opt-in) does, and raise it with
 `COMFYUI_MCP_MAX_LARGE_REQUESTS` or with the number of clients that upload large files.
+
+## The `mcp-convert` Image
+
+`ghcr.io/pixeloven/comfyui/mcp-convert` is the same server with a headless
+Chromium added, so it can convert the editor's UI-format workflows into the API
+format `/prompt` takes ([#167](https://github.com/pixeloven/ComfyUI-Docker/issues/167)).
+It runs the instance's own frontend, so a conversion is what the editor's
+Export (API) would write. It is built from the same Dockerfile with
+`RELAY_CONVERT=1` and published with the same tags as `mcp`. Opting in means
+changing the image; the `mcp` image has no browser.
+
+Everything in [The `mcp` Image](#the-mcp-image) holds for it too, except
+where this table says otherwise.
+
+| Contract | Value |
+|----------|-------|
+| Conversion | On (`COMFYUI_MCP_CONVERT=1`, set by the image). `0` turns it off, and the server then answers as the `mcp` image does. `server_info.capabilities.conversion` reports the state (`ready`, `running`, `backing_off`, `unavailable`, `stopped` or `off`), when it can't convert why, and once a tab has loaded the frontend, its `frontend_version` |
+| Frontend | The conversion is whatever the frontend `COMFYUI_URL` serves would export. Each image version is tested against the ComfyUI `COMFYUI_VERSION` pins, and its frontend (1.53.6 for v0.38.0); the lockdown's path allowlist was derived on that frontend. Against another ComfyUI or frontend (`core:nightly`, or a custom `--front-end-version`) it is untested: a frontend that needs a path the allowlist lacks fails to load, as `conversion_unavailable` |
+| Multi-user | Not supported. On a ComfyUI started with `--multi-user` the frontend waits for someone to choose a user, so every conversion fails with `conversion_unavailable` after about 30 seconds |
+| Tools | The same tool names and profiles. `template_get` takes `format: "api"`; `workflow_validate` and `workflow_run` also take a UI-format graph, convert it first and report `converted_from_ui`; `workflow_validate` returns the converted graph, up to 80,000 characters. A conversion that can't run fails with `conversion_unavailable` (retryable when it may work later: the browser didn't start, the frontend didn't load, a tab or the browser went away, every tab stayed busy), and one the frontend rejects with `conversion_failed`; there is no fallback converter. `workflow_run` checks a UI graph for partner-API nodes before it converts it |
+| Writable paths | `/tmp`, which must be writable: the browser keeps its profile there and the Playwright driver its scratch files (a few hundred KB). A read-only root filesystem works with a tmpfs on `/tmp`. Without one, every conversion fails with `conversion_unavailable` |
+| User | `1000:1000` by default, and any UID works, as for `mcp` |
+| Tabs | `COMFYUI_MCP_CONVERT_PAGES` (default `2`, at most `8`) frontend tabs convert at once; more conversions wait for one, up to 60 seconds. Each tab costs about 265 MB |
+| Memory | About 100 MB until the first conversion starts the browser. Then, with the default 2 tabs, about 1.1 GB idle, 1.5 GB with 6 conversions at once, and up to 2.4 GB over a long run of conversions (the container's cgroup peaked at 2.32 GB, with a real input file for every template input). Input files don't add to that: graphs whose input is a 410 MB video peaked at 1.97 GB. Set a limit of at least 3 GiB with 2 tabs, and about 265 MB more for each extra tab |
+| Latency | The first conversion starts the browser and takes about 5 seconds. After that every conversion waits at least 0.3 seconds for the tab's network to go quiet before it exports (a median of about 0.37 seconds for a template with no loaders), and about 0.55 seconds when the graph's input files exist, since the relay lets their previews load first (a loaded video preview changes what the export holds), for at most 10 seconds; measured on 8 CPUs. On a host starved of CPU a preview can take longer, and the export then lacks a UI-only input such as `video-preview`, which ComfyUI ignores |
+| Size | About 304 MB compressed and 872 MB unpacked, against 63 MB and 217 MB for `mcp` |
+| Stopping | `SIGTERM` closes the browser along with the server, within the `mcp` image's budget |
+
+**The lockdown.** The browser has no network: every connection it makes,
+to ComfyUI or anywhere else, goes to a proxy that doesn't exist, and every
+name it looks up resolves to nothing. What reaches ComfyUI is sent by the relay
+itself: a `GET`, with no body, for a path the frontend needs, which the relay's
+README lists. Any other method, host or path the page asks for is refused, fail
+closed. So the relay **sends ComfyUI no write** while it converts: no `POST`,
+no prompt, no `extra_data`, no credentials. That is tested against a stand-in
+ComfyUI that records every request it receives, while a page script tries
+every channel out it can (workers, shared workers, websockets, speculation
+rules, beacons, iframes, popups, WebRTC, WebTransport), each first shown to get
+out of a plain browser. The frontend's own settings writes, which it makes as
+it starts, are answered inside the relay and never sent. A graph whose
+frontend code uploads while it is exported (Load3D does) always fails with
+`conversion_failed`. A `COMFYUI_URL` that carries credentials is refused for
+conversion (the server itself still uses it).
+
+**What stays reachable, and the browser's posture.** The `GET` routes on the
+allowlist, as ComfyUI implements them, which on a bare ComfyUI v0.38.0 only
+read. Query strings aren't checked, so a parameter such as `/api/userdata`'s
+`dir` is left to ComfyUI's own path checks. An input file for a preview
+(`/api/view`) is read in ranges of at most 4 MiB, so an input video of any size
+stays cheap, and every other answer is capped at 32 MiB. Under `/extensions/` any `GET` a
+custom node registers there is reachable, and custom-node JavaScript loads and
+runs in the page, because a custom node's widgets can change what the export
+writes; it runs under the same lockdown. Chromium runs without its sandbox
+(`--no-sandbox`): Docker's default seccomp profile together with
+`no-new-privileges` leaves it none it can use. A renderer compromised by a
+page would run as the relay's UID, in the container that holds
+`COMFYUI_MCP_HTTP_TOKEN`; the browser's own environment doesn't carry it. If that
+is not acceptable for a deployment, run
+`mcp` instead. Chromium's security fixes reach the image when its Playwright
+pin moves, which is meant to follow each Playwright release, about monthly.
 
 ## What Counts as a Breaking Change
 

@@ -39,6 +39,7 @@ Images are `ghcr.io/pixeloven/comfyui/<name>`. The bake targets:
 | `cuda` | `runtime-cuda`, `core-cuda`, `complete-cuda` | `complete` = core + `extra-requirements.txt`, portable across CUDA GPUs |
 | `cuda-arch` | `complete-cuda-sm{80,86,89,90,120}` | Complete + one SageAttention 2.2.0 wheel per compute capability. Built separately so an ABI break cannot block the generic CUDA images. |
 | `mcp`, `fetch` | `mcp`, `fetch` | Independent of the runtime images |
+| (none) | `mcp-convert` | `mcp` plus Playwright and Chromium's headless shell, for UI-to-API conversion (#167): the same Dockerfile with `RELAY_CONVERT=1`, conversion on (`COMFYUI_MCP_CONVERT=1`). In `all`; CI's `relay-convert` job probes it and `build-mcp-convert` publishes it, apart from `relay` and `build-mcp`, so it never holds back `mcp`; the release needs all four |
 | `all` | all of the above | |
 
 The five Compose examples map to `core:cuda`, `complete:cuda`, `core:cpu`, `core:rocm`
@@ -150,7 +151,8 @@ There is no date tag.
 - Pins that move only on purpose: `COMFYUI_VERSION`, the SageAttention URL and sha256 values,
   `COMFY_DOCS_SHA` (CI's `docs-pin` job fails a PR whose pin isn't on Comfy-Org/docs `main`),
   comfyrelay's exact `mcp==` pin and `services/uv.lock`, `tini`'s apt version in
-  `dockerfile.comfy.relay`, the `sam2` commit in `extra-requirements.txt`, and GitHub Action versions
+  `dockerfile.comfy.relay`, and for `mcp-convert` its exact `playwright==` pin, the Chromium
+  revision and tree hash (its apt packages are named but unpinned, from the digest-pinned base's sources; Playwright moves about monthly for Chromium's fixes), the `sam2` commit in `extra-requirements.txt`, and GitHub Action versions
   (exact semver tags, bumped by Dependabot).
 
 ## Project invariants
@@ -204,6 +206,7 @@ make smoke                                       # builds core-cpu, boots it; SM
 IMAGE_LABEL=local docker buildx bake mcp --load  # the mcp image; its build probes the server. Without a docker0 bridge, bake's
                                                  # network=host isn't honoured: docker buildx build --network host with the args from bake --print mcp
 tests/relay/run.sh [--network host] --comfyui <core-cpu image> ghcr.io/pixeloven/comfyui/mcp:local
+                                                 # mcp-convert too: run.sh gives it /tmp and converts a template through it
 docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
 ```
 

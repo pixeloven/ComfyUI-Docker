@@ -7,11 +7,18 @@
 # exactly what services/uv.lock pins, hash-checked. comfyctl is the command:
 # `comfyctl relay serve` mounts comfyrelay, and comfyfetch comes with comfyctl.
 # dockerfile.comfy.relay.dockerignore, beside this file, is the context filter.
+#
+# Two images from this file. RELAY_CONVERT=0 (the default) is the mcp image.
+# RELAY_CONVERT=1 is mcp-convert (#167): the same server plus Playwright and
+# Chromium's headless shell, so it can convert UI-format workflows through
+# ComfyUI's own frontend (comfyrelay/convert.py). It picks the final stage's
+# base and the venv below; with 0, every step the mcp image runs is unchanged.
+ARG RELAY_CONVERT=0
 
 # The uv that installs from the lock. Build stage only.
 FROM ghcr.io/astral-sh/uv:0.11.23@sha256:d0a0a753ab981624b49c97abc98821c1c09f4ca69d1ef5cee69c501be3d88479 AS uv
 
-FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS builder
+FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS deps
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_PYTHON=/usr/local/bin/python3 \
@@ -27,6 +34,8 @@ COPY fetch/pyproject.toml fetch/
 COPY comfyctl/pyproject.toml comfyctl/README.md comfyctl/
 COPY comfyrelay/pyproject.toml comfyrelay/README.md comfyrelay/
 RUN uv sync --frozen --no-dev --all-packages --no-install-workspace
+
+FROM deps AS builder
 # Then the three workspace members themselves, not editable, so /src can go.
 COPY fetch/comfyfetch fetch/comfyfetch
 COPY comfyctl/comfyctl comfyctl/comfyctl
@@ -65,7 +74,80 @@ ARG GIT_SHA=
 RUN /opt/venv/bin/comfyctl relay docs build --docs-sha "$COMFY_DOCS_SHA" --skills /skills --out /docs \
       --git-sha "$GIT_SHA"
 
-FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
+# -- mcp-convert only (RELAY_CONVERT=1) -------------------------------------------
+# Chromium's headless shell, fetched by the Playwright the lock pins
+# (comfyrelay's `convert` extra). It depends on the lock alone, not the app
+# code, so a code change doesn't fetch it again. Playwright decides which build
+# it fetches, and checks no hash, so this checks both: the revision Playwright
+# 1.63.0 names, and a hash over every file of that build. Moving Playwright
+# moves both; take the new values from a build's failure message. CI's
+# relay-convert job reads both ARG lines below to check its own copy.
+#
+# The hash pins integrity, not freshness: Chromium's security fixes reach this
+# image only when Playwright moves. Move it with each Playwright release (about
+# monthly), and at least once a month: the playwright== pin and the lock, these
+# two values, and the package names below if its build needs other libraries.
+FROM deps AS browser
+ARG CHROMIUM_REVISION=1243
+ARG CHROMIUM_TREE_SHA256=7310e9a7f48efd6d1a9a93be874f39dd0f8bdbcf56e3f83a3ebc4597448df8ba
+RUN uv sync --frozen --no-dev --all-packages --no-install-workspace --extra convert && \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright /opt/venv/bin/playwright install --only-shell chromium && \
+    rm -rf /opt/playwright/ffmpeg-* && \
+    cd "/opt/playwright/chromium_headless_shell-$CHROMIUM_REVISION/chrome-headless-shell-linux64" && \
+    got="$(find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)" && \
+    if [ "$got" != "$CHROMIUM_TREE_SHA256" ]; then \
+      echo "chromium_headless_shell-$CHROMIUM_REVISION hashes to $got, not $CHROMIUM_TREE_SHA256" >&2; exit 1; \
+    fi && \
+    [ "$(ls /opt/playwright)" = "chromium_headless_shell-$CHROMIUM_REVISION" ] && \
+    chmod -R a+rX /opt/playwright
+
+# The venv with Playwright added. The strip above still holds: uv adds
+# packages, and these checks fail the build if it ever restored the SDK's CLI.
+FROM builder AS venv-1
+RUN uv sync --frozen --no-dev --all-packages --no-editable --extra convert && \
+    test ! -e /opt/venv/bin/mcp && \
+    ! /opt/venv/bin/python -c 'import mcp.cli' 2>/dev/null && \
+    ! /opt/venv/bin/python -c 'import dotenv' 2>/dev/null
+FROM builder AS venv-0
+FROM venv-${RELAY_CONVERT} AS venv
+
+# mcp-convert's base: the browser, then the system libraries it links against
+# and the one font family it needs to render (without fontconfig and a font its
+# renderer crashes on page load), before any app code. Not Playwright's
+# --with-deps set, which is about 115 MB more (X server bits, more fonts). The
+# names are pinned, their versions are not (owner decision on #191): they come
+# from the digest-pinned base image's Debian sources at build time, as the core
+# images' packages do, so a rebuild picks up Debian's security fixes. A cached
+# layer would not, so APT_REFRESH, a stamp bake computes that changes weekly
+# (docker-bake.hcl), invalidates this layer's cache: CI's cached builds
+# reinstall these packages at least once a week. Integrity comes from that base
+# and the hash-checked Chromium build; freshness from that and from the
+# Playwright cadence above. The ldd check fails the build if Chromium links a
+# library this set doesn't provide, and if the browser isn't where it should be.
+FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS runtime-1
+COPY --from=browser /opt/playwright /opt/playwright
+ARG APT_REFRESH=
+RUN set -eu; \
+    echo "apt packages as of ${APT_REFRESH:-this build}"; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      libglib2.0-0t64 libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libdbus-1-3 libx11-6 \
+      libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libgbm1 libexpat1 libxcb1 libxkbcommon0 \
+      libasound2t64 libatspi2.0-0t64 fontconfig fonts-liberation; \
+    rm -rf /var/lib/apt/lists/*; \
+    set -- /opt/playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell; \
+    if [ "$#" -ne 1 ] || [ ! -x "$1" ]; then echo "no single chrome-headless-shell under /opt/playwright: $*" >&2; exit 1; fi; \
+    ldd "$1" > /tmp/ldd.txt; \
+    if grep 'not found' /tmp/ldd.txt; then echo "chrome-headless-shell links libraries this image lacks" >&2; exit 1; fi; \
+    rm /tmp/ldd.txt
+# convert.py finds the browser here. COMFYUI_MCP_CONVERT=0 turns conversion off.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
+    COMFYUI_MCP_CONVERT=1
+
+# The mcp image's base: the plain one.
+FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS runtime-0
+
+FROM runtime-${RELAY_CONVERT}
 
 # tini as PID 1, so `docker stop` and a pod's SIGTERM reach the server at once
 # instead of waiting out the grace period. Pinned to the version Debian 13
@@ -77,14 +159,16 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # comfy, 1000:1000. Any other UID works too: the server writes nothing, so a
-# read-only root filesystem needs no tmpfs beyond /tmp.
+# read-only root filesystem needs no tmpfs beyond /tmp. mcp-convert's browser
+# does write, to /tmp alone (its profile and Playwright's artifacts, a few
+# hundred KB), so there /tmp must be writable.
 ARG APP_UID=1000
 ARG APP_GID=1000
 RUN groupadd -g "$APP_GID" comfy && \
     useradd -u "$APP_UID" -g "$APP_GID" -d /app -s /usr/sbin/nologin -M comfy && \
     mkdir -p /app && chown comfy:comfy /app
 
-COPY --from=builder /opt/venv /opt/venv
+COPY --from=venv /opt/venv /opt/venv
 
 # The docs index is a GPL-3.0 work, shipped with the English markdown it was built
 # from (/opt/docs/source), the GPL text and a NOTICE (/licenses). The server's

@@ -25,6 +25,13 @@
     COMFYUI_MCP_DOCS        the docs index docs_search and docs_guide read
                             (default /opt/docs/docs.sqlite, where the image
                             builds it); without one those tools say so
+    COMFYUI_MCP_CONVERT     1 converts UI-format workflows through the
+                            instance's own frontend in headless Chromium
+                            (convert.py). The mcp-convert image sets it; the
+                            mcp image has no browser, so there it stays off.
+    COMFYUI_MCP_CONVERT_PAGES
+                            how many frontend tabs convert at once (default
+                            2, at most 8); each costs about 265 MB
 
 The token, ComfyUI and listen variables are the ones the `mcp` image read
 before 5.0.0, when it packaged artokun/comfyui-mcp, so a deployment keeps them
@@ -36,7 +43,7 @@ from __future__ import annotations
 import os
 import re
 import socket
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 from typing import Literal
 from urllib.parse import urlsplit
@@ -48,6 +55,10 @@ MAX_JOBS_ENV = "COMFYUI_MCP_MAX_JOBS"
 MAX_LARGE_REQUESTS_ENV = "COMFYUI_MCP_MAX_LARGE_REQUESTS"
 DOCS_ENV = "COMFYUI_MCP_DOCS"
 DEFAULT_DOCS = "/opt/docs/docs.sqlite"
+CONVERT_ENV = "COMFYUI_MCP_CONVERT"
+CONVERT_PAGES_ENV = "COMFYUI_MCP_CONVERT_PAGES"
+DEFAULT_CONVERT_PAGES = 2
+MAX_CONVERT_PAGES = 8
 DEFAULT_MAX_JOBS = 16
 DEFAULT_MAX_LARGE_REQUESTS = 2
 # The shortest token the server starts with (owner decision on #136): 32
@@ -172,6 +183,8 @@ class Settings:
     max_jobs: int = DEFAULT_MAX_JOBS
     max_large_requests: int = DEFAULT_MAX_LARGE_REQUESTS
     docs_path: str = DEFAULT_DOCS
+    convert: bool = False
+    convert_pages: int = DEFAULT_CONVERT_PAGES
 
     @classmethod
     def load(
@@ -201,6 +214,9 @@ class Settings:
         if not 0 < port < 65536:
             raise ConfigError(f"port {port} is out of range")
         instance_id = env.get(INSTANCE_ID_ENV, "").strip()
+        convert_pages = _at_least_one(env, CONVERT_PAGES_ENV, DEFAULT_CONVERT_PAGES)
+        if convert_pages > MAX_CONVERT_PAGES:
+            raise ConfigError(f"{CONVERT_PAGES_ENV}={convert_pages} is over {MAX_CONVERT_PAGES}")
         return cls(
             token=token,
             comfyui_url=check_comfyui_url(comfyui_url),
@@ -213,7 +229,24 @@ class Settings:
             max_jobs=_at_least_one(env, MAX_JOBS_ENV, DEFAULT_MAX_JOBS),
             max_large_requests=_at_least_one(env, MAX_LARGE_REQUESTS_ENV, DEFAULT_MAX_LARGE_REQUESTS),
             docs_path=env.get(DOCS_ENV, "").strip() or DEFAULT_DOCS,
+            convert=env.get(CONVERT_ENV, "").strip() == "1",
+            convert_pages=convert_pages,
         )
+
+
+def drop_secrets(env: MutableMapping[str, str] = os.environ) -> list[str]:
+    """Remove the secrets the server has already read from its own environment, so nothing it starts later (the
+    converter's Playwright driver and browser, any subprocess) inherits them: the token, and COMFYUI_URL when it
+    carries credentials. Call it once Settings.load has succeeded; nothing reads them from the environment after.
+    Returns the names it removed."""
+    dropped = []
+    if env.pop(TOKEN_ENV, None) is not None:
+        dropped.append(TOKEN_ENV)
+    url = env.get("COMFYUI_URL", "")
+    if "@" in url.partition("://")[2].partition("/")[0]:
+        del env["COMFYUI_URL"]
+        dropped.append("COMFYUI_URL")
+    return dropped
 
 
 def _at_least_one(env: Mapping[str, str], name: str, default: int) -> int:

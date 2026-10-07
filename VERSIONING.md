@@ -13,6 +13,7 @@ GitHub Release:
 |---|---|---|
 | `complete` / `core` / `runtime` images | GHCR | `@sha256:…`, reads the semver tag |
 | `mcp` image (comfyrelay) | GHCR | `@sha256:…` |
+| `mcp-convert` image (comfyrelay with a headless Chromium) | GHCR | `@sha256:…` |
 | `fetch` image (`comfyctl fetch`) | GHCR | `@sha256:…` |
 | `comfyctl` and `comfyfetch` **wheels** | release assets, installed as a pair | URL + the published `SHA256SUMS` |
 | skills plugin | the git tag | `@v1.2.3` |
@@ -23,7 +24,7 @@ The version lives in `VERSION`. `services/fetch/pyproject.toml`,
 `package.json`, and the `comfyfetch`, `comfyctl` and `comfyrelay` entries in
 `services/uv.lock` must state the same number — checked on **every push**, not
 at release time, because drift found on the tag is drift found too late.
-comfyrelay ships as the `mcp` image, not as a wheel, and that image reports
+comfyrelay ships as the `mcp` and `mcp-convert` images, not as a wheel, and they report
 its version, so it moves with the others.
 
 ### Why not a line per component
@@ -147,6 +148,12 @@ echo 1.2.3 > VERSION
 git commit -am "release 1.2.3"
 git tag v1.2.3 && git push --tags
 ```
+
+**Check a new image's GHCR package is public, once.** A package GHCR creates
+on CI's first push can start private. After the first `main` push that
+publishes a new image (`mcp-convert` is the latest), check its package's
+visibility on GitHub, and make it public before the release that announces it;
+otherwise every consumer's pull fails with `unauthorized`.
 
 A release rebuilds every image rather than reusing digests. It is ~60 minutes
 and it happens rarely; the alternative is a release whose images came from a

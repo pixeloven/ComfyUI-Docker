@@ -42,6 +42,7 @@ from .settings import (
     ConfigError,
     Settings,
     check_token,
+    drop_secrets,
 )
 
 # The server and the probe import the MCP SDK, so each command imports its own
@@ -111,6 +112,7 @@ def serve(
     except ConfigError as exc:
         log.error("%s", exc)
         raise typer.Exit(2) from exc
+    drop_secrets()  # read once; nothing this process starts inherits them
     from .server import serve as run_server
 
     run_server(settings)

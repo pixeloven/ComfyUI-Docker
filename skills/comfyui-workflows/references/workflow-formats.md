@@ -100,10 +100,27 @@ each definition with its inputs named as a graph must name them. *(needs the com
 *Needs the comfyrelay sidecar.*
 
 - `template_get` returns a template as the editor loads it: **UI format**.
-  Use it to learn which nodes and models a template needs, not to run it.
-- `workflow_validate` and `workflow_run` take **API format** only. Given a UI
-  save file, `workflow_validate` reports an `invalid_workflow` problem that says
-  to export the API format, and `workflow_run` refuses it (`workflow_invalid`).
+  Use it to learn which nodes and models a template needs.
+- Which format `workflow_validate` and `workflow_run` take depends on the
+  image the relay runs. `server_info` says which under
+  `capabilities.conversion`:
+  - **`mcp-convert`** (`state` is `ready` or `running`) converts for you. It
+    runs the instance's own editor in a headless browser, so the result is what
+    Export (API) would write. Pass a UI save file straight to
+    `workflow_validate` or `workflow_run`: each converts it first and says
+    `converted_from_ui`, and `workflow_validate` returns the API graph it
+    checked. `template_get` with `format: "api"` returns a template already
+    converted. When conversion can't run (`conversion_unavailable`) or the
+    editor rejects the graph (`conversion_failed`), the error says why and
+    nothing is converted any other way. A graph whose editor code uploads a file
+    while it is exported, such as a Load3D node, always fails to convert,
+    because the relay sends ComfyUI nothing but reads.
+  - **`mcp`** (`state` is `off`) takes **API format** only. Given a UI save
+    file, `workflow_validate` reports an `invalid_workflow` problem that says to
+    export the API format, and `workflow_run` refuses it (`workflow_invalid`).
+    `template_get` with `format: "api"` fails with `conversion_unavailable`.
+- Either way, `workflow_run` refuses a graph with a partner-API node, UI format
+  included, before converting it.
 - `workflow_run` takes the graph alone, not a whole `/prompt` body. It chooses
   the prompt id itself.
 

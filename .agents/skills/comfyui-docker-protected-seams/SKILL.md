@@ -57,6 +57,9 @@ registry is what they check against.
   which profile holds each, `COMFYUI_MCP_PROFILES` and its default,
   `COMFYUI_MCP_MAX_LARGE_REQUESTS` and its default, `USER 1000:1000` and any UID,
   `SIGTERM` handling; `docs/user-guides/runtime-contract.md` → *The `mcp` Image*),
+  the `mcp-convert` image's (all of those, plus `COMFYUI_MCP_CONVERT` on by default,
+  `COMFYUI_MCP_CONVERT_PAGES` and its default, a writable `/tmp`, and which formats
+  `template_get`, `workflow_validate` and `workflow_run` take; *The `mcp-convert` Image*),
   the fetch image's `ENTRYPOINT` in `dockerfile.comfy.fetch` (`comfyctl fetch fetch`:
   Jobs and Compose append `/lock.yaml /app --apply` to it, and overrides name the
   binary), the permission steps in `dockerfile.comfy.core`, the volume mounts in
@@ -83,7 +86,14 @@ registry is what they check against.
 - **Pattern:** `SAGEATTENTION_RELEASE_URL` and each `SAGEATTENTION_WHEEL_SHA256`,
   the `sam2` commit in `extra-requirements.txt`, the base images in
   `services/*/dockerfile.*` and `services/comfy/*/dockerfile.*` (including the `mcp`
-  image's `ghcr.io/astral-sh/uv` build stage), the `mcp` image's `tini` apt version
+  image's `ghcr.io/astral-sh/uv` build stage), the `mcp-convert` image's exact
+  `playwright==` pin (comfyrelay's `convert` extra), its `CHROMIUM_REVISION` and
+  `CHROMIUM_TREE_SHA256` checks, and the package names its `runtime-1` stage
+  installs (names only: their versions come unpinned from the digest-pinned
+  base's Debian sources, owner decision on #191; integrity is the base digest
+  and the Chromium tree hash, freshness is rebuilding and moving Playwright about
+  monthly, so flag a change that pins a version, drops the hash check, or lets
+  the Playwright pin go stale), the `mcp` image's `tini` apt version
   and its builder step that strips the SDK's `mcp` CLI from the venv and fails the
   build if `mcp.cli` or `dotenv` can be imported, `COMFY_DOCS_SHA` in
   `docker-bake.hcl` (the Comfy-Org/docs commit the relay's docs index covers:

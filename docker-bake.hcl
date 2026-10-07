@@ -385,6 +385,33 @@ group "mcp" {
     targets = ["mcp"]
 }
 
+// A stamp that changes weekly (the month, and the week of it), which invalidates
+// mcp-convert's cached apt layer so its unpinned Debian packages are reinstalled,
+// with their security fixes, at least once a week. Set it to force a refresh.
+variable "APT_REFRESH" {
+    default = ""
+}
+
+// The same server with a headless Chromium, so it converts UI-format workflows
+// through ComfyUI's own frontend (#167). From the same Dockerfile with
+// RELAY_CONVERT=1, and conversion is on by default in it. A separate image so
+// the mcp image stays without a browser. The Playwright version, the Chromium
+// build and the apt packages it adds are pinned in the Dockerfile.
+target "mcp-convert" {
+    inherits = ["mcp"]
+    tags = [
+        "${REGISTRY_URL}mcp-convert:${IMAGE_LABEL}",
+        "${REGISTRY_URL}mcp-convert:cache",
+        PUBLISH_LATEST ? "${REGISTRY_URL}mcp-convert:latest" : "",
+        IMAGE_VERSION != "" ? "${REGISTRY_URL}mcp-convert:${IMAGE_VERSION}" : ""
+    ]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}mcp-convert:cache,optional=true"]
+    args = {
+        RELAY_CONVERT = "1"
+        APT_REFRESH = APT_REFRESH != "" ? APT_REFRESH : "${formatdate("YYYY-MM", timestamp())}-w${floor((parseint(formatdate("D", timestamp()), 10) - 1) / 7)}"
+    }
+}
+
 // Model fetcher. Independent of RUNTIME: it moves bytes and checks hashes, so
 // there is no CUDA/CPU/ROCm variant to build.
 target "fetch" {
@@ -418,7 +445,7 @@ group "default" {
 }
 
 group "all" {
-    targets = ["runtime", "cuda", "cuda-arch", "cpu", "rocm", "xpu", "mcp", "fetch"]
+    targets = ["runtime", "cuda", "cuda-arch", "cpu", "rocm", "xpu", "mcp", "mcp-convert", "fetch"]
 }
 
 group "core" {

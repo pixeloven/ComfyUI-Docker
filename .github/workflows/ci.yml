@@ -364,6 +364,7 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-rocm"
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-xpu"
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "mcp-convert"
         docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
 
   # COMFY_DOCS_SHA must be a commit on Comfy-Org/docs `main` (#134, #136).
@@ -988,7 +989,9 @@ jobs:
   # SIGTERM stop (`tests/relay/run.sh`, the same script locally). Then it runs the live
   # tests (*_live.py) against a fresh core-cpu: the only check that the relay
   # and a real ComfyUI agree (cancel, SIGTERM survival, /prompt errors), and
-  # that the unit tests' FakeComfyUI behaves like the real one (#147).
+  # that the unit tests' FakeComfyUI behaves like the real one (#147). The
+  # converter's live tests are relay-convert's, so nothing about mcp-convert
+  # can hold back the mcp image.
   relay:
     name: comfyrelay probes a booted core-cpu
     runs-on: ubuntu-latest
@@ -1107,8 +1110,12 @@ jobs:
           sleep 2
         done
         echo "ComfyUI (${COMFYUI_IMAGE}) answered after $(( $(date +%s) - start ))s"
+        live=()
+        for f in comfyrelay/tests/test_*_live.py; do
+          [ "${f}" = comfyrelay/tests/test_relay_convert_live.py ] || live+=("${f}")
+        done
         COMFYRELAY_LIVE_COMFYUI_URL="${url}" uv run --locked pytest -v -rs -o log_level=INFO \
-          --junitxml "${LIVE_OUT}/junit.xml" comfyrelay/tests/test_*_live.py 2>&1 | tee "${LIVE_OUT}/pytest.log"
+          --junitxml "${LIVE_OUT}/junit.xml" "${live[@]}" 2>&1 | tee "${LIVE_OUT}/pytest.log"
         python3 - "${LIVE_OUT}/junit.xml" <<'PY'
         import sys
         import xml.etree.ElementTree as ET
@@ -1152,6 +1159,225 @@ jobs:
         path: tests/relay/results/
         if-no-files-found: warn
         retention-days: 14
+
+  # mcp-convert (#167): comfyrelay with a headless Chromium, from the same
+  # Dockerfile with RELAY_CONVERT=1. Its own job, apart from `relay`, so that
+  # nothing about it (a stale apt pin, the Chromium download, a flaky browser
+  # test) holds back the mcp image: build-mcp needs only `relay`, and
+  # build-mcp-convert only this. The release needs both.
+  #
+  # It probes the image as `relay` does (tests/relay/run.sh, which gives a
+  # converting image a tmpfs on /tmp and converts a template through it
+  # against the frontend's own export from the same run), then runs the
+  # converter's live tests (test_relay_convert_live.py: the lockdown with its
+  # negative control, the allowlist, the oracle, a crashed tab) against a
+  # fresh core-cpu, with the same Chromium build the image has, hash-checked.
+  relay-convert:
+    name: comfyrelay mcp-convert probes a booted core-cpu
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [context, test-bake-targets]
+    if: needs.context.outputs.build_relay == 'true'
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.3.0
+
+    # Never pushed: `push: false`, and `ci` is not a label CI publishes.
+    - name: Build the mcp-convert image
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: mcp-convert
+        load: true
+        push: false
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
+        IMAGE_LABEL: ci
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
+        GIT_SHA: ${{ github.sha }}
+
+    # As `relay` picks it.
+    - name: Pick the core-cpu
+      id: comfyui
+      env:
+        LATEST: ${{ needs.context.outputs.registry_url }}core:cpu-latest
+        OWN: ${{ needs.context.outputs.registry_url }}core:cpu-relay
+        PIN: ${{ needs.context.outputs.comfyui_version }}
+      run: |
+        set -euo pipefail
+        published="$(docker buildx imagetools inspect "${LATEST}" \
+          --format '{{index .Image.Config.Labels "org.opencontainers.image.version"}}')"
+        if [ "${published}" = "${PIN}" ]; then
+          echo "cpu-latest holds ComfyUI ${published}, the pin: testing against it"
+          { echo "image=${LATEST}"; echo "build=false"; } >> "${GITHUB_OUTPUT}"
+        else
+          echo "::notice::cpu-latest holds ComfyUI ${published:-<no version label>} but this commit pins ${PIN}: building core-cpu here"
+          { echo "image=${OWN}"; echo "build=true"; } >> "${GITHUB_OUTPUT}"
+        fi
+
+    - name: Build core-cpu at this commit's pin
+      if: steps.comfyui.outputs.build == 'true'
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: core-cpu
+        load: true
+        push: false
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
+        IMAGE_LABEL: relay
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
+
+    - name: Probe mcp-convert, and convert a template through it
+      env:
+        COMFYUI_IMAGE: ${{ steps.comfyui.outputs.image }}
+        RELAY_IMAGE: ${{ needs.context.outputs.registry_url }}mcp-convert:ci
+      run: |
+        docker image inspect "${COMFYUI_IMAGE}" >/dev/null 2>&1 || docker pull -q "${COMFYUI_IMAGE}"
+        tests/relay/run.sh --comfyui "${COMFYUI_IMAGE}" "${RELAY_IMAGE}"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10.0.1
+
+    # The Chromium build the pinned Playwright names, as the image has it, and
+    # checked the same way: its revision and the hash over its files, both read
+    # from dockerfile.comfy.relay, since `playwright install` checks no hash.
+    - name: Install the converter's browser
+      working-directory: services
+      run: |
+        set -euo pipefail
+        export PLAYWRIGHT_BROWSERS_PATH="${RUNNER_TEMP}/ms-playwright"
+        uv run --locked --extra convert playwright install --with-deps --only-shell chromium
+        rev="$(sed -n 's/^ARG CHROMIUM_REVISION=//p' comfyrelay/dockerfile.comfy.relay)"
+        want="$(sed -n 's/^ARG CHROMIUM_TREE_SHA256=//p' comfyrelay/dockerfile.comfy.relay)"
+        got="$(cd "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-${rev}/chrome-headless-shell-linux64" \
+          && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+        if [ "${got}" != "${want}" ]; then
+          echo "::error::chromium_headless_shell-${rev} hashes to ${got}, not ${want} (dockerfile.comfy.relay)"
+          exit 1
+        fi
+        echo "chromium_headless_shell-${rev} matches its pinned hash"
+        echo "PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH}" >> "${GITHUB_ENV}"
+
+    # As `relay` runs its live tests, against a fresh core-cpu no browser has
+    # opened, for the converter's alone. A skipped test fails the step.
+    - name: Run the converter's live tests against a booted core-cpu
+      timeout-minutes: 10
+      working-directory: services
+      env:
+        COMFYUI_IMAGE: ${{ steps.comfyui.outputs.image }}
+        LIVE_CONTAINER: comfyrelay-convert-live-comfyui
+        LIVE_PORT: 8188
+        LIVE_OUT: ${{ github.workspace }}/tests/relay/results/live
+      run: |
+        set -euo pipefail
+        mkdir -p "${LIVE_OUT}"
+        docker run -d --name "${LIVE_CONTAINER}" --network host --security-opt no-new-privileges:true \
+          -e COMFY_PORT="${LIVE_PORT}" -e COMFY_ENABLE_MANAGER=false -e "CLI_ARGS=--listen 127.0.0.1" \
+          "${COMFYUI_IMAGE}" >/dev/null
+        url="http://127.0.0.1:${LIVE_PORT}"
+        start="$(date +%s)"
+        until curl -fsS --max-time 10 "${url}/system_stats" >/dev/null 2>&1; do
+          [ "$(docker inspect -f '{{.State.Running}}' "${LIVE_CONTAINER}")" = true ] \
+            || { echo "::error::ComfyUI exited before /system_stats answered"; exit 1; }
+          [ $(( $(date +%s) - start )) -lt 300 ] \
+            || { echo "::error::ComfyUI did not answer /system_stats within 300s"; exit 1; }
+          sleep 2
+        done
+        echo "ComfyUI (${COMFYUI_IMAGE}) answered after $(( $(date +%s) - start ))s"
+        COMFYRELAY_LIVE_COMFYUI_URL="${url}" uv run --locked --extra convert pytest -v -rs -o log_level=INFO \
+          --junitxml "${LIVE_OUT}/junit.xml" comfyrelay/tests/test_relay_convert_live.py 2>&1 | tee "${LIVE_OUT}/pytest.log"
+        python3 - "${LIVE_OUT}/junit.xml" <<'PY'
+        import sys
+        import xml.etree.ElementTree as ET
+
+        suite = ET.parse(sys.argv[1]).getroot()
+        suite = suite if suite.tag == "testsuite" else suite.find("testsuite")
+        ran, skipped = int(suite.get("tests")), int(suite.get("skipped"))
+        if ran == 0 or skipped:
+            sys.exit(f"::error::{skipped} of {ran} live tests skipped; every one must run against the booted ComfyUI")
+        print(f"live tests: {ran} ran, none skipped")
+        PY
+
+    - name: Keep the live ComfyUI's log
+      if: always()
+      env:
+        LIVE_CONTAINER: comfyrelay-convert-live-comfyui
+        LIVE_OUT: tests/relay/results/live
+      run: |
+        docker container inspect "${LIVE_CONTAINER}" >/dev/null 2>&1 || exit 0
+        mkdir -p "${LIVE_OUT}"
+        docker logs "${LIVE_CONTAINER}" > "${LIVE_OUT}/comfyui.log" 2>&1 || true
+        docker rm -f "${LIVE_CONTAINER}" >/dev/null 2>&1 || true
+
+    - name: Record the probe
+      if: always()
+      run: |
+        if [ -f tests/relay/results/summary.json ]; then
+          { echo '### comfyrelay probe, mcp-convert'; echo '```json'; cat tests/relay/results/summary.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload the probe report and logs
+      if: always()
+      uses: actions/upload-artifact@v7.0.1
+      with:
+        name: relay-convert
+        path: tests/relay/results/
+        if-no-files-found: warn
+        retention-days: 14
+
+  # Publishes mcp-convert as build-mcp publishes mcp, with the same tags, and
+  # only after relay-convert has probed this commit's image. It needs nothing of
+  # build-mcp and build-mcp nothing of it, so neither can hold back the other.
+  build-mcp-convert:
+    runs-on: ubuntu-latest
+    needs: [context, test-bake-targets, relay-convert]
+    if: needs.context.outputs.build_relay == 'true'
+    env:
+      REGISTRY: ghcr.io
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.3.0
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v4.6.0
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build the mcp-convert image
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: mcp-convert
+        push: ${{ github.event_name == 'push' }}
+        no-cache: ${{ github.event.inputs.force_rebuild == 'true' }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        set: |
+          *.cache-from=type=gha,scope=mcp-convert
+          *.cache-to=type=gha,mode=max,scope=mcp-convert
+        provenance: false
+        sbom: false
+      env:
+        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
+        IMAGE_LABEL: ${{ needs.context.outputs.image_label }}
+        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
+        IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
+        PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
+        GIT_SHA: ${{ github.sha }}
 
   build-linux-accelerators:
     runs-on: ubuntu-latest
@@ -1222,7 +1448,7 @@ jobs:
   release:
     name: cut the release
     runs-on: ubuntu-latest
-    needs: [context, validate-models, end-to-end, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, relay, docs-pin, build-linux-accelerators, smoke-cpu]
+    needs: [context, validate-models, end-to-end, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, relay, build-mcp-convert, relay-convert, docs-pin, build-linux-accelerators, smoke-cpu]
     # `!contains(failure)` rather than the default all-succeeded: on a non-release
     # push some build jobs are legitimately `skipped` by the path filter, and
     # `skipped` is not `success`.
@@ -1230,7 +1456,8 @@ jobs:
     # But this job only runs for a release, which is a `v*` tag ref (pushed,
     # or a workflow_dispatch run at the tag), and there nothing it needs is
     # skipped legitimately: `context` forces build_images, build_fetch and
-    # build_relay true, docs-pin's `if` holds on any v* tag ref whatever the
+    # build_relay true (which relay-convert and build-mcp-convert run on, as
+    # relay and build-mcp do), docs-pin's `if` holds on any v* tag ref whatever the
     # event, and validate-models, end-to-end and build-cuda-arch have no `if`.
     # So a `skipped` need here means an upstream failure hid it -- a failed
     # validate-models leaves publish-fetch skipped, not failed -- and every

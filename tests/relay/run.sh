@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Integration test for the mcp image (comfyrelay) against a booted ComfyUI. It tests
 # the sidecar as deployed: the token gate, the arbitrary-UID and read-only
-# contract, reaching ComfyUI, and stopping on SIGTERM. No agent runs.
+# contract, reaching ComfyUI, and stopping on SIGTERM. No agent runs. It tests the
+# mcp-convert image too, and converts a template through it (step 4b).
 #
 #   tests/relay/run.sh [--network MODE] [--out DIR] --comfyui IMAGE <relay-image>
 #
@@ -18,7 +19,9 @@
 #   1. The relay refuses to start without a token: exit 2, "Refusing to start".
 #   2. Boot ComfyUI (Manager off) and wait for /system_stats.
 #   3. Start the relay as UID 12345, GID 0, with a read-only root filesystem
-#      and no-new-privileges, pointed at that ComfyUI.
+#      and no-new-privileges, pointed at that ComfyUI. An image that converts
+#      (COMFYUI_MCP_CONVERT=1, mcp-convert) also gets a tmpfs on /tmp, the one
+#      writable path its contract asks for; the mcp image gets nothing writable.
 #   4. From inside the relay container, `comfyctl relay probe -o json` passes:
 #      401 without the token, initialize, tools/list, server_info, the docs
 #      index (built, and docs_search finds something), and ComfyUI
@@ -28,7 +31,12 @@
 #      docs_guide, docs_search, job_cancel, job_status, model_list,
 #      node_describe, node_search, server_info, template_get, template_search
 #      and the four workflow_* tools.
-#   5. `docker stop` ends it within 2 seconds: tini passes SIGTERM on.
+#   4b. mcp-convert only: tests/relay/convert_smoke.py, run inside the relay
+#      container, converts a template through the relay (template_get with
+#      format="api", and workflow_validate given the UI graph) and checks both
+#      against the frontend's own export from this run.
+#   5. `docker stop` ends it within 2 seconds: tini passes SIGTERM on. For
+#      mcp-convert that includes closing the browser 4b started.
 #   6. On any failure, print both containers' logs and exit 1.
 #
 # Every HTTP call runs inside a container, so the host needs only Docker.
@@ -36,7 +44,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 
-usage() { sed -n '6,14p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '7,15p' "$0" | sed 's/^# \{0,1\}//'; }
 
 network=""
 out="$here/results"
@@ -70,8 +78,10 @@ fail() { echo "RELAY FAIL: $*" >&2; exit 1; }
 for img in "$relay" "$comfyui"; do
   docker image inspect "$img" >/dev/null 2>&1 || fail "image $img is not loaded"
 done
+converts=false
+case "$(docker image inspect -f '{{json .Config.Env}}' "$relay")" in *'"COMFYUI_MCP_CONVERT=1"'*) converts=true ;; esac
 mkdir -p "$out"
-rm -f "$out"/probe.json "$out"/relay.log "$out"/comfyui.log "$out"/summary.json
+rm -f "$out"/probe.json "$out"/relay.log "$out"/comfyui.log "$out"/summary.json "$out"/convert.json
 
 retire() {
   local c="$1" log="$2" status="${3:-0}"
@@ -128,7 +138,8 @@ until docker exec "$comfy" curl -fsS --max-time 10 "http://127.0.0.1:$comfy_port
 done
 echo "relay: ComfyUI ($comfyui) answered after $(( $(date +%s) - start ))s"
 
-# 3. The relay, as an arbitrary UID with nothing writable.
+# 3. The relay, as an arbitrary UID with nothing writable (but /tmp, for a browser).
+[ "$converts" = false ] || relay_args+=(--tmpfs /tmp)
 docker run -d --name "$side" "${relay_args[@]}" \
   --user 12345:0 --read-only --security-opt no-new-privileges:true \
   -e COMFYUI_MCP_HTTP_TOKEN="$token" -e MCP_PORT="$relay_port" \
@@ -156,6 +167,21 @@ tools="$(docker exec -i "$comfy" jq -r '.tools | join(",")' < "$out/probe.json")
 want_tools="docs_guide,docs_search,job_cancel,job_status,model_list,node_describe,node_search,server_info,template_get,template_search,workflow_outputs,workflow_run,workflow_upload_input,workflow_validate"
 [ "$tools" = "$want_tools" ] || fail "the default profiles list tools $tools, not $want_tools"
 echo "relay: tools $tools"
+conversion="$(docker exec -i "$comfy" jq -r '.server_info.capabilities.conversion.state' < "$out/probe.json")"
+if [ "$converts" = true ]; then
+  [ "$conversion" = ready ] || fail "the image converts, but server_info says conversion is $conversion"
+else
+  [ "$conversion" = off ] || fail "the image has no browser, but server_info says conversion is $conversion"
+fi
+
+# 4b. mcp-convert: a template converted through the relay, against the frontend's own export.
+converted=null
+if [ "$converts" = true ]; then
+  docker exec -i -e COMFYUI_MCP_HTTP_TOKEN="$token" -e RELAY_URL="http://127.0.0.1:$relay_port/mcp" "$side" \
+    python - < "$here/convert_smoke.py" > "$out/convert.json" || fail "the conversion smoke failed: $(cat "$out/convert.json")"
+  converted="$(cat "$out/convert.json")"
+  echo "relay: converted $converted"
+fi
 
 # 5. SIGTERM, through tini.
 t0="$(date +%s%N)"
@@ -173,7 +199,9 @@ cat > "$out/summary.json" <<EOF
   "matches_pin": $matches,
   "stop_ms": $stop_ms,
   "uid": 12345,
-  "read_only": true
+  "read_only": true,
+  "conversion": "$conversion",
+  "converted": $converted
 }
 EOF
 echo "relay: PASS, results in $out"

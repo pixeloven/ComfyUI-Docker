@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .comfyui import ComfyUIClient, ComfyUIError
 from .consent import ConsentGate
+from .convert import Converter, off_reason
 from .docs_index import DocsIndex
 from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
@@ -59,6 +60,8 @@ class Relay:
     docs_error: str | None = None
     # Each workflow template's requirements, for the installed templates version (template_search).
     template_requirements: TemplateCache = field(default_factory=TemplateCache)
+    # UI-to-API conversion (#167), when COMFYUI_MCP_CONVERT=1; None when it is off.
+    converter: Converter | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +116,8 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
         Call it first. It reports the live ComfyUI version next to the version this server was built for, and
         whether ComfyUI is reachable right now. It never fails because ComfyUI is down; `comfyui.error` says why.
         `docs` lists the documentation built in for docs_search and docs_guide: each source's version and license.
+        `capabilities.conversion` says whether this server converts UI-format workflows to API format, and if not,
+        why.
         """
         s = relay.settings
         live, error = None, None
@@ -143,6 +148,7 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
                     "max_wait_seconds": MAX_WAIT_SECONDS,
                     "max_in_flight": relay.jobs.max_in_flight,
                 },
+                "conversion": relay.converter.status() if relay.converter else {"state": "off", "reason": off_reason()},
             },
             comfyui=ComfyUIStatus(
                 reachable=error is None,

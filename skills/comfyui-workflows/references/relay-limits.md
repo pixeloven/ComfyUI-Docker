@@ -33,8 +33,10 @@ fails as an unknown tool, so check `server_info` rather than assuming.
   flag those nodes in advance. The relay decides from `/object_info`: the
   node's `api_node` flag, Comfy.org credential inputs, or a class from ComfyUI's
   partner-API package.
-- **The UI format.** `workflow_run` takes API-format graphs only (the
-  `workflow-formats` topic).
+- **The UI format, unless it converts.** The `mcp` image's `workflow_run` takes
+  API-format graphs only. The `mcp-convert` image converts a UI-format graph
+  first, through the instance's own editor; `server_info.capabilities.conversion`
+  says which you have (the `workflow-formats` topic).
 - **Anything but its own ComfyUI.** It makes no other outbound connection, so
   docs answers come from the docs index built into its image, not the web.
 
