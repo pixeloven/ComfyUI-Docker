@@ -61,6 +61,11 @@ until the first conversion starts the browser (about 5 seconds), then at about
 New variables: `COMFYUI_MCP_CONVERT` (on in this image) and
 `COMFYUI_MCP_CONVERT_PAGES` (default 2).
 
+**A smaller `tools/list` (#169).** comfyrelay's tool list drops from about
+54 KB to 15 KB with the default profiles (`read` alone: 35 KB to 9 KB). It no
+longer advertises an `outputSchema`, which was two thirds of it, and the
+descriptions are shorter. Tool results, arguments and profiles are unchanged.
+
 ## 5.1.0 — 2026-10-04
 
 ### ComfyUI v0.38.0
