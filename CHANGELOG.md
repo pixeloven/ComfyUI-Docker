@@ -54,6 +54,10 @@ runtime contract's *The `mcp-convert` Image* has the details.
 `mcp-convert` is probed and published by CI jobs of its own, so a failure in
 it never holds back the `mcp` image.
 
+A CI workflow of its own, which publishes nothing, converts every open template
+through it and checks each against the frontend's own export and ComfyUI's
+validation (#167's D8), when the ComfyUI pin, the converter or the image changes.
+
 **Sizing.** About 304 MB to pull (`mcp`: 63 MB). It idles at about 100 MB
 until the first conversion starts the browser (about 5 seconds), then at about
 1.1 GB with the default 2 tabs, up to 2.4 GB over a long run. Give it at least

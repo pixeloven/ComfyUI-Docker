@@ -687,7 +687,9 @@ network to go quiet (the review after the settle wait measured a median of about
 template with no loaders).
 
 Give it a memory limit of at least 3 GiB with 2 tabs, and about 265 MB more for each extra tab.
-The image is 304 MB compressed and 872 MB unpacked, against 63 MB and 217 MB for `mcp`.
+The image is 304 MB to pull and 1.18 GB on disk, against 63 MB and 280 MB for `mcp`: the compressed layers
+in the registry manifest, and `docker image ls` DISK USAGE on Docker 29's containerd image store, which
+keeps the compressed layers beside the unpacked ones (measured on main's `mcp-convert:ad8420ac`).
 
 ## Docs tools
 

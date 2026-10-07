@@ -358,28 +358,38 @@ async def comfyui_status(path: str) -> int:
         return (await http.get(path)).status_code
 
 
-async def export(workflows: list[dict]) -> list[dict]:
-    """The oracle: the frontend's own Export (API) in a plain browser, nothing blocked, a fresh context each. It
-    loads through a stand-in, so the settings the frontend writes as it starts never reach ComfyUI."""
-    from playwright.async_api import async_playwright
+async def export(workflows: list[dict], script: str = conv._CONVERT, tabs: int = 1) -> list[dict | Exception]:
+    """The oracle: the frontend's own Export (API) in a plain browser, nothing blocked, a fresh context each, `tabs`
+    at a time; `script` loads and exports one workflow. It loads through a stand-in, so the settings the frontend
+    writes as it starts never reach ComfyUI. A workflow the frontend itself fails to export gives the error it
+    raised; a frontend that doesn't load fails the call. The corpus (test_relay_convert_corpus.py) uses it too."""
+    from playwright.async_api import Error, async_playwright
 
-    out = []
     standin = _serve(StandIn(free_port()))
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
-        try:
-            for wf in workflows:
-                context = await browser.new_context()
+    slots = asyncio.Semaphore(tabs)
+
+    async def one(browser, wf: dict) -> dict | Exception:
+        async with slots:
+            context = await browser.new_context()
+            try:
                 page = await context.new_page()
                 await page.goto(url_of(standin), wait_until="load")
                 await page.wait_for_function(conv._READY, polling=250, timeout=60_000)
-                out.append(await page.evaluate(conv._CONVERT, wf))
+                try:
+                    return await page.evaluate(script, wf)
+                except Error as exc:
+                    return exc
+            finally:
                 await context.close()
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            return list(await asyncio.gather(*(one(browser, wf) for wf in workflows)))
         finally:
             await browser.close()
             standin.shutdown()
             standin.server_close()
-    return out
 
 
 def escape_args(standin, canary, fresh, udp) -> list:
@@ -621,10 +631,13 @@ async def test_large_answers_are_refused_and_never_balloon_the_relay(standin):
 #   [c.mux(p) for p in s.encode()]; c.close()"
 PREVIEW_CLIP = os.path.join(os.path.dirname(__file__), "data", "convert-preview.mp4")
 # The oracle for a graph with a preview: the frontend's own export, once every LoadVideo's preview widget exists,
-# however long that takes, rather than once the network is quiet, which is what the relay waits for.
+# at the top level and inside subgraphs, however long that takes (at most 30 s), rather than once the network is
+# quiet, which is what the relay waits for.
 EXPORT_AFTER_PREVIEWS = """async (wf) => {
   await window.app.loadGraphData(wf, true, false, null);
-  const videos = () => window.app.graph.nodes.filter(n => n.type === 'LoadVideo');
+  const all = (graph, seen) => graph.nodes.flatMap(n => n.subgraph && !seen.has(n.subgraph)
+    ? (seen.add(n.subgraph), [n, ...all(n.subgraph, seen)]) : [n]);
+  const videos = () => all(window.app.graph, new Set()).filter(n => n.type === 'LoadVideo');
   const t0 = Date.now();
   while (Date.now() - t0 < 30000) {
     if (videos().every(n => (n.widgets || []).some(w => w.name === 'video-preview'))) break;
