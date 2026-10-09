@@ -256,7 +256,7 @@ async def call(tool: str, args: dict, docs: str | None) -> tuple[bool, dict | st
     server, _ = build_server(s, comfyui=comfyui_answering())
     async with Client(server, mode="legacy") as client:
         tools = {t.name: t for t in (await client.list_tools()).tools}
-        assert tools[tool].annotations.read_only_hint is True and tools[tool].output_schema is not None
+        assert tools[tool].annotations.read_only_hint is True
         result = await client.call_tool(tool, args)
     if result.is_error:
         text = result.content[0].text

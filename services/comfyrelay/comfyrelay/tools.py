@@ -113,11 +113,10 @@ def _server_info(relay: Relay) -> Callable[..., Any]:
     async def server_info(ctx: Context) -> ServerInfo:
         """Identify this ComfyUI sidecar: its id, active capability profiles, tools, and the ComfyUI version it serves.
 
-        Call it first. It reports the live ComfyUI version next to the version this server was built for, and
-        whether ComfyUI is reachable right now. It never fails because ComfyUI is down; `comfyui.error` says why.
-        `docs` lists the documentation built in for docs_search and docs_guide: each source's version and license.
-        `capabilities.conversion` says whether this server converts UI-format workflows to API format, and if not,
-        why.
+        Call it first. It gives the live ComfyUI version beside the one this server was built for, and whether
+        ComfyUI is reachable (if not, `comfyui.error` says why; this never fails). `docs` lists the built-in docs'
+        versions and licenses; `capabilities.conversion` says whether this server converts UI-format workflows,
+        and if not, why.
         """
         s = relay.settings
         live, error = None, None
@@ -198,17 +197,16 @@ def _job_status(relay: Relay) -> Callable[..., Any]:
             default=0,
             ge=0,
             le=MAX_WAIT_SECONDS,
-            description="0 answers at once. Otherwise wait up to this long for the job to finish; keep it under "
-            "your own client's tool-call timeout (often about 60s).",
+            description="0 answers at once; otherwise wait up to this long for the job to finish. Keep it under "
+            "your client's tool-call timeout (often about 60s).",
         ),
     ) -> JobView:
-        """Check on a long-running job by its id, or wait for it to finish. Changes nothing.
+        """Check on a job by its id, or wait for it to finish. Changes nothing.
 
-        Tools that start work lasting longer than one call return a job_id; poll or wait on it here. A wait
-        returns when the job finishes or after timeout_seconds (the job keeps running; call again). Keep each
-        wait under your own client's tool-call timeout, often about 60s, and wait again rather than longer.
-        A workflow run's job_id is its ComfyUI prompt_id: if this server no longer holds the job (it restarted),
-        the run is looked up on ComfyUI and reported with source "comfyui". To stop a job, use job_cancel.
+        A wait returns when the job finishes or after timeout_seconds; the job keeps running, so call again rather
+        than wait longer. While it works, progress gives a workflow run's comfyui_state and queue_position (0 is
+        next). On ComfyUI v0.37.0 and later a run's job_id is its prompt_id, so a run this server no longer holds
+        (it restarted) is looked up on ComfyUI, with source "comfyui". To stop a job, use job_cancel.
         """
         if relay.jobs.find(job_id) is None:  # not held here: a workflow run is looked up on ComfyUI (#146)
             return JobView(**await reattach_status(relay.comfyui, job_id, timeout_seconds))
@@ -222,10 +220,9 @@ def _job_cancel(relay: Relay) -> Callable[..., Any]:
     async def job_cancel(job_id: str) -> JobView:
         """Cancel a running job by its id, and report its state. Cancelling a finished job changes nothing.
 
-        It waits briefly for the job to stop. A job that is still unwinding reports `cancelling`; follow it with
-        job_status until it reports `cancelled`. It cancels only jobs this server holds: a workflow run from
-        before it restarted is refused with job_not_held, and nothing is sent to ComfyUI, since a prompt it does not
-        hold could be another client's. A person can cancel such a run from ComfyUI's queue panel.
+        A job still unwinding reports `cancelling`; follow it with job_status until `cancelled`. Only jobs this
+        server holds: a run from before it restarted is refused with job_not_held and nothing reaches ComfyUI (it
+        could be another client's); a person can cancel it in ComfyUI's queue panel.
         """
         if relay.jobs.find(job_id) is None:  # not held here: refused before any request to ComfyUI (#146)
             raise reattach_refuse_cancel(job_id)

@@ -95,15 +95,14 @@ def _docs_search(relay: Relay) -> Callable[..., Any]:
         ),
         limit: int = Field(default=5, ge=1, le=20),
     ) -> DocsSearchResult:
-        """Search the documentation built into this server: docs.comfy.org (Comfy Org's ComfyUI docs: the workflow
-        JSON spec, the server's routes and websocket messages, custom node development, tutorials, interface and
-        troubleshooting pages, built-in node pages) and this project's own guides (docs_guide).
+        """Search the docs built into this server: docs.comfy.org (workflow JSON spec, server routes and websocket
+        messages, custom node development, tutorials, troubleshooting, built-in node pages) and this project's
+        guides (docs_guide).
 
-        Results are sections of pages, best match first, each with its source, version, path, license and upstream
-        url, and a guide's with its docs_guide topic. docs.comfy.org describes the latest ComfyUI, which may not
-        match the version this server serves: for a node's inputs, defaults and outputs use node_describe, which
-        reads the running instance. Words match across word forms (run, running); every word must match unless
-        none do.
+        Results are page sections, best first, with source, path, license and url, and a guide's docs_guide topic.
+        docs.comfy.org describes the latest ComfyUI, not necessarily this one: for a node's inputs and defaults
+        use node_describe. Words match across forms (run, running); every word must match unless none do (match
+        says which).
         """
         words = _query_words(query)
         if not words:
@@ -159,13 +158,11 @@ def _docs_guide(relay: Relay) -> Callable[..., Any]:
     async def docs_guide(
         topic: str | None = Field(default=None, description="A topic from the list; leave it out to list them"),
     ) -> DocsGuideResult:
-        """Read this project's curated guides for working with ComfyUI workflows: UI vs API workflow JSON, adding
-        models and nodes (propose a manifest change, never install), errors and validation, this server's own
-        limits, and authoring comfy.yaml.
+        """Read this project's guides to ComfyUI workflows: UI vs API JSON, adding models and nodes (propose a
+        manifest change, never install), errors and validation, this server's limits, and authoring comfy.yaml.
 
-        Without a topic it lists the topics with a one-line summary each; with one it returns that guide's
-        markdown. They are the published comfyui-workflows skill, so an agent with the skill installed has the
-        same text. docs_search searches them together with docs.comfy.org.
+        Without a topic it lists the topics, one line each; with one it returns that guide's markdown. They are the
+        published comfyui-workflows skill. docs_search searches them too.
         """
         index = _docs_index(relay)
         listed = await asyncio.to_thread(index.topics)

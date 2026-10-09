@@ -28,7 +28,6 @@ async def info(s=None, comfyui=None, elicitation=False) -> dict:
         tools = {t.name: t for t in (await client.list_tools()).tools}
         result = await client.call_tool("server_info", {})
     assert not result.is_error, result.content
-    assert tools["server_info"].output_schema is not None
     assert tools["server_info"].annotations.read_only_hint is True
     return result.structured_content
 

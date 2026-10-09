@@ -28,6 +28,7 @@ import uvicorn
 from mcp.server.mcpserver import MCPServer
 
 if TYPE_CHECKING:
+    from mcp_types import Tool
     from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import __version__
@@ -65,6 +66,44 @@ CONVERTS_NOT = (
 )
 
 
+class RelayMCPServer(MCPServer):
+    """The SDK's server, with a lighter tools/list (#169).
+
+    It leaves out each tool's outputSchema, which the SDK generates from the
+    return model and which was two thirds of tools/list. Results don't change:
+    a tool still returns its JSON as text and as structuredContent, checked
+    against its model here. The JSON shape of a tool's output isn't a contract
+    (VERSIONING.md), and without a schema a client has nothing to check
+    structuredContent against. It also drops pydantic's generated `title`s
+    from inputSchema, which only repeat each argument's name.
+    """
+
+    async def list_tools(self) -> list[Tool]:
+        return [
+            tool.model_copy(update={"output_schema": None, "input_schema": untitled(tool.input_schema)})
+            for tool in await super().list_tools()
+        ]
+
+
+def untitled(schema: Any) -> Any:
+    """A JSON schema without its `title` annotations. Property names, defaults and enums are kept as they are."""
+    if isinstance(schema, list):
+        return [untitled(s) for s in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {}
+    for key, value in schema.items():
+        if key == "title" and isinstance(value, str):
+            continue
+        if key in ("properties", "$defs") and isinstance(value, dict):
+            out[key] = {name: untitled(sub) for name, sub in value.items()}
+        elif key in ("default", "const", "enum", "examples"):
+            out[key] = value
+        else:
+            out[key] = untitled(value)
+    return out
+
+
 def build_server(settings: Settings, *, comfyui: ComfyUIClient | None = None) -> tuple[MCPServer, Relay]:
     relay = Relay(
         settings=settings,
@@ -80,7 +119,7 @@ def build_server(settings: Settings, *, comfyui: ComfyUIClient | None = None) ->
     # A converter that refused to start (a COMFYUI_URL with credentials, no browser in the image) converts nothing.
     converts = relay.converter is not None and not relay.converter.refused
     instructions = INSTRUCTIONS.replace("{formats}", CONVERTS if converts else CONVERTS_NOT)
-    server = MCPServer(SERVER_NAME, version=__version__, instructions=instructions)
+    server = RelayMCPServer(SERVER_NAME, version=__version__, instructions=instructions)
     register(server, relay)
     return server, relay
 

@@ -161,9 +161,9 @@ class ValidationResult(BaseModel):
 WorkflowArg = Annotated[
     dict[str, Any],
     Field(
-        description='The workflow in ComfyUI\'s API format: {"<node id>": {"class_type": "<node class>", '
-        '"inputs": {"<name>": <value> or ["<source node id>", <output index>]}}}. The editor\'s UI format is '
-        "converted first where this server converts (server_info.capabilities.conversion), and refused elsewhere."
+        description='API format: {"<node id>": {"class_type": "<node class>", "inputs": {"<name>": <value> or '
+        '["<source node id>", <output index>]}}}. UI format is converted where this server converts '
+        "(server_info.capabilities.conversion), refused elsewhere."
     ),
 ]
 
@@ -285,19 +285,16 @@ async def _as_api(
 
 def _workflow_validate(relay: Relay) -> Callable[..., Any]:
     async def workflow_validate(workflow: WorkflowArg) -> ValidationResult:
-        """Check a ComfyUI workflow (API format) for what can be known without submitting it; runs nothing.
+        """Check a workflow (API format) for what can be known without submitting it. Runs and changes nothing;
+        workflow_run runs the same check first.
 
-        Finds a graph that is not in API format, node classes this instance does not have (with near names),
-        links to nodes or outputs that do not exist, and a graph with no output node, each naming the node id and
-        input. Lists partner-API nodes, which workflow_run refuses. It does not check input types or values
-        (required inputs, COMBO choices, number ranges): ComfyUI has no dry run, so those are checked by ComfyUI
-        itself when workflow_run submits the graph, and come back as its errors. Changes nothing. workflow_run
-        runs this same check first.
-
-        Where this server converts (server_info.capabilities.conversion), a UI-format graph is converted first by
-        this instance's own frontend, and the result returns the API graph it checked, with converted_from_ui. A
-        conversion that can't run fails with conversion_unavailable, and one the frontend rejects with
-        conversion_failed; there is no fallback converter.
+        Finds a graph not in API format, node classes this instance lacks (with near names), links to missing
+        nodes or outputs, and no output node, each naming the node id and input; lists partner-API nodes, which
+        workflow_run refuses. It does not check input types or values (required inputs, COMBO choices, ranges):
+        ComfyUI has no dry run, so it checks those when workflow_run submits the graph. Where this server converts,
+        a UI-format graph is converted first and the API graph it checked is returned, with converted_from_ui; a
+        conversion that can't run fails with conversion_unavailable, one the frontend rejects with
+        conversion_failed. There is no fallback converter.
         """
         workflow, converted = await _as_api(relay, workflow)
         result = _result(await _validate(relay, workflow))
@@ -384,22 +381,18 @@ def comfyui_problems(node_errors: Any, note: str = "") -> list[dict[str, Any]]:
 
 def _workflow_run(relay: Relay) -> Callable[..., Any]:
     async def workflow_run(workflow: WorkflowArg) -> RunStarted:
-        """Run a ComfyUI workflow (API format) and return a job id straight away; the run continues in ComfyUI.
+        """Run a workflow (API format): returns a job_id at once, and the run continues in ComfyUI.
 
-        It runs workflow_validate's check first, and refuses a graph that fails it. It refuses any graph with a
-        partner-API node (a paid external service) outright. ComfyUI then checks input types and values as it
-        accepts the graph: one it rejects fails at once with workflow_rejected, carrying ComfyUI's per-node errors
-        (type, node id, input, details). Then follow the job with job_status: it reports queued or running, and at
-        the end the saved files, or ComfyUI's error naming the node that failed. List or fetch the files with
-        workflow_outputs. Each call is a new run with new outputs. job_cancel stops it on ComfyUI.
+        It runs workflow_validate's check first, and refuses a graph that fails it or has any partner-API node (a
+        paid external service). ComfyUI then checks input types and values: a graph it rejects fails at once with
+        workflow_rejected and its per-node errors. Follow the job with job_status (queued or running, then the
+        saved files or ComfyUI's error naming the failed node); workflow_outputs lists or fetches the files, and
+        job_cancel stops the run. Each call is a new run.
 
-        What the graph does is up to its nodes: this server reaches only ComfyUI, but a custom node installed there
-        may write anywhere ComfyUI can, or reach the network. Only partner-API nodes are refused.
-
-        Where this server converts (server_info.capabilities.conversion), a UI-format graph is converted first by
-        this instance's own frontend, after its node types pass the partner-API check, and the result says
-        converted_from_ui. A conversion that can't run fails with conversion_unavailable, and one the frontend
-        rejects with conversion_failed; nothing is submitted then.
+        A custom node may write anywhere ComfyUI can, or reach the network: only partner-API nodes are refused.
+        Where this server converts, a UI-format graph is converted after the partner-API check (converted_from_ui);
+        a conversion that can't run fails with conversion_unavailable, one the frontend rejects with
+        conversion_failed, and nothing is submitted.
         """
         workflow, converted = await _as_api(relay, workflow, refuse_partner=True)
         report = await _validate(relay, workflow)
@@ -1012,17 +1005,17 @@ def _workflow_outputs(relay: Relay) -> Callable[..., Any]:
         fetch: str | None = Field(
             default=None,
             description="A filename from this job's files (or subfolder/filename) to return inline: an image or "
-            f"audio as content the model can see or hear, anything else as a resource. At most {MAX_INLINE_BYTES} "
-            "bytes; leave it out to list only.",
+            f"audio as content you can see or hear, anything else as a resource. At most {MAX_INLINE_BYTES} bytes; "
+            "omit to list only.",
         ),
     ) -> Annotated[CallToolResult, OutputsView]:
-        """List the files a finished workflow_run job saved, with their sizes, and optionally return one inline.
+        """List the files a workflow_run job saved, with their sizes, and optionally return one inline. Changes
+        nothing.
 
-        Takes the job_id from workflow_run. Lists each file (node, filename, subfolder, type, size) and any
-        non-file outputs such as text; works for failed or cancelled runs too, which may have saved some files,
-        and after this server restarts (the run is then looked up on ComfyUI by its id, and marked source
-        "comfyui"). Nothing is streamed unless asked: pass fetch=<filename> to get that one file's bytes, up to a
-        size cap. Changes nothing.
+        Lists each file (node, filename, subfolder, type, size) and non-file outputs such as text, for failed or
+        cancelled runs too, and after this server restarts (looked up on ComfyUI, source "comfyui"). size_bytes
+        is null past the first 32 files (when fetching, for all but that file). Nothing is sent unless fetch names
+        a file: view_path works only for a client that reaches ComfyUI directly, so through this server use fetch.
         """
         job = relay.jobs.find(job_id)
         if job is None:  # not held here: look the run up on ComfyUI (#146); how it ended comes from /history below
@@ -1187,8 +1180,7 @@ def _workflow_upload_input(relay: Relay) -> Callable[..., Any]:
         """Upload a file (an image, a mask, audio, video) into ComfyUI's input directory, for LoadImage and friends.
 
         Returns the name ComfyUI stored it under: put that in the loading node's input. It never overwrites: a
-        different file with the same name is stored as name (1).ext, and the same bytes again reuse the file
-        already there. Writes only to ComfyUI's input directory, through ComfyUI's own upload API.
+        different file of the same name is stored as name (1).ext; the same bytes again reuse the file.
         """
         clean = sanitise_filename(filename)
         payload = content_base64.strip()

@@ -1283,6 +1283,5 @@ async def test_every_introspection_tool_is_read_only_and_only_gets_from_comfyui(
             assert not (await mcp.call_tool(name, args)).is_error, name
             assert tools[name].annotations.read_only_hint is True
             assert tools[name].annotations.destructive_hint is False
-            assert tools[name].output_schema is not None
     assert {method for method, _ in seen} == {"GET"}
     assert {host for _, host in seen} == {"comfyui.test"}

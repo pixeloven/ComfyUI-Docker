@@ -194,13 +194,13 @@ def _node_search(relay: Relay) -> Callable[..., Any]:
         query: str = Field(min_length=1, description="Words or a class name: 'load checkpoint', 'KSampler', 'upscale'"),
         limit: int = Field(default=20, ge=1, le=100),
     ) -> NodeSearchResult:
-        """Find node classes in the live ComfyUI (built-in and custom nodes) by class name, display name, alias,
-        category or description.
+        """Find node classes in the live ComfyUI (built-in and custom) by name, display name, alias, category or
+        description.
 
-        Use it to find the right node, then node_describe for its inputs, defaults, limits and outputs. Each hit
-        gives the class_type to use in a workflow. Exact and prefix matches on the name rank first, so near
-        namesakes stay apart: CheckpointLoaderSimple ("Load Checkpoint") is not CheckpointLoader (deprecated).
-        Partner-API nodes (api_node, they spend credits) and deprecated ones rank after the rest of their tier.
+        Each hit gives the class_type for a workflow; node_describe gives its inputs and outputs. Exact and prefix
+        name matches rank first (CheckpointLoaderSimple, "Load Checkpoint", is not the deprecated
+        CheckpointLoader); partner-API nodes (api_node: they spend credits) and deprecated ones rank last in their
+        tier.
         """
         words = _words(query)
         if not words:
@@ -520,20 +520,22 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
             default=DEFAULT_MAX_OPTIONS,
             ge=1,
             le=5000,
-            description="Show at most this many values of each COMBO input and names of each Autogrow input. It "
-            "applies at every level, so a dynamic combo's options each list their own inputs within it",
+            description="At most this many values per COMBO input and names per Autogrow input, at every level",
         ),
     ) -> NodeSpec:
-        """Get one node class's full spec from the live ComfyUI: every input with its type, default, min, max and
-        step, and a COMBO input's allowed values; its outputs in socket order with their names; whether it is an
-        output node; and whether it is a partner-API node.
+        """Get one node class's spec from the live ComfyUI: each input's type, default, min, max, step and COMBO
+        values; its outputs in socket order; whether it is an output node or a partner-API node. Look defaults and
+        limits up here: they change between ComfyUI versions.
 
-        Look defaults and limits up here rather than recalling them: they change between ComfyUI versions. Use
-        each input's `name` as the key in a graph: inputs added by a dynamic input are fully qualified with dots
-        (a COMFY_DYNAMICCOMBO_V3 `resize_type` set to an option adds `resize_type.width`; a COMFY_AUTOGROW_V3
-        `images` takes `images.image0`, `images.image1`, ...). Long lists are cut to max_options, with a total.
-        `help` is the node's help page, the markdown the editor shows for it, when ComfyUI has one.
-        An unknown class fails with `unknown_node_class` and a `suggestions` list of close class names.
+        Use each input's `name` as its key in a graph. A dynamic input's inputs are qualified with dots: a
+        COMFY_DYNAMICCOMBO_V3 `resize_type` lists options as {value, inputs}, and set to one adds
+        `resize_type.width`; a COMFY_AUTOGROW_V3 `images` takes `images.image0`, `images.image1`, ... (the first
+        autogrow.min names are required); a COMFY_DYNAMICSLOT_V3 adds its slot_inputs once something is linked to
+        it. A COMFY_MATCHTYPE_V3 input takes any of match_type.allowed_types; an output whose same_type_as names
+        that input (by its match_type.template_id) carries the type linked to it. An output's `index` is the one a
+        link [node_id, index] uses; hidden_inputs are ComfyUI's, never set in a graph. Lists are cut to
+        max_options, with a total. `help` is the node's help page, when it has one (help_truncated: cut at 64 KB).
+        An unknown class fails with `unknown_node_class` and close `suggestions`.
         """
         found = {} if class_type in DOT_SEGMENTS else await relay.comfyui.object_info(class_type)
         if class_type in found:
@@ -600,12 +602,11 @@ def _model_list(relay: Relay) -> Callable[..., Any]:
             "the full number",
         ),
     ) -> ModelListResult:
-        """List the model files actually on disk in the live ComfyUI, by folder type (checkpoints, loras, vae,
-        text_encoders, diffusion_models, ...), as its loader nodes offer them.
+        """List the model files on disk in the live ComfyUI by folder type (checkpoints, loras, vae, text_encoders,
+        diffusion_models, ...), as loader nodes offer them: what a workflow can load. Nothing is downloaded here.
 
-        Use it to see what a workflow can load. It only reads: nothing is downloaded or installed here. Lists are
-        cut to max_files per folder (truncated says so); ask for one folder to see more of it. An unknown folder
-        fails with `unknown_model_folder` and the folder types ComfyUI knows.
+        Lists are cut to max_files per folder (truncated says so); ask for one folder to see more. An unknown
+        folder fails with `unknown_model_folder` and the known ones.
         """
         known = [f for f in await relay.comfyui.model_folders() if f not in NOT_MODEL_FOLDERS | DOT_SEGMENTS]
         if folder is not None and folder not in known:
@@ -1351,25 +1352,17 @@ def _template_search(relay: Relay) -> Callable[..., Any]:
             description="Return only templates this instance can run now (runnable true); unchecked ones are left out",
         ),
     ) -> TemplateSearchResult:
-        """Find ComfyUI workflow templates (the ones the ComfyUI frontend's template browser offers) for a goal,
-        by title, name, tags, model family, description and category, and check each match against the live
-        instance.
+        """Find workflow templates (those the frontend's template browser offers) for a goal, by title, name, tags,
+        model family, description and category, and check each against the live instance. Where ComfyUI serves
+        its agent index (index.mcp.json; source.index says), hits also match and carry task, inputs, outputs,
+        capabilities, recommend and freshness.
 
-        When ComfyUI serves its agent index (/templates/index.mcp.json; v0.37.0 does), the search also matches
-        each template's task, inputs and outputs, and capabilities, and a hit carries them, with the index's
-        recommend and freshness, to choose by. source.index says whether it was used; if ComfyUI can't serve it,
-        the search runs on index.json alone.
-
-        Hits are ranked by how many query words they match, then runnable before not, then relevance. With a
-        one-word query every match ties on words matched, so runnable templates come first. Each hit's
-        runnability summarises what this instance is missing for it: counts and the first few names of node
-        classes, declared models, models on disk only under another path, input files its loaders name, and
-        partner-API nodes; template_get gives the full lists. runnable is true only when none of those is found;
-        it does not validate the graph itself, models named only in widget values, or memory. runnable is null
-        when the check couldn't be made in time (the template, a model folder it names, or /object_info couldn't
-        be read; unchecked says why); the search still answers. runnable_only keeps only runnable templates.
-        Templates built on partner-API nodes, which spend credits, are left out unless include_partner_api is
-        true. Fetch one with template_get.
+        Ranked by query words matched, then runnable first, then relevance. Each hit's runnability lists what this
+        instance lacks for it (counts and first names of node classes, declared models, models only under another
+        path, input files, partner-API nodes); template_get has the full lists. runnable is true only when nothing
+        is missing; it doesn't validate the graph, models named only in widget values, or memory. null: not
+        checked (unchecked says why). Partner-API templates, which spend credits, are left out unless
+        include_partner_api. Fetch one with template_get.
         """
         words = _words(query)
         if not words:
@@ -1453,22 +1446,22 @@ def _template_get(relay: Relay) -> Callable[..., Any]:
         ),
         format: Literal["ui", "api"] = Field(
             default="ui",
-            description="ui: the template as the editor stores it. api: the graph workflow_run takes, converted "
-            "by this instance's own frontend. Only where this server converts (server_info.capabilities."
-            "conversion); elsewhere api fails with conversion_unavailable",
+            description="ui: as the editor stores it. api: the graph workflow_run takes, converted by this "
+            "instance's frontend where this server converts; elsewhere it fails with conversion_unavailable",
         ),
     ) -> TemplateDetail:
-        """Fetch one ComfyUI workflow template by name: its metadata, a runnability check against the live
-        instance (the same one template_search reports), and the workflow itself.
+        """Fetch one workflow template by name: its metadata, a runnability check against the live instance, and
+        the workflow.
 
-        The workflow is in the frontend's UI format (nodes with widgets_values, links, subgraph definitions), as
-        the ComfyUI frontend loads it, not the API format /prompt takes. With format="api", this instance's own
-        frontend converts it, as the editor's Export (API) would, where this server converts
-        (server_info.capabilities.conversion). A conversion that can't run fails with conversion_unavailable, and
-        one the frontend rejects with conversion_failed; each says why and carries the UI graph when it fits.
-        There is no fallback converter. A workflow too large to return (over 80,000 characters as JSON) fails
-        with `workflow_too_large`; include_workflow=false still returns its metadata and runnability. An unknown
-        name fails with `unknown_template` and close matches.
+        The workflow is in the frontend's UI format (nodes with widgets_values, links, subgraphs), not the API
+        format /prompt takes. format="api" has this instance's own frontend convert it, as Export (API) would,
+        where this server converts (server_info.capabilities.conversion). A conversion that can't run fails with
+        conversion_unavailable, one the frontend rejects with conversion_failed; each says why, with the UI graph
+        when it fits. There is no fallback converter. In runnability, a model in models_need_value_change is on
+        disk at found_at, the value its loader needs; missing_inputs need uploading; missing_models are for a
+        human to add through the manifest (folder_known false: this ComfyUI has no such folder type). Over 80,000 characters as JSON fails with `workflow_too_large`
+        (include_workflow=false still returns the rest). An unknown name fails with `unknown_template` and close
+        matches.
         """
         name = name.removesuffix(".json")
         index, object_info, source = await asyncio.gather(
