@@ -80,8 +80,53 @@ the manifest and lock formats don't change. What moved:
      where it was `comfyfetch/<version> (…)`. Update any proxy or allowlist
      rule that matches it.
 
+`comfyctl fetch resolve`, `check` and the manifest and lock formats:
+
+- **A direct-URL source needs `as:` or `file:`** (#161). Without either, the
+  lock's path was the `install` directory, and `fetch` wrote the model over
+  it. The manifest schema now refuses the entry, so `resolve` exits 2 and
+  `check` exits 1. For a URL with `file:` and no `as:`, the lock's `model:` is
+  now `file`'s basename, matching its path, where it was the URL's.
+  *Migration:* add `as: <filename>` to each `https://` entry that has neither.
+- **A lock's `paths[].path` must name a file:** the schema's pattern is now
+  `^models/.*[^/]$` (#161), so `check` and `fetch` refuse a path ending in `/`.
+  *Migration:* re-resolve a lock that has one, after adding `as:` as above.
+- **One lock entry per install path** (#160). A file two groups declare
+  identically (`x-` keys aside) is resolved once and locked once, by `resolve`
+  and by `--from-lock`. Two groups declaring different files at one path make
+  `resolve` report the path as unresolved and exit 1, and `check` report
+  `CONFLICT <path>`. `check` also fails a lock listing a path twice
+  (`DUPLICATE <path>`), and `--from-lock` refuses a parent that does. A lock
+  no longer contains YAML anchors or aliases.
+  *Migration:* give the clashing files different `as:` names or install
+  directories, then re-resolve any lock `check` now reports as `DUPLICATE`.
+- **`resolve` validates before it resolves** (#154): the manifest against
+  the schema and the semantic checks `check` runs, and a `--from-lock` parent
+  against the lock schema. A problem exits 2 with the list on stderr, or
+  `{"problems": [...], "ok": false, "lock_written": false}` under `-o json`,
+  where it was a `KeyError` traceback with exit 1, or no error at all for a
+  semantic problem such as a capability no profile can satisfy. An unknown
+  `--profile` with `--from-lock` now exits 2 as well, as it does without it.
+  *Migration:* run `comfyctl fetch check` on the manifest and fix what it
+  reports; treat exit 2 from `resolve` as "fix the input".
+
+### Added
+
+- **`comfyctl fetch resolve -O/--out PATH` and `--header FILE`** (#159), as
+  `build` has. `-O` writes the lock through a sibling file and a rename only
+  once every source has resolved, so a failed resolve leaves the existing lock
+  untouched, where `> lock.yaml` leaves it empty. `--header` prepends a file
+  verbatim. Under `-o json`, `-O` writes the lock and the result gains `path`.
+  stdout stays the default.
+
 ### Fixed
 
+- **`resolve` needs no temp directory** and survives a failed download. Hashing
+  a `gh:` asset with no digest, or an `hf:` file outside LFS, copied the body
+  into a temp file nobody read, so under a read-only root `resolve` crashed
+  with a traceback and stopped the pass. It now streams the body through the
+  hash, and a download that fails is reported as that entry's unresolved
+  source while the rest of the pass continues.
 - **The `comfyctl` image installs from `services/uv.lock`** (#177), hash-checked,
   as the `mcp` image does, where the `fetch` image ran `pip install` against
   PyPI's latest versions. (A wheel install still resolves its dependencies at

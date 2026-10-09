@@ -50,7 +50,7 @@
                 },
                 "file": {
                   "type": "string",
-                  "description": "Path within the source repo. Omit for sources that name a single file."
+                  "description": "Path within the source repo, for hf: and gh:. Its basename names the installed file unless `as` does. A direct URL needs `file` or `as`."
                 },
                 "revision": {
                   "type": "string",
@@ -93,6 +93,30 @@
                       "as"
                     ],
                     "$comment": "A civitai source's filename comes from the API, so it is not knowable offline. `as` makes the install path derivable from the manifest alone, which is what lets check-lock.sh run without network."
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "source": {
+                        "pattern": "^https?://"
+                      }
+                    },
+                    "required": [
+                      "source"
+                    ],
+                    "not": {
+                      "required": [
+                        "file"
+                      ]
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "as"
+                    ],
+                    "errorMessage": "a direct-URL source needs `as` (or `file`) to name the installed file",
+                    "$comment": "Without either, the install path is the `install` DIRECTORY, and fetch writes the file over it. Taking the name from the URL isn't derivable the way check derives paths, so the manifest names it."
                   }
                 }
               ],

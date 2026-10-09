@@ -35,8 +35,12 @@ replaced the `fetch` image in 6.0.0.
 - **`-o json`** on any verb (after the verb, not after `fetch`) prints the result as
   stable JSON on stdout. Progress stays on stderr, so the output parses.
 - **Exit codes:** `0` did what was asked, `1` a real failure (unresolved source,
-  hash mismatch, manifest and lock disagree), `2` a bad request (missing file,
-  unknown profile, incompatible flags).
+  hash mismatch, manifest and lock disagree, two groups installing different
+  files at one path), `2` a bad request (missing file, unknown profile,
+  incompatible flags). Before it resolves anything, `resolve` validates the
+  manifest, and a `--from-lock` parent, exactly as `check` does, and exits `2`
+  if either fails, listing the problems. `check` reports the same problems as
+  its verdict, with `1`.
 
 `comfy.yaml` may itself be generated. Past a few hundred lines a single manifest
 stops working — every family conflicts with every other on edit — so `build`
@@ -74,16 +78,19 @@ the resolved full path.
 | `hf:<owner>/<repo>` | `file:` | `x-linked-etag` header |
 | `gh:<owner>/<repo>@<tag>` | `file:` (asset name) | release asset `digest`, else download-and-hash |
 | `civitai:<modelVersionId>` | **`as:`** | `files[0].hashes.SHA256` |
-| `https://…` | **`sha256:`** | nothing — you must state it |
+| `https://…` | **`sha256:`** and **`as:`** (or `file:`) | nothing — you must state it |
 
 Note the two that need something extra, because both fail in confusing ways:
 
 - **`civitai:` requires `as:`.** The filename comes from the API, so without it
   the install path is not knowable offline — and `check` cannot run without
   network. The schema enforces this.
-- **A direct URL requires `sha256:`.** Nothing about a bare URL can be resolved
-  from headers. Resolve refuses rather than writing a lock entry that verifies
-  nothing.
+- **A direct URL requires `sha256:`, and `as:` or `file:`.** Nothing about a
+  bare URL can be resolved from headers. Resolve refuses rather than writing a
+  lock entry that verifies nothing. The name says what the installed file is
+  called, and `check` derives the path from it offline. Up to 5.x a URL with
+  neither locked the `install` directory as the path, and fetch wrote the file
+  over it; the schema now refuses that entry.
 
 Use `as:` too whenever the local filename should differ from upstream's — e.g.
 upstream `4x-UltraSharp.pth` stored as `4xUltrasharp_4xUltrasharpV10.pt`.
@@ -115,9 +122,15 @@ Generate the full lock first, then **derive** the others so every profile pins
 identical commits:
 
 ```sh
-comfyctl fetch resolve comfy.yaml > comfy-lock.yaml
-comfyctl fetch resolve comfy.yaml --profile sdxl --from-lock comfy-lock.yaml > locks/sdxl.yaml
+comfyctl fetch resolve comfy.yaml -O comfy-lock.yaml
+comfyctl fetch resolve comfy.yaml --profile sdxl --from-lock comfy-lock.yaml -O locks/sdxl.yaml
 ```
+
+Use `-O`/`--out` rather than `>`: it writes only once every source resolves,
+so a failed resolve leaves the committed lock as it was. The shell truncates a
+`>` target before `resolve` runs, so a failure there leaves an empty lock.
+`--header <file>` prepends that file to the lock verbatim, for a provenance
+comment.
 
 Resolving each independently is the mistake: locks made minutes apart can
 legitimately pin different commits.
@@ -157,6 +170,10 @@ A host listed here whose variable is unset does **not** block public files.
   profile lock is a verbatim subset of the full lock. Without it, locks made
   minutes apart can pin different upstream commits and every one of them passes
   `check` on its own.
+- **Declaring one install path twice.** A file shared by two groups, declared
+  identically (`x-` keys aside), is one lock entry. Two *different* files at
+  one path are refused: `resolve` reports it as unresolved, and `check` as
+  `CONFLICT`. A lock listing a path twice fails `check` as `DUPLICATE`.
 - **Trusting a filename.** The same name routinely carries different bytes.
   `flux1-krea-dev` had a Civitai source that now 404s and an identical-byte copy
   on HuggingFace — only the hash proved they were the same file.

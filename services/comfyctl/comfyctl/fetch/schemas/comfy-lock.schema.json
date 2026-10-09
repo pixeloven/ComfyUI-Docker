@@ -57,7 +57,8 @@
               "properties": {
                 "path": {
                   "type": "string",
-                  "pattern": "^models/"
+                  "pattern": "^models/.*[^/]$",
+                  "description": "The installed FILE's path, never a directory: fetch writes a file at exactly this path."
                 }
               }
             }

@@ -31,6 +31,41 @@ def install_path(entry: dict) -> str:
     return f"{entry['install']}{name}"
 
 
+def conflicts(groups: list[dict]) -> dict[str, list[str]]:
+    """Install paths that two file entries declare DIFFERENTLY -> group names.
+
+    The same file declared identically in two groups (a VAE shared by a base
+    and an add-on) is one install and one lock entry. Two different
+    declarations for one path are two files fighting over it: the last fetched
+    wins, and every fetch re-downloads both. `x-` keys are consumer metadata,
+    so they don't make two declarations different.
+    """
+    seen: dict[str, tuple[dict, list[str]]] = {}
+    clashing: set[str] = set()
+    for group in groups:
+        for entry in group["files"]:
+            path = install_path(entry)
+            decl = {k: v for k, v in entry.items() if not k.startswith("x-")}
+            if path not in seen:
+                seen[path] = (decl, [group["name"]])
+                continue
+            first, names = seen[path]
+            if group["name"] not in names:
+                names.append(group["name"])
+            if decl != first:
+                clashing.add(path)
+    return {p: seen[p][1] for p in sorted(clashing)}
+
+
+def duplicate_paths(lock: dict) -> list[str]:
+    """Install paths a lock lists more than once. A lock has one entry per file."""
+    counts: dict[str, int] = {}
+    for m in lock.get("models") or []:
+        if (p := lock_path(m)) is not None:
+            counts[p] = counts.get(p, 0) + 1
+    return [p for p, n in counts.items() if n > 1]
+
+
 def sha256_of(model: dict) -> str | None:
     for h in model.get("hashes") or []:
         if h.get("type") == "SHA256":
@@ -49,6 +84,11 @@ class _Dumper(yaml.SafeDumper):
 
     def increase_indent(self, flow: bool = False, indentless: bool = False) -> Any:
         return super().increase_indent(flow, False)
+
+    def ignore_aliases(self, data: Any) -> bool:
+        # A shared dict must never become an `&id001` anchor and `*id001`
+        # alias: a lock is read by tools that aren't PyYAML.
+        return True
 
 
 def dump(auth: dict | None, models: list[dict]) -> str:
