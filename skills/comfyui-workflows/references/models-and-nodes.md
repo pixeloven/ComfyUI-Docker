@@ -49,11 +49,27 @@ custom_nodes:
       hash: a40cf52c4779454451c4480c95947045e3f31c94
 ```
 
-- **Propose only the pack's entry** under `git_custom_nodes`. `comfyui`
-  beside it isn't part of any pack's entry: leave it as the lock has it. If
-  the lock has no `custom_nodes` section yet, propose `git_custom_nodes` alone
-  and don't add `comfyui`.
+A pack from the Comfy Registry goes under `cnr_custom_nodes` instead, as its
+registry id mapped to a released version. That is the map ComfyUI-Manager
+writes in a snapshot (`get_current_snapshot`, which records a registry pack
+there only when its version isn't `nightly`, `latest` or `unknown`):
+
+```yaml
+custom_nodes:
+  cnr_custom_nodes:
+    <registry id>: <version>
+```
+
+- **Propose only the pack's entry**, under `git_custom_nodes` or
+  `cnr_custom_nodes`. `comfyui` beside them isn't part of any pack's entry:
+  leave it as the lock has it. If the lock has no `custom_nodes` section yet,
+  propose the pack's map alone and don't add `comfyui`.
 - **`hash` is a full commit SHA**, not a branch or a tag, so the pin can't move.
+  A registry entry pins a released version, never `nightly` or `latest`.
+- **A `cnr_custom_nodes` map is the whole set.** Restoring a ComfyUI-Manager
+  snapshot disables any installed registry pack the map doesn't list. Add to
+  an existing map. If you start one, say in the proposal that it lists only
+  this pack.
 - **This section is the part of the lock written by hand.**
   `comfyctl fetch resolve` writes only `auth` and `models`, so a lock
   regenerated with it has no `custom_nodes` section. Carry the section over
