@@ -91,7 +91,7 @@ nothing. All but one stay outside the container: `core-amd` passes
 | `COMFY_TEMP_PATH` | `./data/temp` | Host side of `/app/temp` | all five |
 | `COMFY_USER_PATH` | `./data/user` | Host side of `/app/user` | all five |
 | `COMFY_IMAGE` | the example's image | The `comfyui` service's image | all five |
-| `COMFY_FETCH_IMAGE` | `ghcr.io/pixeloven/comfyui/fetch:latest` | The opt-in `fetch` service's image | all five |
+| `COMFY_FETCH_IMAGE` | `ghcr.io/pixeloven/comfyui/comfyctl:latest` | The opt-in `fetch` service's image (`comfyctl`; it runs `fetch fetch /comfy-lock.yaml /app --apply`) | all five |
 | `COMFY_LOCK` | `../../locks/preview.yaml` | The lock the `fetch` service applies | all five |
 | `HF_TOKEN`, `CIVITAI_TOKEN` | *(empty)* | Passed to the `fetch` service only, for gated downloads | all five |
 | `VIDEO_GID`, `RENDER_GID` | `44`, `109` | `group_add` for GPU device access | `core-amd`, `core-intel` |
@@ -114,10 +114,9 @@ the defaults from the first table. The `fetch` service runs as `${PUID}:${PGID}`
 | `COMFY_LOCK`, `HF_TOKEN`, `CIVITAI_TOKEN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `VIDEO_GID`, `RENDER_GID` | – | – | – | ✓ | ✓ |
 | `HSA_OVERRIDE_GFX_VERSION` | – | – | – | ✓ | – |
-| `COMFY_IMAGE`, `COMFY_FETCH_IMAGE` | – | – | – | – | – |
+| `COMFY_IMAGE`, `COMFY_FETCH_IMAGE` | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-`COMFY_IMAGE` and `COMFY_FETCH_IMAGE` are read by every compose file but documented in
-no `.env.example`. `COMFY_IMAGE` is covered in [Running Containers](running.md) and
+`COMFY_IMAGE` is also covered in [Running Containers](running.md) and
 [Building Images](building.md). `COMFY_RUNTIME` is in none of them, because the image
 sets it.
 
@@ -438,7 +437,6 @@ a major change.
 - [#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115): dependencies and caches installed at runtime are lost when the container is recreated.
 - [#116](https://github.com/pixeloven/ComfyUI-Docker/issues/116): VRAM flags in `CLI_ARGS` make ComfyUI exit on the CPU image.
 - [#117](https://github.com/pixeloven/ComfyUI-Docker/issues/117): `COMFY_ENABLE_*` accept only the exact string `true`.
-- [#118](https://github.com/pixeloven/ComfyUI-Docker/issues/118): `COMFY_IMAGE` and `COMFY_FETCH_IMAGE` are missing from every `.env.example`.
 
 ---
 

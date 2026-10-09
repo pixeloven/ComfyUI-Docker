@@ -1,16 +1,18 @@
 # comfyctl
 
 One command for ComfyUI-Docker's tooling. Each tool is a **group**, mounted from
-its own package rather than reimplemented, so a group behaves exactly like the
-library behind it:
+its own Typer app rather than reimplemented, so a group behaves exactly like the
+code behind it:
 
-| Group | Verbs | Package |
+| Group | Verbs | Code |
 |---|---|---|
-| `comfyctl fetch` | `build`, `resolve`, `fetch`, `check`, `facts` | [`comfyfetch`](../fetch/README.md): manifest, lock and verified model downloads |
+| `comfyctl fetch` | `build`, `resolve`, `fetch`, `check`, `facts` | `comfyctl/fetch/`, in this package ([FETCH.md](FETCH.md)): manifest, lock and verified model downloads |
 | `comfyctl relay` | `serve`, `probe` | [`comfyrelay`](../comfyrelay/README.md): the MCP sidecar. **Not released yet** |
 
 `comfyctl fetch` replaced the `comfyfetch` command in 4.0.0, with the same verbs,
-flags, output and exit codes. More groups join as they are built.
+flags, output and exit codes. Its code was the separate `comfyfetch` package
+(`services/fetch/`) until 6.0.0 moved it into this one. More groups join as they
+are built.
 
 `comfyctl relay` exists only where comfyrelay is installed: in this workspace and in
 the comfyrelay image. comfyctl doesn't depend on comfyrelay, and no release ships it
@@ -39,43 +41,39 @@ that breaks one is a bug.
 
 `comfyctl --help` says the same. `tests/test_comfyctl.py` asserts that every
 verb (every leaf command) takes the output flag, and that `comfyctl fetch` gives the same stdout
-and exit code as comfyfetch's own app.
+and exit code as its own app (`comfyctl.fetch.cli`).
 
 ## Install
 
-**Never let an installer resolve `comfyfetch` from a package index.** Neither
-`comfyctl` nor `comfyfetch` is registered on PyPI, so anyone could publish a
-package under either name, and an index install would run it. `comfyctl`
-depends on `comfyfetch==<same version>`, so every install below supplies
-comfyfetch itself: from the same git commit, or as the named release wheel.
+**Never install `comfyctl` from a package index.** It isn't registered on PyPI,
+so anyone could publish a package under that name, and an index install would
+run it. Install it from this repository: from a git tag, or as the release
+wheel. Since 6.0.0 it is one package, with no first-party dependency.
 
-Straight from git, pinned to a release tag (uv resolves comfyfetch from the same
-commit, through the workspace):
+Straight from git, pinned to a release tag:
 
 ```sh
-uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v5.0.0#subdirectory=services/comfyctl' comfyctl --help
+uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v6.0.0#subdirectory=services/comfyctl' comfyctl --help
 ```
 
-Use uv for this line. `pip install git+…#subdirectory=services/comfyctl`
-ignores the workspace and looks `comfyfetch` up on PyPI instead.
-
-From a release, as two wheels, naming both. The `--with` wheel is what keeps
-comfyfetch coming from the release:
+From a release, as one wheel (check it against the release's `SHA256SUMS`):
 
 ```sh
-v=5.0.0
-uv tool install \
-  "https://github.com/pixeloven/ComfyUI-Docker/releases/download/v${v}/comfyctl-${v}-py3-none-any.whl" \
-  --with "https://github.com/pixeloven/ComfyUI-Docker/releases/download/v${v}/comfyfetch-${v}-py3-none-any.whl"
+v=6.0.0
+uv tool install "https://github.com/pixeloven/ComfyUI-Docker/releases/download/v${v}/comfyctl-${v}-py3-none-any.whl"
 ```
 
-Or run the `fetch` image, whose entrypoint is `comfyctl fetch fetch`. See
-[../fetch/README.md](../fetch/README.md).
+Up to 5.x a release shipped two wheels, installed together with
+`--with <comfyfetch wheel url>`. From 6.0.0 there is no comfyfetch wheel.
+
+Or run the `comfyctl` image, `ghcr.io/pixeloven/comfyui/comfyctl`, whose
+entrypoint is `comfyctl`: `<image> fetch fetch /lock.yaml /app --apply`. See
+[FETCH.md](FETCH.md).
 
 ## Developing
 
 `services/` is a uv workspace (`services/pyproject.toml`), with this package and
-`comfyfetch` as members and one `services/uv.lock`:
+`comfyrelay` as members and one `services/uv.lock`:
 
 ```sh
 cd services

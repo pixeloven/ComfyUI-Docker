@@ -30,7 +30,7 @@ import jsonschema
 
 def load(name: str) -> dict[str, Any]:
     """A bundled schema by name: `comfy` or `comfy-lock`."""
-    text = (resources.files("comfyfetch.schemas") / f"{name}.schema.json").read_text()
+    text = (resources.files("comfyctl.fetch.schemas") / f"{name}.schema.json").read_text()
     return json.loads(text)
 
 

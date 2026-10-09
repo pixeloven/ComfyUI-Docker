@@ -9,8 +9,8 @@ import pathlib
 
 import pytest
 import yaml
-from comfyfetch import fetch, lockfile
-from comfyfetch.cli import app
+from comfyctl.fetch import fetch, lockfile
+from comfyctl.fetch.cli import app
 from typer.testing import CliRunner
 
 runner = CliRunner()

@@ -13,8 +13,8 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from comfyfetch import schema
-from comfyfetch.cli import app
+from comfyctl.fetch import schema
+from comfyctl.fetch.cli import app
 
 runner = CliRunner()
 

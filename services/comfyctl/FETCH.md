@@ -1,4 +1,4 @@
-# fetch — manifest, lock, and verified materialisation
+# comfyctl fetch — manifest, lock, and verified materialisation
 
 Three small tools and an image, following npm's shape:
 
@@ -10,28 +10,24 @@ Three small tools and an image, following npm's shape:
 | **`comfyctl fetch fetch`** | fetcher | Lock → disk, verifying every file. Never reads the manifest. |
 | **`comfyctl fetch check`** | gate | Manifest and lock still agree. Offline. |
 
-This directory is the `comfyfetch` **library**. Its command is `comfyctl fetch`,
-which mounts comfyfetch's own Typer app as a group
-([services/comfyctl](../comfyctl/README.md)). Before 4.0.0 it was a separate
-`comfyfetch` command, with the same verbs, flags, output and exit codes.
+The code is `comfyctl/fetch/`, mounted as the `fetch` group of
+[comfyctl](README.md). Before 4.0.0 it was a separate `comfyfetch` command, with
+the same verbs, flags, output and exit codes, and until 6.0.0 its code was the
+separate `comfyfetch` package in `services/fetch/`.
 
-Python 3.13 on Alpine — PyYAML and Typer — as a ~102 MB image **or** a CLI you
-install directly:
+Python 3.13 on Alpine — PyYAML and Typer — as a ~99 MB image (`comfyctl`) **or**
+a CLI you install directly:
 
 ```sh
-uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v5.0.0#subdirectory=services/comfyctl' comfyctl fetch --help
+uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v6.0.0#subdirectory=services/comfyctl' comfyctl fetch --help
 ```
 
 Pin the tag, as above. An unpinned line follows `main`, and that's how 3.x users
 of the old `comfyfetch` line broke when 4.0.0 renamed the command.
 
-**Never let an installer resolve `comfyfetch` from a package index.** Neither
-`comfyfetch` nor `comfyctl` is registered on PyPI, so anyone could publish a
-package under either name. The `uvx` line above takes comfyfetch from the same
-git commit. From a release, pass the comfyfetch wheel explicitly with
-`--with <comfyfetch wheel url>`, as [services/comfyctl](../comfyctl/README.md#install)
-shows. `pip install` of the git subdirectory, or a bare `comfyctl` wheel with no
-`--with`, looks comfyfetch up on PyPI instead.
+**Never install `comfyctl` from a package index.** It isn't registered on PyPI,
+so anyone could publish a package under that name. Use the `uvx` line above, or
+the release wheel by URL, as [the install section](README.md#install) shows.
 
 The image is for automated deployment; the CLI is for managing your own
 configuration, and for agents. They are the same code and the same behaviour.
@@ -149,20 +145,20 @@ defect one step further out.
 
 ## Versions
 
-`comfyfetch` and `comfyctl` share the repository's version — one number covers
-the images, the wheels and the skills plugin. It lives in `VERSION`, and both
-`pyproject.toml` files must state the same value; CI checks that on every push,
-and **refuses a tag that disagrees**, so a `v1.2.0` tag cannot ship `1.1.0` code.
+`comfyctl` shares the repository's version — one number covers the images, the
+wheel and the skills plugin. It lives in `VERSION`, and
+`services/comfyctl/pyproject.toml` must state the same value; CI checks that on
+every push, and **refuses a tag that disagrees**, so a `v1.2.0` tag cannot ship
+`1.1.0` code.
 
 So this version does not say "what changed in the CLI" — `CHANGELOG.md` does.
 That trade buys one release page describing the whole repo instead of two
 describing halves of it; see `VERSIONING.md`.
 
-A release publishes `fetch:1.2.0` and `fetch:1.2` alongside the commit-sha and
-`latest` tags an ordinary push produces, plus the `comfyctl` and `comfyfetch`
-wheels as release assets. Install them as a pair, passing the comfyfetch wheel
-with `--with` so it never comes from an index; see
-[services/comfyctl](../comfyctl/README.md#install).
+A release publishes `comfyctl:1.2.0` and `comfyctl:1.2` alongside the commit-sha
+and `latest` tags an ordinary push produces, plus the `comfyctl` wheel as a
+release asset; see [the install section](README.md#install). Up to 5.x the image
+was `fetch`, and the release also shipped a `comfyfetch` wheel.
 
 **Pin by digest** — the semver tags say whether a digest change was a patch or a
 break; they are not themselves a safe pin, because a tag can move.
@@ -178,7 +174,7 @@ config rather than trusting CI:
 ```yaml
 initContainers:
   - name: check
-    image: ghcr.io/pixeloven/comfyui/fetch@sha256:...
+    image: ghcr.io/pixeloven/comfyui/comfyctl@sha256:...
     command: ["comfyctl", "fetch"]
     args: ["check", "/config/comfy.yaml", "/config/locks/common.yaml", "--profile", "common"]
 ```
@@ -270,31 +266,33 @@ Every push to `main` publishes the image and prints its digest to the workflow
 run summary:
 
 ```
-ghcr.io/pixeloven/comfyui/fetch:<commit-sha>
-ghcr.io/pixeloven/comfyui/fetch:latest
+ghcr.io/pixeloven/comfyui/comfyctl:<commit-sha>
+ghcr.io/pixeloven/comfyui/comfyctl:latest
 ```
 
 **Pin by digest, not by tag.** `latest` moves, and a fetcher that changes under a
 deployment is the opposite of what a lock is for:
 
 ```
-ghcr.io/pixeloven/comfyui/fetch@sha256:...
+ghcr.io/pixeloven/comfyui/comfyctl@sha256:...
 ```
 
 Docker:
 
 ```sh
 docker run --rm -v comfyui:/workspace -v "$PWD/comfy-lock.yaml:/lock.yaml:ro" \
-  ghcr.io/pixeloven/comfyui/fetch:latest /lock.yaml /workspace --apply
+  ghcr.io/pixeloven/comfyui/comfyctl:latest fetch fetch /lock.yaml /workspace --apply
 ```
 
-The entrypoint is `comfyctl fetch fetch`, so appended arguments go to the
-`fetch` verb. Any other verb replaces the entrypoint:
+The entrypoint is `comfyctl`, so appended arguments name the group and the verb,
+and any verb runs without replacing it:
 
 ```sh
-docker run --rm --entrypoint comfyctl -v "$PWD:/w:ro" \
-  ghcr.io/pixeloven/comfyui/fetch:latest fetch check /w/comfy.yaml /w/comfy-lock.yaml
+docker run --rm -v "$PWD:/w:ro" \
+  ghcr.io/pixeloven/comfyui/comfyctl:latest fetch check /w/comfy.yaml /w/comfy-lock.yaml
 ```
+
+Up to 5.x this was the `fetch` image, whose entrypoint was `comfyctl fetch fetch`.
 
 ## Carrying your own metadata
 
@@ -314,7 +312,7 @@ models:
         x-generation: "2511"
 ```
 
-comfyfetch ignores their content entirely. They exist so the file you already
+`comfyctl fetch` ignores their content entirely. They exist so the file you already
 maintain can carry what your deployment needs.
 
 ## Validating

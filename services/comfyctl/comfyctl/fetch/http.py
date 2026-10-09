@@ -31,7 +31,7 @@ import importlib.metadata
 import httpx
 
 try:
-    _VERSION = importlib.metadata.version("comfyfetch")
+    _VERSION = importlib.metadata.version("comfyctl")
 except importlib.metadata.PackageNotFoundError:  # running from a source tree
     _VERSION = "0"
 

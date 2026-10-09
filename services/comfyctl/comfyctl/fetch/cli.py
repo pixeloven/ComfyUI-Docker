@@ -63,7 +63,7 @@ OutputOpt = Annotated[Mode, typer.Option(
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(importlib.metadata.version("comfyfetch"))
+        typer.echo(importlib.metadata.version("comfyctl"))
         raise typer.Exit()
 
 

@@ -22,7 +22,7 @@ dependencies = ["mcp==2.2.0", "httpx2>=2.5", "uvicorn>=0.31.1", "typer>=0.16.0"]
 convert = ["playwright==1.63.0"]
 
 # Not a wheel: comfyrelay ships as the mcp image (#136), and the release builds
-# only the comfyctl and comfyfetch wheels. No console script either: the command is `comfyctl relay`, which mounts
+# only the comfyctl wheel. No console script either: the command is `comfyctl relay`, which mounts
 # `comfyrelay.cli.app` as a group when this package is installed.
 
 [build-system]

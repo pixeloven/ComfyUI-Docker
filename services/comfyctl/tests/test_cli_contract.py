@@ -6,7 +6,7 @@ every other test passes, so they are asserted rather than assumed.
 import json
 
 import pytest
-from comfyfetch.cli import app
+from comfyctl.fetch.cli import app
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -94,7 +94,7 @@ def test_version_is_reportable():
     import importlib.metadata
     r = runner.invoke(app, ["--version"])
     assert r.exit_code == 0
-    assert r.stdout.strip() == importlib.metadata.version("comfyfetch")
+    assert r.stdout.strip() == importlib.metadata.version("comfyctl")
 
 
 def test_progress_goes_to_stderr_not_stdout(fixtures, tmp_path):
@@ -118,13 +118,13 @@ def test_json_mode_emits_no_progress(fixtures, tmp_path):
 
 @pytest.mark.parametrize("verb", ["build", "resolve", "fetch", "check", "facts"])
 def test_module_entry_point_sees_every_verb(verb):
-    """`python -m comfyfetch.cli <verb>` must reach every verb.
+    """`python -m comfyctl.fetch.cli <verb>` must reach every verb.
 
     Regression: the `__main__` guard sat above `build` and `facts`, so it ran
     the app before they were registered and answered "No such command 'build'".
     """
     import subprocess
     import sys
-    r = subprocess.run([sys.executable, "-m", "comfyfetch.cli", verb, "--help"],
+    r = subprocess.run([sys.executable, "-m", "comfyctl.fetch.cli", verb, "--help"],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr

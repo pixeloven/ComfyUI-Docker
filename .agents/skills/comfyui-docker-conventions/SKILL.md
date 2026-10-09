@@ -1,6 +1,6 @@
 ---
 name: comfyui-docker-conventions
-description: ComfyUI-Docker's repository facts and project invariants — bake targets and profiles, image tag model, CUDA/torch/SageAttention coupling, data volumes, entrypoint UID contract, container standards, dependency rules, verification commands. Load before editing a Dockerfile, docker-bake.hcl, entrypoint/startup, an example compose file, or the Python tooling under services/ (comfyctl, fetch, comfyrelay).
+description: ComfyUI-Docker's repository facts and project invariants — bake targets and profiles, image tag model, CUDA/torch/SageAttention coupling, data volumes, entrypoint UID contract, container standards, dependency rules, verification commands. Load before editing a Dockerfile, docker-bake.hcl, entrypoint/startup, an example compose file, or the Python tooling under services/ (comfyctl and its fetch group, comfyrelay).
 ---
 
 # ComfyUI-Docker conventions
@@ -16,10 +16,9 @@ this skill disagree, the file is right, so fix the skill in the same change.
 | `services/runtime/` | Base images: `dockerfile.cuda.runtime` (`nvidia/cuda:13.0.2-base-ubuntu24.04`) and `dockerfile.cpu.runtime` (`ubuntu:24.04`, used for cpu, **rocm and xpu**) |
 | `services/comfy/core/` | `dockerfile.comfy.core` (a builder stage, then the `core` stage), `entrypoint.sh`, `startup.sh` |
 | `services/comfy/complete/` | `dockerfile.comfy.cuda.complete`, built `FROM core`, and `extra-requirements.txt` |
-| `services/pyproject.toml`, `services/uv.lock` | The uv workspace: a virtual root (it publishes nothing) whose members are `fetch`, `comfyctl` and `comfyrelay`, with one lock. `uv run pytest -q` from `services/` runs every member's tests. |
-| `services/comfyrelay/` | `comfyrelay`, the first-party MCP sidecar (#103), mounted as `comfyctl relay` (`serve`, `probe`, `docs build`) only when installed: comfyctl doesn't depend on it. SDK `mcp==2.2.0` (`MCPServer`), pinned exactly. It is the `mcp` image since 5.0.0 (#136): bake target `mcp`, `dockerfile.comfy.relay`, context `services/`, installed from `uv.lock`, on a digest-pinned `python:3.13-slim` with `tini` (apt-pinned) as PID 1, `USER 1000:1000`, any UID, `:9000/mcp`. The SDK's own `mcp` CLI is removed from its venv. The image builds the docs index for `docs_search` in a `docs` stage (#134): Comfy-Org/docs at the `COMFY_DOCS_SHA` bake pin, fetched with git, plus the guides in `skills/comfyui-workflows/`, which arrive as the `skills` named context. The image ships the index, the markdown it indexed, `/licenses/NOTICE` (non-affiliation statement included) and the GPL-3.0 text, and is labelled `MIT AND GPL-3.0`. The NOTICE and the guides' URLs name the `GIT_SHA` build arg (CI passes `github.sha`; without it, the tag `v<VERSION>`). The server refuses a token under 32 characters, and admits at most `COMFYUI_MCP_MAX_LARGE_REQUESTS` (default 2) request bodies over 1 MiB at once. There is no comfyrelay wheel: the release builds only the comfyctl and comfyfetch wheels. CI's `relay` job probes the image against a booted core-cpu with `tests/relay/run.sh`, and `build-mcp` publishes it only after that passes. |
-| `services/fetch/` | `comfyfetch`, a library with no console script: its Typer app (verbs `resolve`, `fetch`, `check`, `build`, `facts`), its bundled JSON schemas, its tests, and the fetch image (`python:3.13-alpine`, entrypoint `comfyctl fetch fetch`) |
-| `services/comfyctl/` | `comfyctl`, the umbrella CLI. It mounts comfyfetch's app as the `fetch` group rather than reimplementing it. Its README states the conventions every group shares: `--output auto\|plain\|json`, the result on stdout, and exits 0/1/2. It pins `comfyfetch==<VERSION>`. |
+| `services/pyproject.toml`, `services/uv.lock` | The uv workspace: a virtual root (it publishes nothing) whose members are `comfyctl` and `comfyrelay`, with one lock. `uv run pytest -q` from `services/` runs every member's tests. |
+| `services/comfyrelay/` | `comfyrelay`, the first-party MCP sidecar (#103), mounted as `comfyctl relay` (`serve`, `probe`, `docs build`) only when installed: comfyctl doesn't depend on it. SDK `mcp==2.2.0` (`MCPServer`), pinned exactly. It is the `mcp` image since 5.0.0 (#136): bake target `mcp`, `dockerfile.comfy.relay`, context `services/`, installed from `uv.lock`, on a digest-pinned `python:3.13-slim` with `tini` (apt-pinned) as PID 1, `USER 1000:1000`, any UID, `:9000/mcp`. The SDK's own `mcp` CLI is removed from its venv. The image builds the docs index for `docs_search` in a `docs` stage (#134): Comfy-Org/docs at the `COMFY_DOCS_SHA` bake pin, fetched with git, plus the guides in `skills/comfyui-workflows/`, which arrive as the `skills` named context. The image ships the index, the markdown it indexed, `/licenses/NOTICE` (non-affiliation statement included) and the GPL-3.0 text, and is labelled `MIT AND GPL-3.0`. The NOTICE and the guides' URLs name the `GIT_SHA` build arg (CI passes `github.sha`; without it, the tag `v<VERSION>`). The server refuses a token under 32 characters, and admits at most `COMFYUI_MCP_MAX_LARGE_REQUESTS` (default 2) request bodies over 1 MiB at once. There is no comfyrelay wheel: the release builds only the comfyctl wheel. CI's `relay` job probes the image against a booted core-cpu with `tests/relay/run.sh`, and `build-mcp` publishes it only after that passes. |
+| `services/comfyctl/` | `comfyctl`, the umbrella CLI and the one wheel a release ships. `comfyctl/fetch/` is the `fetch` group (verbs `resolve`, `fetch`, `check`, `build`, `facts`) with its bundled JSON schemas, mounted from its own Typer app; it was the separate `comfyfetch` package (`services/fetch/`) until 6.0.0 absorbed it (#197). `FETCH.md` documents it. Its README states the conventions every group shares: `--output auto\|plain\|json`, the result on stdout, and exits 0/1/2. `dockerfile.comfy.ctl` is the `comfyctl` image (bake target `comfyctl`, context `services/`, installed from `uv.lock`, `python:3.13-alpine`, `USER 1000`, entrypoint `comfyctl`), which replaced the `fetch` image. |
 | `comfy.yaml`, `comfy-lock.yaml`, `locks/` | The model manifest (intent), the generated lock (resolution), and the derived profile locks (`locks/preview.yaml`) |
 | `examples/{core-gpu,complete-gpu,core-cpu,core-amd,core-intel}/` | One standalone Compose deployment per profile, each with `.env.example` and `extra_model_paths.yaml` |
 | `examples/kubernetes/` | A generic Kubernetes deployment of `core:cpu-latest` (Deployment running as 1000:1000, seven PVCs, a ClusterIP Service), plus `with-mcp/`: an opt-in strategic-merge patch that adds the `mcp` sidecar, and a placeholder Secret for its token. `kubectl apply -f examples/kubernetes/` doesn't apply `with-mcp/` |
@@ -38,7 +37,7 @@ Images are `ghcr.io/pixeloven/comfyui/<name>`. The bake targets:
 | `core` | `core-{cuda,cpu,rocm,xpu}` | ComfyUI plus torch from `TORCH_INDEX` = `cu130` / `cpu` / `rocm7.2` / `xpu` |
 | `cuda` | `runtime-cuda`, `core-cuda`, `complete-cuda` | `complete` = core + `extra-requirements.txt`, portable across CUDA GPUs |
 | `cuda-arch` | `complete-cuda-sm{80,86,89,90,120}` | Complete + one SageAttention 2.2.0 wheel per compute capability. Built separately so an ABI break cannot block the generic CUDA images. |
-| `mcp`, `fetch` | `mcp`, `fetch` | Independent of the runtime images |
+| `mcp`, `comfyctl` | `mcp`, `comfyctl` | Independent of the runtime images |
 | (none) | `mcp-convert` | `mcp` plus Playwright and Chromium's headless shell, for UI-to-API conversion (#167): the same Dockerfile with `RELAY_CONVERT=1`, conversion on (`COMFYUI_MCP_CONVERT=1`). In `all`; CI's `relay-convert` job probes it and `build-mcp-convert` publishes it, apart from `relay` and `build-mcp`, so it never holds back `mcp`; the release needs all four |
 | `all` | all of the above | |
 
@@ -66,7 +65,7 @@ These come from `VERSIONING.md` and the `context` job in `ci.yml`. A tag answers
 | `<runtime>-X.Y.Z` | our packaging, released | a `vX.Y.Z` tag |
 | `<runtime>-nightly` | upstream ComfyUI **master**, resolved to a commit | `nightly.yml`, 02:00 UTC; Sundays bypass cache |
 
-`mcp` and `fetch` use the same scheme without the runtime prefix, and `fetch`
+`mcp` and `comfyctl` use the same scheme without the runtime prefix, and `comfyctl`
 also gets `X.Y`. A PR build never pushes. **What ComfyUI is inside** is stated
 only by the `org.opencontainers.image.version` label, which is set from
 `COMFYUI_VERSION` (tag, branch or commit SHA; a release requires `vX.Y.Z`).
@@ -127,8 +126,9 @@ There is no date tag.
 
 - **Base images:** official `nvidia/cuda` for CUDA. `ubuntu:24.04` for cpu, rocm and xpu,
   with the accelerator coming from PyTorch's official wheel index (not an official
-  Python image). `python:3.13-slim` for `mcp` (comfyrelay), and `python:*-alpine` for `fetch`.
-  Only the `mcp` image pins its bases by digest; `nvidia/cuda:13.0.2-base-ubuntu24.04`,
+  Python image). `python:3.13-slim` for `mcp` (comfyrelay), and `python:*-alpine` for `comfyctl`.
+  Only the `mcp` image pins its bases by digest (the `comfyctl` image's build-only uv stage
+  is the same digest-pinned uv); `nvidia/cuda:13.0.2-base-ubuntu24.04`,
   `ubuntu:24.04` and `python:3.13-alpine` are pinned by tag alone.
 - **Multi-stage:** the venv, ComfyUI and torch are built in `builder` and copied into
   `core`. The runtime base keeps `build-essential` and `python3-dev`.
@@ -147,7 +147,7 @@ There is no date tag.
   `/app/custom_nodes` volume (through Manager or a mount). `complete` pre-installs the
   Python *dependencies* common nodes need, because a missing import crash-loops ComfyUI.
   `comfy.yaml` covers **models only** today. `comfy-lock.yaml` has a `custom_nodes`
-  section in comfy-cli's shape, but `comfyfetch` does not act on it.
+  section in comfy-cli's shape, but `comfyctl fetch` does not act on it.
 - Pins that move only on purpose: `COMFYUI_VERSION`, the SageAttention URL and sha256 values,
   `COMFY_DOCS_SHA` (CI's `docs-pin` job fails a PR whose pin isn't on Comfy-Org/docs `main`),
   comfyrelay's exact `mcp==` pin and `services/uv.lock`, `tini`'s apt version in

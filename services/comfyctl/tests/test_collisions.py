@@ -14,10 +14,10 @@ import pathlib
 
 import pytest
 import yaml
-from comfyfetch import build, profiles
+from comfyctl.fetch import build, profiles
 from typer.testing import CliRunner
 
-from comfyfetch.cli import app
+from comfyctl.fetch.cli import app
 
 runner = CliRunner()
 

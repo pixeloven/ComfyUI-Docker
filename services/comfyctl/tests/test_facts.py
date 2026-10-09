@@ -14,7 +14,7 @@ import respx
 import yaml
 from httpx import Response
 
-from comfyfetch import facts
+from comfyctl.fetch import facts
 
 FIX = pathlib.Path(__file__).parent / "fixtures" / "facts"
 
@@ -182,7 +182,7 @@ def test_headers_can_be_supplied_instead_of_read_from_a_store(civitai, tmp_path)
     """
     from typer.testing import CliRunner
 
-    from comfyfetch.cli import app
+    from comfyctl.fetch.cli import app
 
     sources = tmp_path / "models"
     sources.mkdir()
@@ -212,7 +212,7 @@ def test_headers_and_store_are_mutually_exclusive(tmp_path):
     """Two sources for one input is a wrong request, not a merge."""
     from typer.testing import CliRunner
 
-    from comfyfetch.cli import app
+    from comfyctl.fetch.cli import app
 
     (tmp_path / "m").mkdir()
     lock = tmp_path / "l.yaml"

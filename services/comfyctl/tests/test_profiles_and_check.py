@@ -1,8 +1,8 @@
 """Profile expansion and manifest/lock consistency. All offline."""
 import pytest
 import yaml
-from comfyfetch import check as C
-from comfyfetch import lockfile, profiles
+from comfyctl.fetch import check as C
+from comfyctl.fetch import lockfile, profiles
 
 MANIFEST = {
     "models": [{"name": "a"}, {"name": "b"}],

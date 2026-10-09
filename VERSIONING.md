@@ -14,14 +14,13 @@ GitHub Release:
 | `complete` / `core` / `runtime` images | GHCR | `@sha256:…`, reads the semver tag |
 | `mcp` image (comfyrelay) | GHCR | `@sha256:…` |
 | `mcp-convert` image (comfyrelay with a headless Chromium) | GHCR | `@sha256:…` |
-| `fetch` image (`comfyctl fetch`) | GHCR | `@sha256:…` |
-| `comfyctl` and `comfyfetch` **wheels** | release assets, installed as a pair | URL + the published `SHA256SUMS` |
+| `comfyctl` image (the CLI, including `comfyctl fetch`) | GHCR | `@sha256:…` |
+| `comfyctl` **wheel** | a release asset | URL + the published `SHA256SUMS` |
 | skills plugin | the git tag | `@v1.2.3` |
 
-The version lives in `VERSION`. `services/fetch/pyproject.toml`,
-`services/comfyctl/pyproject.toml` (its version, and its `comfyfetch==` pin),
+The version lives in `VERSION`. `services/comfyctl/pyproject.toml`,
 `services/comfyrelay/pyproject.toml`, `.claude-plugin/plugin.json`,
-`package.json`, and the `comfyfetch`, `comfyctl` and `comfyrelay` entries in
+`package.json`, and the `comfyctl` and `comfyrelay` entries in
 `services/uv.lock` must state the same number — checked on **every push**, not
 at release time, because drift found on the tag is drift found too late.
 comfyrelay ships as the `mcp` and `mcp-convert` images, not as a wheel, and they report
@@ -140,8 +139,7 @@ Before tagging, the lead session runs agent tasks T1–T6 against comfyrelay and
 
 ```sh
 echo 1.2.3 > VERSION
-# match it in services/fetch/pyproject.toml, services/comfyctl/pyproject.toml (version
-# AND its comfyfetch==1.2.3 pin), services/comfyrelay/pyproject.toml,
+# match it in services/comfyctl/pyproject.toml, services/comfyrelay/pyproject.toml,
 # .claude-plugin/plugin.json and package.json
 (cd services && uv lock)   # after the pyproject.toml edits: uv.lock copies the versions
 # add a dated `## 1.2.3 — YYYY-MM-DD` section to CHANGELOG.md
@@ -161,10 +159,10 @@ different commit than its wheel.
 
 **Push the tag. Never create the GitHub Release by hand.** The tag is the
 trigger; CI does the rest — it checks every version file agrees with the tag,
-builds every image from that one commit, builds and *attests* both wheels, and
-creates the Release with `comfyctl-<ver>-py3-none-any.whl`,
-`comfyfetch-<ver>-py3-none-any.whl`, `SHA256SUMS` and `IMAGE-DIGESTS.txt`
-attached.
+builds every image from that one commit, builds and *attests* the wheel, and
+creates the Release with `comfyctl-<ver>-py3-none-any.whl`, `SHA256SUMS` and
+`IMAGE-DIGESTS.txt` attached. Up to 5.x it also attached a
+`comfyfetch-<ver>-py3-none-any.whl`.
 
 `gh release create` looks equivalent and is not. CI refuses to write into a
 Release that already exists — *"releases are immutable"* — so creating one by

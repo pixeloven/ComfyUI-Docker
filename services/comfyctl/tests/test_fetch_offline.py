@@ -19,7 +19,7 @@ import httpx
 import pytest
 import respx
 import yaml
-from comfyfetch import fetch
+from comfyctl.fetch import fetch
 
 URL = "https://example.invalid/m.safetensors"
 BODY = b"weights, allegedly" * 1000

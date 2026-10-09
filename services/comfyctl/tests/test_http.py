@@ -11,7 +11,7 @@ import pytest
 import respx
 from httpx import Response
 
-from comfyfetch import auth, http, resolve
+from comfyctl.fetch import auth, http, resolve
 
 
 @respx.mock

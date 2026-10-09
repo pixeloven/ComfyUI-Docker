@@ -15,13 +15,15 @@ models/  --comfyctl fetch build-->  comfy.yaml  --comfyctl fetch resolve-->  com
 The command is `comfyctl fetch <verb>`. Up to 3.x it was `comfyfetch <verb>`, with
 the same verbs and flags. 4.0.0 removed that command and left no alias, so
 rewrite any old invocation you find. Without installing anything, pinned to a tag:
-`uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v5.0.0#subdirectory=services/comfyctl' comfyctl fetch --help`.
+`uvx --from 'git+https://github.com/pixeloven/ComfyUI-Docker@v6.0.0#subdirectory=services/comfyctl' comfyctl fetch --help`.
+An older `…#subdirectory=services/fetch` line is gone with 6.0.0: use `services/comfyctl`.
 
-**Never let an installer resolve `comfyfetch` from a package index.** Neither
-`comfyctl` nor `comfyfetch` is registered on PyPI. Use the `uvx` line above, which
-takes comfyfetch from the same commit, or install the release's `comfyctl` wheel
-with `--with <comfyfetch wheel url>`. Don't use `pip install` on the git
-subdirectory, or a `comfyctl` wheel on its own.
+**Never install `comfyctl` from a package index.** It isn't registered on PyPI.
+Use the `uvx` line above, or install the release's `comfyctl` wheel by its URL:
+one wheel since 6.0.0, with no `--with` (there is no `comfyfetch` wheel any more).
+In a container, run the `ghcr.io/pixeloven/comfyui/comfyctl` image, whose
+entrypoint is `comfyctl`: `<image> fetch fetch /lock.yaml /app --apply`. It
+replaced the `fetch` image in 6.0.0.
 
 - **`fetch` is a dry run by default.** `comfyctl fetch fetch <lock> <ComfyUI root>`
   only reports; add `--apply` to download. The root is the ComfyUI root, not

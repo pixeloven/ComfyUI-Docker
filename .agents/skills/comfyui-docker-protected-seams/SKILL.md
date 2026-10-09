@@ -13,13 +13,12 @@ registry is what they check against.
 
 ### 1. Release line and publish paths
 
-- **Pattern:** `VERSION`; the version in `services/fetch/pyproject.toml`,
-  `services/comfyctl/pyproject.toml` (and its `comfyfetch==` pin),
+- **Pattern:** `VERSION`; the version in `services/comfyctl/pyproject.toml`,
   `services/comfyrelay/pyproject.toml`, `.claude-plugin/plugin.json`,
-  `package.json`, and the `comfyfetch`, `comfyctl` and `comfyrelay` entries in
+  `package.json`, and the `comfyctl` and `comfyrelay` entries in
   `services/uv.lock`; the `context` and `release` jobs in `ci.yml` (including
   which workspace packages the release builds wheels for); `IMAGE_LABEL`,
-  `PUBLISH_LATEST`, `IMAGE_VERSION`, `FETCH_VERSION` and every `tags = [...]` in
+  `PUBLISH_LATEST`, `IMAGE_VERSION`, `COMFYCTL_VERSION` and every `tags = [...]` in
   `docker-bake.hcl`, and which targets `group "all"` holds; comfyctl's
   dependencies; anything in `nightly.yml` that sets tags.
 - **Risk:** a tag starts meaning two things. The nightly moving `*-latest` hands every
@@ -40,9 +39,9 @@ registry is what they check against.
 
 ### 3. Manifest and lock format
 
-- **Pattern:** `services/fetch/comfyfetch/schemas/*.json`, `schema.py`, `lockfile.py`,
+- **Pattern:** `services/comfyctl/comfyctl/fetch/schemas/*.json`, `schema.py`, `lockfile.py`,
   any change to which keys `comfy.yaml` or a lock accepts, and CLI verbs or flags
-  (`comfyctl`, and the comfyfetch app it mounts as `comfyctl fetch`).
+  (`comfyctl`, including its `fetch` group).
 - **Risk:** consumers pin these formats. `VERSIONING.md` says a format break is
   **major**, however small the diff.
 - **Response:** flag it and classify it as major or not. Update `skills/comfy-manifest/SKILL.md`
@@ -60,9 +59,11 @@ registry is what they check against.
   the `mcp-convert` image's (all of those, plus `COMFYUI_MCP_CONVERT` on by default,
   `COMFYUI_MCP_CONVERT_PAGES` and its default, a writable `/tmp`, and which formats
   `template_get`, `workflow_validate` and `workflow_run` take; *The `mcp-convert` Image*),
-  the fetch image's `ENTRYPOINT` in `dockerfile.comfy.fetch` (`comfyctl fetch fetch`:
-  Jobs and Compose append `/lock.yaml /app --apply` to it, and overrides name the
-  binary), the permission steps in `dockerfile.comfy.core`, the volume mounts in
+  the `comfyctl` image's `ENTRYPOINT` in `dockerfile.comfy.ctl` (`comfyctl`: Jobs
+  and Compose append `fetch fetch /lock.yaml /app --apply` to it; it replaced the
+  `fetch` image, whose entrypoint was `comfyctl fetch fetch`, in 6.0.0), its labels
+  (`org.opencontainers.image.source`, `.description` and `.licenses`, and no
+  `.version`, because no ComfyUI is inside), the permission steps in `dockerfile.comfy.core`, the volume mounts in
   `examples/*/docker-compose.yml`, and removing a bake target, image, or example.
 - **Risk:** a deployment that worked breaks on `docker compose pull`, or only under
   a UID nobody tested. That includes Kubernetes `runAsUser` deployments, which
@@ -75,7 +76,7 @@ registry is what they check against.
 
 - **Pattern:** `secrets.*` in workflows (today `HF_TOKEN`, used by the fetch tests,
   and `GITHUB_TOKEN`), the `auth:` map in `comfy.yaml` (values must be `${ENV_VAR}`),
-  `services/fetch/comfyfetch/auth.py`, and any `ENV`, `ARG` or file in an image
+  `services/comfyctl/comfyctl/fetch/auth.py`, and any `ENV`, `ARG` or file in an image
   that could carry a token.
 - **Risk:** a credential baked into a public image or committed to a public repo.
 - **Response:** flag it. Credentials are resolved from the environment by host, and
