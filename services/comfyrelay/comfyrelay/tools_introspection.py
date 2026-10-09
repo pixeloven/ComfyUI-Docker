@@ -84,6 +84,8 @@ INACTIVE_MODES = frozenset({2, 4})
 # names the whole models root, so it would list every model a second time.
 NOT_MODEL_FOLDERS = frozenset({"custom_nodes", "download_model_base"})
 FETCH_CONCURRENCY = 8
+# A node's or template's display name, as ComfyUI gives it, is cut to this width wherever the relay passes it on.
+DISPLAY_NAME_MAX_CHARS = 120
 # A node's help page is read up to this many bytes. The longest in comfyui-embedded-docs 0.5.12 is about 11 KB.
 HELP_MAX_BYTES = 64 * 1024
 # Help is optional detail: node_describe's help fetches, all of a call's together, get this long; then help is left
@@ -223,7 +225,7 @@ def _node_search(relay: Relay) -> Callable[..., Any]:
             results=[
                 NodeHit(
                     class_type=class_type,
-                    display_name=str(node.get("display_name") or class_type),
+                    display_name=_capped(str(node.get("display_name") or class_type), DISPLAY_NAME_MAX_CHARS),
                     category=str(node.get("category") or ""),
                     summary=_one_line(node.get("description")),
                     pack=_pack(node),
@@ -489,7 +491,7 @@ def _spec(class_type: str, info: dict[str, Any], max_options: int) -> NodeSpec:
     )
     return NodeSpec(
         class_type=class_type,
-        display_name=str(info.get("display_name") or class_type),
+        display_name=_capped(str(info.get("display_name") or class_type), DISPLAY_NAME_MAX_CHARS),
         category=str(info.get("category") or ""),
         description=info.get("description") or None,
         pack=_pack(info),
@@ -526,13 +528,17 @@ def _closest(query: str, by_key: dict[str, list[tuple[str, str]]], n: int = 5) -
     for key in keys:
         for ident, display in by_key[key]:
             seen.setdefault(ident, display)
-    return [{"id": ident, "display_name": display} for ident, display in list(seen.items())[:n]]
+    return [
+        {"id": ident, "display_name": _capped(display, DISPLAY_NAME_MAX_CHARS)}
+        for ident, display in list(seen.items())[:n]
+    ]
 
 
 # node_describe's class_types takes at most this many classes in one call.
 MAX_DESCRIBE_CLASSES = 20
-# A batch's nodes, as JSON with the indent an MCP client's text content has, stay within this many characters
-# (about 10k tokens), in the spirit of WORKFLOW_MAX_CHARS: help goes first, then whole classes.
+# A batch's nodes take at most this many characters of the answer's text, the indented JSON an MCP client gets
+# (about 10k tokens), in the spirit of WORKFLOW_MAX_CHARS: help goes first, then whole classes. The lists beside them
+# (unknown, failed, omitted) are at most 20 entries of fixed-width fields, plus the names the request itself gave.
 BATCH_MAX_CHARS = 40_000
 # The suggestions for a batch's unknown classes are optional detail too: their scan gets this long.
 SUGGEST_SECONDS = 5.0
@@ -655,18 +661,28 @@ async def _unknowns(comfyui: ComfyUIClient, missing: list[str]) -> list[UnknownC
         return [_unknown(name, [], f"the scan took over {SUGGEST_SECONDS:g}s") for name in missing]
 
 
+def _answer_chars(spec: NodeSpec) -> int:
+    """What the spec takes of the answer's text: its indented JSON, each line two levels deeper as an item of
+    `nodes`, and the separator after it."""
+    text = spec.model_dump_json(indent=2)
+    return len(text) + 4 * (text.count("\n") + 1) + 2
+
+
 def _within_budget(specs: list[NodeSpec]) -> tuple[list[NodeSpec], list[OmittedClass]]:
-    """The specs that fit BATCH_MAX_CHARS, in order. One that doesn't fit with its help is kept without it, and one
-    that doesn't fit without it either is omitted; later, smaller ones may still fit."""
+    """The specs that fit BATCH_MAX_CHARS, in the order asked. Over it, help goes first, from the last class back,
+    and only then whole classes: the ones that still fit are kept in order, and later, smaller ones may fit."""
+    sizes = [_answer_chars(spec) for spec in specs]
+    for i in reversed(range(len(specs))):
+        if sum(sizes) <= BATCH_MAX_CHARS:
+            break
+        if specs[i].help is not None:
+            specs[i].help = specs[i].help_path = specs[i].help_truncated = None
+            specs[i].help_omitted = f"left out to keep the batch within {BATCH_MAX_CHARS} characters; ask for it alone"
+            sizes[i] = _answer_chars(specs[i])
     kept: list[NodeSpec] = []
     omitted: list[OmittedClass] = []
     used = 0
-    for spec in specs:
-        size = len(spec.model_dump_json(indent=2))
-        if used + size > BATCH_MAX_CHARS and spec.help is not None:
-            spec.help = spec.help_path = spec.help_truncated = None
-            spec.help_omitted = f"the batch's answer would pass {BATCH_MAX_CHARS} characters; ask for it alone"
-            size = len(spec.model_dump_json(indent=2))
+    for spec, size in zip(specs, sizes, strict=True):
         if used + size > BATCH_MAX_CHARS:
             omitted.append(OmittedClass(class_type=spec.class_type, reason=f"over {BATCH_MAX_CHARS} characters"))
             continue
@@ -708,8 +724,8 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
         graph. Lists are cut to max_options, with a total. `help` is the node's help page, when it has one
         (help_truncated: cut at 64 KB). An unknown class fails with `unknown_node_class` and close `suggestions`.
         class_types (up to 20) answers {nodes, unknown, failed, omitted}: an unknown class goes in `unknown`, with that
-        code and its suggestions, and the call succeeds. Past 40,000 characters, help is left out (help_omitted), then
-        classes (omitted): ask for those alone.
+        code and its suggestions, and the call succeeds. Past 40,000 characters, help is left out (help_omitted)
+        before any class is (omitted): ask for those alone.
         """
         if (class_type is None) == (class_types is None):
             raise RelayError("invalid_arguments", "give exactly one of class_type or class_types")

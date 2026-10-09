@@ -736,17 +736,75 @@ async def test_help_slower_than_its_bound_is_left_out_with_the_reason(monkeypatc
     assert "help" not in batch["nodes"][0] and batch["nodes"][0]["help_omitted"].startswith("timeout")
 
 
-async def test_a_batch_past_its_budget_drops_help_then_omits_classes(monkeypatch):
-    """BATCH_MAX_CHARS bounds a batch's answer: what fits comes back in order, help is dropped before a class is,
-    and each class left out is named, to ask for alone. A class_type call is never cut."""
+def _spec_chars(node: dict) -> int:
+    return tools_introspection._answer_chars(tools_introspection.NodeSpec.model_validate(node))
+
+
+async def test_a_batch_measures_each_class_as_it_sits_in_the_answer():
+    """_answer_chars is what a class takes of the answer's text, nested in `nodes`: the cap holds on what the client
+    gets, not on each spec at the top level."""
+    result = await call("node_describe", {"class_types": ["KSampler", "OpenAIDalle3", "ResizeImageMaskNode"]})
+    nodes = result.structured_content["nodes"]
+    wrapper = len('{\n  "nodes": [\n') + len("\n  ]\n}") - 2  # the last item has no separator
+    assert len(result.content[0].text) == wrapper + sum(_spec_chars(n) for n in nodes)
+
+
+async def test_a_batch_over_its_budget_drops_help_from_the_last_class_back_before_omitting_any(monkeypatch):
+    help_md = {
+        "/docs/KSampler/en.md": httpx2.Response(200, text="k" * 3_000),
+        "/docs/OpenAIDalle3/en.md": httpx2.Response(200, text="d" * 30_000),
+    }
+    bare = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"], "include_help": False})
+    room = sum(_spec_chars(n) for n in bare["nodes"]) + 3_000 * 2  # both bare fit, and so does KSampler's help
+    monkeypatch.setattr(tools_introspection, "BATCH_MAX_CHARS", room)
+    got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **help_md)
+    ksampler, dalle = got["nodes"]
+    assert "omitted" not in got
+    assert len(ksampler["help"]) == 3_000 and "help_omitted" not in ksampler
+    assert "help" not in dalle and "ask for it alone" in dalle["help_omitted"]
+
+
+async def test_an_early_classs_help_never_costs_a_later_class_its_place(monkeypatch):
+    """KSampler with its help would fit, leaving too little for OpenAIDalle3; both fit without the help. A batch
+    drops the help, not the class (#198 re-review: 17 of 20 common classes came back with help, 3 omitted)."""
+    bare = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"], "include_help": False})
+    k_bare, d_bare = (_spec_chars(n) for n in bare["nodes"])
+    help_md = {"/docs/KSampler/en.md": httpx2.Response(200, text="k" * (d_bare // 2 + 400))}
+    monkeypatch.setattr(tools_introspection, "BATCH_MAX_CHARS", k_bare + d_bare + 300)  # + help_omitted
+    got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **help_md)
+    assert "omitted" not in got and [n["class_type"] for n in got["nodes"]] == ["KSampler", "OpenAIDalle3"]
+    assert "help" not in got["nodes"][0] and "ask for it alone" in got["nodes"][0]["help_omitted"]
+
+
+async def test_a_batch_still_over_its_budget_without_help_omits_classes(monkeypatch):
+    """What fits comes back in order, each class left out is named, to ask for alone; a class_type call is never
+    cut."""
     help_md = {"/docs/KSampler/en.md": httpx2.Response(200, text="x" * 30_000)}
-    bare = await call("node_describe", {"class_type": "KSampler", "include_help": False})
-    monkeypatch.setattr(tools_introspection, "BATCH_MAX_CHARS", len(bare.content[0].text) + 200)  # + help_omitted
+    bare = await ok("node_describe", {"class_type": "KSampler", "include_help": False})
+    monkeypatch.setattr(tools_introspection, "BATCH_MAX_CHARS", _spec_chars(bare) + 200)  # + help_omitted
     got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **help_md)
     (ksampler,) = got["nodes"]
     assert "help" not in ksampler and "ask for it alone" in ksampler["help_omitted"]
     assert [(o["class_type"], o["reason"].startswith("over ")) for o in got["omitted"]] == [("OpenAIDalle3", True)]
     assert len((await ok("node_describe", {"class_type": "KSampler"}, **help_md))["help"]) == 30_000
+
+
+async def test_display_names_are_cut_to_a_fixed_width_wherever_they_are_passed_on():
+    """ComfyUI's data is untrusted: a 200,000-character display name reaches no answer whole."""
+    cap = tools_introspection.DISPLAY_NAME_MAX_CHARS
+    long_node = {**OBJECT_INFO["KSampler"], "display_name": "Long " * 40_000}
+    info = {**OBJECT_INFO, "LongNode": long_node}
+    routes_ = {
+        "/object_info": httpx2.Response(200, json=info),
+        "/object_info/LongNode": httpx2.Response(200, json={"LongNode": long_node}),
+    }
+    hits = (await ok("node_search", {"query": "LongNode"}, **routes_))["results"]
+    assert hits[0]["class_type"] == "LongNode" and len(hits[0]["display_name"]) == cap
+    assert len((await ok("node_describe", {"class_type": "LongNode"}, **routes_))["display_name"]) == cap
+    (suggested,) = (await error("node_describe", {"class_type": "LongNod"}, **routes_))["suggestions"]
+    assert suggested["class_type"] == "LongNode" and len(suggested["display_name"]) == cap
+    batch = await ok("node_describe", {"class_types": ["LongNod"]}, **routes_)
+    assert [len(s["display_name"]) for s in batch["unknown"][0]["suggestions"]] == [cap]
 
 
 async def test_a_batch_within_its_budget_is_not_cut():
