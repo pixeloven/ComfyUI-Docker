@@ -4,9 +4,9 @@ A single comfy.yaml does not scale. At ~1,400 lines every model family
 conflicts with every other on edit, and there is no way to ship one family
 without the rest. `build` assembles the manifest from one file per lineage.
 
-The generated manifest stays COMMITTED rather than gitignored: comfyfetch,
+The generated manifest stays COMMITTED rather than gitignored: comfyctl,
 CI and any policy gate read it directly, and a build step between `git clone`
-and `comfyfetch check` is a step that gets skipped.
+and `comfyctl fetch check` is a step that gets skipped.
 
 WHAT A SOURCE FILE LOOKS LIKE
 

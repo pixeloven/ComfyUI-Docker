@@ -11,7 +11,7 @@ import pytest
 import respx
 from httpx import Response
 
-from comfyfetch import auth, http, resolve
+from comfyctl.fetch import auth, http, resolve
 
 
 @respx.mock
@@ -109,7 +109,7 @@ def test_the_user_agent_is_ours_and_not_the_stdlib_default():
     with http.request("https://example.com/a"):
         pass
     ua = route.calls[0].request.headers["user-agent"]
-    assert ua.startswith("comfyfetch/")
+    assert ua.startswith("comfyctl/")
     assert "urllib" not in ua.lower()
 
 

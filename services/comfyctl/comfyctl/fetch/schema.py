@@ -15,7 +15,7 @@ TWO LAYERS, deliberately separate:
 EXTENSIONS ARE NAMED, NOT ALLOWED. `additionalProperties: false` is what makes
 a typo an error, so it stays -- and `^x-` keys are permitted alongside it. That
 is the convention OpenAPI settled on, and it keeps "unknown bare key" a
-failure. comfyfetch ignores `x-` content entirely; it exists so a consumer can
+failure. comfyctl ignores `x-` content entirely; it exists so a consumer can
 carry its own metadata in the file it already maintains.
 """
 
@@ -30,7 +30,7 @@ import jsonschema
 
 def load(name: str) -> dict[str, Any]:
     """A bundled schema by name: `comfy` or `comfy-lock`."""
-    text = (resources.files("comfyfetch.schemas") / f"{name}.schema.json").read_text()
+    text = (resources.files("comfyctl.fetch.schemas") / f"{name}.schema.json").read_text()
     return json.loads(text)
 
 

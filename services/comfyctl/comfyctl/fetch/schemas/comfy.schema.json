@@ -98,7 +98,7 @@
               ],
               "patternProperties": {
                 "^x-": {
-                  "description": "Consumer extension. `additionalProperties: false` is what makes `instal:` an error instead of a silent no-op, so extensions have to be NAMED rather than allowed by relaxing it -- the convention OpenAPI settled on. comfyfetch ignores these; they exist so a consumer can carry its own metadata (trigger words, family generation, packaging) in the file it already maintains."
+                  "description": "Consumer extension. `additionalProperties: false` is what makes `instal:` an error instead of a silent no-op, so extensions have to be NAMED rather than allowed by relaxing it -- the convention OpenAPI settled on. comfyctl ignores these; they exist so a consumer can carry its own metadata (trigger words, family generation, packaging) in the file it already maintains."
                 }
               }
             }
@@ -106,7 +106,7 @@
         },
         "patternProperties": {
           "^x-": {
-            "description": "Consumer extension. `additionalProperties: false` is what makes `instal:` an error instead of a silent no-op, so extensions have to be NAMED rather than allowed by relaxing it -- the convention OpenAPI settled on. comfyfetch ignores these; they exist so a consumer can carry its own metadata (trigger words, family generation, packaging) in the file it already maintains."
+            "description": "Consumer extension. `additionalProperties: false` is what makes `instal:` an error instead of a silent no-op, so extensions have to be NAMED rather than allowed by relaxing it -- the convention OpenAPI settled on. comfyctl ignores these; they exist so a consumer can carry its own metadata (trigger words, family generation, packaging) in the file it already maintains."
           }
         }
       }

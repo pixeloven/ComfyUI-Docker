@@ -1,6 +1,6 @@
 """A group and a profile must never share a name.
 
-comfyfetch resolves both out of ONE namespace and the group wins, because
+comfyctl resolves both out of ONE namespace and the group wins, because
 `expand()` tests `member in known` before `member in profiles`. So a profile
 named after a group resolves the GROUP -- silently, with a self-consistent lock,
 correct hashes and a passing `check`.
@@ -14,10 +14,10 @@ import pathlib
 
 import pytest
 import yaml
-from comfyfetch import build, profiles
+from comfyctl.fetch import build, profiles
 from typer.testing import CliRunner
 
-from comfyfetch.cli import app
+from comfyctl.fetch.cli import app
 
 runner = CliRunner()
 

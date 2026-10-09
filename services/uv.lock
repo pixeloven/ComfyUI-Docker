@@ -10,7 +10,6 @@ resolution-markers = [
 [manifest]
 members = [
     "comfyctl",
-    "comfyfetch",
     "comfyrelay",
 ]
 
@@ -189,29 +188,6 @@ wheels = [
 name = "comfyctl"
 version = "5.2.0"
 source = { editable = "comfyctl" }
-dependencies = [
-    { name = "comfyfetch" },
-    { name = "typer" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "comfyfetch", editable = "fetch" },
-    { name = "typer", specifier = ">=0.16.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
-
-[[package]]
-name = "comfyfetch"
-version = "5.2.0"
-source = { editable = "fetch" }
 dependencies = [
     { name = "httpx" },
     { name = "jsonschema" },

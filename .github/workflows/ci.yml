@@ -5,9 +5,8 @@ on:
     branches: [ main ]
     tags:
       # ONE release line. `v1.2.3` publishes everything this repo produces --
-      # the ComfyUI images, the mcp image, the fetch image, the comfyctl and
-      # comfyfetch wheels, and the skills plugin -- from one commit, in one
-      # GitHub Release.
+      # the ComfyUI images, the mcp images, the comfyctl image, the comfyctl
+      # wheel, and the skills plugin -- from one commit, in one GitHub Release.
       #
       # There used to be two lines, and a `comfyfetch/v*` tag published only the
       # CLI. The result was a releases page where neither entry described the
@@ -48,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       images: ${{ steps.filter.outputs.images }}
-      fetch: ${{ steps.filter.outputs.fetch }}
+      comfyctl: ${{ steps.filter.outputs.comfyctl }}
       relay: ${{ steps.filter.outputs.relay }}
       bake: ${{ steps.filter.outputs.bake }}
       examples: ${{ steps.filter.outputs.examples }}
@@ -69,23 +68,20 @@ jobs:
             - 'services/runtime/**'
             - 'docker-bake.hcl'
             - '.github/workflows/ci.yml'
-          fetch:
-            - 'services/fetch/**'
+          comfyctl:
             - 'services/comfyctl/**'
+            - 'docker-bake.hcl'
             - 'services/pyproject.toml'
             - 'services/uv.lock'
             - 'comfy.yaml'
             - 'comfy-lock.yaml'
             - 'locks/**'
-            - 'services/fetch/comfyfetch/schemas/**'
-          # The mcp image (comfyrelay, since 5.0.0) installs all three
-          # workspace members from the one lock, so a change to any of them can
-          # break it. It also indexes the guides in skills/ into its docs index
-          # (#134).
+          # The mcp image (comfyrelay, since 5.0.0) installs both workspace
+          # members from the one lock, so a change to either can break it. It
+          # also indexes the guides in skills/ into its docs index (#134).
           relay:
             - 'services/comfyrelay/**'
             - 'services/comfyctl/**'
-            - 'services/fetch/**'
             - 'services/pyproject.toml'
             - 'services/uv.lock'
             - 'skills/**'
@@ -106,7 +102,8 @@ jobs:
   # every IMAGE_LABEL fell through its `|| 'latest'` branch, and the run
   # republished `core:cuda-latest` from a tag commit. That is the overwrite
   # PUBLISH_LATEST exists to prevent, bypassed because the label WAS `latest`.
-  # It went the other way too: a `v*` tag rebuilt and pushed `fetch:latest`.
+  # It went the other way too: a `v*` tag rebuilt and pushed `fetch:latest`
+  # (the image `comfyctl` replaced in 6.0.0).
   #
   # VERSIONING.md says the two lines move independently. This is where that
   # stops being a claim about intent.
@@ -117,10 +114,10 @@ jobs:
     outputs:
       image_version: ${{ steps.classify.outputs.image_version }}
       image_label: ${{ steps.classify.outputs.image_label }}
-      fetch_version: ${{ steps.classify.outputs.fetch_version }}
-      fetch_label: ${{ steps.classify.outputs.fetch_label }}
+      comfyctl_version: ${{ steps.classify.outputs.comfyctl_version }}
+      comfyctl_label: ${{ steps.classify.outputs.comfyctl_label }}
       build_images: ${{ steps.classify.outputs.build_images }}
-      build_fetch: ${{ steps.classify.outputs.build_fetch }}
+      build_comfyctl: ${{ steps.classify.outputs.build_comfyctl }}
       build_relay: ${{ steps.classify.outputs.build_relay }}
       publish_latest: ${{ steps.classify.outputs.publish_latest }}
       comfyui_version: ${{ steps.classify.outputs.comfyui_version }}
@@ -131,7 +128,7 @@ jobs:
 
     # The lock agrees with every pyproject.toml, or nothing publishes. Here rather
     # than only in validate-models because every publishing job needs this one:
-    # the release job tolerates a SKIPPED publish-fetch, which is what a failed
+    # the release job tolerates a SKIPPED publish-comfyctl, which is what a failed
     # validate-models produces.
     - uses: astral-sh/setup-uv@v10.0.1
     - name: services/uv.lock is current
@@ -140,14 +137,14 @@ jobs:
     - id: classify
       env:
         IMAGES_CHANGED: ${{ needs.changes.outputs.images }}
-        FETCH_CHANGED: ${{ needs.changes.outputs.fetch }}
+        COMFYCTL_CHANGED: ${{ needs.changes.outputs.comfyctl }}
         RELAY_CHANGED: ${{ needs.changes.outputs.relay }}
       run: |
         set -euo pipefail
 
         release_version=""
         image_version=""
-        fetch_version=""
+        comfyctl_version=""
 
         # The version lives in a file and the tag only selects it. A tag that
         # disagrees would ship 0.1.0 bytes as v0.2.0 with nothing downstream
@@ -177,7 +174,7 @@ jobs:
             # they tie the tag to every file that states the version.
             agree "${release_version}" "$(tr -d '[:space:]' < VERSION)" VERSION v
             image_version="${release_version}"
-            fetch_version="${release_version}"
+            comfyctl_version="${release_version}"
             ;;
           refs/tags/*)
             echo "::error::tag ${GITHUB_REF#refs/tags/} is not a release (expected vX.Y.Z)"
@@ -189,11 +186,9 @@ jobs:
         # too late. One repo, one number, and this is the ONE table of the files
         # that state it: a new versioned file is one row here.
         #
-        # The comfyfetch pin is a row because uv does not hold a workspace member
-        # to it: the lock stays green while the two wheels refuse to install
-        # together. services/uv.lock is NOT a row: the `uv lock --check` step
-        # above fails whenever the lock disagrees with either pyproject.toml,
-        # and those two are rows, so the lock is covered transitively.
+        # services/uv.lock is NOT a row: the `uv lock --check` step above fails
+        # whenever the lock disagrees with a member's pyproject.toml, and those
+        # are rows, so the lock is covered transitively.
         versions="$(python3 - <<'PY'
         import json, tomllib
 
@@ -201,15 +196,8 @@ jobs:
             with open(path, "rb") as f:
                 return tomllib.load(f)
 
-        def comfyfetch_pin():
-            deps = toml("services/comfyctl/pyproject.toml")["project"]["dependencies"]
-            pins = [d.split("==", 1)[1] for d in deps if d.startswith("comfyfetch==")]
-            return pins[0] if len(pins) == 1 else "<no single comfyfetch== pin>"
-
         rows = {
-            "services/fetch/pyproject.toml": lambda: toml("services/fetch/pyproject.toml")["project"]["version"],
             "services/comfyctl/pyproject.toml": lambda: toml("services/comfyctl/pyproject.toml")["project"]["version"],
-            "the comfyfetch pin in services/comfyctl/pyproject.toml": comfyfetch_pin,
             # Not a wheel, but the mcp image's server_info reports it.
             "services/comfyrelay/pyproject.toml": lambda: toml("services/comfyrelay/pyproject.toml")["project"]["version"],
             ".claude-plugin/plugin.json": lambda: json.load(open(".claude-plugin/plugin.json"))["version"],
@@ -233,7 +221,7 @@ jobs:
         # always a true statement about what was built.
         commit_sha="${GITHUB_SHA:0:8}"
         image_label="${image_version:-${commit_sha}}"
-        fetch_label="${fetch_version:-${commit_sha}}"
+        comfyctl_label="${comfyctl_version:-${commit_sha}}"
 
         main=false
         if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF}" = refs/heads/main ]; then
@@ -245,20 +233,20 @@ jobs:
         # built from a different commit than its wheel, which is exactly the
         # kind of thing nobody can debug six months later.
         build_images=false
-        build_fetch=false
+        build_comfyctl=false
         build_relay=false
         if [ -n "${release_version}" ]; then
           build_images=true
-          build_fetch=true
+          build_comfyctl=true
           # The mcp image is comfyrelay (#136): a release probes it too.
           build_relay=true
         elif [ "${main}" = true ]; then
           build_images=true
-          build_fetch=true
+          build_comfyctl=true
           build_relay=true
         else
           if [ "${IMAGES_CHANGED}" = true ]; then build_images=true; fi
-          if [ "${FETCH_CHANGED}" = true ]; then build_fetch=true; fi
+          if [ "${COMFYCTL_CHANGED}" = true ]; then build_comfyctl=true; fi
           if [ "${RELAY_CHANGED}" = true ]; then build_relay=true; fi
         fi
 
@@ -287,10 +275,10 @@ jobs:
         {
           echo "image_version=${image_version}"
           echo "image_label=${image_label}"
-          echo "fetch_version=${fetch_version}"
-          echo "fetch_label=${fetch_label}"
+          echo "comfyctl_version=${comfyctl_version}"
+          echo "comfyctl_label=${comfyctl_label}"
           echo "build_images=${build_images}"
-          echo "build_fetch=${build_fetch}"
+          echo "build_comfyctl=${build_comfyctl}"
           echo "build_relay=${build_relay}"
           echo "publish_latest=${main}"
           echo "comfyui_version=${comfyui_version}"
@@ -298,7 +286,7 @@ jobs:
           echo "commit_sha=${commit_sha}"
         } >> "${GITHUB_OUTPUT}"
 
-        echo "images=${build_images} (label ${image_label}) fetch=${build_fetch} (label ${fetch_label}) mcp=${build_relay} (label ${image_label})"
+        echo "images=${build_images} (label ${image_label}) comfyctl=${build_comfyctl} (label ${comfyctl_label}) mcp=${build_relay} (label ${image_label})"
 
   # The workflows themselves. This repo's expensive bugs have been shell bugs --
   # a yq escape change that processed 0 files and exited 0, an `A && B || C`
@@ -323,7 +311,9 @@ jobs:
           cd examples/$example
           # Create temporary .env for validation
           cp .env.example .env
-          docker compose config --quiet
+          # --profile models: the opt-in fetch service too, which is where an
+          # undeclared network hid (#119).
+          docker compose --profile models config --quiet
           cd ../..
         done
 
@@ -365,7 +355,7 @@ jobs:
         docker buildx bake --file docker-bake.hcl --print | grep -q "core-xpu"
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp"
         docker buildx bake --file docker-bake.hcl --print | grep -q "mcp-convert"
-        docker buildx bake --file docker-bake.hcl --print | grep -q "fetch"
+        docker buildx bake --file docker-bake.hcl --print | grep -q "comfyctl"
 
   # COMFY_DOCS_SHA must be a commit on Comfy-Org/docs `main` (#134, #136).
   # GitHub serves any commit in the repo's fork network by its SHA, so a SHA
@@ -440,7 +430,7 @@ jobs:
 
     - name: Validate the manifest and the locks
       run: |
-        # `comfyctl fetch check` validates the format now -- comfyfetch bundles the
+        # `comfyctl fetch check` validates the format now -- comfyctl bundles the
         # schemas, so there is exactly ONE definition of a valid manifest and
         # it is the one consumers get. The root schemas/ copy was deleted with
         # this change: two files with the same $id, and CI checking the stale
@@ -463,11 +453,11 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
 
-    - name: Build the fetch image
+    - name: Build the comfyctl image
       uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
-        targets: fetch
+        targets: comfyctl
         load: true
         push: false
       env:
@@ -483,13 +473,13 @@ jobs:
         work="$(mktemp -d)"; mkdir -p "$work/models"
         docker run --rm -u "$(id -u)" \
           -v "$PWD/locks:/locks:ro" -v "$work/models:/app/models" \
-          ghcr.io/pixeloven/comfyui/fetch:ci /locks/preview.yaml /app --apply
+          ghcr.io/pixeloven/comfyui/comfyctl:ci fetch fetch /locks/preview.yaml /app --apply
         want=f0fb51dd10d41c26612c070fa0b52ea0215a5ff90792134b4971109dd713c019
         got="$(sha256sum "$work/models/vae_approx/taesd_decoder.safetensors" | cut -d' ' -f1)"
         [ "$got" = "$want" ] || { echo "FETCHED WRONG BYTES: $got"; exit 1; }
         docker run --rm -u "$(id -u)" \
           -v "$PWD/locks:/locks:ro" -v "$work/models:/app/models" \
-          ghcr.io/pixeloven/comfyui/fetch:ci /locks/preview.yaml /app --apply \
+          ghcr.io/pixeloven/comfyui/comfyctl:ci fetch fetch /locks/preview.yaml /app --apply \
           | grep -q '^present:     2' || { echo "NOT IDEMPOTENT"; exit 1; }
         echo "image ok: fetches the right bytes, and does nothing the second time"
 
@@ -503,11 +493,11 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
 
-    - name: Build the fetch image
+    - name: Build the comfyctl image
       uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
-        targets: fetch
+        targets: comfyctl
         load: true
         push: false
       env:
@@ -518,14 +508,14 @@ jobs:
     # is well-formed, and the image test says the fetcher works in isolation.
     # NEITHER catches a wiring problem -- and the first real run of this failed
     # with "destination not writable", because Docker creates a missing
-    # bind-mount source as ROOT while the fetch image runs non-root by design.
+    # bind-mount source as ROOT while the image runs non-root by design.
     #
     # Deliberately small: the `preview` lock is 9.5 MB of TAESD decoders, so
     # this runs on every PR in seconds rather than pulling a model set.
     - name: docker compose --profile models, into a real volume
       working-directory: examples/core-gpu
       env:
-        COMFY_FETCH_IMAGE: ghcr.io/pixeloven/comfyui/fetch:ci
+        COMFYCTL_IMAGE: ghcr.io/pixeloven/comfyui/comfyctl:ci
       run: |
         set -eu
         cp .env.example .env
@@ -565,18 +555,18 @@ jobs:
     - name: Re-running changes nothing
       working-directory: examples/core-gpu
       env:
-        COMFY_FETCH_IMAGE: ghcr.io/pixeloven/comfyui/fetch:ci
+        COMFYCTL_IMAGE: ghcr.io/pixeloven/comfyui/comfyctl:ci
       run: |
         docker compose --profile models run --rm fetch | tee /tmp/second.log
         grep -q '^present:     2' /tmp/second.log || { echo "NOT IDEMPOTENT"; cat /tmp/second.log; exit 1; }
         grep -q '^fetched:     0' /tmp/second.log || { echo "REFETCHED"; cat /tmp/second.log; exit 1; }
 
-  publish-fetch:
-    name: publish the fetch image
+  publish-comfyctl:
+    name: publish the comfyctl image
     runs-on: ubuntu-latest
     # Keeps the full gate: it publishes an artifact consumers pin by digest.
     needs: [context, validate-examples, test-bake-targets, validate-models, end-to-end]
-    if: needs.context.outputs.build_fetch == 'true'
+    if: needs.context.outputs.build_comfyctl == 'true'
     env:
       REGISTRY: ghcr.io
     steps:
@@ -599,7 +589,7 @@ jobs:
       uses: docker/bake-action@v7.3.0
       with:
         files: docker-bake.hcl
-        targets: fetch
+        targets: comfyctl
         push: ${{ github.event_name == 'push' }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
         set: |
@@ -609,9 +599,9 @@ jobs:
         sbom: false
       env:
         REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
-        IMAGE_LABEL: ${{ needs.context.outputs.fetch_label }}
+        IMAGE_LABEL: ${{ needs.context.outputs.comfyctl_label }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
-        FETCH_VERSION: ${{ needs.context.outputs.fetch_version }}
+        COMFYCTL_VERSION: ${{ needs.context.outputs.comfyctl_version }}
 
     # Consumers pin by digest, so the digest has to be findable without digging
     # through logs. Harmony pins this one in a Job manifest.
@@ -619,17 +609,17 @@ jobs:
       if: github.event_name == 'push'
       run: |
         {
-          echo "### fetch image"
+          echo "### comfyctl image"
           echo ""
-          echo "- tag: \`${{ needs.context.outputs.registry_url }}fetch:${{ needs.context.outputs.fetch_label }}\`"
+          echo "- tag: \`${{ needs.context.outputs.registry_url }}comfyctl:${{ needs.context.outputs.comfyctl_label }}\`"
           echo ""
           echo "Pin consumers by digest:"
           echo ""
           echo '```'
           docker buildx imagetools inspect \
-            "${{ needs.context.outputs.registry_url }}fetch:${{ needs.context.outputs.fetch_label }}" \
+            "${{ needs.context.outputs.registry_url }}comfyctl:${{ needs.context.outputs.comfyctl_label }}" \
             --format '{{println .Manifest.Digest}}' \
-            | sed "s|^|${{ needs.context.outputs.registry_url }}fetch@|"
+            | sed "s|^|${{ needs.context.outputs.registry_url }}comfyctl@|"
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1443,24 +1433,24 @@ jobs:
   # was a string in a file that no consumer could obtain.
   #
   # One release, everything in it: the digests of every image the run published,
-  # the comfyctl and comfyfetch wheels with their checksums and build provenance,
+  # the comfyctl wheel with its checksum and build provenance,
   # and notes from the changelog. A consumer should not have to assemble a release from parts.
   release:
     name: cut the release
     runs-on: ubuntu-latest
-    needs: [context, validate-models, end-to-end, publish-fetch, build-cuda, build-cuda-arch, build-cpu, build-mcp, relay, build-mcp-convert, relay-convert, docs-pin, build-linux-accelerators, smoke-cpu]
+    needs: [context, validate-models, end-to-end, publish-comfyctl, build-cuda, build-cuda-arch, build-cpu, build-mcp, relay, build-mcp-convert, relay-convert, docs-pin, build-linux-accelerators, smoke-cpu]
     # `!contains(failure)` rather than the default all-succeeded: on a non-release
     # push some build jobs are legitimately `skipped` by the path filter, and
     # `skipped` is not `success`.
     #
     # But this job only runs for a release, which is a `v*` tag ref (pushed,
     # or a workflow_dispatch run at the tag), and there nothing it needs is
-    # skipped legitimately: `context` forces build_images, build_fetch and
+    # skipped legitimately: `context` forces build_images, build_comfyctl and
     # build_relay true (which relay-convert and build-mcp-convert run on, as
     # relay and build-mcp do), docs-pin's `if` holds on any v* tag ref whatever the
     # event, and validate-models, end-to-end and build-cuda-arch have no `if`.
     # So a `skipped` need here means an upstream failure hid it -- a failed
-    # validate-models leaves publish-fetch skipped, not failed -- and every
+    # validate-models leaves publish-comfyctl skipped, not failed -- and every
     # need must have succeeded.
     #
     # This gates the GitHub Release only. On a tag the build jobs push their
@@ -1469,7 +1459,7 @@ jobs:
     if: >-
       !cancelled()
       && !contains(needs.*.result, 'failure')
-      && (needs.context.outputs.image_version != '' || needs.context.outputs.fetch_version != '')
+      && (needs.context.outputs.image_version != '' || needs.context.outputs.comfyctl_version != '')
       && !contains(needs.*.result, 'skipped')
     permissions:
       contents: write
@@ -1478,7 +1468,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
-      FETCH_VERSION: ${{ needs.context.outputs.fetch_version }}
+      COMFYCTL_VERSION: ${{ needs.context.outputs.comfyctl_version }}
       REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
       COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
     steps:
@@ -1522,9 +1512,9 @@ jobs:
         echo "title=${title}" >> "$GITHUB_ENV"
         echo "--- notes ---"; cat notes.md
 
-    # -- the CLI line: wheels, so comfyctl is usable without Docker ------------
-    # Two, from the one uv workspace: comfyctl, and comfyfetch, the library its
-    # `fetch` group mounts. Neither is on PyPI, so they install as a pair.
+    # -- the CLI line: a wheel, so comfyctl is usable without Docker -----------
+    # One, from the one uv workspace: comfyctl, which holds `comfyctl fetch`
+    # since 6.0.0 absorbed comfyfetch. It is not on PyPI.
     # Named, not --all-packages: the workspace also holds comfyrelay, which
     # ships as the mcp image, not as a wheel. comfyctl does not depend on it;
     # without it, `comfyctl relay` is a hidden command that says it is not in
@@ -1532,42 +1522,38 @@ jobs:
 
     - uses: astral-sh/setup-uv@v10.0.1
 
-    - name: Build the wheels
+    - name: Build the wheel
       working-directory: services
       run: |
         set -euo pipefail
-        for package in comfyfetch comfyctl; do
-          uv build --package "${package}" --wheel -o "${GITHUB_WORKSPACE}/dist"
-        done
+        uv build --package comfyctl --wheel -o "${GITHUB_WORKSPACE}/dist"
         cd "${GITHUB_WORKSPACE}/dist"
-        # Exactly these two. A new workspace member must be added here on
+        # Exactly this one. A new workspace member must be added here on
         # purpose, never published by accident.
-        want="$(printf '%s\n' "comfyctl-${FETCH_VERSION}-py3-none-any.whl" "comfyfetch-${FETCH_VERSION}-py3-none-any.whl")"
+        want="comfyctl-${COMFYCTL_VERSION}-py3-none-any.whl"
         got="$(find . -maxdepth 1 -name '*.whl' -printf '%f\n' | sort)"
         if [ "${got}" != "${want}" ]; then
-          echo "::error::the release built ${got//$'\n'/ }; it ships only ${want//$'\n'/ }"
+          echo "::error::the release built ${got//$'\n'/ }; it ships only ${want}"
           exit 1
         fi
         # A URL pin is only as good as a checksum next to it -- this is what the
         # SageAttention wheels already publish, and what consumers verify.
         sha256sum ./*.whl | tee SHA256SUMS
 
-    - name: The wheels install and run
+    - name: The wheel installs and runs
       run: |
         set -euo pipefail
-        # The install services/comfyctl/README.md gives: both wheels, named, so
-        # comfyfetch can only come from this release and never from an index.
+        # The install services/comfyctl/README.md gives: the wheel, by itself.
         run() {
-          uvx --from "./dist/comfyctl-${FETCH_VERSION}-py3-none-any.whl" \
-            --with "./dist/comfyfetch-${FETCH_VERSION}-py3-none-any.whl" comfyctl "$@"
+          uvx --from "./dist/comfyctl-${COMFYCTL_VERSION}-py3-none-any.whl" comfyctl "$@"
         }
         for got in "$(run --version)" "$(run fetch --version)"; do
-          if [ "${got}" != "${FETCH_VERSION}" ]; then
-            echo "::error::the wheels report ${got}, the tag says ${FETCH_VERSION}"
+          if [ "${got}" != "${COMFYCTL_VERSION}" ]; then
+            echo "::error::the wheel reports ${got}, the tag says ${COMFYCTL_VERSION}"
             exit 1
           fi
         done
-        echo "wheels ok: comfyctl and comfyfetch report ${FETCH_VERSION}"
+        echo "wheel ok: comfyctl and comfyctl fetch report ${COMFYCTL_VERSION}"
 
     - uses: actions/attest-build-provenance@v4.2.2
       with:
@@ -1639,7 +1625,7 @@ jobs:
       run: |
         set -euo pipefail
         assets=""
-        if [ -d dist ]; then assets="dist/comfyctl-${FETCH_VERSION}-py3-none-any.whl dist/comfyfetch-${FETCH_VERSION}-py3-none-any.whl dist/SHA256SUMS"; fi
+        if [ -d dist ]; then assets="dist/comfyctl-${COMFYCTL_VERSION}-py3-none-any.whl dist/SHA256SUMS"; fi
         if [ -f IMAGE-DIGESTS.txt ]; then assets="${assets} IMAGE-DIGESTS.txt"; fi
         # shellcheck disable=SC2086
         gh release create "${tag}" ${assets} --title "${title}" --notes-file notes.md --verify-tag

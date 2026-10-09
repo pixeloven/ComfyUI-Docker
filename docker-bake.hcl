@@ -79,8 +79,8 @@ variable "IMAGE_VERSION" {
     default = ""
 }
 
-variable "FETCH_VERSION" {
-    // Semver for the fetch image, set only by a release tag. Empty on ordinary
+variable "COMFYCTL_VERSION" {
+    // Semver for the comfyctl image, set only by a release tag. Empty on ordinary
     // pushes, which publish the commit-sha and :latest tags alone.
     default = ""
 }
@@ -412,31 +412,29 @@ target "mcp-convert" {
     }
 }
 
-// Model fetcher. Independent of RUNTIME: it moves bytes and checks hashes, so
-// there is no CUDA/CPU/ROCm variant to build.
-target "fetch" {
-    context = "services/fetch"
-    dockerfile = "dockerfile.comfy.fetch"
-    // The image's command is comfyctl, which mounts comfyfetch as its `fetch` group.
-    contexts = {
-        comfyctl = "services/comfyctl"
-    }
+// The comfyctl CLI as an image, whose `fetch` group is the model fetcher. It
+// replaced the `fetch` image in 6.0.0 (#197). Independent of RUNTIME: it moves
+// bytes and checks hashes, so there is no CUDA/CPU/ROCm variant to build. The
+// context is the uv workspace root, so the image installs services/uv.lock (#177).
+target "comfyctl" {
+    context = "services"
+    dockerfile = "comfyctl/dockerfile.comfy.ctl"
     platforms = PLATFORMS
     tags = [
-        "${REGISTRY_URL}fetch:${IMAGE_LABEL}",
-        "${REGISTRY_URL}fetch:cache",
-        PUBLISH_LATEST ? "${REGISTRY_URL}fetch:latest" : "",
+        "${REGISTRY_URL}comfyctl:${IMAGE_LABEL}",
+        "${REGISTRY_URL}comfyctl:cache",
+        PUBLISH_LATEST ? "${REGISTRY_URL}comfyctl:latest" : "",
         // Consumers pin by DIGEST; these say whether a digest change was a
         // patch or a break, which a sha tag cannot.
-        FETCH_VERSION != "" ? "${REGISTRY_URL}fetch:${FETCH_VERSION}" : "",
-        FETCH_VERSION != "" ? "${REGISTRY_URL}fetch:${regex_replace(FETCH_VERSION, "\\.[0-9]+$", "")}" : ""
+        COMFYCTL_VERSION != "" ? "${REGISTRY_URL}comfyctl:${COMFYCTL_VERSION}" : "",
+        COMFYCTL_VERSION != "" ? "${REGISTRY_URL}comfyctl:${regex_replace(COMFYCTL_VERSION, "\\.[0-9]+$", "")}" : ""
     ]
-    cache-from = ["type=registry,ref=${REGISTRY_URL}fetch:cache,optional=true"]
+    cache-from = ["type=registry,ref=${REGISTRY_URL}comfyctl:cache,optional=true"]
     cache-to   = ["type=inline"]
 }
 
-group "fetch" {
-    targets = ["fetch"]
+group "comfyctl" {
+    targets = ["comfyctl"]
 }
 
 // Convenience groups
@@ -445,7 +443,7 @@ group "default" {
 }
 
 group "all" {
-    targets = ["runtime", "cuda", "cuda-arch", "cpu", "rocm", "xpu", "mcp", "mcp-convert", "fetch"]
+    targets = ["runtime", "cuda", "cuda-arch", "cpu", "rocm", "xpu", "mcp", "mcp-convert", "comfyctl"]
 }
 
 group "core" {

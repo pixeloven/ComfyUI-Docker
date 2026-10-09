@@ -23,7 +23,7 @@ import importlib.metadata
 from typing import Annotated
 
 import typer
-from comfyfetch.cli import app as fetch_app
+from comfyctl.fetch.cli import app as fetch_app
 
 app = typer.Typer(
     name="comfyctl",
@@ -36,8 +36,9 @@ app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 
-# The group IS comfyfetch's app, so `comfyctl fetch <verb>` and `comfyfetch <verb>`
-# cannot disagree about flags, output or exit codes.
+# The group IS comfyctl.fetch's own app (comfyfetch's, until 6.0.0 moved it into
+# this package), so `comfyctl fetch <verb>` cannot disagree with it about flags,
+# output or exit codes.
 app.add_typer(fetch_app, name="fetch")
 
 RELAY_UNAVAILABLE = (

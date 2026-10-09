@@ -2,7 +2,7 @@
 
 This file drives **how agents behave** on this project: autonomy, delegation, routing, planning, memory, and how to apply shared platform skills to this repo's specifics. It is deliberately **behavioral, not factual** — conventions, repository facts, and credentials live in **skills**, never here. Keeping this file behavioral is what lets it port across every project that consumes the platform.
 
-> **One platform, many consumers.** The agent fleet and platform skills are shared (from the Crew foundation); each consumer supplies its **own** local skills for its specifics. ComfyUI-Docker is a public product — `pixeloven/ComfyUI-Docker`: GHCR images, the `comfyctl` CLI and the fetch image, and a published skills plugin. Its specifics live in the **▸** blocks below and in its local skills (`.agents/skills/`). This `AGENTS.md` drives every harness that reads it — Claude Code, pi.dev, and OpenAI Codex — all of which can dispatch subagents.
+> **One platform, many consumers.** The agent fleet and platform skills are shared (from the Crew foundation); each consumer supplies its **own** local skills for its specifics. ComfyUI-Docker is a public product — `pixeloven/ComfyUI-Docker`: GHCR images, the `comfyctl` CLI and its image, and a published skills plugin. Its specifics live in the **▸** blocks below and in its local skills (`.agents/skills/`). This `AGENTS.md` drives every harness that reads it — Claude Code, pi.dev, and OpenAI Codex — all of which can dispatch subagents.
 
 ---
 
@@ -19,7 +19,7 @@ Tool use is pre-approved. **Act, then report** — never pause to ask before:
 
 **▸ Ask list — still prompt before these.** Each one publishes to consumers or cannot be taken back:
 
-- **Pushing a `v*` tag.** A tag publishes *everything* — every image, the `comfyctl` and `comfyfetch` wheels, the skills plugin — and CI creates the GitHub Release. Never create a Release by hand; see `VERSIONING.md` → *Releasing*.
+- **Pushing a `v*` tag.** A tag publishes *everything* — every image, the `comfyctl` wheel, the skills plugin — and CI creates the GitHub Release. Never create a Release by hand; see `VERSIONING.md` → *Releasing*.
 - **Triggering a publishing workflow by hand** (`workflow_dispatch` on `CI` or `Nightly Upstream Build`). Both push to GHCR.
 - **Pushing to `main`, force-pushing a shared branch, or deleting a branch, tag, Release or GHCR package.** Always use a branch and a PR. `--force-with-lease` on your own feature branch is fine.
 
@@ -52,7 +52,7 @@ Delegate by work domain, without asking first. Reach for delegation by default o
 
    | Change touches | Run |
    |---|---|
-   | `services/` Python (`fetch/`, `comfyctl/`, `comfyrelay/`), `comfy.yaml`, `comfy-lock.yaml`, `locks/` | `cd services && uv run --locked pytest -q` (add `-m "not network"` offline), then `uv run --locked comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml` |
+   | `services/` Python (`comfyctl/`, `comfyrelay/`), `comfy.yaml`, `comfy-lock.yaml`, `locks/` | `cd services && uv run --locked pytest -q` (add `-m "not network"` offline), then `uv run --locked comfyctl fetch check ../comfy.yaml ../comfy-lock.yaml` |
    | `services/comfyrelay/` (the `mcp` image), anything its image installs, or `skills/` (its docs index covers the guides) | `IMAGE_LABEL=local docker buildx bake mcp --load` (its build refuses a server that starts without a token or fails the probe), then `tests/relay/run.sh [--network host] --comfyui <core-cpu image> ghcr.io/pixeloven/comfyui/mcp:local`, which CI's `relay` job runs against main's `core:cpu-latest` |
    | `docker-bake.hcl`, `examples/` | `make validate` (bake prints `all`, and every example's `docker compose config` resolves) |
    | A Dockerfile, `entrypoint.sh`, `startup.sh` | build the affected bake group and load it (`make cuda`, `make cpu`, `make rocm`, `make xpu`, or `docker buildx bake <target> --load`), then start the matching example |
@@ -147,7 +147,7 @@ Most conventions are reference detail — load them as soon as the task touches 
 
 **▸ ComfyUI-Docker tripwires:**
 
-- **Cutting a release, or changing `VERSION`** → read `VERSIONING.md` → *Releasing*, and load `comfyui-docker-protected-seams`. Creating the GitHub Release by hand makes the release job fail *after* every image has published, which leaves the Release page empty (v2.1.0 to v2.3.0 have that shape). `VERSION`, `services/fetch/pyproject.toml`, `services/comfyctl/pyproject.toml` (its version and its `comfyfetch==` pin), `services/comfyrelay/pyproject.toml`, `.claude-plugin/plugin.json`, `package.json`, and the `comfyfetch`, `comfyctl` and `comfyrelay` entries in `services/uv.lock` must agree, and CI checks all of them on every push.
+- **Cutting a release, or changing `VERSION`** → read `VERSIONING.md` → *Releasing*, and load `comfyui-docker-protected-seams`. Creating the GitHub Release by hand makes the release job fail *after* every image has published, which leaves the Release page empty (v2.1.0 to v2.3.0 have that shape). `VERSION`, `services/comfyctl/pyproject.toml`, `services/comfyrelay/pyproject.toml`, `.claude-plugin/plugin.json`, `package.json`, and the `comfyctl` and `comfyrelay` entries in `services/uv.lock` must agree, and CI checks all of them on every push.
 - **Changing a `comfyctl` command (including a `comfyctl fetch` verb), a flag, or the manifest or lock format** → update `skills/comfy-manifest/SKILL.md` in the same change, and load `comfyui-docker-protected-seams`. That skill ships to every consumer on the next tag, and no test compares it with the CLI. When it names a flag the code no longer has, an agent calls it and reports comfyctl as broken. A format break is a **major** version.
 - **Bumping `COMFYUI_VERSION`, the torch index, the CUDA base image, or Python** → load `comfyui-docker-conventions`. The SageAttention wheels are built for exactly cu130, torch 2.13.0 and cp312, while core installs whatever torch the index serves. When those diverge, only the separately built `cuda-arch` group fails, so the generic CUDA images keep publishing while the `cuda-sm*` tags quietly stop moving.
 - **Editing `entrypoint.sh`, `startup.sh`, or the permission steps in `dockerfile.comfy.core`** → load `comfyui-docker-conventions`. The arbitrary-UID contract only fails at runtime, under a UID nobody tested. The volume-root `chown` is deliberately non-recursive, because model stores run to terabytes.
