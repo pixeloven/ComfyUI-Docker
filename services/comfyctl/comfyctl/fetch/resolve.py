@@ -22,7 +22,6 @@ import hashlib
 import json
 import pathlib
 import re
-import tempfile
 import httpx
 import urllib.parse
 
@@ -118,12 +117,19 @@ def _civitai(version_id: str) -> tuple[str, str]:
 
 
 def _download_and_hash(url: str, auth: AuthMap) -> str:
-    with tempfile.NamedTemporaryFile() as tmp:
+    """sha256 of the body, streamed: nothing is written to disk.
+
+    It once copied the body into a temp file nobody read, which made `resolve`
+    crash with a traceback under a read-only root (no usable TMPDIR) and stop
+    the whole pass. A failed download is this entry's failure, not the run's.
+    """
+    h = hashlib.sha256()
+    try:
         with http.request(url, token=auth.token_for(url), timeout=600) as resp:
-            h = hashlib.sha256()
             for block in iter(lambda: resp.read(1 << 20), b""):
                 h.update(block)
-                tmp.write(block)
+    except (httpx.HTTPError, OSError) as exc:
+        raise Unresolved(f"{url}: download to hash it failed: {exc}") from exc
     return h.hexdigest()
 
 
@@ -156,8 +162,14 @@ def _resolve_file(entry: dict, auth: AuthMap) -> dict:
         # no hash produces a fetch that verifies nothing.
         if not stated:
             raise Unresolved(f"{source}: a direct URL needs `sha256` in the manifest")
+        # ...and must name the file. A filename taken from the URL is not
+        # derivable the way `check` derives it, so without `as`/`file` the
+        # install path was the DIRECTORY, and fetch wrote a file over it.
+        if not (entry.get("as") or file):
+            raise Unresolved(f"{source}: a direct URL needs `as` or `file` "
+                             f"to name the installed file")
         url, sha = source, stated
-        name = pathlib.PurePosixPath(urllib.parse.urlsplit(source).path).name
+        name = pathlib.PurePosixPath(file).name
     else:
         raise Unresolved(f"{source}: unknown source scheme")
 
@@ -188,8 +200,18 @@ def from_lock(manifest: dict, profile: str, parent: dict) -> tuple[dict | None, 
     independently could legitimately pin DIFFERENT ones, because a moving
     revision is supposed to advance.
     """
-    wanted = [lockfile.install_path(f)
-              for m in _selected(manifest, profile) for f in m["files"]]
+    selected = _selected(manifest, profile)
+    clash = lockfile.conflicts(selected)
+    if clash:
+        raise Unresolved("\n".join(_conflict_message(p, g) for p, g in clash.items()))
+    # Ordered and de-duplicated: a file two groups share is one entry.
+    wanted = list(dict.fromkeys(lockfile.install_path(f)
+                                for m in selected for f in m["files"]))
+    doubled = [p for p in lockfile.duplicate_paths(parent) if p in wanted]
+    if doubled:
+        raise Unresolved(
+            "the parent lock lists a path more than once; re-resolve it before "
+            "deriving from it:\n" + "\n".join(f"  {p}" for p in doubled))
     have = {lockfile.lock_path(m): m for m in parent.get("models") or []}
     missing = [p for p in wanted if p not in have]
     if missing:
@@ -211,8 +233,23 @@ def resolve_all(manifest: dict, profile: str | None,
     auth = AuthMap.from_document(manifest)
     models: list[dict] = []
     failures: list[str] = []
-    for capability in _selected(manifest, profile):
+    selected = _selected(manifest, profile)
+    # Two different files for one path are refused before any network: the
+    # last one fetched would win, and every fetch would download both.
+    clash = lockfile.conflicts(selected)
+    for path, groups in clash.items():
+        failures.append(_conflict_message(path, groups))
+        if on_resolved:
+            on_resolved(groups[0], None, failures[-1])
+    # One file declared identically by several groups resolves ONCE, into one
+    # entry. Resolving it twice could pin two commits of a moving revision.
+    done: set[str] = set(clash)
+    for capability in selected:
         for entry in capability["files"]:
+            path = lockfile.install_path(entry)
+            if path in done:
+                continue
+            done.add(path)
             try:
                 model = _resolve_file(entry, auth)
             except Unresolved as exc:
@@ -226,5 +263,13 @@ def resolve_all(manifest: dict, profile: str | None,
     return models, failures
 
 
+def _conflict_message(path: str, groups: list[str]) -> str:
+    who = ", ".join(repr(g) for g in groups)
+    return (f"{path}: declared differently by {who} -- two different files "
+            f"can't install to one path")
+
+
 def declared_count(manifest: dict, profile: str | None) -> int:
-    return sum(len(m["files"]) for m in _selected(manifest, profile))
+    """Distinct install paths: a file two groups share is one file."""
+    return len({lockfile.install_path(f)
+                for m in _selected(manifest, profile) for f in m["files"]})

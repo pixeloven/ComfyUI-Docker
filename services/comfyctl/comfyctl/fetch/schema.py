@@ -40,7 +40,11 @@ def validate(doc: dict, name: str) -> list[str]:
     out = []
     for error in sorted(validator.iter_errors(doc), key=lambda e: list(e.path)):
         where = "/".join(str(p) for p in error.path) or "(root)"
-        out.append(f"{where}: {error.message}")
+        # `errorMessage` (ajv-errors' keyword; an annotation to any other
+        # validator) says WHY a conditional rule failed, where jsonschema
+        # alone would only say "'as' is a required property".
+        hint = error.schema.get("errorMessage") if isinstance(error.schema, dict) else None
+        out.append(f"{where}: {hint or error.message}")
     return out
 
 
