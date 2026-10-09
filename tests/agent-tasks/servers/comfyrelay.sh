@@ -11,7 +11,8 @@
 # label.
 #
 # It runs as the image ships it, hardened the way tests/relay/run.sh runs it:
-# an arbitrary UID, a read-only root filesystem, no-new-privileges. The bearer
+# an arbitrary UID, a read-only root filesystem (with a tmpfs on /tmp for
+# mcp-convert, whose browser needs it), no-new-privileges. The bearer
 # token is COMFYRELAY_MCP_TOKEN (lib.sh keeps one per HARNESS_DATA), and it binds
 # loopback only, so under --network host nothing else on the network reaches
 # it. COMFYUI_MCP_PROFILES is the image default (read,run) unless set.
@@ -36,8 +37,14 @@ case "${1:-}" in
     fi
     profiles=()
     [ -n "${COMFYUI_MCP_PROFILES:-}" ] && profiles=(-e COMFYUI_MCP_PROFILES="$COMFYUI_MCP_PROFILES")
+    # An image that converts (mcp-convert) needs a writable /tmp for its browser
+    # (runtime-contract.md, The mcp-convert Image), as tests/relay/run.sh gives it.
+    tmp=()
+    case "$(docker image inspect -f '{{json .Config.Env}}' "$IMAGE")" in
+      *'"COMFYUI_MCP_CONVERT=1"'*) tmp=(--tmpfs /tmp) ;;
+    esac
     docker run -d --name "$NAME" --network host \
-      --user 12345:0 --read-only --security-opt no-new-privileges:true \
+      --user 12345:0 --read-only "${tmp[@]}" --security-opt no-new-privileges:true \
       -e COMFYUI_MCP_HTTP_TOKEN="$COMFYRELAY_MCP_TOKEN" \
       -e COMFYUI_URL="$COMFY_URL" \
       -e MCP_HOST=127.0.0.1 -e MCP_PORT="$PORT" \

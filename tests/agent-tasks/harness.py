@@ -796,14 +796,23 @@ def widget_values(node: dict) -> list:
     return list(w.values()) if isinstance(w, dict) else list(w)
 
 
+def unset(value: object) -> bool:
+    """A value that sets nothing: how converters write a display-only widget such as
+    ImageCompare's compare_view, which is required but accepts any value (the
+    workflow-formats guide). An empty dict or a null; or empty strings, ["", ""],
+    which the frontend's Export (API) writes as {"__value__": ["", ""]} and
+    ComfyUI's /history then records unwrapped."""
+    if isinstance(value, dict) and set(value) == {"__value__"}:
+        value = value["__value__"]
+    return value in ({}, None) or (isinstance(value, list) and bool(value) and all(v == "" for v in value))
+
+
 def t5_same_graph(g: dict, nodes: list[dict]) -> str | None:
     """Why the job's nodes and settings aren't the template's, or None. The job
     must run each node class as many times as the template does, and each job
-    node's set values (every input that isn't a link; an empty dict or a null
-    counts as unset, which is how converters write a display-only widget such as
-    ImageCompare's) must be widget values of a template node of its class: the
-    template's input file, upscale method, factor and file prefix. Links aren't
-    compared."""
+    node's set values (every input that isn't a link or unset()) must be widget
+    values of a template node of its class: the template's input file, upscale
+    method, factor and file prefix. Links aren't compared."""
     by_class: dict[str, list[list]] = {}
     for n in nodes:
         by_class.setdefault(n["type"], []).append(widget_values(n))
@@ -812,7 +821,7 @@ def t5_same_graph(g: dict, nodes: list[dict]) -> str | None:
     if got != want:
         return f"runs {dict(sorted(got.items()))}, where the template runs {dict(sorted(want.items()))}"
     for nid, n in sorted(g.items()):
-        values = {k: v for k, v in (n.get("inputs") or {}).items() if not is_link(v) and v not in ({}, None)}
+        values = {k: v for k, v in (n.get("inputs") or {}).items() if not is_link(v) and not unset(v)}
         if not any(all(v in w for v in values.values()) for w in by_class[n["class_type"]]):
             return f"sets {n['class_type']} {nid} to {values}, not the template's {by_class[n['class_type']]}"
     return None
