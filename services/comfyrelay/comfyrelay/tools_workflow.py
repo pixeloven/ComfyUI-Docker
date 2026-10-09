@@ -385,9 +385,9 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
 
         It runs workflow_validate's check first, and refuses a graph that fails it or has any partner-API node (a
         paid external service). ComfyUI then checks input types and values: a graph it rejects fails at once with
-        workflow_rejected and its per-node errors. Follow the job with job_status (queued or running, then the
-        saved files or ComfyUI's error naming the failed node); workflow_outputs lists or fetches the files, and
-        job_cancel stops the run. Each call is a new run.
+        workflow_rejected and its per-node errors, and nothing is queued (its job_id only repeats that). Follow the
+        job with job_status (queued or running, then the saved files or ComfyUI's error naming the failed node);
+        workflow_outputs lists or fetches the files, and job_cancel stops the run. Each call is a new run.
 
         A custom node may write anywhere ComfyUI can, or reach the network: only partner-API nodes are refused.
         Where this server converts, a UI-format graph is converted after the partner-API check (converted_from_ui);
@@ -488,6 +488,8 @@ async def run_prompt(
             raise finished from None
         raise
     except BaseException as exc:
+        if getattr(exc, "code", None) == "workflow_rejected":
+            progress["comfyui_state"] = "rejected"  # not "submitting": ComfyUI refused it, and nothing was queued
         _resolve(submitted, exc=exc)
         raise
 
@@ -677,6 +679,7 @@ async def stop_prompt(
         await asyncio.wait({post}, timeout=max(0.0, deadline - loop.time() - CANCEL_RESERVE_SECONDS))
     if post.done() and not post.cancelled() and getattr(post.exception(), "code", None) == "workflow_rejected":
         _stop(progress, "not_needed")
+        progress["comfyui_state"] = "rejected"
         return None
     last = "no answer from ComfyUI"
     while True:
@@ -766,6 +769,9 @@ def _cancel_when_answered(comfyui: ComfyUIClient, progress: dict[str, Any], post
         progress["prompt_id"] = post.result()["prompt_id"]
         why = "its submission was answered after its job was cancelled"
         _keep(asyncio.ensure_future(_settle(comfyui, progress, progress["prompt_id"], why)))
+    elif not post.cancelled() and getattr(post.exception(), "code", None) == "workflow_rejected":
+        _stop(progress, "not_needed")  # ComfyUI refused it after the stop's budget ran out: nothing was queued
+        progress["comfyui_state"] = "rejected"
 
 
 async def _settle(comfyui: ComfyUIClient, progress: dict[str, Any], prompt_id: str, why: str) -> None:

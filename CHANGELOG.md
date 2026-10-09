@@ -80,6 +80,16 @@ the manifest and lock formats don't change. What moved:
      where it was `comfyfetch/<version> (…)`. Update any proxy or allowlist
      rule that matches it.
 
+### Added
+
+- **comfyrelay `node_describe`: several classes per call, and help optional**
+  ([#169](https://github.com/pixeloven/ComfyUI-Docker/issues/169)). `class_types` (up to 20, instead of
+  `class_type`) answers `{nodes, unknown, failed, omitted}`: an unknown class is listed in `unknown` with
+  `unknown_node_class` and its `suggestions`, a class ComfyUI fails to describe in `failed`, and the call still
+  succeeds. A batch's `nodes` take at most 40,000 characters of the answer: help is dropped first
+  (`help_omitted`), and only then classes (`omitted`, to ask for alone). `include_help: false` leaves the help
+  pages out. Both are optional, and a `class_type` call answers as before.
+
 ### Fixed
 
 - **The `comfyctl` image installs from `services/uv.lock`** (#177), hash-checked,
@@ -91,6 +101,13 @@ the manifest and lock formats don't change. What moved:
 - **`core-amd` and `core-intel` declare `comfy_network`** (#119), so
   `docker compose --profile models` no longer fails there. `make validate` and
   CI now check every example with `--profile models`.
+- **comfyrelay: display names are cut to 120 characters** (#169) in `node_search`, `node_describe` and its
+  suggestions, since they come from ComfyUI.
+- **comfyrelay `node_describe`: help fetches are bounded** (#163, #169). A call's help fetches get 5 s in all;
+  after that help is left out, and `help_omitted` says why, instead of the call waiting on ComfyUI.
+- **comfyrelay `workflow_run`: a rejected run says it was never queued** (#169). `workflow_rejected` still
+  carries a `job_id`, which only repeats the rejection; its `job_status` now reports `comfyui_state: "rejected"`
+  instead of `submitting`, also when a cancel meets the rejection.
 
 ## 5.2.0 — 2026-10-09
 

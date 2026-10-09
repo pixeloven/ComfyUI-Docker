@@ -181,7 +181,7 @@ class JobView(BaseModel):
     progress: dict[str, Any] | None = Field(
         default=None,
         description="What the job reports while it works. A workflow run: prompt_id, comfyui_state (submitting, "
-        "queued, running, finished) and, while queued, queue_position (0 is next)",
+        "queued, running, finished; rejected: never queued) and, while queued, queue_position (0 is next)",
     )
     source: Literal["relay", "comfyui"] = Field(
         default="relay",
