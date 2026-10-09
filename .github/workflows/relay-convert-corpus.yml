@@ -112,11 +112,11 @@ jobs:
         persist-credentials: false
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.3.0
+      uses: docker/setup-buildx-action@v4.4.1
 
     # Never pushed: `push: false`, and `corpus` is not a label anything publishes.
     - name: Build the mcp-convert image
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: mcp-convert
@@ -151,7 +151,7 @@ jobs:
     # Never pushed, like the image above.
     - name: Build core-cpu at this commit's pin
       if: steps.comfyui.outputs.build == 'true'
-      uses: docker/bake-action@v7.3.0
+      uses: docker/bake-action@v7.4.0
       with:
         files: docker-bake.hcl
         targets: core-cpu
@@ -161,7 +161,7 @@ jobs:
         sbom: false
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v10.0.1
+      uses: astral-sh/setup-uv@v10.2.0
 
     # The oracle's browser: the Chromium build the pinned Playwright names, as
     # the image has it, checked against the revision and tree hash in
