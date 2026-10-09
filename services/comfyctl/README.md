@@ -64,6 +64,33 @@ v=6.0.0
 uv tool install "https://github.com/pixeloven/ComfyUI-Docker/releases/download/v${v}/comfyctl-${v}-py3-none-any.whl"
 ```
 
+That checks the wheel, but not its dependencies: the wheel names them by range,
+so they resolve from PyPI as they are on the day you install. For an install
+where every file is pinned and hash-checked, use the release's
+`comfyctl-<ver>-requirements.txt` (since 6.0.0). It pins each dependency to the
+version and hashes in `services/uv.lock`, and names the wheel itself by its
+release URL and hash, so it is the whole install. Put it in a venv of its own
+(Python 3.11 or later):
+
+```sh
+v=6.0.0
+req="https://github.com/pixeloven/ComfyUI-Docker/releases/download/v${v}/comfyctl-${v}-requirements.txt"
+python3 -m venv ~/.local/share/comfyctl
+~/.local/share/comfyctl/bin/pip install --require-hashes -r "${req}"
+~/.local/share/comfyctl/bin/comfyctl --version
+```
+
+With uv, the same install is
+`uv venv ~/.local/share/comfyctl && uv pip install --python ~/.local/share/comfyctl --require-hashes -r "${req}"`.
+A file whose hash doesn't match stops the install, and nothing is installed.
+`uv tool install --constraints <file>` is not a substitute: it pins the versions
+but ignores the hashes.
+
+The requirements file carries a build provenance attestation, as the wheel
+does. To check that CI built it before you trust its hashes, download it, run
+`gh attestation verify "comfyctl-${v}-requirements.txt" --repo pixeloven/ComfyUI-Docker`,
+and install from the local copy.
+
 Up to 5.x a release shipped two wheels, installed together with
 `--with <comfyfetch wheel url>`. From 6.0.0 there is no comfyfetch wheel.
 

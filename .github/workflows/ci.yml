@@ -1433,8 +1433,8 @@ jobs:
   # was a string in a file that no consumer could obtain.
   #
   # One release, everything in it: the digests of every image the run published,
-  # the comfyctl wheel with its checksum and build provenance,
-  # and notes from the changelog. A consumer should not have to assemble a release from parts.
+  # the comfyctl wheel and its hash-locked requirements file with their
+  # checksums and build provenance, and notes from the changelog. A consumer should not have to assemble a release from parts.
   release:
     name: cut the release
     runs-on: ubuntu-latest
@@ -1536,9 +1536,36 @@ jobs:
           echo "::error::the release built ${got//$'\n'/ }; it ships only ${want}"
           exit 1
         fi
+
+    # The wheel names its dependencies by range, so an install resolves them
+    # from PyPI as they are that day. This file pins every one to the version
+    # and hashes in services/uv.lock (#175), and ends with the wheel itself, by
+    # its release URL and hash: pip and uv refuse a requirement without a hash in
+    # --require-hashes mode, the bare wheel included, so this one file is the
+    # whole install. --no-emit-workspace leaves out the comfyctl line uv would
+    # write as a local path; comfyrelay is not a comfyctl dependency, so the
+    # export never reaches it, and the check below holds that.
+    - name: The hash-locked requirements file
+      working-directory: services
+      run: |
+        set -euo pipefail
+        whl="comfyctl-${COMFYCTL_VERSION}-py3-none-any.whl"
+        req="${GITHUB_WORKSPACE}/dist/comfyctl-${COMFYCTL_VERSION}-requirements.txt"
+        uv export --package comfyctl --frozen --no-dev --no-emit-workspace > "${req}"
+        if grep -q -i '^comfyrelay\|^mcp==' "${req}"; then
+          echo "::error::the comfyctl requirements reach comfyrelay"
+          exit 1
+        fi
+        {
+          echo "# comfyctl itself: this release's wheel, by URL and hash."
+          echo "comfyctl @ https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/${whl} \\"
+          echo "    --hash=sha256:$(sha256sum "${GITHUB_WORKSPACE}/dist/${whl}" | cut -d' ' -f1)"
+        } >> "${req}"
+
+        cd "${GITHUB_WORKSPACE}/dist"
         # A URL pin is only as good as a checksum next to it -- this is what the
         # SageAttention wheels already publish, and what consumers verify.
-        sha256sum ./*.whl | tee SHA256SUMS
+        sha256sum ./*.whl ./*-requirements.txt | tee SHA256SUMS
 
     - name: The wheel installs and runs
       run: |
@@ -1555,17 +1582,42 @@ jobs:
         done
         echo "wheel ok: comfyctl and comfyctl fetch report ${COMFYCTL_VERSION}"
 
+    - name: The requirements file installs, hash-checked
+      run: |
+        set -euo pipefail
+        # The install the comfyctl README gives, into a clean venv. The wheel's
+        # release URL does not exist until the release does, so this copy points
+        # its line at the wheel just built; the hash it is checked against is
+        # the one the published file carries.
+        whl="comfyctl-${COMFYCTL_VERSION}-py3-none-any.whl"
+        sed "s#^comfyctl @ https://.*/${whl} #comfyctl @ file://${PWD}/dist/${whl} #" \
+          "dist/comfyctl-${COMFYCTL_VERSION}-requirements.txt" > "${RUNNER_TEMP}/requirements.txt"
+        if ! grep -q "^comfyctl @ file://" "${RUNNER_TEMP}/requirements.txt"; then
+          echo "::error::the requirements file has no comfyctl wheel line"
+          exit 1
+        fi
+        uv venv "${RUNNER_TEMP}/venv"
+        uv pip install --python "${RUNNER_TEMP}/venv" --require-hashes -r "${RUNNER_TEMP}/requirements.txt"
+        got="$("${RUNNER_TEMP}/venv/bin/comfyctl" --version)"
+        if [ "${got}" != "${COMFYCTL_VERSION}" ]; then
+          echo "::error::the hash-checked install reports ${got}, the tag says ${COMFYCTL_VERSION}"
+          exit 1
+        fi
+        echo "requirements ok: a --require-hashes install reports ${COMFYCTL_VERSION}"
+
     - uses: actions/attest-build-provenance@v4.2.2
       with:
-        subject-path: dist/*.whl
+        subject-path: |
+          dist/*.whl
+          dist/*-requirements.txt
 
     # An attestation nobody verifies is decoration. This is the selftest: if the
     # step above ever silently produced nothing, this fails the release.
     - name: The attestations verify
       run: |
         set -euo pipefail
-        for whl in ./dist/*.whl; do
-          gh attestation verify "${whl}" --repo "${GITHUB_REPOSITORY}"
+        for f in ./dist/*.whl ./dist/*-requirements.txt; do
+          gh attestation verify "${f}" --repo "${GITHUB_REPOSITORY}"
         done
 
     # -- the image line: the digests, which are what consumers actually pin ----
@@ -1625,7 +1677,7 @@ jobs:
       run: |
         set -euo pipefail
         assets=""
-        if [ -d dist ]; then assets="dist/comfyctl-${COMFYCTL_VERSION}-py3-none-any.whl dist/SHA256SUMS"; fi
+        if [ -d dist ]; then assets="dist/comfyctl-${COMFYCTL_VERSION}-py3-none-any.whl dist/comfyctl-${COMFYCTL_VERSION}-requirements.txt dist/SHA256SUMS"; fi
         if [ -f IMAGE-DIGESTS.txt ]; then assets="${assets} IMAGE-DIGESTS.txt"; fi
         # shellcheck disable=SC2086
         gh release create "${tag}" ${assets} --title "${title}" --notes-file notes.md --verify-tag

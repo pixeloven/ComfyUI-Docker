@@ -16,6 +16,7 @@ GitHub Release:
 | `mcp-convert` image (comfyrelay with a headless Chromium) | GHCR | `@sha256:…` |
 | `comfyctl` image (the CLI, including `comfyctl fetch`) | GHCR | `@sha256:…` |
 | `comfyctl` **wheel** | a release asset | URL + the published `SHA256SUMS` |
+| `comfyctl-X.Y.Z-requirements.txt` (the wheel and every dependency, hash-locked from `services/uv.lock`) | a release asset | `pip install --require-hashes -r`, attested like the wheel |
 | skills plugin | the git tag | `@v1.2.3` |
 
 The version lives in `VERSION`. `services/comfyctl/pyproject.toml`,
@@ -142,7 +143,7 @@ echo 1.2.3 > VERSION
 # match it in services/comfyctl/pyproject.toml, services/comfyrelay/pyproject.toml,
 # .claude-plugin/plugin.json and package.json
 (cd services && uv lock)   # after the pyproject.toml edits: uv.lock copies the versions
-# add a dated `## 1.2.3 — YYYY-MM-DD` section to CHANGELOG.md
+# turn CHANGELOG.md's `## Unreleased` into a dated `## 1.2.3 — YYYY-MM-DD` section
 git commit -am "release 1.2.3"
 git tag v1.2.3 && git push --tags
 ```
@@ -159,9 +160,10 @@ different commit than its wheel.
 
 **Push the tag. Never create the GitHub Release by hand.** The tag is the
 trigger; CI does the rest — it checks every version file agrees with the tag,
-builds every image from that one commit, builds and *attests* the wheel, and
-creates the Release with `comfyctl-<ver>-py3-none-any.whl`, `SHA256SUMS` and
-`IMAGE-DIGESTS.txt` attached. Up to 5.x it also attached a
+builds every image from that one commit, builds and *attests* the wheel and
+its hash-locked requirements file, and creates the Release with
+`comfyctl-<ver>-py3-none-any.whl`, `comfyctl-<ver>-requirements.txt`,
+`SHA256SUMS` and `IMAGE-DIGESTS.txt` attached. Up to 5.x it also attached a
 `comfyfetch-<ver>-py3-none-any.whl`.
 
 `gh release create` looks equivalent and is not. CI refuses to write into a
