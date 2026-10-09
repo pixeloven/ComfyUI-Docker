@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 # `comfyctl fetch` lives in this package (comfyctl.fetch) since 6.0.0, which
 # absorbed comfyfetch: one wheel, and no first-party dependency for an
 # installer to look up on an index.
-dependencies = ["PyYAML>=6.0", "typer>=0.16.0", "httpx>=0.27", "jsonschema>=4.20"]
+dependencies = ["PyYAML>=6.0", "typer>=0.27.3", "httpx>=0.27", "jsonschema>=4.20"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "respx>=0.21"]
