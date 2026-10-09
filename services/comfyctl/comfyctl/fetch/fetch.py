@@ -8,7 +8,7 @@
   and are renamed only after the hash matches, so an interrupted run leaves the
   workspace exactly as it found it.
 
-Driven by `comfyfetch fetch`; see cli.py for the interface.
+Driven by `comfyctl fetch fetch`; see cli.py for the interface.
 
 Paths in the lock are relative to the ComfyUI ROOT (they begin `models/`), so
 the second argument is the workspace root, not the models directory.

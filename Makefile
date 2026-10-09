@@ -66,11 +66,11 @@ KUBERNETES_VERSION ?= 1.36.4
 
 validate: ## Validate Bake, example Compose configurations and the Kubernetes example
 	docker buildx bake --print all > /dev/null
-	cd examples/core-gpu && docker compose config --quiet
-	cd examples/complete-gpu && docker compose config --quiet
-	cd examples/core-cpu && docker compose config --quiet
-	cd examples/core-amd && docker compose config --quiet
-	cd examples/core-intel && docker compose config --quiet
+	cd examples/core-gpu && docker compose --profile models config --quiet
+	cd examples/complete-gpu && docker compose --profile models config --quiet
+	cd examples/core-cpu && docker compose --profile models config --quiet
+	cd examples/core-amd && docker compose --profile models config --quiet
+	cd examples/core-intel && docker compose --profile models config --quiet
 	$(KUBECONFORM) -strict -summary -kubernetes-version $(KUBERNETES_VERSION) -ignore-filename-pattern '\.patch\.yaml$$' examples/kubernetes
 	# The opt-in MCP sidecar is a patch, not a resource: validate the Deployment it makes.
 	@if command -v kubectl >/dev/null; then \

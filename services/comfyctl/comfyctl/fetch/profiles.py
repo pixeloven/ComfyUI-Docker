@@ -18,7 +18,7 @@ class ProfileError(Exception):
 def collisions(manifest: dict) -> list[str]:
     """Names that are BOTH a model group and a profile.
 
-    comfyfetch resolves both out of one namespace and `expand()` tests
+    comfyctl resolves both out of one namespace and `expand()` tests
     `member in known` before `member in profiles`, so the group always wins. A
     profile named after a group therefore resolves the GROUP, at every level --
     and the resulting lock is self-consistent, correctly hashed and passes

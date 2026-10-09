@@ -2,12 +2,13 @@
 # package, and it publishes nothing. Its members are packages, and each one
 # builds on its own:
 #
-#   fetch/       comfyfetch -- manifest, lock and verified model downloads
-#   comfyctl/    comfyctl   -- the umbrella CLI, which mounts each tool as a group
+#   comfyctl/    comfyctl   -- the umbrella CLI, which mounts each tool as a group,
+#                including `comfyctl fetch` (manifest, lock and verified model
+#                downloads), which lives in it since 6.0.0 absorbed comfyfetch
 #   comfyrelay/  comfyrelay -- the MCP sidecar, mounted as `comfyctl relay`.
 #                It ships as the mcp image, not as a wheel: the release
-#                builds only comfyfetch and comfyctl, and comfyctl does not
-#                depend on it (see comfyctl/cli.py).
+#                builds only comfyctl, and comfyctl does not depend on it
+#                (see comfyctl/cli.py).
 #
 # It is rooted here rather than at the repository root because everything else
 # in this repo is Docker and Compose, and a root pyproject.toml would pull every
@@ -18,13 +19,13 @@
 # One lock (uv.lock, beside this file) covers every member, so the members
 # can't drift onto different dependency versions.
 [tool.uv.workspace]
-members = ["fetch", "comfyctl", "comfyrelay"]
+members = ["comfyctl", "comfyrelay"]
 
 # `uv run pytest -q` from here runs every member's tests in one pass. Each
-# member keeps its own pytest config, so `cd fetch && uv run pytest` still works.
+# member keeps its own pytest config, so `cd comfyctl && uv run pytest` still works.
 [dependency-groups]
 dev = ["pytest>=8.0", "respx>=0.21"]
 
 [tool.pytest.ini_options]
-testpaths = ["fetch/tests", "comfyctl/tests", "comfyrelay/tests"]
+testpaths = ["comfyctl/tests", "comfyrelay/tests"]
 markers = ["network: hits real hosts on purpose"]
