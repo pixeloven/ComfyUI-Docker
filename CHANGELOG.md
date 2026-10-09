@@ -9,6 +9,15 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## Unreleased
+
+- **The `comfyui-workflows` guides: a `custom_nodes` lock entry, and what `workflow_validate` doesn't check**
+  ([#169](https://github.com/pixeloven/ComfyUI-Docker/issues/169), [#145](https://github.com/pixeloven/ComfyUI-Docker/issues/145)).
+  `models-and-nodes` shows the fields of a node pack's entry (`git_custom_nodes`, keyed by repository URL,
+  with `hash` and `disabled`). It also notes that `comfyctl fetch resolve` doesn't write that section.
+  `errors-and-validation` opens by saying that a graph `workflow_validate` calls `valid` and `runnable` can
+  still be rejected by ComfyUI for an input or link type, as T4's is.
+
 ## 5.2.0 — 2026-10-09
 
 ### A new image: `mcp-convert` (#167)

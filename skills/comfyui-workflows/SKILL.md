@@ -27,7 +27,9 @@ ComfyUI, through its HTTP API and editor.
   workflow needs a model or node pack the instance lacks. Propose a manifest
   change; never install.
 - [errors-and-validation](references/errors-and-validation.md): which check
-  catches what, and how to read ComfyUI's per-node errors.
+  catches what, and how to read ComfyUI's per-node errors. The relay's
+  `workflow_validate` doesn't check input or link types; ComfyUI checks them
+  when the graph is submitted. *(needs the comfyrelay sidecar)*
 - [relay-limits](references/relay-limits.md): the comfyrelay sidecar's
   profiles, refusals, jobs and re-attaching. The whole topic needs the sidecar.
 - [comfy-manifest](../comfy-manifest/SKILL.md): authoring `comfy.yaml` and

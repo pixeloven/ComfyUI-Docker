@@ -19,9 +19,10 @@ agent's job is to propose the change to those files.
      it belongs in (`install: models/<folder>/`). The `comfy-manifest` topic
      covers the format.
    - **A node pack** goes in the `custom_nodes` section of `comfy-lock.yaml`,
-     pinned to a version or commit. Name the pack's repository and the class
-     you need from it. `comfyctl fetch` fetches models only, so this entry
-     records the request for whoever deploys the instance.
+     pinned to a commit (*A `custom_nodes` entry*, below, has the fields).
+     Name the pack's repository and the class you need from it.
+     `comfyctl fetch` fetches models only, so this entry records the request
+     for whoever deploys the instance.
 3. **Say what the workflow needs it for**, so the reviewer can judge it: which
    node, which input, and the model's license if it restricts use.
 
@@ -32,6 +33,31 @@ or replica loses it.
 
 The comfyrelay sidecar refuses to install anything (see the `relay-limits`
 topic). *(needs the comfyrelay sidecar)*
+
+## A `custom_nodes` entry
+
+The section has comfy-cli's shape. A pack from git goes under
+`git_custom_nodes`, keyed by its repository URL, with the full commit SHA it's
+pinned to in `hash`. This is the entry in this repository's own lock:
+
+```yaml
+custom_nodes:
+  comfyui: 8f40b43e0204d5b9780f3e9618e140e929e80594
+  git_custom_nodes:
+    https://github.com/kijai/ComfyUI-KJNodes:
+      disabled: false
+      hash: a40cf52c4779454451c4480c95947045e3f31c94
+```
+
+- **Propose only the pack's entry** under `git_custom_nodes`. `comfyui`
+  beside it isn't part of any pack's entry: leave it as the lock has it.
+- **`hash` is a full commit SHA**, not a branch or a tag, so the pin can't move.
+- **This section is the part of the lock written by hand.**
+  `comfyctl fetch resolve` writes only `auth` and `models`, so a lock
+  regenerated with it has no `custom_nodes` section. Carry the section over
+  when you regenerate.
+- `comfyctl fetch check` accepts any object here, and nothing in `comfyctl`
+  reads it.
 
 ## The subfolder gotcha
 
