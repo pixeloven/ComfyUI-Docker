@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import httpx2
 import pytest
@@ -677,13 +678,80 @@ async def test_a_batch_still_answers_when_the_suggestions_cannot_be_read():
     assert "no suggestions" in unknown["message"]
 
 
-async def test_a_batch_fails_when_comfyui_fails_on_a_class():
-    err = await error(
-        "node_describe",
-        {"class_types": ["KSampler", "OpenAIDalle3"]},
-        **{"/object_info/OpenAIDalle3": httpx2.Response(500, text="boom")},
-    )
-    assert err["code"] != "unknown_node_class"
+async def test_comfyui_failing_on_one_class_fails_that_class_not_the_batch():
+    """A class_type call still fails; in a batch the failure is reported per class, and the rest are answered."""
+    boom = {"/object_info/OpenAIDalle3": httpx2.Response(500, text="boom")}
+    got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **boom)
+    assert [n["class_type"] for n in got["nodes"]] == ["KSampler"]
+    (failed,) = got["failed"]
+    assert (failed["class_type"], failed["code"]) == ("OpenAIDalle3", "comfyui_http_error")
+    assert failed["message"].startswith("OpenAIDalle3: ")
+    assert (await error("node_describe", {"class_type": "OpenAIDalle3"}, **boom))["code"] == "comfyui_http_error"
+
+
+async def test_a_batch_whose_object_info_read_times_out_lists_its_unknown_classes_without_suggestions(monkeypatch):
+    monkeypatch.setattr(tools_introspection, "OBJECT_INFO_SECONDS", 0.05)
+
+    async def stalled() -> httpx2.Response:
+        await asyncio.sleep(5)
+        return httpx2.Response(200, json=OBJECT_INFO)
+
+    asked = {"class_types": ["KSampler", "checkpointloadersimple"]}
+    got = await ok("node_describe", asked, **{"/object_info": stalled})
+    assert [n["class_type"] for n in got["nodes"]] == ["KSampler"]
+    (unknown,) = got["unknown"]
+    assert unknown["suggestions"] == [] and "no suggestions: /object_info timeout" in unknown["message"]
+
+
+async def test_a_slow_suggestion_scan_degrades_to_no_suggestions_with_the_reason(monkeypatch):
+    monkeypatch.setattr(tools_introspection, "SUGGEST_SECONDS", 0.05)
+    index = tools_introspection._name_index
+    monkeypatch.setattr(tools_introspection, "_name_index", lambda names: time.sleep(0.3) or index(names))
+    got = await ok("node_describe", {"class_types": ["checkpointloadersimple", "Zzzzzz"]})
+    assert [u["suggestions"] for u in got["unknown"]] == [[], []]
+    assert all("the scan took over 0.05s" in u["message"] for u in got["unknown"])
+
+
+async def test_the_suggestion_index_is_built_once_per_batch(monkeypatch):
+    built = []
+    index = tools_introspection._name_index
+    monkeypatch.setattr(tools_introspection, "_name_index", lambda names: built.append(1) or index(names))
+    got = await ok("node_describe", {"class_types": ["checkpointloadersimple", "Load Checkpoint", "Zzzzzz"]})
+    assert len(got["unknown"]) == 3 and built == [1]
+    assert got["unknown"][0]["suggestions"][0]["class_type"] == "CheckpointLoaderSimple"
+
+
+async def test_help_slower_than_its_bound_is_left_out_with_the_reason(monkeypatch):
+    """Help is optional detail (#163): ComfyUI too slow to serve it leaves the answer as it would be without it."""
+    monkeypatch.setattr(tools_introspection, "HELP_SECONDS", 0.05)
+
+    async def stalled() -> httpx2.Response:
+        await asyncio.sleep(5)
+        return httpx2.Response(200, text="late")
+
+    slow = {"/docs/KSampler/en.md": stalled}
+    single = await ok("node_describe", {"class_type": "KSampler"}, **slow)
+    assert "help" not in single and single["help_omitted"].startswith("timeout")
+    batch = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **slow)
+    assert "help" not in batch["nodes"][0] and batch["nodes"][0]["help_omitted"].startswith("timeout")
+
+
+async def test_a_batch_past_its_budget_drops_help_then_omits_classes(monkeypatch):
+    """BATCH_MAX_CHARS bounds a batch's answer: what fits comes back in order, help is dropped before a class is,
+    and each class left out is named, to ask for alone. A class_type call is never cut."""
+    help_md = {"/docs/KSampler/en.md": httpx2.Response(200, text="x" * 30_000)}
+    bare = await call("node_describe", {"class_type": "KSampler", "include_help": False})
+    monkeypatch.setattr(tools_introspection, "BATCH_MAX_CHARS", len(bare.content[0].text) + 200)  # + help_omitted
+    got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **help_md)
+    (ksampler,) = got["nodes"]
+    assert "help" not in ksampler and "ask for it alone" in ksampler["help_omitted"]
+    assert [(o["class_type"], o["reason"].startswith("over ")) for o in got["omitted"]] == [("OpenAIDalle3", True)]
+    assert len((await ok("node_describe", {"class_type": "KSampler"}, **help_md))["help"]) == 30_000
+
+
+async def test_a_batch_within_its_budget_is_not_cut():
+    got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]})
+    assert "omitted" not in got and all("help_omitted" not in n for n in got["nodes"])
 
 
 async def test_a_batch_takes_up_to_its_cap():

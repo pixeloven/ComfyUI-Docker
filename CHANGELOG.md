@@ -13,12 +13,16 @@ see `VERSIONING.md`.
 
 - **comfyrelay `node_describe`: several classes per call, and help optional**
   ([#169](https://github.com/pixeloven/ComfyUI-Docker/issues/169)). `class_types` (up to 20, instead of
-  `class_type`) answers `{nodes, unknown}`: an unknown class is listed in `unknown` with `unknown_node_class`
-  and its `suggestions`, and the call still succeeds. `include_help: false` leaves the help pages out. Both are
-  optional, and a `class_type` call answers as before.
+  `class_type`) answers `{nodes, unknown, failed, omitted}`: an unknown class is listed in `unknown` with
+  `unknown_node_class` and its `suggestions`, a class ComfyUI fails to describe in `failed`, and the call still
+  succeeds. A batch stays within 40,000 characters: help is dropped first (`help_omitted`), then classes
+  (`omitted`, to ask for alone). `include_help: false` leaves the help pages out. Both are optional, and a
+  `class_type` call answers as before.
+- **comfyrelay `node_describe`: help fetches are bounded** (#163, #169). A call's help fetches get 5 s in all;
+  after that help is left out, and `help_omitted` says why, instead of the call waiting on ComfyUI.
 - **comfyrelay `workflow_run`: a rejected run says it was never queued** (#169). `workflow_rejected` still
   carries a `job_id`, which only repeats the rejection; its `job_status` now reports `comfyui_state: "rejected"`
-  instead of `submitting`.
+  instead of `submitting`, also when a cancel meets the rejection.
 
 ## 5.2.0 — 2026-10-09
 

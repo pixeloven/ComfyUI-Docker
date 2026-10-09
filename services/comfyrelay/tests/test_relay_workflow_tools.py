@@ -666,6 +666,20 @@ async def test_a_cancel_during_a_submission_comfyui_rejects_says_it_was_never_qu
 
 
 @pytest.mark.usefixtures("quick_stop")
+async def test_a_rejection_after_the_stops_budget_still_says_it_was_never_queued():
+    fake = FakeComfyUI(auto="hold")
+    fake.reject = {"error": {"type": "prompt_outputs_failed_validation", "message": "x"}, "node_errors": {}}
+    fake.delays["/prompt"] = 1.0  # past what the unwind may wait (0.8s budget less the 0.3s reserve)
+    progress = {"prompt_id": "p-late-rejected", "comfyui_state": "submitting"}  # as workflow_run starts it
+    await assert_producer_honours_cancel(lambda: tw.run_prompt(fake.client(), t1(), progress))
+    assert (progress["stop"], progress["comfyui_state"]) == ("unconfirmed", "submitting")
+    await asyncio.sleep(0.8)  # ComfyUI answers: a refusal, so nothing is queued and nothing needs cancelling again
+    assert (progress["stop"], progress["comfyui_state"]) == ("not_needed", "rejected")
+    assert "stop_detail" not in progress
+    assert fake.pending == [] and fake.count("POST", "/api/jobs/p-late-rejected/cancel") == 1
+
+
+@pytest.mark.usefixtures("quick_stop")
 async def test_a_submission_slower_than_the_budget_is_cancelled_when_it_answers(caplog):
     caplog.set_level(logging.INFO, logger="comfyrelay.workflow")
     fake = FakeComfyUI(auto="hold")
