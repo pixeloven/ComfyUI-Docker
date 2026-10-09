@@ -5,8 +5,8 @@ import socketserver
 import threading
 
 import pytest
-from comfyfetch import http as cf
-from comfyfetch.auth import AuthMap
+from comfyctl.fetch import http as cf
+from comfyctl.fetch.auth import AuthMap
 
 
 def test_literal_token_is_ignored():

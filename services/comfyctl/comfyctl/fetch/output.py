@@ -11,8 +11,8 @@ Three consumers with different needs, and one flag:
 and every container, so the useful default needs no flag.
 
 PROGRESS goes to stderr; the RESULT goes to stdout. That distinction is not
-cosmetic: `comfyfetch resolve ... > lock.yaml` must capture the lock and not the
-chatter, and `comfyfetch fetch ... | grep present` must see the summary. Sending
+cosmetic: `comfyctl fetch resolve ... > lock.yaml` must capture the lock and not the
+chatter, and `comfyctl fetch fetch ... | grep present` must see the summary. Sending
 both to stderr leaves stdout empty and every such pipeline silently matching
 nothing.
 """

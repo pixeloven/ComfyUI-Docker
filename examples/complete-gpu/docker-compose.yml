@@ -7,7 +7,7 @@ services:
   # is small enough to be a demonstration rather than a download. Point it at
   # ../../comfy-lock.yaml for the full set.
   fetch:
-    image: ${COMFY_FETCH_IMAGE:-ghcr.io/pixeloven/comfyui/fetch:latest}
+    image: ${COMFYCTL_IMAGE:-ghcr.io/pixeloven/comfyui/comfyctl:latest}
     container_name: comfyui-fetch-complete-gpu
     profiles: [models]
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -22,7 +22,7 @@ services:
       # which is /app -- the same base_path extra_model_paths.yaml declares.
       - ${COMFY_MODEL_PATH:-./data/models}:/app/models
       - ${COMFY_LOCK:-../../locks/preview.yaml}:/comfy-lock.yaml:ro
-    command: ["/comfy-lock.yaml", "/app", "--apply"]
+    command: ["fetch", "fetch", "/comfy-lock.yaml", "/app", "--apply"]
     networks:
       - comfy_network
 

@@ -5,7 +5,7 @@
 #
 # The build context is services/, the uv workspace root, so the image installs
 # exactly what services/uv.lock pins, hash-checked. comfyctl is the command:
-# `comfyctl relay serve` mounts comfyrelay, and comfyfetch comes with comfyctl.
+# `comfyctl relay serve` mounts comfyrelay, and `comfyctl fetch` comes with comfyctl.
 # dockerfile.comfy.relay.dockerignore, beside this file, is the context filter.
 #
 # Two images from this file. RELAY_CONVERT=0 (the default) is the mcp image.
@@ -15,7 +15,8 @@
 # base and the venv below; with 0, every step the mcp image runs is unchanged.
 ARG RELAY_CONVERT=0
 
-# The uv that installs from the lock. Build stage only.
+# The uv that installs from the lock. Build stage only. The same pin (version and
+# digest) is in comfyctl/dockerfile.comfy.ctl; move both together.
 FROM ghcr.io/astral-sh/uv:0.11.23@sha256:d0a0a753ab981624b49c97abc98821c1c09f4ca69d1ef5cee69c501be3d88479 AS uv
 
 FROM python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b AS deps
@@ -30,14 +31,12 @@ WORKDIR /src
 # rebuilds when they change. --frozen installs the lock as written and fails
 # rather than re-resolving; every wheel is checked against its lock hash.
 COPY pyproject.toml uv.lock ./
-COPY fetch/pyproject.toml fetch/
 COPY comfyctl/pyproject.toml comfyctl/README.md comfyctl/
 COPY comfyrelay/pyproject.toml comfyrelay/README.md comfyrelay/
 RUN uv sync --frozen --no-dev --all-packages --no-install-workspace
 
 FROM deps AS builder
-# Then the three workspace members themselves, not editable, so /src can go.
-COPY fetch/comfyfetch fetch/comfyfetch
+# Then the two workspace members themselves, not editable, so /src can go.
 COPY comfyctl/comfyctl comfyctl/comfyctl
 COPY comfyrelay/comfyrelay comfyrelay/comfyrelay
 RUN uv sync --frozen --no-dev --all-packages --no-editable

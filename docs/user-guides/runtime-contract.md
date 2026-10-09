@@ -5,8 +5,9 @@ variables, the volume paths, the port, the readiness endpoint, and how the conta
 behaves depending on the user it starts as.
 
 The separate `mcp` image has a shorter contract of its own, in
-[The `mcp` Image](#the-mcp-image), and so does `mcp-convert`, in
-[The `mcp-convert` Image](#the-mcp-convert-image).
+[The `mcp` Image](#the-mcp-image), and so do `mcp-convert`, in
+[The `mcp-convert` Image](#the-mcp-convert-image), and `comfyctl`, in
+[The `comfyctl` Image](#the-comfyctl-image).
 
 A deployment that works on one release must keep working on the next. Changing
 anything on this page in a way that breaks one is a **major** version (see
@@ -91,7 +92,7 @@ nothing. All but one stay outside the container: `core-amd` passes
 | `COMFY_TEMP_PATH` | `./data/temp` | Host side of `/app/temp` | all five |
 | `COMFY_USER_PATH` | `./data/user` | Host side of `/app/user` | all five |
 | `COMFY_IMAGE` | the example's image | The `comfyui` service's image | all five |
-| `COMFY_FETCH_IMAGE` | `ghcr.io/pixeloven/comfyui/fetch:latest` | The opt-in `fetch` service's image | all five |
+| `COMFYCTL_IMAGE` | `ghcr.io/pixeloven/comfyui/comfyctl:latest` | The opt-in `fetch` service's image ([The `comfyctl` Image](#the-comfyctl-image); the service runs `fetch fetch /comfy-lock.yaml /app --apply`). Up to 5.x this was `COMFY_FETCH_IMAGE`, which the examples no longer read | all five |
 | `COMFY_LOCK` | `../../locks/preview.yaml` | The lock the `fetch` service applies | all five |
 | `HF_TOKEN`, `CIVITAI_TOKEN` | *(empty)* | Passed to the `fetch` service only, for gated downloads | all five |
 | `VIDEO_GID`, `RENDER_GID` | `44`, `109` | `group_add` for GPU device access | `core-amd`, `core-intel` |
@@ -114,10 +115,9 @@ the defaults from the first table. The `fetch` service runs as `${PUID}:${PGID}`
 | `COMFY_LOCK`, `HF_TOKEN`, `CIVITAI_TOKEN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `VIDEO_GID`, `RENDER_GID` | – | – | – | ✓ | ✓ |
 | `HSA_OVERRIDE_GFX_VERSION` | – | – | – | ✓ | – |
-| `COMFY_IMAGE`, `COMFY_FETCH_IMAGE` | – | – | – | – | – |
+| `COMFY_IMAGE`, `COMFYCTL_IMAGE` | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-`COMFY_IMAGE` and `COMFY_FETCH_IMAGE` are read by every compose file but documented in
-no `.env.example`. `COMFY_IMAGE` is covered in [Running Containers](running.md) and
+`COMFY_IMAGE` is also covered in [Running Containers](running.md) and
 [Building Images](building.md). `COMFY_RUNTIME` is in none of them, because the image
 sets it.
 
@@ -403,6 +403,29 @@ is not acceptable for a deployment, run
 `mcp` instead. Chromium's security fixes reach the image when its Playwright
 pin moves, which is meant to follow each Playwright release, about monthly.
 
+## The `comfyctl` Image
+
+`ghcr.io/pixeloven/comfyui/comfyctl` is the `comfyctl` CLI as an image, for
+materialising a lock's models into a volume: as a Job, an init container, or the
+examples' opt-in `fetch` service. It talks to no ComfyUI. It replaced the
+`fetch` image in 6.0.0
+([#197](https://github.com/pixeloven/ComfyUI-Docker/issues/197)).
+[`services/comfyctl/FETCH.md`](../../services/comfyctl/FETCH.md) documents the
+`fetch` group.
+
+| Contract | Value |
+|----------|-------|
+| Entrypoint | `comfyctl`, with no default command. Arguments name the group and the verb: `<image> fetch fetch /lock.yaml /app --apply`, `<image> fetch check /config/comfy.yaml /config/comfy-lock.yaml`. The `fetch` image's entrypoint was `comfyctl fetch fetch` |
+| Exit codes | `0` did what was asked, `1` a real failure (a source didn't resolve, a hash didn't match, a manifest and its lock disagree), `2` a bad request (a missing file, an unknown profile, incompatible flags, or arguments for the old entrypoint) |
+| Credentials | Read from the environment variables the lock's `auth:` map names, by host (the examples pass `HF_TOKEN` and `CIVITAI_TOKEN`). Never from the image or the lock |
+| User | `USER 1000`, with no group, so it runs as `1000:0`. Any UID works: the image itself needs nothing writable. `fetch fetch --apply` needs write access to the destination volume, where it writes each file beside its target (`<name>.fetch-tmp`) and renames it into place |
+| Read-only root | Works for `check`, `build`, `facts` and `fetch`, which write only to the paths you mount. `resolve` needs a **writable temp directory** (`/tmp`, or `TMPDIR`) under `--read-only`: a `gh:` asset with no published digest is downloaded there in full to hash it, so size it for the largest such file. Without one, that resolve fails with `No usable temporary directory found` |
+| Tags | `<sha8>` and `latest` from a push to `main`, `X.Y.Z` and `X.Y` from a release. No runtime prefix and no `nightly`. Pin a digest; the release's `IMAGE-DIGESTS.txt` lists it |
+| Labels | `org.opencontainers.image.source` (this repository), `org.opencontainers.image.description` and `org.opencontainers.image.licenses` (`MIT`). There is no `org.opencontainers.image.version`: on the other images it states the ComfyUI inside, and this one has none |
+
+These are promises by the same rule as the rest of this page: breaking one is
+a major version.
+
 ## What Counts as a Breaking Change
 
 [`VERSIONING.md` → *What counts as major*](../../VERSIONING.md#what-counts-as-major)
@@ -438,7 +461,6 @@ a major change.
 - [#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115): dependencies and caches installed at runtime are lost when the container is recreated.
 - [#116](https://github.com/pixeloven/ComfyUI-Docker/issues/116): VRAM flags in `CLI_ARGS` make ComfyUI exit on the CPU image.
 - [#117](https://github.com/pixeloven/ComfyUI-Docker/issues/117): `COMFY_ENABLE_*` accept only the exact string `true`.
-- [#118](https://github.com/pixeloven/ComfyUI-Docker/issues/118): `COMFY_IMAGE` and `COMFY_FETCH_IMAGE` are missing from every `.env.example`.
 
 ---
 

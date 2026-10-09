@@ -46,7 +46,7 @@ from . import resolve as resolve_mod
 from .output import Mode, Out
 
 app = typer.Typer(
-    name="comfyfetch",
+    name="fetch",
     help=__doc__,
     add_completion=True,
     no_args_is_help=True,
@@ -63,7 +63,7 @@ OutputOpt = Annotated[Mode, typer.Option(
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(importlib.metadata.version("comfyfetch"))
+        typer.echo(importlib.metadata.version("comfyctl"))
         raise typer.Exit()
 
 
@@ -73,7 +73,7 @@ def _main(
         "--version", callback=_version_callback, is_eager=True,
         help="Show the version and exit.")] = False,
 ) -> None:
-    """comfyfetch — resolve, verify and materialise ComfyUI model locks."""
+    """comfyctl fetch — resolve, verify and materialise ComfyUI model locks."""
 
 
 def _load(path: pathlib.Path, what: str) -> dict:

@@ -1,9 +1,9 @@
 """comfyctl's contract: groups are mounted, never reimplemented, and share one set
 of conventions.
 
-The fetch group's behaviour is tested in depth by services/fetch/tests against
-comfyfetch's app. These tests prove the mount passes it through untouched, so
-the same flags give the same stdout and exit code under `comfyctl fetch`.
+The fetch group's behaviour is tested in depth by the other tests here, against
+comfyctl.fetch's own app. These tests prove the mount passes it through untouched,
+so the same flags give the same stdout and exit code under `comfyctl fetch`.
 """
 
 from __future__ import annotations
@@ -14,15 +14,15 @@ import pathlib
 import pytest
 import typer
 from comfyctl.cli import app
-from comfyfetch.cli import app as fetch_app
+from comfyctl.fetch.cli import app as fetch_app
 from typer.testing import CliRunner
 
-FIXTURES = pathlib.Path(__file__).parents[2] / "fetch" / "tests" / "fixtures"
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 runner = CliRunner()
 
 
-def test_every_comfyfetch_verb_is_under_fetch():
-    """A verb added to comfyfetch appears under `comfyctl fetch` with no edit here."""
+def test_every_fetch_verb_is_under_comfyctl_fetch():
+    """A verb added to comfyctl.fetch appears under `comfyctl fetch` with no edit here."""
     fetch_group = typer.main.get_command(app).commands["fetch"]
     assert set(fetch_group.commands) == set(typer.main.get_command(fetch_app).commands)
     assert {"build", "resolve", "fetch", "check", "facts"} <= set(fetch_group.commands)
@@ -54,7 +54,7 @@ def test_every_comfyfetch_verb_is_under_fetch():
         ["build", "missing-dir"],
     ],
 )
-def test_fetch_group_matches_comfyfetch(args, tmp_path, monkeypatch):
+def test_fetch_group_matches_its_own_app(args, tmp_path, monkeypatch):
     """Same stdout, same exit code, whichever way the app is reached."""
     monkeypatch.chdir(FIXTURES)
     args = [a.replace("{tmp}", str(tmp_path)) for a in args]
@@ -177,10 +177,10 @@ def typer_that_shows_locals(monkeypatch):
     import importlib
 
     import comfyctl.cli
-    import comfyfetch.cli
+    import comfyctl.fetch.cli
     import comfyrelay.cli
 
-    modules = (comfyfetch.cli, comfyrelay.cli, comfyctl.cli)  # comfyctl mounts the other two
+    modules = (comfyctl.fetch.cli, comfyrelay.cli, comfyctl.cli)  # comfyctl mounts the other two
     monkeypatch.setitem(typer.Typer.__init__.__kwdefaults__, "pretty_exceptions_show_locals", True)
     yield [importlib.reload(m).app for m in modules]
     monkeypatch.undo()

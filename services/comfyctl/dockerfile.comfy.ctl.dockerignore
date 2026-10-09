@@ -1,5 +1,6 @@
 # The context is services/ (the uv workspace root). Send only what the image
-# installs: the workspace files and the two Python members' sources.
+# installs: the workspace files, comfyctl's source, and comfyrelay's project
+# metadata, which uv reads to load the workspace but does not install.
 *
 !pyproject.toml
 !uv.lock
@@ -8,6 +9,5 @@
 !comfyctl/comfyctl/
 !comfyrelay/pyproject.toml
 !comfyrelay/README.md
-!comfyrelay/comfyrelay/
 **/__pycache__
 **/*.pyc

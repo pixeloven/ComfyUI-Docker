@@ -13,8 +13,8 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from comfyfetch import schema
-from comfyfetch.cli import app
+from comfyctl.fetch import schema
+from comfyctl.fetch.cli import app
 
 runner = CliRunner()
 
@@ -32,7 +32,7 @@ def write(path: pathlib.Path, doc: dict) -> pathlib.Path:
 
 def test_the_schemas_ship_with_the_package(tmp_path):
     """Bundled as package data, not read from a checkout. A consumer running
-    `uvx comfyfetch` has no checkout to point at."""
+    `uvx … comfyctl` has no checkout to point at."""
     assert schema.load("comfy") ["type"] == "object"
     assert schema.load("comfy-lock")["type"] == "object"
 
@@ -53,7 +53,7 @@ def test_an_x_prefixed_key_is_allowed_anywhere_a_consumer_needs_one(tmp_path):
 
     A real consumer carries 43 such keys -- trigger words a LoRA needs to fire,
     which generation of a family a file belongs to, and whether a checkpoint is
-    all-in-one or split. None of that is comfyfetch's business, and all of it
+    all-in-one or split. None of that is comfyctl's business, and all of it
     would be lost if the only options were "schema rejects it" or "schema stops
     checking".
     """

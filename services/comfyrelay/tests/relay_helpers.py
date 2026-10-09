@@ -1,5 +1,5 @@
 """Helpers the tests import. Uniquely named, because `import conftest` would be
-ambiguous: services/fetch/tests has a conftest.py too, and one pytest run
+ambiguous: services/comfyctl/tests has a conftest.py too, and one pytest run
 collects both."""
 
 from __future__ import annotations
