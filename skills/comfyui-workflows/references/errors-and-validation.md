@@ -15,7 +15,8 @@ as a `LoadImage` mask (output 1) wired into `SaveImage`'s `images`, passes it
 with `valid` and `runnable` both true. (`runnable` means only that
 `workflow_run` will submit it.) That graph then fails at `workflow_run` with
 `workflow_rejected`, and ComfyUI's `return_type_mismatch` names the node and
-input (section 2). To find out whether ComfyUI accepts a graph, submit it.
+input (section 2). Only submitting a graph with `workflow_run` tells you
+whether ComfyUI accepts it, and that also runs it: there is no dry run.
 
 ComfyUI has no dry run, so the relay checks only what can be known without
 submitting the graph, against the live `/object_info`:

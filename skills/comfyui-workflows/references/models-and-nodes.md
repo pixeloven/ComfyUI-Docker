@@ -50,7 +50,9 @@ custom_nodes:
 ```
 
 - **Propose only the pack's entry** under `git_custom_nodes`. `comfyui`
-  beside it isn't part of any pack's entry: leave it as the lock has it.
+  beside it isn't part of any pack's entry: leave it as the lock has it. If
+  the lock has no `custom_nodes` section yet, propose `git_custom_nodes` alone
+  and don't add `comfyui`.
 - **`hash` is a full commit SHA**, not a branch or a tag, so the pin can't move.
 - **This section is the part of the lock written by hand.**
   `comfyctl fetch resolve` writes only `auth` and `models`, so a lock

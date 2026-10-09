@@ -6,7 +6,8 @@ description: Author comfy.yaml and generate locks — source forms, when `as:` i
 # Authoring `comfy.yaml`
 
 `comfy.yaml` is hand-authored and declares **intent**. `comfy-lock.yaml` records
-the **resolution** and is generated — never hand-edit a lock.
+the **resolution** and is generated — never hand-edit a lock (its `custom_nodes`
+section aside: see *Mistakes that fail quietly*).
 
 ```
 models/  --comfyctl fetch build-->  comfy.yaml  --comfyctl fetch resolve-->  comfy-lock.yaml  --comfyctl fetch fetch-->  disk
@@ -138,7 +139,9 @@ A host listed here whose variable is unset does **not** block public files.
 ## Mistakes that fail quietly
 
 - **Hand-editing a lock.** It is generated. The sha256 in it then describes
-  bytes nobody verified.
+  bytes nobody verified. The one exception is `custom_nodes`, which nothing
+  generates: `resolve` writes only `auth` and `models`, so carry that section
+  over by hand when you regenerate.
 - **Editing `comfy.yaml` without regenerating.** The fetcher reads the lock, so
   your new model is simply never fetched and nothing says so.
 - **Assuming a gated repo is missing.** `black-forest-labs` publishes as
