@@ -298,7 +298,8 @@ async def test_every_open_template_converts_as_the_editor_exports_it_and_comfyui
             result, why = await outcome(name, entry, comfyui)
             expected = _expected(name)
             if result not in ("fail", expected):
-                result, why = "fail", f"listed as {expected}, but it is {result}: correct the list"
+                listed = "not listed" if expected == "pass" else f"listed as {expected}"
+                result, why = "fail", f"{listed}, but it is {result}: correct the list"
             elif result == "fail" and expected != "pass":
                 why = f"listed as {expected}, but: {why}"
             entry["result"] = result
