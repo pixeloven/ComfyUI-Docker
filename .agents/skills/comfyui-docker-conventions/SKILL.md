@@ -207,6 +207,11 @@ IMAGE_LABEL=local docker buildx bake mcp --load  # the mcp image; its build prob
                                                  # network=host isn't honoured: docker buildx build --network host with the args from bake --print mcp
 tests/relay/run.sh [--network host] --comfyui <core-cpu image> ghcr.io/pixeloven/comfyui/mcp:local
                                                  # mcp-convert too: run.sh gives it /tmp and converts a template through it
+tests/relay/corpus.sh --comfyui <core-cpu image> <mcp-convert image>
+                                                 # D8's corpus (#167): every open template through the relay, against the frontend's
+                                                 # own export and ComfyUI's /prompt validation, never queued. Needs the convert
+                                                 # extra's Chromium on the host; CI's `mcp-convert template corpus` workflow runs it when
+                                                 # the relay, its lock, its Dockerfile, the mcp-convert target or COMFYUI_VERSION changes
 docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
 ```
 

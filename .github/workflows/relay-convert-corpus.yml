@@ -1,0 +1,212 @@
+# D8's test bar for the mcp-convert image (#167): every open template the
+# pinned ComfyUI serves, converted through the relay, validated by the relay
+# and by ComfyUI, and identical to the frontend's own export in a plain
+# browser tab. tests/relay/corpus.sh is the same run locally.
+#
+# A workflow of its own rather than a job in ci.yml, so that running it by
+# hand (workflow_dispatch) is never a run of CI, which publishes. It publishes
+# nothing: it builds mcp-convert and loads it, never pushes, and logs in to no
+# registry. Nothing needs it, so it holds back no image and no release.
+#
+# It runs on a pull request only when the converter's result could change:
+#   - the mcp-convert bake target as it resolves, which carries the
+#     COMFYUI_VERSION pin, so a ComfyUI bump runs it (and so does any other
+#     change to that target, such as COMFY_DOCS_SHA);
+#   - the relay's code (convert.py and the tools that call it), the lock its
+#     image installs, the Dockerfile mcp-convert is built from, or this job's
+#     own files: the workflow, the scripts and tests it runs, and the oracle
+#     it shares with test_relay_convert_live.py.
+name: mcp-convert template corpus
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # As ci.yml's `changes` gates its jobs: a path filter, plus the resolved
+  # bake target compared with the PR's merge-base, since a pin bump is a change
+  # inside docker-bake.hcl rather than a path of its own.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      corpus: ${{ steps.decide.outputs.corpus }}
+    steps:
+    - uses: actions/checkout@v7.0.1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - uses: dorny/paths-filter@v4.0.3
+      id: filter
+      if: github.event_name == 'pull_request'
+      with:
+        filters: |
+          corpus:
+            - 'services/comfyrelay/comfyrelay/**'
+            - 'services/uv.lock'
+            - 'services/comfyrelay/dockerfile.comfy.relay'
+            - 'services/comfyrelay/tests/test_relay_convert_corpus.py'
+            - 'services/comfyrelay/tests/test_relay_convert_live.py'
+            - 'services/comfyrelay/tests/data/convert-preview.mp4'
+            - 'tests/relay/corpus.sh'
+            - 'tests/relay/validate_only.py'
+            - '.github/workflows/relay-convert-corpus.yml'
+
+    # APT_REFRESH is left out: it is a stamp of the current week, not the PR's.
+    - name: Did the mcp-convert target change?
+      id: bake
+      if: github.event_name == 'pull_request'
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -euo pipefail
+        base="$(git merge-base "${BASE_SHA}" HEAD)"
+        git show "${base}:docker-bake.hcl" > "${RUNNER_TEMP}/base.hcl"
+        resolve() {
+          docker buildx bake -f "$1" --print mcp-convert | jq -S 'del(.target["mcp-convert"].args.APT_REFRESH)'
+        }
+        if [ "$(resolve "${RUNNER_TEMP}/base.hcl")" = "$(resolve docker-bake.hcl)" ]; then
+          echo "the mcp-convert target resolves as it does at ${base:0:8}"
+          echo "changed=false" >> "${GITHUB_OUTPUT}"
+        else
+          echo "the mcp-convert target resolves differently from ${base:0:8}:"
+          diff <(resolve "${RUNNER_TEMP}/base.hcl") <(resolve docker-bake.hcl) || true
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+        fi
+
+    - name: Decide
+      id: decide
+      env:
+        PATHS: ${{ steps.filter.outputs.corpus }}
+        BAKE: ${{ steps.bake.outputs.changed }}
+      run: |
+        if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] || [ "${PATHS}" = true ] || [ "${BAKE}" = true ]; then
+          echo "corpus=true" >> "${GITHUB_OUTPUT}"
+        else
+          echo "corpus=false" >> "${GITHUB_OUTPUT}"
+        fi
+
+  corpus:
+    name: every open template converts as the editor exports it
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: changes
+    if: needs.changes.outputs.corpus == 'true'
+    # The images this job builds are tagged with it, and never pushed.
+    env:
+      IMAGE_LABEL: corpus
+    steps:
+    - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4.3.0
+
+    # Never pushed: `push: false`, and `corpus` is not a label anything publishes.
+    - name: Build the mcp-convert image
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: mcp-convert
+        load: true
+        push: false
+        provenance: false
+        sbom: false
+      env:
+        GIT_SHA: ${{ github.sha }}
+
+    # As ci.yml's relay jobs pick it: main's core-cpu when it holds the pinned
+    # ComfyUI, and otherwise (a pin bump) one built here at the pin.
+    - name: Pick the core-cpu
+      id: comfyui
+      run: |
+        set -euo pipefail
+        printed="$(docker buildx bake -f docker-bake.hcl --print core-cpu mcp-convert)"
+        own="$(jq -r '.target["core-cpu"].tags[0]' <<< "${printed}")"
+        latest="${own%:*}:cpu-latest"
+        pin="$(jq -r '.target["core-cpu"].args.COMFYUI_VERSION' <<< "${printed}")"
+        published="$(docker buildx imagetools inspect "${latest}" \
+          --format '{{index .Image.Config.Labels "org.opencontainers.image.version"}}')"
+        { echo "pin=${pin}"; echo "relay=$(jq -r '.target["mcp-convert"].tags[0]' <<< "${printed}")"; } >> "${GITHUB_OUTPUT}"
+        if [ "${published}" = "${pin}" ]; then
+          echo "cpu-latest holds ComfyUI ${published}, the pin: testing against it"
+          { echo "image=${latest}"; echo "build=false"; } >> "${GITHUB_OUTPUT}"
+        else
+          echo "::notice::cpu-latest holds ComfyUI ${published:-<no version label>} but this commit pins ${pin}: building core-cpu here"
+          { echo "image=${own}"; echo "build=true"; } >> "${GITHUB_OUTPUT}"
+        fi
+
+    # Never pushed, like the image above.
+    - name: Build core-cpu at this commit's pin
+      if: steps.comfyui.outputs.build == 'true'
+      uses: docker/bake-action@v7.3.0
+      with:
+        files: docker-bake.hcl
+        targets: core-cpu
+        load: true
+        push: false
+        provenance: false
+        sbom: false
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10.0.1
+
+    # The oracle's browser: the Chromium build the pinned Playwright names, as
+    # the image has it, checked against the revision and tree hash in
+    # dockerfile.comfy.relay, as relay-convert checks it. Without
+    # --with-deps: the runner's image already has the libraries it needs, and
+    # the apt step costs minutes.
+    - name: Install the oracle's browser
+      working-directory: services
+      run: |
+        set -euo pipefail
+        export PLAYWRIGHT_BROWSERS_PATH="${RUNNER_TEMP}/ms-playwright"
+        uv run --locked --extra convert playwright install --only-shell chromium
+        rev="$(sed -n 's/^ARG CHROMIUM_REVISION=//p' comfyrelay/dockerfile.comfy.relay)"
+        want="$(sed -n 's/^ARG CHROMIUM_TREE_SHA256=//p' comfyrelay/dockerfile.comfy.relay)"
+        got="$(cd "${PLAYWRIGHT_BROWSERS_PATH}/chromium_headless_shell-${rev}/chrome-headless-shell-linux64" \
+          && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+        if [ "${got}" != "${want}" ]; then
+          echo "::error::chromium_headless_shell-${rev} hashes to ${got}, not ${want} (dockerfile.comfy.relay)"
+          exit 1
+        fi
+        echo "chromium_headless_shell-${rev} matches its pinned hash"
+        echo "PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH}" >> "${GITHUB_ENV}"
+
+    - name: Convert every open template, and compare
+      env:
+        COMFYUI_IMAGE: ${{ steps.comfyui.outputs.image }}
+        RELAY_IMAGE: ${{ steps.comfyui.outputs.relay }}
+      run: |
+        docker image inspect "${COMFYUI_IMAGE}" >/dev/null 2>&1 || docker pull -q "${COMFYUI_IMAGE}"
+        tests/relay/corpus.sh --comfyui "${COMFYUI_IMAGE}" "${RELAY_IMAGE}"
+
+    - name: Record the counts
+      if: always()
+      env:
+        PIN: ${{ steps.comfyui.outputs.pin }}
+      run: |
+        f=tests/relay/results/corpus/corpus.json
+        [ -f "$f" ] || exit 0
+        { echo "### mcp-convert template corpus, ComfyUI ${PIN}"; echo '```json'; jq .summary "$f"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the corpus report and logs
+      if: always()
+      uses: actions/upload-artifact@v7.0.1
+      with:
+        name: relay-convert-corpus
+        path: tests/relay/results/corpus/
+        if-no-files-found: warn
+        retention-days: 14
