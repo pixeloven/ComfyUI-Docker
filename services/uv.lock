@@ -187,7 +187,7 @@ wheels = [
 
 [[package]]
 name = "comfyctl"
-version = "5.1.0"
+version = "5.2.0"
 source = { editable = "comfyctl" }
 dependencies = [
     { name = "comfyfetch" },
@@ -210,7 +210,7 @@ dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "comfyfetch"
-version = "5.1.0"
+version = "5.2.0"
 source = { editable = "fetch" }
 dependencies = [
     { name = "httpx" },
@@ -241,7 +241,7 @@ dev = [
 
 [[package]]
 name = "comfyrelay"
-version = "5.1.0"
+version = "5.2.0"
 source = { editable = "comfyrelay" }
 dependencies = [
     { name = "httpx2" },

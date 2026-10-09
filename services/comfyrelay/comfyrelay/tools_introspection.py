@@ -530,12 +530,12 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
         Use each input's `name` as its key in a graph. A dynamic input's inputs are qualified with dots: a
         COMFY_DYNAMICCOMBO_V3 `resize_type` lists options as {value, inputs}, and set to one adds
         `resize_type.width`; a COMFY_AUTOGROW_V3 `images` takes `images.image0`, `images.image1`, ... (the first
-        autogrow.min names are required); a COMFY_DYNAMICSLOT_V3 adds its slot_inputs once something is linked to
-        it. A COMFY_MATCHTYPE_V3 input takes any of match_type.allowed_types; an output whose same_type_as names
-        that input (by its match_type.template_id) carries the type linked to it. An output's `index` is the one a
-        link [node_id, index] uses; hidden_inputs are ComfyUI's, never set in a graph. Lists are cut to
-        max_options, with a total. `help` is the node's help page, when it has one (help_truncated: cut at 64 KB).
-        An unknown class fails with `unknown_node_class` and close `suggestions`.
+        autogrow.min names are required when autogrow.item is required); a COMFY_DYNAMICSLOT_V3 adds its
+        slot_inputs once something is linked to it. A COMFY_MATCHTYPE_V3 input takes any of
+        match_type.allowed_types; an output whose same_type_as is that input's name carries the type linked to it.
+        An output's `index` is the one a link [node_id, index] uses; hidden_inputs are ComfyUI's, never set in a
+        graph. Lists are cut to max_options, with a total. `help` is the node's help page, when it has one
+        (help_truncated: cut at 64 KB). An unknown class fails with `unknown_node_class` and close `suggestions`.
         """
         found = {} if class_type in DOT_SEGMENTS else await relay.comfyui.object_info(class_type)
         if class_type in found:
