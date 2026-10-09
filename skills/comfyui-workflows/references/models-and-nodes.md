@@ -56,6 +56,7 @@ there only when its version isn't `nightly`, `latest` or `unknown`):
 
 ```yaml
 custom_nodes:
+  git_custom_nodes: {}
   cnr_custom_nodes:
     <registry id>: <version>
 ```
@@ -63,7 +64,10 @@ custom_nodes:
 - **Propose only the pack's entry**, under `git_custom_nodes` or
   `cnr_custom_nodes`. `comfyui` beside them isn't part of any pack's entry:
   leave it as the lock has it. If the lock has no `custom_nodes` section yet,
-  propose the pack's map alone and don't add `comfyui`.
+  propose the pack's map alone and don't add `comfyui`, but always with a
+  `git_custom_nodes` map, empty (`{}`) for a registry pack: ComfyUI-Manager's
+  snapshot restore fails on a section without one, after it has already
+  disabled the registry packs the section doesn't list.
 - **`hash` is a full commit SHA**, not a branch or a tag, so the pin can't move.
   A registry entry pins a released version, never `nightly` or `latest`.
 - **A `cnr_custom_nodes` map is the whole set.** Restoring a ComfyUI-Manager
