@@ -43,11 +43,11 @@ import re
 from collections import Counter, OrderedDict
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import quote
 
 from mcp_types import ToolAnnotations
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, RootModel, model_serializer
 
 from .comfyui import ComfyUIClient, ComfyUIError
 from .convert import off_reason, unavailable
@@ -513,16 +513,72 @@ def _close_matches(query: str, names: Iterable[tuple[str, str]], n: int = 5) -> 
     return [{"id": ident, "display_name": display} for ident, display in list(seen.items())[:n]]
 
 
+# node_describe's class_types takes at most this many classes in one call.
+MAX_DESCRIBE_CLASSES = 20
+
+
+class UnknownClass(_Compact):
+    class_type: str
+    code: Literal["unknown_node_class"] = "unknown_node_class"
+    message: str
+    suggestions: list[dict[str, str]]
+
+
+class NodeSpecs(_Compact):
+    nodes: list[NodeSpec] = Field(description="The classes found, in the order asked")
+    unknown: list[UnknownClass] | None = Field(default=None, description="The classes this ComfyUI has not got")
+
+
+class NodeDescribed(RootModel[NodeSpec | NodeSpecs]):
+    """node_describe's answer: a NodeSpec for class_type, or a NodeSpecs for class_types. A root model, so the one
+    class answer is the NodeSpec itself, as before class_types (#169)."""
+
+
+async def _describe(comfyui: ComfyUIClient, class_type: str, max_options: int, include_help: bool) -> NodeSpec | None:
+    """The class's spec, or None when ComfyUI has no such class."""
+    found = {} if class_type in DOT_SEGMENTS else await comfyui.object_info(class_type)
+    if class_type in found:
+        if not isinstance(found[class_type], dict):
+            raise _bad(f"an /object_info/{class_type} that is not an object")
+        spec = _spec(class_type, found[class_type], max_options)
+        page = await _help(comfyui, class_type, found[class_type]) if include_help else None
+        if page:
+            spec.help, spec.help_path, spec.help_truncated = page[0], page[1], page[2] or None
+        return spec
+    if found:
+        raise _bad(f"an /object_info/{class_type} that describes other classes")
+    return None
+
+
+def _unknown(class_type: str, every: dict[str, dict[str, Any]]) -> UnknownClass:
+    suggestions = _close_matches(class_type, ((k, str(v.get("display_name") or k)) for k, v in every.items()))
+    return UnknownClass(
+        class_type=class_type,
+        message=f"ComfyUI has no node class {class_type!r}. Class names are case-sensitive; "
+        + ("close matches are in suggestions." if suggestions else "find one with node_search."),
+        suggestions=[{"class_type": s["id"], "display_name": s["display_name"]} for s in suggestions],
+    )
+
+
 def _node_describe(relay: Relay) -> Callable[..., Any]:
     async def node_describe(
-        class_type: str = Field(min_length=1, description="The exact class, as node_search returns it: 'KSampler'"),
+        class_type: str | None = Field(
+            default=None, min_length=1, description="The exact class, as node_search returns it: 'KSampler'"
+        ),
         max_options: int = Field(
             default=DEFAULT_MAX_OPTIONS,
             ge=1,
             le=5000,
             description="At most this many values per COMBO input and names per Autogrow input, at every level",
         ),
-    ) -> NodeSpec:
+        class_types: list[Annotated[str, Field(min_length=1)]] | None = Field(
+            default=None,
+            min_length=1,
+            max_length=MAX_DESCRIBE_CLASSES,
+            description="Several classes in one call, instead of class_type",
+        ),
+        include_help: bool = Field(default=True, description="false leaves help out"),
+    ) -> NodeDescribed:
         """Get one node class's spec from the live ComfyUI: each input's type, default, min, max, step and COMBO
         values; its outputs in socket order; whether it is an output node or a partner-API node. Look defaults and
         limits up here: they change between ComfyUI versions.
@@ -536,25 +592,28 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
         An output's `index` is the one a link [node_id, index] uses; hidden_inputs are ComfyUI's, never set in a
         graph. Lists are cut to max_options, with a total. `help` is the node's help page, when it has one
         (help_truncated: cut at 64 KB). An unknown class fails with `unknown_node_class` and close `suggestions`.
+        class_types (up to 20) answers {nodes, unknown}: an unknown class goes in `unknown`, with that code and its
+        suggestions, and the call succeeds.
         """
-        found = {} if class_type in DOT_SEGMENTS else await relay.comfyui.object_info(class_type)
-        if class_type in found:
-            if not isinstance(found[class_type], dict):
-                raise _bad(f"an /object_info/{class_type} that is not an object")
-            spec = _spec(class_type, found[class_type], max_options)
-            page = await _help(relay.comfyui, class_type, found[class_type])
-            if page:
-                spec.help, spec.help_path, spec.help_truncated = page[0], page[1], page[2] or None
-            return spec
-        if found:
-            raise _bad(f"an /object_info/{class_type} that describes other classes")
-        every = _checked_object_info(await relay.comfyui.object_info())
-        suggestions = _close_matches(class_type, ((k, str(v.get("display_name") or k)) for k, v in every.items()))
-        raise RelayError(
-            "unknown_node_class",
-            f"ComfyUI has no node class {class_type!r}. Class names are case-sensitive; "
-            + ("close matches are in suggestions." if suggestions else "find one with node_search."),
-            suggestions=[{"class_type": s["id"], "display_name": s["display_name"]} for s in suggestions],
+        if (class_type is None) == (class_types is None):
+            raise RelayError("invalid_arguments", "give class_type or class_types, not both")
+        if class_type is not None:
+            spec = await _describe(relay.comfyui, class_type, max_options, include_help)
+            if spec is not None:
+                return NodeDescribed(spec)
+            unknown = _unknown(class_type, _checked_object_info(await relay.comfyui.object_info()))
+            raise RelayError("unknown_node_class", unknown.message, suggestions=unknown.suggestions)
+        asked = list(dict.fromkeys(class_types or ()))
+        specs = await _gather_limited(
+            lambda name=name: _describe(relay.comfyui, name, max_options, include_help) for name in asked
+        )
+        missing = [name for name, spec in zip(asked, specs, strict=True) if spec is None]
+        every = _checked_object_info(await relay.comfyui.object_info()) if missing else {}
+        return NodeDescribed(
+            NodeSpecs(
+                nodes=[spec for spec in specs if spec is not None],
+                unknown=[_unknown(name, every) for name in missing] or None,
+            )
         )
 
     return node_describe

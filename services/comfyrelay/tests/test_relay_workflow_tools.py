@@ -419,6 +419,20 @@ async def test_run_reports_comfyuis_own_rejection():
     assert job.snapshot()["state"] == "failed" and job.error["code"] == "workflow_rejected"
 
 
+async def test_a_rejected_runs_job_says_it_was_never_queued():
+    """T4 (#169): the job_id of a run ComfyUI refused only repeats the rejection; job_status must not leave it
+    looking as if the submission were still under way."""
+    fake = FakeComfyUI()
+    fake.reject = {"error": {"type": "prompt_outputs_failed_validation", "message": "x"}, "node_errors": {}}
+    server, _ = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        error = error_of(await client.call_tool("workflow_run", {"workflow": t1()}))
+        view = (await client.call_tool("job_status", {"job_id": error["job_id"]})).structured_content
+    assert (view["state"], view["error"]["code"]) == ("failed", "workflow_rejected")
+    assert view["progress"]["comfyui_state"] == "rejected"
+    assert (fake.pending, fake.running, fake.history) == ([], [], {})
+
+
 async def test_outputs_comfyui_drops_are_reported_as_warnings():
     """ComfyUI accepts a graph when any output passes, and quietly drops the rest."""
     fake = FakeComfyUI(auto="hold")

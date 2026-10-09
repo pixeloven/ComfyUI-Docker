@@ -385,7 +385,7 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
 
         It runs workflow_validate's check first, and refuses a graph that fails it or has any partner-API node (a
         paid external service). ComfyUI then checks input types and values: a graph it rejects fails at once with
-        workflow_rejected and its per-node errors. Follow the job with job_status (queued or running, then the
+        workflow_rejected and its per-node errors, and nothing is queued (its job_id only repeats that). Follow the job with job_status (queued or running, then the
         saved files or ComfyUI's error naming the failed node); workflow_outputs lists or fetches the files, and
         job_cancel stops the run. Each call is a new run.
 
@@ -488,6 +488,8 @@ async def run_prompt(
             raise finished from None
         raise
     except BaseException as exc:
+        if getattr(exc, "code", None) == "workflow_rejected":
+            progress["comfyui_state"] = "rejected"  # not "submitting": ComfyUI refused it, and nothing was queued
         _resolve(submitted, exc=exc)
         raise
 

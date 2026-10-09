@@ -12,6 +12,7 @@ from comfyrelay import tools_introspection
 from comfyrelay.comfyui import ComfyUIClient
 from comfyrelay.server import build_server
 from mcp import Client
+from mcp_types import CallToolResult
 from relay_helpers import SYSTEM_STATS, settings
 
 pytestmark = pytest.mark.anyio
@@ -617,6 +618,86 @@ async def test_an_unknown_class_suggests_close_matches():
     err = await error("node_describe", {"class_type": "Load Checkpoint"})
     assert "CheckpointLoaderSimple" in [s["class_type"] for s in err["suggestions"]]
     assert (await error("node_describe", {"class_type": "Zzzzzz"}))["suggestions"] == []
+
+
+async def _describe_recording(args: dict, **overrides) -> tuple[CallToolResult, list[str]]:
+    """node_describe through a ComfyUI that records each path asked for."""
+    seen = []
+    table = routes(**overrides)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        path = request.url.raw_path.decode()
+        seen.append(path)
+        if path in table:
+            return table[path]
+        return httpx2.Response(200, json={}) if path.startswith("/object_info/") else httpx2.Response(404)
+
+    client = ComfyUIClient("http://comfyui.test:8188", transport=httpx2.MockTransport(handler))
+    server, _ = build_server(settings(profiles=("read",)), comfyui=client)
+    async with Client(server, mode="legacy") as mcp:
+        return await mcp.call_tool("node_describe", args), seen
+
+
+async def test_describe_several_classes_in_one_call_with_unknown_ones_listed_not_failed():
+    """class_types (#169): each class as class_type describes it, in the order asked and once each; an unknown one
+    is reported with the code and suggestions class_type fails with, and the rest are still answered."""
+    got = await ok(
+        "node_describe", {"class_types": ["KSampler", "checkpointloadersimple", "OpenAIDalle3", "KSampler", "Zzzzzz"]}
+    )
+    assert [n["class_type"] for n in got["nodes"]] == ["KSampler", "OpenAIDalle3"]
+    assert got["nodes"][0] == await ok("node_describe", {"class_type": "KSampler"})
+    single = await error("node_describe", {"class_type": "checkpointloadersimple"})
+    unknown, nothing = got["unknown"]
+    assert unknown == {
+        "class_type": "checkpointloadersimple",
+        "code": "unknown_node_class",
+        "message": single["message"],
+        "suggestions": single["suggestions"],
+    }
+    assert (nothing["class_type"], nothing["suggestions"]) == ("Zzzzzz", [])
+
+
+async def test_a_batch_of_known_classes_reads_only_their_own_object_info():
+    result, seen = await _describe_recording({"class_types": ["KSampler", "OpenAIDalle3"], "include_help": False})
+    assert not result.is_error and "unknown" not in result.structured_content
+    assert sorted(seen) == ["/object_info/KSampler", "/object_info/OpenAIDalle3"]
+
+
+async def test_include_help_false_leaves_the_help_page_out_and_never_fetches_it():
+    help_md = httpx2.Response(200, text="# KSampler\n\nDenoises.", headers={"content-type": "text/markdown"})
+    result, seen = await _describe_recording(
+        {"class_type": "KSampler", "include_help": False}, **{"/docs/KSampler/en.md": help_md}
+    )
+    assert not result.is_error and "help" not in result.structured_content
+    assert seen == ["/object_info/KSampler"]
+    batch = await ok(
+        "node_describe", {"class_types": ["KSampler"], "include_help": False}, **{"/docs/KSampler/en.md": help_md}
+    )
+    assert "help" not in batch["nodes"][0]
+    batch = await ok("node_describe", {"class_types": ["KSampler"]}, **{"/docs/KSampler/en.md": help_md})
+    assert batch["nodes"][0]["help"] == "# KSampler\n\nDenoises."
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {},
+        {"class_type": "KSampler", "class_types": ["KSampler"]},
+    ],
+    ids=["neither", "both"],
+)
+async def test_describe_takes_class_type_or_class_types(args):
+    assert (await error("node_describe", args))["code"] == "invalid_arguments"
+
+
+@pytest.mark.parametrize(
+    "class_types",
+    [[], [""], [f"Node{i}" for i in range(tools_introspection.MAX_DESCRIBE_CLASSES + 1)]],
+    ids=["empty", "an-empty-name", "over-the-cap"],
+)
+async def test_a_batch_is_refused_past_its_bounds_before_comfyui_is_asked(class_types):
+    result, seen = await _describe_recording({"class_types": class_types})
+    assert result.is_error and seen == []
 
 
 # -- model_list -------------------------------------------------------------------

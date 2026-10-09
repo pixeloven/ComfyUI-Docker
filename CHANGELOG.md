@@ -9,6 +9,17 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## Unreleased
+
+- **comfyrelay `node_describe`: several classes per call, and help optional**
+  ([#169](https://github.com/pixeloven/ComfyUI-Docker/issues/169)). `class_types` (up to 20, instead of
+  `class_type`) answers `{nodes, unknown}`: an unknown class is listed in `unknown` with `unknown_node_class`
+  and its `suggestions`, and the call still succeeds. `include_help: false` leaves the help pages out. Both are
+  optional, and a `class_type` call answers as before.
+- **comfyrelay `workflow_run`: a rejected run says it was never queued** (#169). `workflow_rejected` still
+  carries a `job_id`, which only repeats the rejection; its `job_status` now reports `comfyui_state: "rejected"`
+  instead of `submitting`.
+
 ## 5.2.0 — 2026-10-09
 
 ### A new image: `mcp-convert` (#167)
