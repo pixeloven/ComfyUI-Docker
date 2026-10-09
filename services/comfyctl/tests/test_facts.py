@@ -1,4 +1,4 @@
-"""`comfyfetch facts` — what a model IS, versus what its filename claims.
+"""`comfyctl fetch facts` — what a model IS, versus what its filename claims.
 
 Every network response is REPLAYED from a recording, so this suite is offline
 and deterministic. That matters more here than elsewhere: the sidecars carry

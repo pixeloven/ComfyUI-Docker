@@ -35,7 +35,7 @@ try:
 except importlib.metadata.PackageNotFoundError:  # running from a source tree
     _VERSION = "0"
 
-USER_AGENT = f"comfyfetch/{_VERSION} (+https://github.com/pixeloven/ComfyUI-Docker)"
+USER_AGENT = f"comfyctl/{_VERSION} (+https://github.com/pixeloven/ComfyUI-Docker)"
 
 
 def _headers(token: str | None) -> dict[str, str]:

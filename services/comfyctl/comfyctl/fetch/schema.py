@@ -15,7 +15,7 @@ TWO LAYERS, deliberately separate:
 EXTENSIONS ARE NAMED, NOT ALLOWED. `additionalProperties: false` is what makes
 a typo an error, so it stays -- and `^x-` keys are permitted alongside it. That
 is the convention OpenAPI settled on, and it keeps "unknown bare key" a
-failure. comfyfetch ignores `x-` content entirely; it exists so a consumer can
+failure. comfyctl ignores `x-` content entirely; it exists so a consumer can
 carry its own metadata in the file it already maintains.
 """
 

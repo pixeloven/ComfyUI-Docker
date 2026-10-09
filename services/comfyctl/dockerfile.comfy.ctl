@@ -17,7 +17,8 @@
 
 ARG PYTHON_VERSION=3.13
 
-# The uv that installs from the lock, the one the mcp image uses. Build stage only.
+# The uv that installs from the lock. Build stage only. The same pin (version and
+# digest) is in comfyrelay/dockerfile.comfy.relay; move both together.
 FROM ghcr.io/astral-sh/uv:0.11.23@sha256:d0a0a753ab981624b49c97abc98821c1c09f4ca69d1ef5cee69c501be3d88479 AS uv
 
 FROM python:${PYTHON_VERSION}-alpine AS builder

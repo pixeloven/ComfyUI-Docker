@@ -49,7 +49,8 @@ registry is what they check against.
 
 ### 4. Runtime contract
 
-- **Pattern:** env var names and defaults (`PUID`, `PGID`, `COMFY_*`, `CLI_ARGS`),
+- **Pattern:** env var names and defaults (`PUID`, `PGID`, `COMFY_*`, `CLI_ARGS`,
+  and the examples' `COMFYCTL_IMAGE`, which the `COMFY_*` glob doesn't match),
   volume paths under `/app`, the port, `entrypoint.sh` user, chown and gosu logic,
   the `mcp` image's promises (`COMFYUI_MCP_HTTP_TOKEN` required and at least 32
   characters, `MCP_PORT` 9000, the `/mcp` path, `COMFYUI_URL`, the tool names and

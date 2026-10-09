@@ -70,6 +70,7 @@ jobs:
             - '.github/workflows/ci.yml'
           comfyctl:
             - 'services/comfyctl/**'
+            - 'docker-bake.hcl'
             - 'services/pyproject.toml'
             - 'services/uv.lock'
             - 'comfy.yaml'
@@ -514,7 +515,7 @@ jobs:
     - name: docker compose --profile models, into a real volume
       working-directory: examples/core-gpu
       env:
-        COMFY_FETCH_IMAGE: ghcr.io/pixeloven/comfyui/comfyctl:ci
+        COMFYCTL_IMAGE: ghcr.io/pixeloven/comfyui/comfyctl:ci
       run: |
         set -eu
         cp .env.example .env
@@ -554,7 +555,7 @@ jobs:
     - name: Re-running changes nothing
       working-directory: examples/core-gpu
       env:
-        COMFY_FETCH_IMAGE: ghcr.io/pixeloven/comfyui/comfyctl:ci
+        COMFYCTL_IMAGE: ghcr.io/pixeloven/comfyui/comfyctl:ci
       run: |
         docker compose --profile models run --rm fetch | tee /tmp/second.log
         grep -q '^present:     2' /tmp/second.log || { echo "NOT IDEMPOTENT"; cat /tmp/second.log; exit 1; }

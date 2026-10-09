@@ -21,7 +21,7 @@ FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 runner = CliRunner()
 
 
-def test_every_comfyfetch_verb_is_under_fetch():
+def test_every_fetch_verb_is_under_comfyctl_fetch():
     """A verb added to comfyctl.fetch appears under `comfyctl fetch` with no edit here."""
     fetch_group = typer.main.get_command(app).commands["fetch"]
     assert set(fetch_group.commands) == set(typer.main.get_command(fetch_app).commands)
@@ -54,7 +54,7 @@ def test_every_comfyfetch_verb_is_under_fetch():
         ["build", "missing-dir"],
     ],
 )
-def test_fetch_group_matches_comfyfetch(args, tmp_path, monkeypatch):
+def test_fetch_group_matches_its_own_app(args, tmp_path, monkeypatch):
     """Same stdout, same exit code, whichever way the app is reached."""
     monkeypatch.chdir(FIXTURES)
     args = [a.replace("{tmp}", str(tmp_path)) for a in args]

@@ -42,8 +42,9 @@ It was, and the trade is deliberate. The shell version accumulated seven
 distinct classes of silent bug — the worst being a `yq` whose escape handling
 differs between *patch* releases, which once made the record parser match
 nothing, process zero files and exit 0. The property given up, "no language
-runtime", costs 39 MB and was always weak: a consumer runs an image, they do not
-install an interpreter. The finished image is 102 MB against 48.5 MB.
+runtime", costs about 50 MB and was always weak: a consumer runs an image, they
+do not install an interpreter. The `comfyctl` image is about 99 MB against the
+shell version's 48.5 MB.
 
 ### Output and exit codes
 

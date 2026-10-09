@@ -8,7 +8,7 @@ resolve to a new commit once upstream moves, so a re-resolve gate would fail for
 the one reason that is not a mistake -- and would need network access in CI to
 do it. Hash changes come from a deliberate resolve run, reviewed like any diff.
 
-Driven by `comfyfetch check`; see cli.py for the interface.
+Driven by `comfyctl fetch check`; see cli.py for the interface.
 """
 
 from __future__ import annotations

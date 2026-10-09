@@ -1,6 +1,6 @@
 """A group and a profile must never share a name.
 
-comfyfetch resolves both out of ONE namespace and the group wins, because
+comfyctl resolves both out of ONE namespace and the group wins, because
 `expand()` tests `member in known` before `member in profiles`. So a profile
 named after a group resolves the GROUP -- silently, with a self-consistent lock,
 correct hashes and a passing `check`.

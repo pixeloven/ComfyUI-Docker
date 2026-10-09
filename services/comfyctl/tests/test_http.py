@@ -109,7 +109,7 @@ def test_the_user_agent_is_ours_and_not_the_stdlib_default():
     with http.request("https://example.com/a"):
         pass
     ua = route.calls[0].request.headers["user-agent"]
-    assert ua.startswith("comfyfetch/")
+    assert ua.startswith("comfyctl/")
     assert "urllib" not in ua.lower()
 
 
