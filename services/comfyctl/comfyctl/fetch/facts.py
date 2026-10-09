@@ -43,7 +43,7 @@ from typing import Any
 import httpx
 import yaml
 
-from . import http
+from . import http, lockfile
 
 API = "https://civitai.com/api/v1/model-versions"
 RESERVED = ("profiles.yaml", "capabilities.yaml", "_meta.yaml")
@@ -168,18 +168,21 @@ def render(
     `generated` is a PARAMETER rather than today's date so the output is
     reproducible: a timestamp is the difference between an artifact that can be
     diffed against its committed form and one that cannot.
+
+    `headers`, `shas` and the sidecar's `files:` are all keyed by INSTALL PATH
+    (`models/loras/x.safetensors`), never by basename. Basenames repeat, and a
+    name-keyed join gave one file the other's facts (#153). The path is used
+    for identity only: `describe()` still never sees it.
     """
     cache: dict[str, str] = {}
     facts: dict[str, dict] = {}
-    for group in lineage.get("groups") or []:
-        for entry in group.get("files") or []:
-            name = (entry.get("as") or entry["file"]).split("/")[-1]
-            record = describe(
-                name, header=headers.get(name, {}), sha=shas.get(name),
-                token=token, cache=cache,
-            )
-            if record:
-                facts[name] = record
+    for path in declared(lineage):
+        record = describe(
+            path.rsplit("/", 1)[-1], header=headers.get(path, {}), sha=shas.get(path),
+            token=token, cache=cache,
+        )
+        if record:
+            facts[path] = record
     if not facts:
         return ""
     body = yaml.dump(
@@ -187,3 +190,46 @@ def render(
         Dumper=_Dumper, sort_keys=False, width=100, default_flow_style=False,
     )
     return HEADER.format(generator=generator) + body
+
+
+def declared(lineage: dict) -> list[str]:
+    """The install paths a lineage source declares, which key its sidecar."""
+    return [lockfile.install_path(entry)
+            for group in lineage.get("groups") or []
+            for entry in group.get("files") or []]
+
+
+def stale(sources: Path) -> tuple[list[str], int]:
+    """(problems, sidecars checked) for every `*.facts.yaml` under `sources`.
+
+    OFFLINE, and only the safe direction: a sidecar with no sibling lineage, or
+    a `files:` key its lineage does not declare, is stale. A declared file with
+    no entry is fine, because `render()` omits a file with nothing measurable.
+    """
+    problems: list[str] = []
+    sidecars = sorted(sources.rglob("*.facts.yaml"))
+    for path in sidecars:
+        rel = path.relative_to(sources).as_posix()
+        source = path.with_name(path.name.removesuffix(".facts.yaml") + ".yaml")
+        if not source.is_file():
+            problems.append(f"{rel}: no sibling lineage {source.name}")
+            continue
+        try:
+            doc = yaml.safe_load(path.read_text()) or {}
+            lineage = yaml.safe_load(source.read_text()) or {}
+        except yaml.YAMLError as exc:
+            problems.append(f"{rel}: not readable YAML: {exc}")
+            continue
+        files = doc.get("files") if isinstance(doc, dict) else None
+        if not isinstance(files, dict):
+            problems.append(f"{rel}: no `files:` mapping")
+            continue
+        known = set(declared(lineage))
+        for key in files:
+            if key in known:
+                continue
+            hint = ("; a basename key: since 6.0.0 sidecars key files by install "
+                    "path, so regenerate it with `comfyctl fetch facts`"
+                    if "/" not in str(key) else "")
+            problems.append(f"{rel}: {key} is not declared by {source.name}{hint}")
+    return problems, len(sidecars)

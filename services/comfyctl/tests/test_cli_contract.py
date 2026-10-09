@@ -128,3 +128,91 @@ def test_module_entry_point_sees_every_verb(verb):
     r = subprocess.run([sys.executable, "-m", "comfyctl.fetch.cli", verb, "--help"],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+# ---- a failure under -o json still says why (#152) --------------------------
+#
+# These paths reported through Out.problem(), a no-op under json, and exited
+# without a result: exit 1 and zero bytes on BOTH streams.
+
+def _stale_build(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "_meta.yaml").write_text("name: s\n")
+    (src / "a.yaml").write_text(
+        "groups:\n  - name: g\n    files:\n"
+        "      - {source: 'hf:a/b', file: a.safetensors, install: models/loras/}\n")
+    built = tmp_path / "comfy.yaml"
+    built.write_text("# stale\n")
+    return src, built
+
+
+def _failing(name, fixtures, tmp_path):
+    """(args, expected exit) for each failure path, built lazily per test."""
+    src, built = _stale_build(tmp_path)
+    (tmp_path / "no-meta").mkdir()
+    manifest, parent = fixtures / "manifest-two-profiles.yaml", fixtures / "lock-stale-parent.yaml"
+    return {
+        "resolve --from-lock, stale parent": (
+            ["resolve", str(manifest), "--profile", "both", "--from-lock", str(parent)], 1),
+        "resolve --from-lock, unknown profile": (
+            ["resolve", str(manifest), "--profile", "nope", "--from-lock", str(parent)], 2),
+        "resolve, unknown profile": (
+            ["resolve", str(manifest), "--profile", "nope"], 2),
+        "build, no _meta.yaml": (["build", str(tmp_path / "no-meta")], 1),
+        "build --check, stale": (["build", str(src), "-O", str(built), "--check"], 1),
+        "build --check, missing": (
+            ["build", str(src), "-O", str(tmp_path / "absent.yaml"), "--check"], 1),
+        "check, missing file": (["check", str(tmp_path / "x.yaml"), str(tmp_path / "y.yaml")], 2),
+        "fetch, missing lock": (["fetch", str(tmp_path / "x.yaml"), str(tmp_path)], 2),
+        "facts, missing sources": (["facts", str(tmp_path / "nope"), str(parent),
+                                    "--store", str(tmp_path)], 2),
+    }[name]
+
+
+FAILURES = ["resolve --from-lock, stale parent", "resolve --from-lock, unknown profile",
+            "resolve, unknown profile", "build, no _meta.yaml", "build --check, stale",
+            "build --check, missing", "check, missing file", "fetch, missing lock",
+            "facts, missing sources"]
+
+
+@pytest.mark.parametrize("name", FAILURES)
+def test_every_failure_under_json_writes_a_json_result(name, fixtures, tmp_path):
+    """The contract: under -o json, a non-zero exit still puts one JSON object
+    on stdout, with `ok: false` and the reason in `problems`, and the reason on
+    stderr too. A machine consumer never gets a bare exit code."""
+    args, code = _failing(name, fixtures, tmp_path)
+    r = runner.invoke(app, [*args, "-o", "json"])
+    assert r.exit_code == code, r.output
+    payload = json.loads(r.stdout)
+    assert payload["ok"] is False
+    assert payload["problems"] and all(payload["problems"])
+    assert r.stderr.strip(), "the reason did not reach stderr"
+
+
+def test_from_lock_failure_names_the_profile_and_the_stale_paths(fixtures):
+    r = runner.invoke(app, ["resolve", str(fixtures / "manifest-two-profiles.yaml"),
+                            "--profile", "both",
+                            "--from-lock", str(fixtures / "lock-stale-parent.yaml"),
+                            "-o", "json"])
+    assert r.exit_code == 1
+    payload = json.loads(r.stdout)
+    assert (payload["profile"], payload["entries"]) == ("both", 0)
+    assert "models/vae_approx/taesdxl_decoder.safetensors" in payload["problems"][0]
+
+
+def test_build_check_failure_says_stale(tmp_path):
+    src, built = _stale_build(tmp_path)
+    r = runner.invoke(app, ["build", str(src), "-O", str(built), "--check", "-o", "json"])
+    assert r.exit_code == 1
+    assert json.loads(r.stdout)["stale"] is True
+
+
+def test_an_unknown_profile_with_from_lock_is_a_request_error(fixtures):
+    """Exit 2, as it is without --from-lock: the request named a profile the
+    manifest does not have. It was 1 on the --from-lock path."""
+    r = runner.invoke(app, ["resolve", str(fixtures / "manifest-two-profiles.yaml"),
+                            "--profile", "nope",
+                            "--from-lock", str(fixtures / "lock-two-entries.yaml")])
+    assert r.exit_code == 2, r.output
+    assert "no such profile" in r.output

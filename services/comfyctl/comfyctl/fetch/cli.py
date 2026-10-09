@@ -30,7 +30,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import pathlib
-from typing import Annotated
+from typing import Annotated, Any, NoReturn
 
 import typer
 import yaml
@@ -76,10 +76,34 @@ def _main(
     """comfyctl fetch — resolve, verify and materialise ComfyUI model locks."""
 
 
-def _load(path: pathlib.Path, what: str) -> dict:
+def _usage(out: Out, message: str) -> NoReturn:
+    """A wrong request: exit 2, the reason on stderr.
+
+    Under -o json stdout gets a JSON object as well, so a machine consumer
+    always has a result to parse, never a bare exit code (#152).
+    """
+    typer.echo(message, err=True)
+    if out.is_json:
+        out.result("", {"problems": [message], "ok": False})
+    raise typer.Exit(2)
+
+
+def _failed(out: Out, message: str, **machine: Any) -> NoReturn:
+    """A real failure: exit 1, the reason on stderr.
+
+    Under -o json stdout gets `machine` plus `problems` and `ok: false`. These
+    paths once called `out.problem()` and exited, which under json wrote zero
+    bytes to either stream (#152).
+    """
+    out.problem(message)
+    if out.is_json:
+        out.result("", {**machine, "problems": [message], "ok": False})
+    raise typer.Exit(1)
+
+
+def _load(path: pathlib.Path, what: str, out: Out) -> dict:
     if not path.is_file():
-        typer.echo(f"no such {what}: {path}", err=True)
-        raise typer.Exit(2)
+        _usage(out, f"no such {what}: {path}")
     return lockfile.load(path)
 
 
@@ -99,19 +123,21 @@ def resolve(
     That is why CI never re-resolves as a drift check — use `check` instead.
     """
     out = Out(output)
-    doc = _load(manifest, "manifest")
+    doc = _load(manifest, "manifest", out)
 
     if from_lock is not None:
         if profile is None:
-            typer.echo("--from-lock needs --profile: without one it would copy "
-                       "the lock verbatim", err=True)
-            raise typer.Exit(2)
-        parent = _load(from_lock, "lock")
+            _usage(out, "--from-lock needs --profile: without one it would copy "
+                        "the lock verbatim")
+        parent = _load(from_lock, "lock", out)
         try:
             auth, models = resolve_mod.from_lock(doc, profile, parent)
-        except (resolve_mod.Unresolved, profiles_mod.ProfileError) as exc:
-            out.problem(str(exc))
-            raise typer.Exit(1) from exc
+        except profiles_mod.ProfileError as exc:
+            # An unknown profile is a wrong REQUEST, as it is without
+            # --from-lock: exit 2, not 1 (#152).
+            _usage(out, str(exc))
+        except resolve_mod.Unresolved as exc:
+            _failed(out, str(exc), profile=profile, entries=0)
         out.note(f"profile [bold]{profile}[/bold] selects {len(models)} entries "
                  f"from {from_lock}")
         if out.is_json:
@@ -128,8 +154,7 @@ def resolve(
                 out.problem(f"  UNRESOLVED  {err}") if err
                 else out.note(f"resolved [dim]{cap}[/dim]: {name}")))
     except profiles_mod.ProfileError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(2) from exc
+        _usage(out, str(exc))
 
     if failures:
         # No lock is written. A lock that looks complete but is short is worse
@@ -168,8 +193,7 @@ def fetch(
     """
     out = Out(output)
     if not lock.is_file():
-        typer.echo(f"no such lock: {lock}", err=True)
-        raise typer.Exit(2)
+        _usage(out, f"no such lock: {lock}")
 
     # #67 asked for this in `fetch` as well as `check`, and the reason is
     # sharper here: fetch WRITES. A malformed lock puts files in the wrong
@@ -205,6 +229,11 @@ def check(
     parent: Annotated[pathlib.Path | None, typer.Option(
         help="Assert this lock is a verbatim subset of the lock it was derived "
              "from with --from-lock.")] = None,
+    subset_only: Annotated[bool, typer.Option(
+        "--subset-only",
+        help="With --parent: the lock may be NARROWER than the manifest (or "
+             "--profile). A declared file it lacks is reported as narrowed, "
+             "not NOT LOCKED; a file it holds that is not declared still fails.")] = False,
     output: OutputOpt = Mode.auto,
 ) -> None:
     """Manifest and lock agree. Offline.
@@ -214,7 +243,13 @@ def check(
     and would need network access to do it.
     """
     out = Out(output)
-    doc, lock_doc = _load(manifest, "manifest"), _load(lock, "lock")
+    if subset_only and parent is None:
+        # "A subset of what" is undefined without one (#157).
+        _usage(out, "--subset-only needs --parent: it asserts a subset of that lock")
+    doc, lock_doc = _load(manifest, "manifest", out), _load(lock, "lock", out)
+    # Present in every --subset-only result, so its shape does not depend on
+    # how far the check got.
+    extra: dict[str, Any] = {"narrowed": None} if subset_only else {}
 
     # FORMAT BEFORE CONSISTENCY. A manifest with `instal:` for `install:` is
     # perfectly consistent with a lock that therefore contains nothing -- so
@@ -227,7 +262,7 @@ def check(
     def _fail(problems: list[str], headline: str) -> None:
         human = headline + "\n" + "".join(f"  {p}\n" for p in problems)
         out.result(human, {"declared": None, "locked": None,
-                           "problems": problems, "ok": False})
+                           "problems": problems, "ok": False, **extra})
         raise typer.Exit(1)
 
     problems = schema_mod.validate(doc, "comfy")
@@ -241,7 +276,7 @@ def check(
         _fail(problems, f"{len(problems)} schema problem(s):")
 
     if parent is not None:
-        parent_doc = _load(parent, "parent lock")
+        parent_doc = _load(parent, "parent lock", out)
         bad_parent = schema_mod.validate(parent_doc, "comfy-lock")
         if bad_parent:
             _fail([f"parent: {p}" for p in bad_parent],
@@ -254,16 +289,25 @@ def check(
     try:
         problems, declared, locked = check_mod.check(doc, lock_doc, profile)
     except profiles_mod.ProfileError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(2) from exc
+        _usage(out, str(exc))
 
     n_profiles = len(doc.get("profiles") or {})
+    verdict = f"manifest and lock agree; {n_profiles} profiles valid"
+    if subset_only:
+        # Only the one-sided half of agreement: NOT DECLARED still fails, since
+        # a derived lock must not hold what the manifest does not declare (#157).
+        narrowed = [p.removeprefix("NOT LOCKED").strip()
+                    for p in problems if p.startswith("NOT LOCKED")]
+        problems = [p for p in problems if not p.startswith("NOT LOCKED")]
+        extra = {"narrowed": narrowed}
+        verdict = (f"the lock declares nothing outside the manifest; "
+                   f"{len(narrowed)} declared file(s) narrowed out")
     human = (f"declared: {declared}\nlocked:   {locked}\n"
+             + "".join(f"  narrowed     {p}\n" for p in extra.get("narrowed") or [])
              + "".join(f"  {p}\n" for p in problems)
-             + ("" if problems else
-                f"manifest and lock agree; {n_profiles} profiles valid"))
+             + ("" if problems else verdict))
     out.result(human, {"declared": declared, "locked": locked,
-                       "problems": problems, "ok": not problems})
+                       "problems": problems, "ok": not problems, **extra})
     if problems:
         raise typer.Exit(1)
 
@@ -293,36 +337,30 @@ def build(
     """
     o = Out(output)
     if not sources.is_dir():
-        typer.echo(f"no such directory: {sources}", err=True)
-        raise typer.Exit(2)
+        _usage(o, f"no such directory: {sources}")
     if check and out is None:
-        typer.echo("--check needs --out: there is nothing to compare stdout against",
-                   err=True)
-        raise typer.Exit(2)
+        _usage(o, "--check needs --out: there is nothing to compare stdout against")
 
     head = ""
     if header is not None:
         if not header.is_file():
-            typer.echo(f"no such header file: {header}", err=True)
-            raise typer.Exit(2)
+            _usage(o, f"no such header file: {header}")
         head = header.read_text()
 
     try:
         rendered, counts = build_mod.render(sources, header=head)
     except build_mod.BuildError as exc:
-        o.problem(str(exc))
-        raise typer.Exit(1) from exc
+        _failed(o, str(exc))
 
     summary = (f"{counts['groups']} groups, {counts['profiles']} profiles, "
                f"{counts['capabilities']} capabilities")
 
     if check:
         if not out.is_file():
-            o.problem(f"{out} does not exist")
-            raise typer.Exit(1)
+            _failed(o, f"{out} does not exist", stale=True, **counts)
         if out.read_text() != rendered:
-            o.problem(f"{out} is STALE against {sources} -- re-run without --check")
-            raise typer.Exit(1)
+            _failed(o, f"{out} is STALE against {sources} -- re-run without --check",
+                    stale=True, **counts)
         o.note(f"{out} up to date ({summary})")
         if o.is_json:
             o.result("", {"stale": False, **counts})
@@ -342,13 +380,15 @@ def build(
 def facts(
     sources: Annotated[pathlib.Path, typer.Argument(
         help="Directory of per-lineage source files -- the same root `build` takes.")],
-    lock: Annotated[pathlib.Path, typer.Argument(help="comfy-lock.yaml, for content hashes.")],
+    lock: Annotated[pathlib.Path | None, typer.Argument(
+        help="comfy-lock.yaml, for content hashes. Not with --check.")] = None,
     store: Annotated[pathlib.Path | None, typer.Option(
         help="ComfyUI root. Safetensors headers are read from here.")] = None,
     headers_file: Annotated[pathlib.Path | None, typer.Option(
         "--headers",
-        help="Pre-extracted headers as JSON ({filename: __metadata__}). Use "
-             "when the store is not reachable from here -- a Kubernetes store "
+        help="Pre-extracted headers as JSON ({install path: __metadata__}, each "
+             "path relative to the ComfyUI root, e.g. models/loras/x.safetensors). "
+             "Use when the store is not reachable from here -- a Kubernetes store "
              "lives inside the cluster while the sources are in a checkout "
              "outside it.")] = None,
     token: Annotated[str | None, typer.Option(
@@ -357,6 +397,11 @@ def facts(
     generated: Annotated[str | None, typer.Option(
         help="Date stamped into each sidecar. Defaults to today; pass a fixed "
              "value to make output reproducible.")] = None,
+    check: Annotated[bool, typer.Option(
+        "--check",
+        help="Offline, for CI: exit 1 if a committed sidecar has no sibling "
+             "lineage, or names a file its lineage does not declare. Reads "
+             "SOURCES only: no lock, store or network.")] = False,
     output: OutputOpt = Mode.auto,
 ) -> None:
     """Measure what each model IS, and write a sidecar per lineage. NETWORK.
@@ -364,39 +409,62 @@ def facts(
     Writes `<lineage>.facts.yaml` beside each source file, recording what the
     trainer put in the safetensors header and what the publisher claims for the
     file's CONTENT HASH. Where those disagree, the disagreement is the point.
+    Files are keyed by install path, because basenames repeat.
 
     Needs the store on disk AND network, so it cannot run in CI -- the same
-    contract as `resolve`. Enforce freshness offline instead, by comparing each
-    sidecar's key set against its sibling lineage.
+    contract as `resolve`. `--check` is the offline freshness gate CI runs.
     """
     import time as _time
 
     out = Out(output)
     if not sources.is_dir():
-        typer.echo(f"no such directory: {sources}", err=True)
-        raise typer.Exit(2)
-    if (store is None) == (headers_file is None):
-        typer.echo("pass exactly one of --store or --headers", err=True)
-        raise typer.Exit(2)
-    if store is not None and not store.is_dir():
-        typer.echo(f"store not readable: {store}", err=True)
-        raise typer.Exit(2)
-    if headers_file is not None and not headers_file.is_file():
-        typer.echo(f"no such headers file: {headers_file}", err=True)
-        raise typer.Exit(2)
-    doc = _load(lock, "lock")
+        _usage(out, f"no such directory: {sources}")
 
+    if check:
+        # The same idea as `build --check`: a committed generated artifact,
+        # and an offline staleness gate for it (#155).
+        if lock is not None or store is not None or headers_file is not None:
+            _usage(out, "--check reads SOURCES only: it takes no lock, --store or --headers")
+        problems, sidecars = facts_mod.stale(sources)
+        human = ("".join(f"  {p}\n" for p in problems)
+                 + (f"{len(problems)} problem(s) in {sidecars} facts sidecars" if problems
+                    else f"{sidecars} facts sidecars match their lineages"))
+        out.result(human, {"sidecars": sidecars, "problems": problems, "ok": not problems})
+        if problems:
+            raise typer.Exit(1)
+        return
+
+    if lock is None:
+        _usage(out, "facts needs LOCK, for content hashes (--check needs none)")
+    if (store is None) == (headers_file is None):
+        _usage(out, "pass exactly one of --store or --headers")
+    if store is not None and not store.is_dir():
+        _usage(out, f"store not readable: {store}")
+    if headers_file is not None and not headers_file.is_file():
+        _usage(out, f"no such headers file: {headers_file}")
+    doc = _load(lock, "lock", out)
+
+    # Every join is by INSTALL PATH, never basename. Basenames repeat
+    # (`diffusion_pytorch_model.safetensors` is HuggingFace's default), and a
+    # last-wins dict keyed by name handed one file's header and hash to the
+    # other (#153). Every path of an entry holds the same bytes, so one hash.
     shas = {
-        m["model"]: h["hash"]
+        p["path"]: h["hash"]
         for m in doc.get("models") or []
         for h in m.get("hashes") or []
         if h.get("type") == "SHA256"
+        for p in m.get("paths") or []
     }
     if headers_file is not None:
         headers = json.loads(headers_file.read_text())
+        bare = sorted(k for k in headers if "/" not in k) if isinstance(headers, dict) else []
+        if not isinstance(headers, dict) or bare:
+            _usage(out, "--headers keys must be install paths relative to the ComfyUI "
+                        "root (models/...), not basenames"
+                        + (f": {', '.join(bare[:3])}" if bare else ""))
     else:
         headers = {
-            p.name: facts_mod.safetensors_header(p)
+            p.relative_to(store).as_posix(): facts_mod.safetensors_header(p)
             for p in store.rglob("*.safetensors")
         }
     out.note(f"{len(shas)} hashes from the lock, {len(headers)} safetensors headers read")

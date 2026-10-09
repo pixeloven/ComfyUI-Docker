@@ -27,16 +27,22 @@ replaced the `fetch` image in 6.0.0.
 
 - **`fetch` is a dry run by default.** `comfyctl fetch fetch <lock> <ComfyUI root>`
   only reports; add `--apply` to download. The root is the ComfyUI root, not
-  `models/`, because lock paths begin `models/`.
+  `models/`, because lock paths begin `models/`. An entry with no SHA256 is
+  refused, counted as `failed`, and the run exits 1.
 - **`facts`** writes a `<lineage>.facts.yaml` sidecar per source file, recording
   what the safetensors header says against what the publisher claims for the
   file's hash: `comfyctl fetch facts models/ comfy-lock.yaml --store <root>`
-  (or `--headers <json>`). It needs the network.
+  (or `--headers <json>`). It needs the network. Its `files:` are keyed by
+  install path (`models/loras/x.safetensors`), not basename, and so are a
+  `--headers` file's keys; regenerate a sidecar from before 6.0.0.
+  `comfyctl fetch facts models/ --check` is the offline gate for committed
+  sidecars: it exits 1 when one names a file its lineage no longer declares.
 - **`-o json`** on any verb (after the verb, not after `fetch`) prints the result as
-  stable JSON on stdout. Progress stays on stderr, so the output parses.
+  stable JSON on stdout, failures included: a failure carries `"ok": false` and
+  its reasons in `problems`. Progress stays on stderr, so the output parses.
 - **Exit codes:** `0` did what was asked, `1` a real failure (unresolved source,
-  hash mismatch, manifest and lock disagree), `2` a bad request (missing file,
-  unknown profile, incompatible flags).
+  hash mismatch, a lock entry with no SHA256, manifest and lock disagree), `2` a
+  bad request (missing file, unknown profile, incompatible flags).
 
 `comfy.yaml` may itself be generated. Past a few hundred lines a single manifest
 stops working — every family conflicts with every other on edit — so `build`
@@ -156,7 +162,9 @@ A host listed here whose variable is unset does **not** block public files.
 - **Deriving locks independently.** `comfyctl fetch check --parent` asserts a
   profile lock is a verbatim subset of the full lock. Without it, locks made
   minutes apart can pin different upstream commits and every one of them passes
-  `check` on its own.
+  `check` on its own. A derived lock deliberately narrower than any profile adds
+  `--subset-only`: it must still be a verbatim subset and declare nothing extra,
+  but a declared file it lacks is reported under `narrowed`, not as a failure.
 - **Trusting a filename.** The same name routinely carries different bytes.
   `flux1-krea-dev` had a Civitai source that now 404s and an identical-byte copy
   on HuggingFace — only the hash proved they were the same file.

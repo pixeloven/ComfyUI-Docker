@@ -56,8 +56,14 @@ keys. Human output goes to **stderr**; stdout carries the artifact, so
 | exit | meaning |
 |---|---|
 | `0` | did what was asked |
-| `1` | a real failure — a source did not resolve, a hash did not match, a lock and its manifest disagree |
+| `1` | a real failure — a source did not resolve, a hash did not match, a lock entry has no SHA256, a lock and its manifest disagree |
 | `2` | the request was wrong — missing file, unknown profile, incompatible flags |
+
+Under `--output json`, a failure still writes one JSON object to stdout, with
+`"ok": false` and the reasons in `problems` (or, for `fetch` and a full
+`resolve`, their usual counters), and the reason also goes to stderr. The one
+exception is a command line Typer itself can't parse, such as an unknown
+option: that exits 2 with usage text on stderr only.
 
 ## Why a lock at all
 
@@ -97,7 +103,8 @@ no equivalent for and which never appears inside a model entry.
 Verification is the point. **A wrong-but-plausible model file is worse than a
 missing one** — a missing file fails loudly at load; a wrong one renders subtly
 wrong images forever, with no error anywhere. An entry with no `SHA256` is
-refused rather than fetched unverified.
+refused rather than fetched unverified, and the refusal counts as `failed`, so
+`fetch` exits 1: the workspace is then missing a file the lock declares.
 
 ## Profiles
 
@@ -243,6 +250,40 @@ split; a `shared/` vs `custom/` seam (reproducible-from-public-docs vs personal
 taste) is a convention worth having precisely because it is a directory
 boundary, so separating the halves later is `git mv` rather than a re-sort.
 
+## Facts sidecars
+
+`facts` records what each model *is*, measured rather than declared: the
+checkpoint its safetensors header says it was trained on, and what Civitai says
+about its content hash. It writes a `<lineage>.facts.yaml` beside each source
+file, and needs the store's headers and the network, so it can't run in CI:
+
+```sh
+comfyctl fetch facts models/ comfy-lock.yaml --store /workspace      # or --headers headers.json
+comfyctl fetch facts models/ --check                                  # offline; what CI runs
+```
+
+A sidecar's `files:` is keyed by **install path**, the path relative to the
+ComfyUI root:
+
+```yaml
+files:
+  models/loras/my-style-lora.safetensors:
+    trained_on: ponyDiffusionV6XL_v6.safetensors
+    declared_base: Pony
+```
+
+Basenames repeat (`diffusion_pytorch_model.safetensors` is HuggingFace's
+default), so a file is joined to its own header and hash by its path. The path
+is used only for identity: lineage is never inferred from it. A `--headers`
+file is keyed the same way, `{"models/loras/x.safetensors": {…}}`; a key with
+no `/` exits 2. Sidecars written before 6.0.0 are keyed by basename; regenerate
+them with `comfyctl fetch facts`.
+
+The sidecar is committed, so it goes stale when its lineage changes. `--check`
+reads only the source tree and fails (exit 1) when a sidecar has no sibling
+lineage, or names a file its lineage doesn't declare. A declared file with no
+entry is fine, because a file with nothing measurable gets none.
+
 ## Usage
 
 ```sh
@@ -333,6 +374,20 @@ from. `--from-lock` selects rather than re-resolves, so a difference means
 something was re-resolved — and that is how two locks generated minutes apart
 come to pin different upstream commits with nothing noticing.
 
+`--parent` also requires the lock to hold everything the manifest (or
+`--profile`) declares. A derived lock that is deliberately narrower than any
+profile, such as one that drops a precision variant, adds `--subset-only`:
+
+```sh
+comfyctl fetch check comfy.yaml locks/runpod.yaml --profile krea2 --parent comfy-lock.yaml --subset-only
+```
+
+The lock must still be a verbatim subset of the parent, and a file it holds
+that isn't declared still fails (`NOT DECLARED`). A declared file it lacks is
+reported as narrowed rather than `NOT LOCKED`, and the JSON result lists those
+paths under `narrowed`, so a consumer can assert which ones were dropped.
+`--subset-only` without `--parent` exits 2.
+
 ## Capabilities
 
 A capability names the profiles that provide it and the model `type:` values a
@@ -384,10 +439,13 @@ Civitai's `model-versions` endpoint is public, and GitHub's release API is too
 
 | form | resolved from |
 |---|---|
-| `hf:<owner>/<repo>` + `file:` | `x-repo-commit`, `x-linked-etag`, `x-linked-size` headers |
-| `gh:<owner>/<repo>@<tag>` + `file:` | the release API's asset `digest`, `size` |
-| `civitai:<modelVersionId>` | `files[0].hashes.SHA256`, `downloadUrl`, `sizeKB` |
+| `hf:<owner>/<repo>` + `file:` | the `x-repo-commit` and `x-linked-etag` headers; a file whose etag isn't a sha256 (one not stored in LFS) is downloaded and hashed |
+| `gh:<owner>/<repo>@<tag>` + `file:` | the release API's asset `digest` and `browser_download_url`; with no digest, the asset is downloaded and hashed |
+| `civitai:<modelVersionId>` | `files[0].hashes.SHA256` and `downloadUrl` |
 | `https://…` | nothing — **you must supply `sha256:`** |
+
+`resolve` reads no file sizes. The lock has no size field, and no output
+reports bytes; `fetch`'s dry run counts files in `would_fetch`.
 
 `civitai:` sources require `as:`, because the filename comes from the API and
 would otherwise be unknowable offline — which `comfyctl fetch check` depends on.
