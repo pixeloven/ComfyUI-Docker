@@ -679,6 +679,7 @@ async def stop_prompt(
         await asyncio.wait({post}, timeout=max(0.0, deadline - loop.time() - CANCEL_RESERVE_SECONDS))
     if post.done() and not post.cancelled() and getattr(post.exception(), "code", None) == "workflow_rejected":
         _stop(progress, "not_needed")
+        progress["comfyui_state"] = "rejected"
         return None
     last = "no answer from ComfyUI"
     while True:

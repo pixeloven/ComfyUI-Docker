@@ -550,12 +550,20 @@ async def _describe(comfyui: ComfyUIClient, class_type: str, max_options: int, i
     return None
 
 
-def _unknown(class_type: str, every: dict[str, dict[str, Any]]) -> UnknownClass:
-    suggestions = _close_matches(class_type, ((k, str(v.get("display_name") or k)) for k, v in every.items()))
+def _unknown(class_type: str, every: dict[str, dict[str, Any]] | str) -> UnknownClass:
+    """`every` is /object_info, or why it couldn't be read: then there are no suggestions, and the message says so."""
+    names = () if isinstance(every, str) else ((k, str(v.get("display_name") or k)) for k, v in every.items())
+    suggestions = _close_matches(class_type, names)
+    hint = (
+        "close matches are in suggestions."
+        if suggestions
+        else f"find one with node_search (no suggestions: /object_info {every})."
+        if isinstance(every, str)
+        else "find one with node_search."
+    )
     return UnknownClass(
         class_type=class_type,
-        message=f"ComfyUI has no node class {class_type!r}. Class names are case-sensitive; "
-        + ("close matches are in suggestions." if suggestions else "find one with node_search."),
+        message=f"ComfyUI has no node class {class_type!r}. Class names are case-sensitive; " + hint,
         suggestions=[{"class_type": s["id"], "display_name": s["display_name"]} for s in suggestions],
     )
 
@@ -579,7 +587,7 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
         ),
         include_help: bool = Field(default=True, description="false leaves help out"),
     ) -> NodeDescribed:
-        """Get one node class's spec from the live ComfyUI: each input's type, default, min, max, step and COMBO
+        """Get a node class's spec from the live ComfyUI: each input's type, default, min, max, step and COMBO
         values; its outputs in socket order; whether it is an output node or a partner-API node. Look defaults and
         limits up here: they change between ComfyUI versions.
 
@@ -596,7 +604,7 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
         suggestions, and the call succeeds.
         """
         if (class_type is None) == (class_types is None):
-            raise RelayError("invalid_arguments", "give class_type or class_types, not both")
+            raise RelayError("invalid_arguments", "give exactly one of class_type or class_types")
         if class_type is not None:
             spec = await _describe(relay.comfyui, class_type, max_options, include_help)
             if spec is not None:
@@ -608,11 +616,14 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
             lambda name=name: _describe(relay.comfyui, name, max_options, include_help) for name in asked
         )
         missing = [name for name, spec in zip(asked, specs, strict=True) if spec is None]
-        every = _checked_object_info(await relay.comfyui.object_info()) if missing else {}
+        # The suggestions only add detail: /object_info is bounded and may fail, and the difflib scans run off the
+        # event loop.
+        every = await _object_info_or_why(relay.comfyui) if missing else {}
+        unknown = await asyncio.to_thread(lambda: [_unknown(name, every) for name in missing])
         return NodeDescribed(
             NodeSpecs(
                 nodes=[spec for spec in specs if spec is not None],
-                unknown=[_unknown(name, every) for name in missing] or None,
+                unknown=unknown or None,
             )
         )
 

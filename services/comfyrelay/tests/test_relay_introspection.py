@@ -657,6 +657,41 @@ async def test_describe_several_classes_in_one_call_with_unknown_ones_listed_not
     assert (nothing["class_type"], nothing["suggestions"]) == ("Zzzzzz", [])
 
 
+async def test_a_class_type_answer_is_the_node_spec_itself_in_content_and_structured_content():
+    """class_type answers as before class_types (#169): the NodeSpec, not wrapped, in both forms."""
+    result = await call("node_describe", {"class_type": "KSampler"})
+    assert json.loads(result.content[0].text) == result.structured_content
+    assert result.structured_content["class_type"] == "KSampler" and "nodes" not in result.structured_content
+
+
+async def test_a_batch_still_answers_when_the_suggestions_cannot_be_read():
+    """Suggestions are optional detail: a failing /object_info leaves the unknown class without them."""
+    got = await ok(
+        "node_describe",
+        {"class_types": ["KSampler", "checkpointloadersimple"]},
+        **{"/object_info": httpx2.Response(500, text="boom")},
+    )
+    assert [n["class_type"] for n in got["nodes"]] == ["KSampler"]
+    (unknown,) = got["unknown"]
+    assert (unknown["code"], unknown["suggestions"]) == ("unknown_node_class", [])
+    assert "no suggestions" in unknown["message"]
+
+
+async def test_a_batch_fails_when_comfyui_fails_on_a_class():
+    err = await error(
+        "node_describe",
+        {"class_types": ["KSampler", "OpenAIDalle3"]},
+        **{"/object_info/OpenAIDalle3": httpx2.Response(500, text="boom")},
+    )
+    assert err["code"] != "unknown_node_class"
+
+
+async def test_a_batch_takes_up_to_its_cap():
+    names = [f"Node{i}" for i in range(tools_introspection.MAX_DESCRIBE_CLASSES)]
+    got = await ok("node_describe", {"class_types": names})
+    assert (got["nodes"], len(got["unknown"])) == ([], tools_introspection.MAX_DESCRIBE_CLASSES)
+
+
 async def test_a_batch_of_known_classes_reads_only_their_own_object_info():
     result, seen = await _describe_recording({"class_types": ["KSampler", "OpenAIDalle3"], "include_help": False})
     assert not result.is_error and "unknown" not in result.structured_content

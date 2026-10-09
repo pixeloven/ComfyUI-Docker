@@ -656,6 +656,15 @@ async def test_a_cancel_during_submission_waits_for_the_answer_then_cancels():
     assert fake.pending == [] and fake.running == [] and progress["stop"] == "confirmed"
 
 
+async def test_a_cancel_during_a_submission_comfyui_rejects_says_it_was_never_queued():
+    fake = FakeComfyUI(auto="hold")
+    fake.reject = {"error": {"type": "prompt_outputs_failed_validation", "message": "x"}, "node_errors": {}}
+    fake.delays["/prompt"] = 0.5
+    progress = {"prompt_id": "p-rejected"}
+    await assert_producer_honours_cancel(lambda: tw.run_prompt(fake.client(), t1(), progress))
+    assert (progress["stop"], progress["comfyui_state"]) == ("not_needed", "rejected")
+
+
 @pytest.mark.usefixtures("quick_stop")
 async def test_a_submission_slower_than_the_budget_is_cancelled_when_it_answers(caplog):
     caplog.set_level(logging.INFO, logger="comfyrelay.workflow")
