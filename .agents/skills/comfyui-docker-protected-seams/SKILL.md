@@ -64,7 +64,7 @@ registry is what they check against.
   and Compose append `fetch fetch /lock.yaml /app --apply` to it; it replaced the
   `fetch` image, whose entrypoint was `comfyctl fetch fetch`, in 6.0.0), its labels
   (`org.opencontainers.image.source`, `.description` and `.licenses`, and no
-  `.version`, because no ComfyUI is inside), the permission steps in `dockerfile.comfy.core`, the volume mounts in
+  `.version`, because no ComfyUI is inside; *The `comfyctl` Image*), the permission steps in `dockerfile.comfy.core`, the volume mounts in
   `examples/*/docker-compose.yml`, and removing a bake target, image, or example.
 - **Risk:** a deployment that worked breaks on `docker compose pull`, or only under
   a UID nobody tested. That includes Kubernetes `runAsUser` deployments, which

@@ -21,6 +21,12 @@ An older `…#subdirectory=services/fetch` line is gone with 6.0.0: use `service
 **Never install `comfyctl` from a package index.** It isn't registered on PyPI.
 Use the `uvx` line above, or install the release's `comfyctl` wheel by its URL:
 one wheel since 6.0.0, with no `--with` (there is no `comfyfetch` wheel any more).
+For a reproducible install with every dependency hash-checked too, use the
+release's `comfyctl-<ver>-requirements.txt`, which names the wheel and every
+dependency by hash, in a venv of its own:
+`python3 -m venv ~/.local/share/comfyctl && ~/.local/share/comfyctl/bin/pip install --require-hashes -r "https://github.com/pixeloven/ComfyUI-Docker/releases/download/v${v}/comfyctl-${v}-requirements.txt"`
+(with `v=6.0.0`, say). `uv tool install --constraints` with that file is not
+equivalent: it ignores the hashes.
 In a container, run the `ghcr.io/pixeloven/comfyui/comfyctl` image, whose
 entrypoint is `comfyctl`: `<image> fetch fetch /lock.yaml /app --apply`. It
 replaced the `fetch` image in 6.0.0.

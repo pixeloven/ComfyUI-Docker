@@ -28,6 +28,15 @@ of the old `comfyfetch` line broke when 4.0.0 renamed the command.
 **Never install `comfyctl` from a package index.** It isn't registered on PyPI,
 so anyone could publish a package under that name. Use the `uvx` line above, or
 the release wheel by URL, as [the install section](README.md#install) shows.
+For an install where every dependency is pinned and hash-checked too, install
+the release's `comfyctl-<ver>-requirements.txt` into a venv:
+
+```sh
+v=6.0.0
+python3 -m venv ~/.local/share/comfyctl
+~/.local/share/comfyctl/bin/pip install --require-hashes \
+  -r "https://github.com/pixeloven/ComfyUI-Docker/releases/download/v${v}/comfyctl-${v}-requirements.txt"
+```
 
 The image is for automated deployment; the CLI is for managing your own
 configuration, and for agents. They are the same code and the same behaviour.
@@ -157,8 +166,9 @@ That trade buys one release page describing the whole repo instead of two
 describing halves of it; see `VERSIONING.md`.
 
 A release publishes `comfyctl:1.2.0` and `comfyctl:1.2` alongside the commit-sha
-and `latest` tags an ordinary push produces, plus the `comfyctl` wheel as a
-release asset; see [the install section](README.md#install). Up to 5.x the image
+and `latest` tags an ordinary push produces, plus the `comfyctl` wheel and its
+hash-locked `comfyctl-<ver>-requirements.txt` as release assets; see
+[the install section](README.md#install). Up to 5.x the image
 was `fetch`, and the release also shipped a `comfyfetch` wheel.
 
 **Pin by digest** — the semver tags say whether a digest change was a patch or a
