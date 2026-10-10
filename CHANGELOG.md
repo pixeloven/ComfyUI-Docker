@@ -97,6 +97,15 @@ the manifest and lock formats don't change. What moved:
   (`ubuntu:24.04`, `nvidia/cuda:13.0.2-base-ubuntu24.04`, `python:3.13-alpine`, and
   `python:3.13-slim` at the same digest), CI's actionlint and the BuildKit image `setup-buildx-action`
   starts all keep their tags and digests, so the published images' layers don't change.
+- **The `comfyui-workflows` guides: a `custom_nodes` lock entry, and what `workflow_validate` doesn't check**
+  ([#169](https://github.com/pixeloven/ComfyUI-Docker/issues/169), [#145](https://github.com/pixeloven/ComfyUI-Docker/pull/145)).
+  `models-and-nodes` shows the fields of a node pack's entry: `git_custom_nodes`, keyed by repository URL,
+  with `hash` and `disabled`, and `cnr_custom_nodes`, a registry id mapped to its version, as ComfyUI-Manager's
+  snapshot has them. It also notes that `comfyctl fetch resolve` doesn't write that section.
+  `errors-and-validation` opens by saying that a graph `workflow_validate` calls `valid` and `runnable` can
+  still be rejected by ComfyUI for an input or link type, as T4's is.
+  `comfy-manifest`'s "never hand-edit a lock" now names `custom_nodes` as the one exception, since nothing in
+  `comfyctl` generates it, and its `resolve` example says that regenerating drops that section.
 
 ### Fixed
 
