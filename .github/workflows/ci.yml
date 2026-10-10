@@ -297,7 +297,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7.0.1
-    - run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
+    - run: docker run --rm -v "$PWD":/repo -w /repo mirror.gcr.io/rhysd/actionlint:1.7.7 -color
 
   validate-examples:
     runs-on: ubuntu-latest
@@ -452,6 +452,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     - name: Build the comfyctl image
       uses: docker/bake-action@v7.3.0
@@ -492,6 +494,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     - name: Build the comfyctl image
       uses: docker/bake-action@v7.3.0
@@ -576,6 +580,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v4.6.0
@@ -652,6 +658,7 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
       with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
         buildkitd-flags: --debug
   
     - name: Login to GitHub Container Registry
@@ -727,6 +734,7 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
       with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
         buildkitd-flags: --debug
 
     - name: Login to GitHub Container Registry
@@ -788,6 +796,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v4.6.0
@@ -846,6 +856,7 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
       with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
         buildkitd-flags: --debug
   
     - name: Login to GitHub Container Registry
@@ -903,6 +914,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     # Never pushed: `push: false`, and the label is not one CI publishes.
     - name: Build core-cpu
@@ -998,6 +1011,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     # Never pushed: `push: false`, and `ci` is not a label CI publishes.
     - name: Build the mcp image
@@ -1177,6 +1192,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     # Never pushed: `push: false`, and `ci` is not a label CI publishes.
     - name: Build the mcp-convert image
@@ -1340,6 +1357,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v4.6.0
@@ -1401,6 +1420,8 @@ jobs:
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.3.0
+      with:
+        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     - name: Login to GitHub Container Registry
       uses: docker/login-action@v4.6.0

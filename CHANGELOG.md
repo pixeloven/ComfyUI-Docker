@@ -90,6 +90,14 @@ the manifest and lock formats don't change. What moved:
   (`help_omitted`), and only then classes (`omitted`, to ask for alone). `include_help: false` leaves the help
   pages out. Both are optional, and a `class_type` call answers as before.
 
+### Changed
+
+- **Docker Hub images come through `mirror.gcr.io`**, Google's Docker Hub mirror, because Docker
+  Hub's anonymous pull limit was failing CI, `main`'s publishing runs included. The bases
+  (`ubuntu:24.04`, `nvidia/cuda:13.0.2-base-ubuntu24.04`, `python:3.13-alpine`, and
+  `python:3.13-slim` at the same digest), CI's actionlint and the BuildKit image `setup-buildx-action`
+  starts all keep their tags and digests, so the published images' layers don't change.
+
 ### Fixed
 
 - **The `comfyctl` image installs from `services/uv.lock`** (#177), hash-checked,
