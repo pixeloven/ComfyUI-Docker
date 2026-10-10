@@ -83,13 +83,15 @@ python3 -m venv ~/.local/share/comfyctl
 
 The venv's `bin/` isn't on your `PATH`. To run plain `comfyctl`, link it into
 a directory that is:
-`ln -sf ~/.local/share/comfyctl/bin/comfyctl ~/.local/bin/comfyctl`.
-To upgrade, run the same `pip install` line with the new `v`.
+`mkdir -p ~/.local/bin && ln -sf ~/.local/share/comfyctl/bin/comfyctl ~/.local/bin/comfyctl`.
+To upgrade, set the new `v`, re-run the `req=` line (it expands `v` when it is
+assigned), then the install line.
 
 With uv, the same install is
 `uv venv --clear ~/.local/share/comfyctl && uv pip install --python ~/.local/share/comfyctl --require-hashes -r "${req}"`.
 `--clear` replaces an existing venv, which `uv venv` otherwise refuses; to
-upgrade in place instead, run the `uv pip install` part alone.
+upgrade in place instead, set the new `v`, re-run the `req=` line, then run the
+`uv pip install` part alone.
 A file whose hash doesn't match stops the install, and nothing is installed.
 `uv tool install --constraints <file>` is not a substitute: it pins the versions
 but ignores the hashes.

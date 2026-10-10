@@ -585,8 +585,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.release_requirements == 'true'
+    # Builds and installs code from the PR; it needs to read the repo and nothing
+    # more, so no write token and no credentials left in .git/config.
+    permissions:
+      contents: read
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - uses: astral-sh/setup-uv@v10.0.1
       with:
