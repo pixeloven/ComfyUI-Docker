@@ -38,6 +38,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The uv that writes the release's requirements file. Pinned, so the tag runs
+# the uv the release-requirements job already tested on a PR; a newer uv may
+# export differently. Bump it by PR, which reruns that job.
+env:
+  RELEASE_UV_VERSION: "0.13.0"
+
 jobs:
   # Which parts of the repo a change touches. The expensive image builds are
   # ~60 of the ~62 minutes a full run costs, and most changes cannot affect
@@ -51,6 +57,7 @@ jobs:
       relay: ${{ steps.filter.outputs.relay }}
       bake: ${{ steps.filter.outputs.bake }}
       examples: ${{ steps.filter.outputs.examples }}
+      release_requirements: ${{ steps.filter.outputs.release_requirements }}
     steps:
     - uses: actions/checkout@v7.0.1
     # Pinned to an exact semver tag, like every other action here -- a version
@@ -93,6 +100,13 @@ jobs:
             - 'docker-bake.hcl'
           examples:
             - 'examples/**'
+          # What the release's requirements file is made from, and what makes it.
+          release_requirements:
+            - 'services/comfyctl/**'
+            - 'services/pyproject.toml'
+            - 'services/uv.lock'
+            - 'tests/release/**'
+            - '.github/workflows/ci.yml'
 
   # Which release line this ref belongs to, and what to call what it builds.
   #
@@ -560,6 +574,32 @@ jobs:
         docker compose --profile models run --rm fetch | tee /tmp/second.log
         grep -q '^present:     2' /tmp/second.log || { echo "NOT IDEMPOTENT"; cat /tmp/second.log; exit 1; }
         grep -q '^fetched:     0' /tmp/second.log || { echo "REFETCHED"; cat /tmp/second.log; exit 1; }
+
+  # The release's hash-locked requirements file, rehearsed (#175). The release
+  # job writes it and installs it with --require-hashes on a `v*` tag; this runs
+  # the same script on every PR that touches what the file is made from, with the
+  # same pinned uv, so a broken export or install fails a PR and not a release.
+  # Only attesting, verifying and attaching the file need the tag.
+  release-requirements:
+    name: rehearse the release requirements
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.release_requirements == 'true'
+    steps:
+    - uses: actions/checkout@v7.0.1
+
+    - uses: astral-sh/setup-uv@v10.0.1
+      with:
+        version: ${{ env.RELEASE_UV_VERSION }}
+
+    - name: Build the wheel, write the requirements file, install it hash-checked
+      run: |
+        set -euo pipefail
+        v="$(cat VERSION)"
+        (cd services && uv build --package comfyctl --wheel -o "${RUNNER_TEMP}/dist")
+        tests/release/requirements.sh "${RUNNER_TEMP}/dist" \
+          "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${v}"
+        tail -n 3 "${RUNNER_TEMP}/dist/comfyctl-${v}-requirements.txt"
 
   publish-comfyctl:
     name: publish the comfyctl image
@@ -1520,7 +1560,11 @@ jobs:
     # without it, `comfyctl relay` is a hidden command that says it is not in
     # this build.
 
+    # The uv the release-requirements job tests on every PR that touches the
+    # file, so the tag writes it with the same uv.
     - uses: astral-sh/setup-uv@v10.0.1
+      with:
+        version: ${{ env.RELEASE_UV_VERSION }}
 
     - name: Build the wheel
       working-directory: services
@@ -1537,32 +1581,14 @@ jobs:
           exit 1
         fi
 
-    # The wheel names its dependencies by range, so an install resolves them
-    # from PyPI as they are that day. This file pins every one to the version
-    # and hashes in services/uv.lock (#175), and ends with the wheel itself, by
-    # its release URL and hash: pip and uv refuse a requirement without a hash in
-    # --require-hashes mode, the bare wheel included, so this one file is the
-    # whole install. --no-emit-workspace leaves out the comfyctl line uv would
-    # write as a local path; comfyrelay is not a comfyctl dependency, so the
-    # export never reaches it, and the check below holds that.
+    # The hash-locked requirements file (#175): written, then installed into a
+    # clean venv with --require-hashes. The script says why it looks as it does;
+    # the release-requirements job runs it on PRs, so this is a rerun, not a debut.
     - name: The hash-locked requirements file
-      working-directory: services
       run: |
         set -euo pipefail
-        whl="comfyctl-${COMFYCTL_VERSION}-py3-none-any.whl"
-        req="${GITHUB_WORKSPACE}/dist/comfyctl-${COMFYCTL_VERSION}-requirements.txt"
-        uv export --package comfyctl --frozen --no-dev --no-emit-workspace > "${req}"
-        if grep -q -i '^comfyrelay\|^mcp==' "${req}"; then
-          echo "::error::the comfyctl requirements reach comfyrelay"
-          exit 1
-        fi
-        {
-          echo "# comfyctl itself: this release's wheel, by URL and hash."
-          echo "comfyctl @ https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/${whl} \\"
-          echo "    --hash=sha256:$(sha256sum "${GITHUB_WORKSPACE}/dist/${whl}" | cut -d' ' -f1)"
-        } >> "${req}"
-
-        cd "${GITHUB_WORKSPACE}/dist"
+        tests/release/requirements.sh dist "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}"
+        cd dist
         # A URL pin is only as good as a checksum next to it -- this is what the
         # SageAttention wheels already publish, and what consumers verify.
         sha256sum ./*.whl ./*-requirements.txt | tee SHA256SUMS
@@ -1581,29 +1607,6 @@ jobs:
           fi
         done
         echo "wheel ok: comfyctl and comfyctl fetch report ${COMFYCTL_VERSION}"
-
-    - name: The requirements file installs, hash-checked
-      run: |
-        set -euo pipefail
-        # The install the comfyctl README gives, into a clean venv. The wheel's
-        # release URL does not exist until the release does, so this copy points
-        # its line at the wheel just built; the hash it is checked against is
-        # the one the published file carries.
-        whl="comfyctl-${COMFYCTL_VERSION}-py3-none-any.whl"
-        sed "s#^comfyctl @ https://.*/${whl} #comfyctl @ file://${PWD}/dist/${whl} #" \
-          "dist/comfyctl-${COMFYCTL_VERSION}-requirements.txt" > "${RUNNER_TEMP}/requirements.txt"
-        if ! grep -q "^comfyctl @ file://" "${RUNNER_TEMP}/requirements.txt"; then
-          echo "::error::the requirements file has no comfyctl wheel line"
-          exit 1
-        fi
-        uv venv "${RUNNER_TEMP}/venv"
-        uv pip install --python "${RUNNER_TEMP}/venv" --require-hashes -r "${RUNNER_TEMP}/requirements.txt"
-        got="$("${RUNNER_TEMP}/venv/bin/comfyctl" --version)"
-        if [ "${got}" != "${COMFYCTL_VERSION}" ]; then
-          echo "::error::the hash-checked install reports ${got}, the tag says ${COMFYCTL_VERSION}"
-          exit 1
-        fi
-        echo "requirements ok: a --require-hashes install reports ${COMFYCTL_VERSION}"
 
     - uses: actions/attest-build-provenance@v4.2.2
       with:

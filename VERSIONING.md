@@ -138,14 +138,26 @@ image, tool, or optional tool argument is a minor.
 
 Before tagging, the lead session runs agent tasks T1–T6 against comfyrelay and posts the scores on the release PR: see [`tests/agent-tasks/README.md`](tests/agent-tasks/README.md) → *Before each release*.
 
+The bump goes through a release PR like any other change; only the tag is
+pushed by hand, and only after that PR merges:
+
 ```sh
+git switch -c chore/release-1.2.3 origin/main
 echo 1.2.3 > VERSION
 # match it in services/comfyctl/pyproject.toml, services/comfyrelay/pyproject.toml,
 # .claude-plugin/plugin.json and package.json
 (cd services && uv lock)   # after the pyproject.toml edits: uv.lock copies the versions
 # turn CHANGELOG.md's `## Unreleased` into a dated `## 1.2.3 — YYYY-MM-DD` section
-git commit -am "release 1.2.3"
-git tag v1.2.3 && git push --tags
+git add VERSION CHANGELOG.md services/comfyctl/pyproject.toml services/comfyrelay/pyproject.toml \
+  services/uv.lock .claude-plugin/plugin.json package.json
+git commit -m "chore(release): prepare 1.2.3"
+git push -u origin chore/release-1.2.3
+gh pr create --fill        # review, CI green, merge
+
+# After the PR merges: tag its merge commit on main, and push that one tag.
+sha="$(gh pr view chore/release-1.2.3 --json mergeCommit --jq .mergeCommit.oid)"
+git fetch origin && git tag v1.2.3 "${sha}"
+git push origin v1.2.3     # never --tags: that pushes every local tag, and each v* tag publishes
 ```
 
 **Check a new image's GHCR package is public, once.** A package GHCR creates
