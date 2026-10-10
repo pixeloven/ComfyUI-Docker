@@ -225,7 +225,11 @@ FAILURES = {
         "facts", str(t / "nope"), str(f / "lock-good.yaml"), "--store", str(t)], 2),
     "facts, --store is the models dir": (_facts_store_is_models_dir, 2),
     "facts, --headers not JSON": (lambda f, t: _facts(f, t, "--headers", _w(t / "h.json", "{")), 1),
-    "facts, --headers a list": (lambda f, t: _facts(f, t, "--headers", _w(t / "h.json", "[]")), 2),
+    "facts, --headers a list": (lambda f, t: _facts(f, t, "--headers", _w(t / "h.json", "[]")), 1),
+    "facts, --headers value not an object": (lambda f, t: _facts(
+        f, t, "--headers", _w(t / "h.json", '{"models/loras/a.safetensors": "x"}')), 1),
+    "facts, --headers key not under models/": (lambda f, t: _facts(
+        f, t, "--headers", _w(t / "h.json", '{"loras/a.safetensors": {}}')), 1),
     "facts --check, stale sidecar": (_facts_check_stale, 1),
     "facts --check, malformed lineage": (_facts_check_malformed_lineage, 1),
 }
@@ -244,6 +248,17 @@ def test_every_failure_under_json_writes_a_json_result(name, fixtures, tmp_path)
     assert payload["ok"] is False
     assert payload["problems"] and all(payload["problems"])
     assert r.stderr.strip(), "the reason did not reach stderr"
+
+
+def test_a_null_header_value_is_an_empty_header(fixtures, tmp_path):
+    """`null` is what an extractor writes for a file with no __metadata__. It
+    is an empty header, not a malformed one: no traceback, exit 0."""
+    args = _facts(fixtures, tmp_path, "--headers",
+                  _w(tmp_path / "h.json", '{"models/loras/a.safetensors": null}'))
+    r = runner.invoke(app, [*args, "-o", "json"])
+    assert r.exception is None or isinstance(r.exception, SystemExit), repr(r.exception)
+    assert r.exit_code == 0, r.output
+    assert json.loads(r.stdout) == {"sidecars": 0}
 
 
 def test_from_lock_failure_names_the_profile_and_the_stale_paths(fixtures):

@@ -295,7 +295,8 @@ def test_same_named_files_each_keep_their_own_hash(civitai):
 
 def test_headers_keyed_by_basename_are_refused(tmp_path):
     """A pre-6.0.0 headers file is keyed by basename. Silently matching nothing
-    would write sidecars with no headers at all, so it is a wrong request."""
+    would write sidecars with no headers at all, so it is refused: exit 1, as
+    for any input whose content is wrong."""
     from typer.testing import CliRunner
 
     from comfyctl.fetch.cli import app
@@ -307,7 +308,7 @@ def test_headers_keyed_by_basename_are_refused(tmp_path):
     h.write_text(json.dumps({"qwen_3_4b.safetensors": {}}))
     result = CliRunner().invoke(app, ["facts", str(tmp_path / "src"), str(lock),
                                       "--headers", str(h)])
-    assert result.exit_code == 2, result.output
+    assert result.exit_code == 1, result.output
     assert "install paths" in result.output
 
 
@@ -326,8 +327,8 @@ def test_headers_keys_must_start_at_models(tmp_path, key):
     h.write_text(json.dumps({key: {}}))
     result = CliRunner().invoke(app, ["facts", str(tmp_path / "src"), str(lock),
                                       "--headers", str(h)])
-    assert result.exit_code == 2, result.output
-    assert "starting models/" in result.output
+    assert result.exit_code == 1, result.output
+    assert "starting models/" in " ".join(result.output.split())
 
 
 def test_store_must_be_the_comfyui_root_not_models(tmp_path):
@@ -354,22 +355,28 @@ def test_store_must_be_the_comfyui_root_not_models(tmp_path):
     assert right.exit_code == 0, right.output
 
 
-def test_store_holding_none_of_the_declared_files_is_refused(tmp_path):
-    """A root with a models/ directory that holds none of the declared
-    safetensors files is the wrong root, not a store with nothing to say."""
+def test_a_root_whose_files_are_not_fetched_yet_still_gets_hash_facts(civitai, tmp_path):
+    """A correct root need not hold the files yet: the facts that come from the
+    lock's hashes do not need the bytes, so they are still written."""
     from typer.testing import CliRunner
 
     from comfyctl.fetch.cli import app
 
+    by_hash = json.loads((FIX / "by-hash.json").read_text())
+    pony = next(s for s, b in by_hash.items() if (b or {}).get("baseModel") == "Pony")
     root, src = tmp_path / "root", tmp_path / "src"
-    _safetensors(root / "models" / "loras" / "other.safetensors", {})
+    (root / "models").mkdir(parents=True)
     src.mkdir()
     (src / "lineage.yaml").write_text(yaml.safe_dump(SAME_NAME))
     lock = tmp_path / "lock.yaml"
-    lock.write_text("models: []\n")
+    lock.write_text(yaml.safe_dump({"models": [
+        {"model": "qwen_3_4b.safetensors", "paths": [{"path": A}],
+         "hashes": [{"type": "SHA256", "hash": pony}]}]}))
     result = CliRunner().invoke(app, ["facts", str(src), str(lock), "--store", str(root)])
-    assert result.exit_code == 2, result.output
-    assert "no declared .safetensors file" in result.output
+    assert result.exit_code == 0, result.output
+    files = yaml.safe_load((src / "lineage.facts.yaml").read_text())["files"]
+    assert set(files) == {A}
+    assert files[A]["declared_base"] == "Pony"
 
 
 # ---- facts --check: the offline freshness gate (#155) ----------------------

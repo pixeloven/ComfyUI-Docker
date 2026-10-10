@@ -86,14 +86,14 @@ the manifest and lock formats don't change. What moved:
   files with the same name, such as two `qwen_3_4b.safetensors` from different
   repos, each get their own header and hash; before, one got the other's facts.
   A `--headers` file is keyed the same way, by the path relative to the ComfyUI
-  root, and a basename key exits 2.
+  root, and a basename key exits 1.
   *Migration:* regenerate every sidecar with `comfyctl fetch facts`, and key
   any `--headers` file by `models/…` path.
 - **`facts --store` takes the ComfyUI root, not `models/`** (#153), as `fetch`
-  does. Given a directory with no `models/` inside, or one holding none of the
-  declared `.safetensors` files, it exits 2; a `--headers` key that doesn't
-  start `models/` exits 2 too. Before, such a store matched nothing and wrote
-  empty sidecars with exit 0.
+  does. Given a directory with no `models/` inside, it exits 2; a `--headers`
+  key that doesn't start `models/` exits 1. Before, such a store matched
+  nothing and wrote empty sidecars with exit 0. A `--headers` value of `null`
+  is an empty header; any other value that isn't an object exits 1.
   *Migration:* pass `--store /workspace`, not `--store /workspace/models`.
 - **`fetch` fails on an entry with no SHA256** (#158). The entry is still
   refused, but it counts as `failed`, not `skipped`, and the run exits 1, dry

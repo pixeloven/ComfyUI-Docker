@@ -45,9 +45,11 @@ replaced the `fetch` image in 6.0.0.
   counters beside them); the reasons also go to stderr. Progress stays on
   stderr, so the output parses. Only a command line the CLI can't parse at all,
   such as an unknown option, exits 2 with usage text on stderr and no JSON.
-- **Exit codes:** `0` did what was asked, `1` a real failure (unresolved source,
-  hash mismatch, a lock entry with no SHA256, manifest and lock disagree), `2` a
-  bad request (missing file, unknown profile, incompatible flags).
+- **Exit codes:** `0` did what was asked, `1` a real failure (an input that isn't
+  valid YAML or JSON, or fails its schema; an unresolved source, a hash mismatch,
+  a lock entry with no SHA256, manifest and lock disagree), `2` a bad request (a
+  missing file or directory, an unknown profile, bad or conflicting flags, a
+  `--store` that isn't a ComfyUI root).
 
 `comfy.yaml` may itself be generated. Past a few hundred lines a single manifest
 stops working — every family conflicts with every other on edit — so `build`

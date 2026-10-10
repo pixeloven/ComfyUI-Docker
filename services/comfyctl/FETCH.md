@@ -56,8 +56,8 @@ keys. Human output goes to **stderr**; stdout carries the artifact, so
 | exit | meaning |
 |---|---|
 | `0` | did what was asked |
-| `1` | a real failure — a source did not resolve, a hash did not match, a lock entry has no SHA256, a lock and its manifest disagree |
-| `2` | the request was wrong — missing file, unknown profile, incompatible flags |
+| `1` | a real failure — an input that isn't valid YAML or JSON, or fails its schema; a source did not resolve, a hash did not match, a lock entry has no SHA256, a lock and its manifest disagree |
+| `2` | the request was wrong — a missing file or directory, an unknown profile, bad or conflicting flags, a `--store` that isn't a ComfyUI root |
 
 Under `--output json`, every non-zero exit still writes one JSON object to
 stdout, with `"ok": false` and the reasons in `problems`; `fetch` and `resolve`
@@ -279,13 +279,14 @@ Basenames repeat (`diffusion_pytorch_model.safetensors` is HuggingFace's
 default), so a file is joined to its own header and hash by its path. The path
 is used only for identity: lineage is never inferred from it. A `--headers`
 file is keyed the same way, `{"models/loras/x.safetensors": {…}}`; a key that
-doesn't start `models/` exits 2. Sidecars written before 6.0.0 are keyed by
+doesn't start `models/` exits 1, as does a value that is neither an object nor
+`null` (`null` is an empty header). Sidecars written before 6.0.0 are keyed by
 basename; regenerate them with `comfyctl fetch facts`.
 
 `--store` takes the **ComfyUI root**, the directory holding `models/`, as
 `fetch` does: not `models/` itself. It exits 2 when `<store>/models` isn't a
-directory, or when the lineages declare `.safetensors` files and none of them
-is under the store.
+directory. The files need not be there yet: the facts that come from the
+lock's hashes are written without them.
 
 The sidecar is committed, so it goes stale when its lineage changes. `--check`
 reads only the source tree and fails (exit 1) when a sidecar has no sibling

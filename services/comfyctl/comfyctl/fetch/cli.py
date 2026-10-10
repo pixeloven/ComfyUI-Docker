@@ -16,10 +16,12 @@ Kubernetes Job, or an agent:
 EXIT CODES are part of the interface, because automation reads them:
 
     0  did what was asked
-    1  a real failure -- a source did not resolve, a hash did not match,
-       a lock and its manifest disagree
-    2  the request itself was wrong -- missing file, unknown profile,
-       incompatible flags
+    1  a real failure -- an input that isn't valid YAML or JSON, or fails
+       its schema; a source did not resolve, a hash did not match, a lock
+       and its manifest disagree
+    2  the request itself was wrong -- a missing file or directory, an
+       unknown profile, bad or conflicting flags, a --store that isn't a
+       ComfyUI root
 
 Human output goes to stderr; stdout carries the artifact, so redirecting it into
 a lock file stays correct.
@@ -470,14 +472,15 @@ def facts(
         _usage(out, f"no such headers file: {headers_file}")
     doc = _load(lock, "lock", out)
 
+    # Every lineage is read and checked before any network call or write, so a
+    # malformed one fails the run up front instead of halfway through it.
     lineages: list[tuple[pathlib.Path, dict]] = []
-    declared: set[str] = set()
     for path in sorted(sources.rglob("*.yaml")):
         if path.name in facts_mod.RESERVED or path.name.endswith(".facts.yaml"):
             continue
         try:
             lineage = yaml.safe_load(path.read_text()) or {}
-            declared.update(facts_mod.declared(lineage))
+            facts_mod.declared(lineage)
         except (yaml.YAMLError, ValueError, KeyError, TypeError, AttributeError) as exc:
             _failed(out, f"{path} is not a lineage source: {type(exc).__name__}: {exc}")
         lineages.append((path, lineage))
@@ -494,28 +497,34 @@ def facts(
         for p in m.get("paths") or []
     }
     if headers_file is not None:
+        # A --headers file is an INPUT whose content can be wrong: every content
+        # problem exits 1, as unreadable YAML or a schema failure does.
         try:
             headers = json.loads(headers_file.read_text())
         except ValueError as exc:
             _failed(out, f"--headers {headers_file} is not readable JSON: {exc}")
         if not isinstance(headers, dict):
-            _usage(out, "--headers must be a JSON object, {install path: __metadata__}, "
-                        f"not a {type(headers).__name__}")
+            _failed(out, "--headers must be a JSON object, {install path: __metadata__}, "
+                         f"not a {type(headers).__name__}")
         # Every declared path starts `models/` (the schema's `install` pattern),
         # so a key that does not can never match.
         bad = sorted(k for k in headers if not k.startswith("models/"))
         if bad:
-            _usage(out, "--headers keys must be install paths relative to the ComfyUI "
-                        f"root, starting models/: {', '.join(bad[:3])}")
+            _failed(out, "--headers keys must be install paths relative to the ComfyUI "
+                         f"root, starting models/: {', '.join(bad[:3])}")
+        # `null` is what an extractor writes for a file with no __metadata__:
+        # the same as an empty header. Anything else that is not an object is
+        # not a header.
+        headers = {k: {} if v is None else v for k, v in headers.items()}
+        bad = sorted(k for k, v in headers.items() if not isinstance(v, dict))
+        if bad:
+            _failed(out, "--headers values must be JSON objects (the __metadata__ "
+                         f"block) or null: {', '.join(bad[:3])}")
     else:
         headers = {
             p.relative_to(store).as_posix(): facts_mod.safetensors_header(p)
             for p in store.rglob("*.safetensors")
         }
-        wanted = {p for p in declared if p.endswith(".safetensors")}
-        if wanted and not wanted & headers.keys():
-            _usage(out, f"no declared .safetensors file is under {store}: --store takes "
-                        f"the ComfyUI root, the directory holding models/")
     out.note(f"{len(shas)} hashes from the lock, {len(headers)} safetensors headers read")
 
     stamp = generated or _time.strftime("%Y-%m-%d")
