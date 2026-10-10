@@ -419,6 +419,20 @@ async def test_run_reports_comfyuis_own_rejection():
     assert job.snapshot()["state"] == "failed" and job.error["code"] == "workflow_rejected"
 
 
+async def test_a_rejected_runs_job_says_it_was_never_queued():
+    """T4 (#169): the job_id of a run ComfyUI refused only repeats the rejection; job_status must not leave it
+    looking as if the submission were still under way."""
+    fake = FakeComfyUI()
+    fake.reject = {"error": {"type": "prompt_outputs_failed_validation", "message": "x"}, "node_errors": {}}
+    server, _ = serve(fake)
+    async with Client(server, mode="legacy") as client:
+        error = error_of(await client.call_tool("workflow_run", {"workflow": t1()}))
+        view = (await client.call_tool("job_status", {"job_id": error["job_id"]})).structured_content
+    assert (view["state"], view["error"]["code"]) == ("failed", "workflow_rejected")
+    assert view["progress"]["comfyui_state"] == "rejected"
+    assert (fake.pending, fake.running, fake.history) == ([], [], {})
+
+
 async def test_outputs_comfyui_drops_are_reported_as_warnings():
     """ComfyUI accepts a graph when any output passes, and quietly drops the rest."""
     fake = FakeComfyUI(auto="hold")
@@ -640,6 +654,29 @@ async def test_a_cancel_during_submission_waits_for_the_answer_then_cancels():
     order = [(m, p) for m, p, _ in fake.calls if p in ("/prompt", "/api/jobs/p-early/cancel")]
     assert order == [("POST", "/prompt"), ("POST", "/api/jobs/p-early/cancel")]
     assert fake.pending == [] and fake.running == [] and progress["stop"] == "confirmed"
+
+
+async def test_a_cancel_during_a_submission_comfyui_rejects_says_it_was_never_queued():
+    fake = FakeComfyUI(auto="hold")
+    fake.reject = {"error": {"type": "prompt_outputs_failed_validation", "message": "x"}, "node_errors": {}}
+    fake.delays["/prompt"] = 0.5
+    progress = {"prompt_id": "p-rejected"}
+    await assert_producer_honours_cancel(lambda: tw.run_prompt(fake.client(), t1(), progress))
+    assert (progress["stop"], progress["comfyui_state"]) == ("not_needed", "rejected")
+
+
+@pytest.mark.usefixtures("quick_stop")
+async def test_a_rejection_after_the_stops_budget_still_says_it_was_never_queued():
+    fake = FakeComfyUI(auto="hold")
+    fake.reject = {"error": {"type": "prompt_outputs_failed_validation", "message": "x"}, "node_errors": {}}
+    fake.delays["/prompt"] = 1.0  # past what the unwind may wait (0.8s budget less the 0.3s reserve)
+    progress = {"prompt_id": "p-late-rejected", "comfyui_state": "submitting"}  # as workflow_run starts it
+    await assert_producer_honours_cancel(lambda: tw.run_prompt(fake.client(), t1(), progress))
+    assert (progress["stop"], progress["comfyui_state"]) == ("unconfirmed", "submitting")
+    await asyncio.sleep(0.8)  # ComfyUI answers: a refusal, so nothing is queued and nothing needs cancelling again
+    assert (progress["stop"], progress["comfyui_state"]) == ("not_needed", "rejected")
+    assert "stop_detail" not in progress
+    assert fake.pending == [] and fake.count("POST", "/api/jobs/p-late-rejected/cancel") == 1
 
 
 @pytest.mark.usefixtures("quick_stop")

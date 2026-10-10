@@ -43,11 +43,11 @@ import re
 from collections import Counter, OrderedDict
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import quote
 
 from mcp_types import ToolAnnotations
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, RootModel, model_serializer
 
 from .comfyui import ComfyUIClient, ComfyUIError
 from .convert import off_reason, unavailable
@@ -84,8 +84,13 @@ INACTIVE_MODES = frozenset({2, 4})
 # names the whole models root, so it would list every model a second time.
 NOT_MODEL_FOLDERS = frozenset({"custom_nodes", "download_model_base"})
 FETCH_CONCURRENCY = 8
+# A node's or template's display name, as ComfyUI gives it, is cut to this width wherever the relay passes it on.
+DISPLAY_NAME_MAX_CHARS = 120
 # A node's help page is read up to this many bytes. The longest in comfyui-embedded-docs 0.5.12 is about 11 KB.
 HELP_MAX_BYTES = 64 * 1024
+# Help is optional detail: node_describe's help fetches, all of a call's together, get this long; then help is left
+# out, with help_omitted saying why.
+HELP_SECONDS = 5.0
 # Never sent as a path segment: /object_info/.. or /models/. would be
 # normalised to another route.
 DOT_SEGMENTS = frozenset({".", ".."})
@@ -220,7 +225,7 @@ def _node_search(relay: Relay) -> Callable[..., Any]:
             results=[
                 NodeHit(
                     class_type=class_type,
-                    display_name=str(node.get("display_name") or class_type),
+                    display_name=_capped(str(node.get("display_name") or class_type), DISPLAY_NAME_MAX_CHARS),
                     category=str(node.get("category") or ""),
                     summary=_one_line(node.get("description")),
                     pack=_pack(node),
@@ -327,6 +332,10 @@ class NodeSpec(_Compact):
     help_path: str | None = Field(default=None, description="Where on ComfyUI the help page came from")
     help_truncated: bool | None = Field(
         default=None, description=f"true: the help page is longer than {HELP_MAX_BYTES} bytes, and help is its start"
+    )
+    help_omitted: str | None = Field(
+        default=None,
+        description="Why help is left out although it was asked for: ComfyUI was too slow, or a batch's size",
     )
 
 
@@ -482,7 +491,7 @@ def _spec(class_type: str, info: dict[str, Any], max_options: int) -> NodeSpec:
     )
     return NodeSpec(
         class_type=class_type,
-        display_name=str(info.get("display_name") or class_type),
+        display_name=_capped(str(info.get("display_name") or class_type), DISPLAY_NAME_MAX_CHARS),
         category=str(info.get("category") or ""),
         description=info.get("description") or None,
         pack=_pack(info),
@@ -499,10 +508,19 @@ def _spec(class_type: str, info: dict[str, Any], max_options: int) -> NodeSpec:
 
 def _close_matches(query: str, names: Iterable[tuple[str, str]], n: int = 5) -> list[dict[str, str]]:
     """Node classes or templates whose id or display name is close to `query`: case-insensitive, squashed, fuzzy."""
+    return _closest(query, _name_index(names), n)
+
+
+def _name_index(names: Iterable[tuple[str, str]]) -> dict[str, list[tuple[str, str]]]:
+    """(id, display name) pairs by each spelling _closest matches against; built once for several queries."""
     by_key: dict[str, list[tuple[str, str]]] = {}
     for ident, display in names:
         for key in {ident.lower(), _squash(ident), display.lower(), _squash(display)}:
             by_key.setdefault(key, []).append((ident, display))
+    return by_key
+
+
+def _closest(query: str, by_key: dict[str, list[tuple[str, str]]], n: int = 5) -> list[dict[str, str]]:
     keys = difflib.get_close_matches(query.lower(), by_key, n=n * 3, cutoff=0.6)
     keys += difflib.get_close_matches(_squash(query), by_key, n=n * 3, cutoff=0.6)
     keys += [k for k in by_key if len(_squash(query)) >= 3 and _squash(query) in k]
@@ -510,20 +528,189 @@ def _close_matches(query: str, names: Iterable[tuple[str, str]], n: int = 5) -> 
     for key in keys:
         for ident, display in by_key[key]:
             seen.setdefault(ident, display)
-    return [{"id": ident, "display_name": display} for ident, display in list(seen.items())[:n]]
+    return [
+        {"id": ident, "display_name": _capped(display, DISPLAY_NAME_MAX_CHARS)}
+        for ident, display in list(seen.items())[:n]
+    ]
+
+
+# node_describe's class_types takes at most this many classes in one call.
+MAX_DESCRIBE_CLASSES = 20
+# A batch's nodes take at most this many characters of the answer's text, the indented JSON an MCP client gets
+# (about 10k tokens), in the spirit of WORKFLOW_MAX_CHARS: help goes first, then whole classes. The lists beside them
+# (unknown, failed, omitted) are at most 20 entries of fixed-width fields, plus the names the request itself gave.
+BATCH_MAX_CHARS = 40_000
+# The suggestions for a batch's unknown classes are optional detail too: their scan gets this long.
+SUGGEST_SECONDS = 5.0
+
+
+class UnknownClass(_Compact):
+    class_type: str
+    code: Literal["unknown_node_class"] = "unknown_node_class"
+    message: str
+    suggestions: list[dict[str, str]]
+
+
+class FailedClass(_Compact):
+    class_type: str
+    code: str = Field(description="As a class_type call would fail: comfyui_http_error, comfyui_unreachable, ...")
+    message: str
+    retryable: bool
+
+
+class OmittedClass(_Compact):
+    class_type: str
+    reason: str
+
+
+class NodeSpecs(_Compact):
+    nodes: list[NodeSpec] = Field(description="The classes found, in the order asked")
+    unknown: list[UnknownClass] | None = Field(default=None, description="The classes this ComfyUI has not got")
+    failed: list[FailedClass] | None = Field(default=None, description="The classes ComfyUI failed to describe")
+    omitted: list[OmittedClass] | None = Field(
+        default=None, description=f"Found, but past the batch's {BATCH_MAX_CHARS} characters: ask for each alone"
+    )
+
+
+class NodeDescribed(RootModel[NodeSpec | NodeSpecs]):
+    """node_describe's answer: a NodeSpec for class_type, or a NodeSpecs for class_types. A root model, so the one
+    class answer is the NodeSpec itself, as before class_types (#169)."""
+
+
+async def _help_by(
+    comfyui: ComfyUIClient, class_type: str, info: dict[str, Any], deadline: float
+) -> tuple[str, str, bool] | str | None:
+    """_help, or "timeout" once the call's help deadline has passed."""
+    remaining = deadline - asyncio.get_running_loop().time()
+    try:
+        if remaining <= 0:
+            raise TimeoutError
+        return await asyncio.wait_for(_help(comfyui, class_type, info), remaining)
+    except TimeoutError:
+        return "timeout"
+
+
+async def _describe(
+    comfyui: ComfyUIClient, class_type: str, max_options: int, include_help: bool, help_deadline: float
+) -> NodeSpec | None:
+    """The class's spec, or None when ComfyUI has no such class."""
+    found = {} if class_type in DOT_SEGMENTS else await comfyui.object_info(class_type)
+    if class_type in found:
+        if not isinstance(found[class_type], dict):
+            raise _bad(f"an /object_info/{class_type} that is not an object")
+        spec = _spec(class_type, found[class_type], max_options)
+        page = await _help_by(comfyui, class_type, found[class_type], help_deadline) if include_help else None
+        if page == "timeout":
+            spec.help_omitted = f"timeout: ComfyUI did not serve its help page within {HELP_SECONDS:g}s"
+        elif page:
+            spec.help, spec.help_path, spec.help_truncated = page[0], page[1], page[2] or None
+        return spec
+    if found:
+        raise _bad(f"an /object_info/{class_type} that describes other classes")
+    return None
+
+
+async def _describe_or_failed(
+    comfyui: ComfyUIClient, class_type: str, max_options: int, include_help: bool, help_deadline: float
+) -> NodeSpec | FailedClass | None:
+    """_describe, for a batch: a ComfyUI failure is this class's, not the call's."""
+    try:
+        return await _describe(comfyui, class_type, max_options, include_help, help_deadline)
+    except ComfyUIError as exc:
+        return FailedClass(
+            class_type=class_type, code=exc.code, message=f"{class_type}: {exc.message}", retryable=exc.retryable
+        )
+
+
+def _names(every: dict[str, dict[str, Any]]) -> list[tuple[str, str]]:
+    return [(k, str(v.get("display_name") or k)) for k, v in every.items()]
+
+
+def _unknown(class_type: str, suggestions: list[dict[str, str]], why: str | None = None) -> UnknownClass:
+    """`why` there are no suggestions, when they couldn't be looked for."""
+    hint = (
+        "close matches are in suggestions."
+        if suggestions
+        else f"find one with node_search (no suggestions: {why})."
+        if why
+        else "find one with node_search."
+    )
+    return UnknownClass(
+        class_type=class_type,
+        message=f"ComfyUI has no node class {class_type!r}. Class names are case-sensitive; " + hint,
+        suggestions=[{"class_type": s["id"], "display_name": s["display_name"]} for s in suggestions],
+    )
+
+
+async def _unknowns(comfyui: ComfyUIClient, missing: list[str]) -> list[UnknownClass]:
+    """A batch's unknown classes, with suggestions when /object_info can be read (bounded) and scanned (bounded, off
+    the event loop, one index for them all); without them, saying why, when not."""
+    if not missing:
+        return []
+    every = await _object_info_or_why(comfyui)
+    if isinstance(every, str):
+        return [_unknown(name, [], f"/object_info {every}") for name in missing]
+
+    def scan() -> list[UnknownClass]:
+        index = _name_index(_names(every))
+        return [_unknown(name, _closest(name, index)) for name in missing]
+
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(scan), SUGGEST_SECONDS)
+    except TimeoutError:
+        return [_unknown(name, [], f"the scan took over {SUGGEST_SECONDS:g}s") for name in missing]
+
+
+def _answer_chars(spec: NodeSpec) -> int:
+    """What the spec takes of the answer's text: its indented JSON, each line two levels deeper as an item of
+    `nodes`, and the separator after it."""
+    text = spec.model_dump_json(indent=2)
+    return len(text) + 4 * (text.count("\n") + 1) + 2
+
+
+def _within_budget(specs: list[NodeSpec]) -> tuple[list[NodeSpec], list[OmittedClass]]:
+    """The specs that fit BATCH_MAX_CHARS, in the order asked. Over it, help goes first, from the last class back,
+    and only then whole classes: the ones that still fit are kept in order, and later, smaller ones may fit."""
+    sizes = [_answer_chars(spec) for spec in specs]
+    for i in reversed(range(len(specs))):
+        if sum(sizes) <= BATCH_MAX_CHARS:
+            break
+        if specs[i].help is not None:
+            specs[i].help = specs[i].help_path = specs[i].help_truncated = None
+            specs[i].help_omitted = f"left out to keep the batch within {BATCH_MAX_CHARS} characters; ask for it alone"
+            sizes[i] = _answer_chars(specs[i])
+    kept: list[NodeSpec] = []
+    omitted: list[OmittedClass] = []
+    used = 0
+    for spec, size in zip(specs, sizes, strict=True):
+        if used + size > BATCH_MAX_CHARS:
+            omitted.append(OmittedClass(class_type=spec.class_type, reason=f"over {BATCH_MAX_CHARS} characters"))
+            continue
+        kept.append(spec)
+        used += size
+    return kept, omitted
 
 
 def _node_describe(relay: Relay) -> Callable[..., Any]:
     async def node_describe(
-        class_type: str = Field(min_length=1, description="The exact class, as node_search returns it: 'KSampler'"),
+        class_type: str | None = Field(
+            default=None, min_length=1, description="The exact class, as node_search returns it: 'KSampler'"
+        ),
         max_options: int = Field(
             default=DEFAULT_MAX_OPTIONS,
             ge=1,
             le=5000,
             description="At most this many values per COMBO input and names per Autogrow input, at every level",
         ),
-    ) -> NodeSpec:
-        """Get one node class's spec from the live ComfyUI: each input's type, default, min, max, step and COMBO
+        class_types: list[Annotated[str, Field(min_length=1)]] | None = Field(
+            default=None,
+            min_length=1,
+            max_length=MAX_DESCRIBE_CLASSES,
+            description="Several classes in one call, instead of class_type",
+        ),
+        include_help: bool = Field(default=True, description="false leaves help out"),
+    ) -> NodeDescribed:
+        """Get a node class's spec from the live ComfyUI: each input's type, default, min, max, step and COMBO
         values; its outputs in socket order; whether it is an output node or a partner-API node. Look defaults and
         limits up here: they change between ComfyUI versions.
 
@@ -536,25 +723,30 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
         An output's `index` is the one a link [node_id, index] uses; hidden_inputs are ComfyUI's, never set in a
         graph. Lists are cut to max_options, with a total. `help` is the node's help page, when it has one
         (help_truncated: cut at 64 KB). An unknown class fails with `unknown_node_class` and close `suggestions`.
+        class_types (up to 20) answers {nodes, unknown, failed, omitted}: an unknown class goes in `unknown`, with that
+        code and its suggestions, and the call succeeds. Past 40,000 characters, help is left out (help_omitted)
+        before any class is (omitted): ask for those alone.
         """
-        found = {} if class_type in DOT_SEGMENTS else await relay.comfyui.object_info(class_type)
-        if class_type in found:
-            if not isinstance(found[class_type], dict):
-                raise _bad(f"an /object_info/{class_type} that is not an object")
-            spec = _spec(class_type, found[class_type], max_options)
-            page = await _help(relay.comfyui, class_type, found[class_type])
-            if page:
-                spec.help, spec.help_path, spec.help_truncated = page[0], page[1], page[2] or None
-            return spec
-        if found:
-            raise _bad(f"an /object_info/{class_type} that describes other classes")
-        every = _checked_object_info(await relay.comfyui.object_info())
-        suggestions = _close_matches(class_type, ((k, str(v.get("display_name") or k)) for k, v in every.items()))
-        raise RelayError(
-            "unknown_node_class",
-            f"ComfyUI has no node class {class_type!r}. Class names are case-sensitive; "
-            + ("close matches are in suggestions." if suggestions else "find one with node_search."),
-            suggestions=[{"class_type": s["id"], "display_name": s["display_name"]} for s in suggestions],
+        if (class_type is None) == (class_types is None):
+            raise RelayError("invalid_arguments", "give exactly one of class_type or class_types")
+        help_deadline = asyncio.get_running_loop().time() + HELP_SECONDS
+        if class_type is not None:
+            spec = await _describe(relay.comfyui, class_type, max_options, include_help, help_deadline)
+            if spec is not None:
+                return NodeDescribed(spec)
+            every = _checked_object_info(await relay.comfyui.object_info())
+            unknown = _unknown(class_type, _close_matches(class_type, _names(every)))
+            raise RelayError("unknown_node_class", unknown.message, suggestions=unknown.suggestions)
+        asked = list(dict.fromkeys(class_types or ()))
+        found = await _gather_limited(
+            lambda name=name: _describe_or_failed(relay.comfyui, name, max_options, include_help, help_deadline)
+            for name in asked
+        )
+        nodes, omitted = _within_budget([f for f in found if isinstance(f, NodeSpec)])
+        unknown = await _unknowns(relay.comfyui, [name for name, f in zip(asked, found, strict=True) if f is None])
+        failed = [f for f in found if isinstance(f, FailedClass)]
+        return NodeDescribed(
+            NodeSpecs(nodes=nodes, unknown=unknown or None, failed=failed or None, omitted=omitted or None)
         )
 
     return node_describe
