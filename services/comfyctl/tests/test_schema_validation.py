@@ -352,3 +352,74 @@ def test_a_malformed_PARENT_lock_is_reported_as_the_parents_problem(tmp_path):
     result = runner.invoke(app, ["check", str(m), str(child), "--parent", str(parent)])
     assert result.exit_code == 1
     assert "parent:" in result.output, result.output
+
+
+# ---- --subset-only: a derived lock narrower than any profile (#157) ---------
+
+TWO_FILES = {"models": [
+    {"name": "g", "files": [
+        {"source": "hf:a/b", "install": "models/loras/", "as": "a.safetensors"},
+        {"source": "hf:a/b", "install": "models/vae/", "as": "b.safetensors"}]},
+], "profiles": {"p": ["g"]}}
+
+
+def test_subset_only_accepts_a_lock_narrower_than_the_manifest(tmp_path):
+    """A tier-narrowed lock is a verbatim subset of its parent and holds nothing
+    undeclared. Without --subset-only the dropped file is NOT LOCKED, so the
+    same lock can never pass."""
+    parent = write(tmp_path / "parent.yaml", PARENT)
+    child = write(tmp_path / "child.yaml", {"models": [PARENT["models"][0]]})
+    m = write(tmp_path / "comfy.yaml", TWO_FILES)
+    args = ["check", str(m), str(child), "--profile", "p", "--parent", str(parent)]
+
+    assert runner.invoke(app, args).exit_code == 1, "the control: it fails without the flag"
+
+    result = runner.invoke(app, [*args, "--subset-only", "-o", "json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["narrowed"] == ["models/vae/b.safetensors"]
+    assert payload["problems"] == []
+
+
+def test_subset_only_still_fails_what_the_manifest_does_not_declare(tmp_path):
+    """The one-sided half of agreement stays: a derived lock must not carry a
+    file the manifest (here, the profile) does not declare."""
+    parent = write(tmp_path / "parent.yaml", PARENT)
+    child = write(tmp_path / "child.yaml", PARENT)
+    m = write(tmp_path / "comfy.yaml", {"models": [
+        {"name": "g", "files": [
+            {"source": "hf:a/b", "install": "models/loras/", "as": "a.safetensors"}]},
+        {"name": "h", "files": [
+            {"source": "hf:a/b", "install": "models/vae/", "as": "b.safetensors"}]},
+    ], "profiles": {"p": ["g"]}})
+    result = runner.invoke(app, ["check", str(m), str(child), "--profile", "p",
+                                 "--parent", str(parent), "--subset-only", "-o", "json"])
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert any(p.startswith("NOT DECLARED") and "b.safetensors" in p
+               for p in payload["problems"]), payload
+
+
+def test_subset_only_still_requires_a_verbatim_subset(tmp_path):
+    parent = write(tmp_path / "parent.yaml", PARENT)
+    drifted = json.loads(json.dumps(PARENT["models"][0]))
+    drifted["hashes"][0]["hash"] = "c" * 64
+    child = write(tmp_path / "child.yaml", {"models": [drifted]})
+    m = write(tmp_path / "comfy.yaml", TWO_FILES)
+    result = runner.invoke(app, ["check", str(m), str(child), "--parent", str(parent),
+                                 "--subset-only", "-o", "json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert "differs from the parent lock" in payload["problems"][0]
+    assert payload["narrowed"] is None
+
+
+def test_subset_only_without_parent_is_a_request_error(tmp_path):
+    """"A subset of what" is undefined without --parent."""
+    m = write(tmp_path / "comfy.yaml", TWO_FILES)
+    child = write(tmp_path / "child.yaml", {"models": [PARENT["models"][0]]})
+    result = runner.invoke(app, ["check", str(m), str(child), "--subset-only"])
+    assert result.exit_code == 2, result.output
+    assert "needs --parent" in result.output, result.output

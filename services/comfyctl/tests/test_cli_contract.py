@@ -54,8 +54,9 @@ def test_fetch_json_has_stable_keys(fixtures, tmp_path):
                             "-o", "json"])
     payload = json.loads(r.stdout)
     assert set(payload) == {"present", "fetched", "skipped", "failed", "would_fetch",
-                            "bytes_written", "dry_run", "problems"}
+                            "bytes_written", "dry_run", "problems", "ok"}
     assert payload["dry_run"] is True
+    assert payload["ok"] is True
 
 
 def test_json_mode_keeps_stdout_parseable(fixtures, tmp_path):
@@ -128,3 +129,161 @@ def test_module_entry_point_sees_every_verb(verb):
     r = subprocess.run([sys.executable, "-m", "comfyctl.fetch.cli", verb, "--help"],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+# ---- a failure under -o json still says why (#152) --------------------------
+#
+# These paths reported through Out.problem(), a no-op under json, and exited
+# without a result: exit 1 and zero bytes on BOTH streams.
+
+def _stale_build(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir(exist_ok=True)
+    (src / "_meta.yaml").write_text("name: s\n")
+    (src / "a.yaml").write_text(
+        "groups:\n  - name: g\n    files:\n"
+        "      - {source: 'hf:a/b', file: a.safetensors, install: models/loras/}\n")
+    built = tmp_path / "comfy.yaml"
+    built.write_text("# stale\n")
+    return src, built
+
+
+def _w(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return str(path)
+
+
+NOT_YAML = "models: [\n"
+UNRESOLVABLE = ("models:\n  - name: g\n    files:\n"
+                "      - {source: 'https://example.invalid/a.safetensors', install: models/loras/}\n")
+
+
+def _build_check_stale(f, t):
+    src, built = _stale_build(t)
+    return ["build", str(src), "-O", str(built), "--check"]
+
+
+def _build_no_meta(f, t):
+    (t / "no-meta").mkdir()
+    return ["build", str(t / "no-meta")]
+
+
+def _facts(f, t, *extra):
+    return ["facts", str(_stale_build(t)[0]), str(f / "lock-good.yaml"), *extra]
+
+
+def _facts_store_is_models_dir(f, t):
+    (t / "root" / "models").mkdir(parents=True)
+    return _facts(f, t, "--store", str(t / "root" / "models"))
+
+
+def _facts_check_stale(f, t):
+    src = _stale_build(t)[0]
+    _w(src / "a.facts.yaml", "files:\n  models/loras/gone.safetensors: {nsfw: true}\n")
+    return ["facts", str(src), "--check"]
+
+
+def _facts_check_malformed_lineage(f, t):
+    _w(t / "src" / "a.yaml", "groups:\n  - name: g\n    files:\n      - {file: a}\n")
+    _w(t / "src" / "a.facts.yaml", "files:\n  models/loras/a: {nsfw: true}\n")
+    return ["facts", str(t / "src"), "--check"]
+
+
+# name -> (args builder taking (fixtures, tmp_path), expected exit)
+FAILURES = {
+    "resolve --from-lock, stale parent": (lambda f, t: [
+        "resolve", str(f / "manifest-two-profiles.yaml"), "--profile", "both",
+        "--from-lock", str(f / "lock-stale-parent.yaml")], 1),
+    "resolve --from-lock, unknown profile": (lambda f, t: [
+        "resolve", str(f / "manifest-two-profiles.yaml"), "--profile", "nope",
+        "--from-lock", str(f / "lock-stale-parent.yaml")], 2),
+    "resolve, unknown profile": (lambda f, t: [
+        "resolve", str(f / "manifest-two-profiles.yaml"), "--profile", "nope"], 2),
+    "resolve, unresolved source": (lambda f, t: ["resolve", _w(t / "m.yaml", UNRESOLVABLE)], 1),
+    "resolve, not YAML": (lambda f, t: ["resolve", _w(t / "m.yaml", NOT_YAML)], 1),
+    "resolve, not a mapping": (lambda f, t: ["resolve", _w(t / "m.yaml", "- a\n- b\n")], 1),
+    "build, no _meta.yaml": (_build_no_meta, 1),
+    "build --check, stale": (_build_check_stale, 1),
+    "build --check, missing": (lambda f, t: [
+        "build", str(_stale_build(t)[0]), "-O", str(t / "absent.yaml"), "--check"], 1),
+    "check, missing file": (lambda f, t: ["check", str(t / "x.yaml"), str(t / "y.yaml")], 2),
+    "check, not YAML": (lambda f, t: [
+        "check", _w(t / "m.yaml", NOT_YAML), str(f / "lock-good.yaml")], 1),
+    "check, schema problem": (lambda f, t: [
+        "check", _w(t / "m.yaml", "models:\n  - name: g\n    instal: x\n"),
+        str(f / "lock-good.yaml")], 1),
+    "check, disagreement": (lambda f, t: [
+        "check", str(f / "manifest-for-lock-good.yaml"), str(f / "lock-no-hash.yaml")], 1),
+    "fetch, missing lock": (lambda f, t: ["fetch", str(t / "x.yaml"), str(t)], 2),
+    "fetch, not YAML": (lambda f, t: ["fetch", _w(t / "l.yaml", NOT_YAML), str(t)], 1),
+    "fetch, schema problem": (lambda f, t: [
+        "fetch", _w(t / "l.yaml", "models:\n  - {model: a, nonsense: 1}\n"), str(t)], 1),
+    "fetch, a refused entry": (lambda f, t: [
+        "fetch", str(f / "lock-no-hash.yaml"), str(t / "root"), "--apply"], 1),
+    "facts, missing sources": (lambda f, t: [
+        "facts", str(t / "nope"), str(f / "lock-good.yaml"), "--store", str(t)], 2),
+    "facts, --store is the models dir": (_facts_store_is_models_dir, 2),
+    "facts, --headers not JSON": (lambda f, t: _facts(f, t, "--headers", _w(t / "h.json", "{")), 1),
+    "facts, --headers a list": (lambda f, t: _facts(f, t, "--headers", _w(t / "h.json", "[]")), 1),
+    "facts, --headers value not an object": (lambda f, t: _facts(
+        f, t, "--headers", _w(t / "h.json", '{"models/loras/a.safetensors": "x"}')), 1),
+    "facts, --headers key not under models/": (lambda f, t: _facts(
+        f, t, "--headers", _w(t / "h.json", '{"loras/a.safetensors": {}}')), 1),
+    "facts --check, stale sidecar": (_facts_check_stale, 1),
+    "facts --check, malformed lineage": (_facts_check_malformed_lineage, 1),
+}
+
+
+@pytest.mark.parametrize("name", list(FAILURES))
+def test_every_failure_under_json_writes_a_json_result(name, fixtures, tmp_path):
+    """The contract: under -o json, a non-zero exit still puts one JSON object
+    on stdout, with `ok: false` and the reason in `problems`, and the reason on
+    stderr too. A machine consumer never gets a bare exit code, or a traceback."""
+    build_args, code = FAILURES[name]
+    r = runner.invoke(app, [*build_args(fixtures, tmp_path), "-o", "json"])
+    assert r.exception is None or isinstance(r.exception, SystemExit), repr(r.exception)
+    assert r.exit_code == code, r.output
+    payload = json.loads(r.stdout)
+    assert payload["ok"] is False
+    assert payload["problems"] and all(payload["problems"])
+    assert r.stderr.strip(), "the reason did not reach stderr"
+
+
+def test_a_null_header_value_is_an_empty_header(fixtures, tmp_path):
+    """`null` is what an extractor writes for a file with no __metadata__. It
+    is an empty header, not a malformed one: no traceback, exit 0."""
+    args = _facts(fixtures, tmp_path, "--headers",
+                  _w(tmp_path / "h.json", '{"models/loras/a.safetensors": null}'))
+    r = runner.invoke(app, [*args, "-o", "json"])
+    assert r.exception is None or isinstance(r.exception, SystemExit), repr(r.exception)
+    assert r.exit_code == 0, r.output
+    assert json.loads(r.stdout) == {"sidecars": 0}
+
+
+def test_from_lock_failure_names_the_profile_and_the_stale_paths(fixtures):
+    r = runner.invoke(app, ["resolve", str(fixtures / "manifest-two-profiles.yaml"),
+                            "--profile", "both",
+                            "--from-lock", str(fixtures / "lock-stale-parent.yaml"),
+                            "-o", "json"])
+    assert r.exit_code == 1
+    payload = json.loads(r.stdout)
+    assert (payload["profile"], payload["entries"]) == ("both", 0)
+    assert "models/vae_approx/taesdxl_decoder.safetensors" in payload["problems"][0]
+
+
+def test_build_check_failure_says_stale(tmp_path):
+    src, built = _stale_build(tmp_path)
+    r = runner.invoke(app, ["build", str(src), "-O", str(built), "--check", "-o", "json"])
+    assert r.exit_code == 1
+    assert json.loads(r.stdout)["stale"] is True
+
+
+def test_an_unknown_profile_with_from_lock_is_a_request_error(fixtures):
+    """Exit 2, as it is without --from-lock: the request named a profile the
+    manifest does not have. It was 1 on the --from-lock path."""
+    r = runner.invoke(app, ["resolve", str(fixtures / "manifest-two-profiles.yaml"),
+                            "--profile", "nope",
+                            "--from-lock", str(fixtures / "lock-two-entries.yaml")])
+    assert r.exit_code == 2, r.output
+    assert "no such profile" in r.output

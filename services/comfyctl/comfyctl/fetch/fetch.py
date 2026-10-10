@@ -120,10 +120,12 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
         return
     if not want:
         # Fetching this would put unverified bytes in the workspace under the
-        # guise of a verified run.
+        # guise of a verified run. And the refusal is a FAILURE, not a skip:
+        # the workspace then lacks a file the lock declares, which a run that
+        # exits 0 hides until a graph fails to load (#158).
         report.lines.append(
-            f"  SKIP    {name}: no SHA256 in the lock, refusing to fetch unverified")
-        report.skipped += 1
+            f"  FAILED  {name}: no SHA256 in the lock, refusing to fetch unverified")
+        report.failed += 1
         return
     if dry_run:
         report.would += 1

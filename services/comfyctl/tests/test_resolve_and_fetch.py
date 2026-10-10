@@ -131,9 +131,11 @@ def test_wrong_hash_is_rejected_and_leaves_nothing(tmp_path):
 
 def test_entry_without_a_hash_is_refused_not_fetched(tmp_path):
     """Fetching it would put unverified bytes in the workspace under the guise
-    of a verified run. Offline: it must refuse before any request."""
+    of a verified run. Offline: it must refuse before any request. The refusal
+    counts as FAILED, not skipped: the workspace then lacks a file the lock
+    declares (#158)."""
     report = fetch.run(_write(tmp_path, _lock(None)), tmp_path / "root", dry_run=False)
-    assert report.skipped == 1
+    assert (report.failed, report.skipped) == (1, 0)
     assert report.fetched == 0
     assert any("refusing to fetch unverified" in line for line in report.lines)
 
