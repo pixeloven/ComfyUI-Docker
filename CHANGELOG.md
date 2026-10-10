@@ -92,6 +92,11 @@ the manifest and lock formats don't change. What moved:
 
 ### Changed
 
+- **Docker Hub images come through `mirror.gcr.io`**, Google's Docker Hub mirror, because Docker
+  Hub's anonymous pull limit was failing CI, `main`'s publishing runs included. The bases
+  (`ubuntu:24.04`, `nvidia/cuda:13.0.2-base-ubuntu24.04`, `python:3.13-alpine`, and
+  `python:3.13-slim` at the same digest), CI's actionlint and the BuildKit image `setup-buildx-action`
+  starts all keep their tags and digests, so the published images' layers don't change.
 - **The `comfyui-workflows` guides: a `custom_nodes` lock entry, and what `workflow_validate` doesn't check**
   ([#169](https://github.com/pixeloven/ComfyUI-Docker/issues/169), [#145](https://github.com/pixeloven/ComfyUI-Docker/pull/145)).
   `models-and-nodes` shows the fields of a node pack's entry: `git_custom_nodes`, keyed by repository URL,
