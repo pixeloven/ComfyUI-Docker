@@ -217,14 +217,19 @@ def stale(sources: Path) -> tuple[list[str], int]:
         try:
             doc = yaml.safe_load(path.read_text()) or {}
             lineage = yaml.safe_load(source.read_text()) or {}
-        except yaml.YAMLError as exc:
+        except (yaml.YAMLError, ValueError) as exc:
             problems.append(f"{rel}: not readable YAML: {exc}")
             continue
         files = doc.get("files") if isinstance(doc, dict) else None
         if not isinstance(files, dict):
             problems.append(f"{rel}: no `files:` mapping")
             continue
-        known = set(declared(lineage))
+        try:
+            known = set(declared(lineage))
+        except (KeyError, TypeError, AttributeError) as exc:
+            problems.append(f"{rel}: {source.name} is not a lineage source: "
+                            f"{type(exc).__name__}: {exc}")
+            continue
         for key in files:
             if key in known:
                 continue

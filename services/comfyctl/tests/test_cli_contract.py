@@ -54,8 +54,9 @@ def test_fetch_json_has_stable_keys(fixtures, tmp_path):
                             "-o", "json"])
     payload = json.loads(r.stdout)
     assert set(payload) == {"present", "fetched", "skipped", "failed", "would_fetch",
-                            "bytes_written", "dry_run", "problems"}
+                            "bytes_written", "dry_run", "problems", "ok"}
     assert payload["dry_run"] is True
+    assert payload["ok"] is True
 
 
 def test_json_mode_keeps_stdout_parseable(fixtures, tmp_path):
@@ -137,7 +138,7 @@ def test_module_entry_point_sees_every_verb(verb):
 
 def _stale_build(tmp_path):
     src = tmp_path / "src"
-    src.mkdir()
+    src.mkdir(exist_ok=True)
     (src / "_meta.yaml").write_text("name: s\n")
     (src / "a.yaml").write_text(
         "groups:\n  - name: g\n    files:\n"
@@ -147,42 +148,97 @@ def _stale_build(tmp_path):
     return src, built
 
 
-def _failing(name, fixtures, tmp_path):
-    """(args, expected exit) for each failure path, built lazily per test."""
-    src, built = _stale_build(tmp_path)
-    (tmp_path / "no-meta").mkdir()
-    manifest, parent = fixtures / "manifest-two-profiles.yaml", fixtures / "lock-stale-parent.yaml"
-    return {
-        "resolve --from-lock, stale parent": (
-            ["resolve", str(manifest), "--profile", "both", "--from-lock", str(parent)], 1),
-        "resolve --from-lock, unknown profile": (
-            ["resolve", str(manifest), "--profile", "nope", "--from-lock", str(parent)], 2),
-        "resolve, unknown profile": (
-            ["resolve", str(manifest), "--profile", "nope"], 2),
-        "build, no _meta.yaml": (["build", str(tmp_path / "no-meta")], 1),
-        "build --check, stale": (["build", str(src), "-O", str(built), "--check"], 1),
-        "build --check, missing": (
-            ["build", str(src), "-O", str(tmp_path / "absent.yaml"), "--check"], 1),
-        "check, missing file": (["check", str(tmp_path / "x.yaml"), str(tmp_path / "y.yaml")], 2),
-        "fetch, missing lock": (["fetch", str(tmp_path / "x.yaml"), str(tmp_path)], 2),
-        "facts, missing sources": (["facts", str(tmp_path / "nope"), str(parent),
-                                    "--store", str(tmp_path)], 2),
-    }[name]
+def _w(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return str(path)
 
 
-FAILURES = ["resolve --from-lock, stale parent", "resolve --from-lock, unknown profile",
-            "resolve, unknown profile", "build, no _meta.yaml", "build --check, stale",
-            "build --check, missing", "check, missing file", "fetch, missing lock",
-            "facts, missing sources"]
+NOT_YAML = "models: [\n"
+UNRESOLVABLE = ("models:\n  - name: g\n    files:\n"
+                "      - {source: 'https://example.invalid/a.safetensors', install: models/loras/}\n")
 
 
-@pytest.mark.parametrize("name", FAILURES)
+def _build_check_stale(f, t):
+    src, built = _stale_build(t)
+    return ["build", str(src), "-O", str(built), "--check"]
+
+
+def _build_no_meta(f, t):
+    (t / "no-meta").mkdir()
+    return ["build", str(t / "no-meta")]
+
+
+def _facts(f, t, *extra):
+    return ["facts", str(_stale_build(t)[0]), str(f / "lock-good.yaml"), *extra]
+
+
+def _facts_store_is_models_dir(f, t):
+    (t / "root" / "models").mkdir(parents=True)
+    return _facts(f, t, "--store", str(t / "root" / "models"))
+
+
+def _facts_check_stale(f, t):
+    src = _stale_build(t)[0]
+    _w(src / "a.facts.yaml", "files:\n  models/loras/gone.safetensors: {nsfw: true}\n")
+    return ["facts", str(src), "--check"]
+
+
+def _facts_check_malformed_lineage(f, t):
+    _w(t / "src" / "a.yaml", "groups:\n  - name: g\n    files:\n      - {file: a}\n")
+    _w(t / "src" / "a.facts.yaml", "files:\n  models/loras/a: {nsfw: true}\n")
+    return ["facts", str(t / "src"), "--check"]
+
+
+# name -> (args builder taking (fixtures, tmp_path), expected exit)
+FAILURES = {
+    "resolve --from-lock, stale parent": (lambda f, t: [
+        "resolve", str(f / "manifest-two-profiles.yaml"), "--profile", "both",
+        "--from-lock", str(f / "lock-stale-parent.yaml")], 1),
+    "resolve --from-lock, unknown profile": (lambda f, t: [
+        "resolve", str(f / "manifest-two-profiles.yaml"), "--profile", "nope",
+        "--from-lock", str(f / "lock-stale-parent.yaml")], 2),
+    "resolve, unknown profile": (lambda f, t: [
+        "resolve", str(f / "manifest-two-profiles.yaml"), "--profile", "nope"], 2),
+    "resolve, unresolved source": (lambda f, t: ["resolve", _w(t / "m.yaml", UNRESOLVABLE)], 1),
+    "resolve, not YAML": (lambda f, t: ["resolve", _w(t / "m.yaml", NOT_YAML)], 1),
+    "resolve, not a mapping": (lambda f, t: ["resolve", _w(t / "m.yaml", "- a\n- b\n")], 1),
+    "build, no _meta.yaml": (_build_no_meta, 1),
+    "build --check, stale": (_build_check_stale, 1),
+    "build --check, missing": (lambda f, t: [
+        "build", str(_stale_build(t)[0]), "-O", str(t / "absent.yaml"), "--check"], 1),
+    "check, missing file": (lambda f, t: ["check", str(t / "x.yaml"), str(t / "y.yaml")], 2),
+    "check, not YAML": (lambda f, t: [
+        "check", _w(t / "m.yaml", NOT_YAML), str(f / "lock-good.yaml")], 1),
+    "check, schema problem": (lambda f, t: [
+        "check", _w(t / "m.yaml", "models:\n  - name: g\n    instal: x\n"),
+        str(f / "lock-good.yaml")], 1),
+    "check, disagreement": (lambda f, t: [
+        "check", str(f / "manifest-for-lock-good.yaml"), str(f / "lock-no-hash.yaml")], 1),
+    "fetch, missing lock": (lambda f, t: ["fetch", str(t / "x.yaml"), str(t)], 2),
+    "fetch, not YAML": (lambda f, t: ["fetch", _w(t / "l.yaml", NOT_YAML), str(t)], 1),
+    "fetch, schema problem": (lambda f, t: [
+        "fetch", _w(t / "l.yaml", "models:\n  - {model: a, nonsense: 1}\n"), str(t)], 1),
+    "fetch, a refused entry": (lambda f, t: [
+        "fetch", str(f / "lock-no-hash.yaml"), str(t / "root"), "--apply"], 1),
+    "facts, missing sources": (lambda f, t: [
+        "facts", str(t / "nope"), str(f / "lock-good.yaml"), "--store", str(t)], 2),
+    "facts, --store is the models dir": (_facts_store_is_models_dir, 2),
+    "facts, --headers not JSON": (lambda f, t: _facts(f, t, "--headers", _w(t / "h.json", "{")), 1),
+    "facts, --headers a list": (lambda f, t: _facts(f, t, "--headers", _w(t / "h.json", "[]")), 2),
+    "facts --check, stale sidecar": (_facts_check_stale, 1),
+    "facts --check, malformed lineage": (_facts_check_malformed_lineage, 1),
+}
+
+
+@pytest.mark.parametrize("name", list(FAILURES))
 def test_every_failure_under_json_writes_a_json_result(name, fixtures, tmp_path):
     """The contract: under -o json, a non-zero exit still puts one JSON object
     on stdout, with `ok: false` and the reason in `problems`, and the reason on
-    stderr too. A machine consumer never gets a bare exit code."""
-    args, code = _failing(name, fixtures, tmp_path)
-    r = runner.invoke(app, [*args, "-o", "json"])
+    stderr too. A machine consumer never gets a bare exit code, or a traceback."""
+    build_args, code = FAILURES[name]
+    r = runner.invoke(app, [*build_args(fixtures, tmp_path), "-o", "json"])
+    assert r.exception is None or isinstance(r.exception, SystemExit), repr(r.exception)
     assert r.exit_code == code, r.output
     payload = json.loads(r.stdout)
     assert payload["ok"] is False

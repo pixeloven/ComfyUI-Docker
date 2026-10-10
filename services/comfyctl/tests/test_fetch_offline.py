@@ -178,3 +178,26 @@ def test_an_entry_refused_for_no_sha256_fails_the_apply(tmp_path, served, hashes
     assert (payload["failed"], payload["skipped"]) == (1, 0)
     assert any("no SHA256" in line for line in payload["problems"])
     assert served.call_count == 0, "it fetched unverified bytes"
+
+
+@pytest.mark.parametrize("on_disk", [False, True], ids=["absent", "already on disk"])
+def test_the_dry_run_fails_a_no_sha256_entry_too(tmp_path, served, on_disk):
+    """The dry run predicts the apply, so it exits 1 as well. A file already on
+    disk does not change that: with no hash, nothing can say it is the right
+    file."""
+    import json
+
+    from comfyctl.fetch.cli import app
+    from typer.testing import CliRunner
+
+    root = tmp_path / "root"
+    if on_disk:
+        (root / REL).parent.mkdir(parents=True)
+        (root / REL).write_bytes(BODY)
+    r = CliRunner().invoke(app, ["fetch", str(lock(tmp_path, sha=None)), str(root),
+                                 "-o", "json"])
+    assert r.exit_code == 1, r.output
+    payload = json.loads(r.stdout)
+    assert (payload["failed"], payload["present"], payload["ok"]) == (1, 0, False)
+    assert payload["dry_run"] is True
+    assert served.call_count == 0

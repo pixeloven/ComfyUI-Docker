@@ -89,14 +89,26 @@ the manifest and lock formats don't change. What moved:
   root, and a basename key exits 2.
   *Migration:* regenerate every sidecar with `comfyctl fetch facts`, and key
   any `--headers` file by `models/…` path.
+- **`facts --store` takes the ComfyUI root, not `models/`** (#153), as `fetch`
+  does. Given a directory with no `models/` inside, or one holding none of the
+  declared `.safetensors` files, it exits 2; a `--headers` key that doesn't
+  start `models/` exits 2 too. Before, such a store matched nothing and wrote
+  empty sidecars with exit 0.
+  *Migration:* pass `--store /workspace`, not `--store /workspace/models`.
 - **`fetch` fails on an entry with no SHA256** (#158). The entry is still
   refused, but it counts as `failed`, not `skipped`, and the run exits 1, dry
-  run or `--apply`.
+  run or `--apply`. Its line reads `FAILED  <model>: no SHA256 in the lock, …`
+  where it read `SKIP    <model>: …`.
   *Migration:* resolve the lock again so every entry has a `SHA256` hash, or
-  drop the entry.
+  drop the entry; match `FAILED`, not `SKIP`, in anything that greps the line.
 - **An unknown `--profile` with `resolve --from-lock` exits 2**, as it does
   without `--from-lock` (#152). It exited 1.
   *Migration:* treat exit 2 as the bad-profile case in anything that checked for 1.
+- **Under `-o json`, `fetch`'s per-entry lines and `resolve`'s `UNRESOLVED`
+  lines go to stderr** (#152), as plain text, where json mode dropped them. stdout
+  still carries only the JSON result.
+  *Migration:* a caller that merges stderr into stdout (`2>&1`) before parsing
+  the JSON must stop merging, or read stdout alone.
 
 ### Added
 
@@ -132,7 +144,10 @@ the manifest and lock formats don't change. What moved:
   `resolve --from-lock`, `build` or `build --check` exited 1 with nothing on
   stdout or stderr, and a bad request wrote only to stderr. Each now writes one
   JSON object to stdout, with `"ok": false` and the reasons in `problems`, and
-  the reason to stderr too.
+  the reason to stderr too. `fetch`'s result gains `ok`, and a full `resolve`'s
+  gains `ok` and `problems`. An input that isn't readable YAML (or `--headers`
+  JSON), or a manifest that isn't a mapping, exits 1 the same way instead of
+  with a traceback.
 - **`FETCH.md` lists what `resolve` actually reads** (#162). It claimed file
   sizes; `resolve` reads none, and no output reports bytes.
 - **comfyrelay: display names are cut to 120 characters** (#169) in `node_search`, `node_describe` and its

@@ -59,11 +59,14 @@ keys. Human output goes to **stderr**; stdout carries the artifact, so
 | `1` | a real failure — a source did not resolve, a hash did not match, a lock entry has no SHA256, a lock and its manifest disagree |
 | `2` | the request was wrong — missing file, unknown profile, incompatible flags |
 
-Under `--output json`, a failure still writes one JSON object to stdout, with
-`"ok": false` and the reasons in `problems` (or, for `fetch` and a full
-`resolve`, their usual counters), and the reason also goes to stderr. The one
-exception is a command line Typer itself can't parse, such as an unknown
-option: that exits 2 with usage text on stderr only.
+Under `--output json`, every non-zero exit still writes one JSON object to
+stdout, with `"ok": false` and the reasons in `problems`; `fetch` and `resolve`
+keep their usual counters beside them. The reasons also go to stderr, as plain
+lines: under json that includes `fetch`'s per-entry lines and `resolve`'s
+`UNRESOLVED` lines. A file that isn't readable YAML (or JSON, for `--headers`)
+exits 1 the same way, never with a traceback. The one exception is a command
+line Typer itself can't parse, such as an unknown option: that exits 2 with
+usage text on stderr only.
 
 ## Why a lock at all
 
@@ -275,9 +278,14 @@ files:
 Basenames repeat (`diffusion_pytorch_model.safetensors` is HuggingFace's
 default), so a file is joined to its own header and hash by its path. The path
 is used only for identity: lineage is never inferred from it. A `--headers`
-file is keyed the same way, `{"models/loras/x.safetensors": {…}}`; a key with
-no `/` exits 2. Sidecars written before 6.0.0 are keyed by basename; regenerate
-them with `comfyctl fetch facts`.
+file is keyed the same way, `{"models/loras/x.safetensors": {…}}`; a key that
+doesn't start `models/` exits 2. Sidecars written before 6.0.0 are keyed by
+basename; regenerate them with `comfyctl fetch facts`.
+
+`--store` takes the **ComfyUI root**, the directory holding `models/`, as
+`fetch` does: not `models/` itself. It exits 2 when `<store>/models` isn't a
+directory, or when the lineages declare `.safetensors` files and none of them
+is under the store.
 
 The sidecar is committed, so it goes stale when its lineage changes. `--check`
 reads only the source tree and fails (exit 1) when a sidecar has no sibling
@@ -440,7 +448,7 @@ Civitai's `model-versions` endpoint is public, and GitHub's release API is too
 | form | resolved from |
 |---|---|
 | `hf:<owner>/<repo>` + `file:` | the `x-repo-commit` and `x-linked-etag` headers; a file whose etag isn't a sha256 (one not stored in LFS) is downloaded and hashed |
-| `gh:<owner>/<repo>@<tag>` + `file:` | the release API's asset `digest` and `browser_download_url`; with no digest, the asset is downloaded and hashed |
+| `gh:<owner>/<repo>@<tag>` + `file:` | the release API's asset `digest` and `browser_download_url`; with no digest, the manifest's `sha256:` if it states one, and only otherwise the asset is downloaded and hashed |
 | `civitai:<modelVersionId>` | `files[0].hashes.SHA256` and `downloadUrl` |
 | `https://…` | nothing — **you must supply `sha256:`** |
 

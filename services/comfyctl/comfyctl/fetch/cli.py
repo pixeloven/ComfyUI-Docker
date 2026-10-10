@@ -8,7 +8,7 @@ Five verbs, and the same behaviour whether they are driven by a person, a
 Kubernetes Job, or an agent:
 
     comfyctl fetch build models/ -O comfy.yaml
-    comfyctl fetch facts models/ comfy-lock.yaml --store /workspace/models
+    comfyctl fetch facts models/ comfy-lock.yaml --store /workspace
     comfyctl fetch resolve comfy.yaml > comfy-lock.yaml
     comfyctl fetch fetch comfy-lock.yaml /workspace --apply
     comfyctl fetch check comfy.yaml comfy-lock.yaml
@@ -101,10 +101,26 @@ def _failed(out: Out, message: str, **machine: Any) -> NoReturn:
     raise typer.Exit(1)
 
 
+def _reasons(out: Out, problems: list[str]) -> None:
+    """Under json the human text is not printed, so a failure's reasons go to
+    stderr here: the result is on stdout, the reason on stderr, in every mode."""
+    if out.is_json:
+        for p in problems:
+            out.problem(p)
+
+
 def _load(path: pathlib.Path, what: str, out: Out) -> dict:
+    """A YAML mapping, or exit: 2 if the file is missing, 1 if it is not YAML
+    or not a mapping. Either way never a traceback with nothing on stdout."""
     if not path.is_file():
         _usage(out, f"no such {what}: {path}")
-    return lockfile.load(path)
+    try:
+        doc = lockfile.load(path)
+    except (yaml.YAMLError, ValueError) as exc:
+        _failed(out, f"{what} {path} is not readable YAML: {exc}")
+    if not isinstance(doc, dict):
+        _failed(out, f"{what} {path} is not a YAML mapping")
+    return doc
 
 
 @app.command()
@@ -166,12 +182,14 @@ def resolve(
         out.problem("\nNo lock written. Fix the manifest and re-run.")
         if out.is_json:
             out.result("", {"resolved": len(models), "declared": declared,
-                            "failures": failures, "lock_written": False})
+                            "failures": failures, "lock_written": False,
+                            "problems": failures, "ok": False})
         raise typer.Exit(1)
 
     if out.is_json:
         out.result("", {"resolved": len(models), "declared": declared,
-                        "failures": [], "lock_written": True, "models": models})
+                        "failures": [], "lock_written": True, "models": models,
+                        "problems": [], "ok": True})
     else:
         typer.echo(lockfile.dump(doc.get("auth"), models), nl=False)
 
@@ -198,8 +216,9 @@ def fetch(
     # #67 asked for this in `fetch` as well as `check`, and the reason is
     # sharper here: fetch WRITES. A malformed lock puts files in the wrong
     # place, or none at all, after the network has already been used.
-    lock_problems = schema_mod.validate(lockfile.load(lock), "comfy-lock")
+    lock_problems = schema_mod.validate(_load(lock, "lock", out), "comfy-lock")
     if lock_problems:
+        _reasons(out, lock_problems)
         out.result("\n".join(f"  {p}" for p in lock_problems),
                    {"problems": lock_problems, "ok": False})
         raise typer.Exit(1)
@@ -214,7 +233,7 @@ def fetch(
         "present": report.present, "fetched": report.fetched,
         "skipped": report.skipped, "failed": report.failed,
         "would_fetch": report.would, "bytes_written": report.bytes,
-        "dry_run": not apply, "problems": report.lines,
+        "dry_run": not apply, "problems": report.lines, "ok": not report.failed,
     })
     if report.failed:
         raise typer.Exit(1)
@@ -247,8 +266,9 @@ def check(
         # "A subset of what" is undefined without one (#157).
         _usage(out, "--subset-only needs --parent: it asserts a subset of that lock")
     doc, lock_doc = _load(manifest, "manifest", out), _load(lock, "lock", out)
-    # Present in every --subset-only result, so its shape does not depend on
-    # how far the check got.
+    # Present in every --subset-only result that exits 0 or 1, so its shape
+    # does not depend on how far the check got. An exit 2 (a bad request) has
+    # the plain {problems, ok} shape.
     extra: dict[str, Any] = {"narrowed": None} if subset_only else {}
 
     # FORMAT BEFORE CONSISTENCY. A manifest with `instal:` for `install:` is
@@ -256,10 +276,11 @@ def check(
     # checking agreement first reports a confusing symptom of a plain typo.
     #
     # EVERY failure path goes through _fail, which emits the SAME shape as the
-    # success path. Out.problem is a deliberate no-op under --output json, so
-    # raising here directly produced exit 1 with zero bytes on either stream:
-    # a machine consumer got a failure with no reason attached.
+    # success path. Raising here directly once produced exit 1 with zero bytes
+    # on either stream: a machine consumer got a failure with no reason
+    # attached (#152).
     def _fail(problems: list[str], headline: str) -> None:
+        _reasons(out, problems)
         human = headline + "\n" + "".join(f"  {p}\n" for p in problems)
         out.result(human, {"declared": None, "locked": None,
                            "problems": problems, "ok": False, **extra})
@@ -306,6 +327,7 @@ def check(
              + "".join(f"  narrowed     {p}\n" for p in extra.get("narrowed") or [])
              + "".join(f"  {p}\n" for p in problems)
              + ("" if problems else verdict))
+    _reasons(out, problems)
     out.result(human, {"declared": declared, "locked": locked,
                        "problems": problems, "ok": not problems, **extra})
     if problems:
@@ -426,6 +448,7 @@ def facts(
         if lock is not None or store is not None or headers_file is not None:
             _usage(out, "--check reads SOURCES only: it takes no lock, --store or --headers")
         problems, sidecars = facts_mod.stale(sources)
+        _reasons(out, problems)
         human = ("".join(f"  {p}\n" for p in problems)
                  + (f"{len(problems)} problem(s) in {sidecars} facts sidecars" if problems
                     else f"{sidecars} facts sidecars match their lineages"))
@@ -438,11 +461,26 @@ def facts(
         _usage(out, "facts needs LOCK, for content hashes (--check needs none)")
     if (store is None) == (headers_file is None):
         _usage(out, "pass exactly one of --store or --headers")
-    if store is not None and not store.is_dir():
-        _usage(out, f"store not readable: {store}")
+    if store is not None and not (store / "models").is_dir():
+        # The ComfyUI ROOT, as `fetch` takes: install paths begin `models/`. A
+        # models directory here matched nothing and wrote empty sidecars.
+        _usage(out, f"--store takes the ComfyUI root, the directory holding models/: "
+                    f"{store / 'models'} is not a directory")
     if headers_file is not None and not headers_file.is_file():
         _usage(out, f"no such headers file: {headers_file}")
     doc = _load(lock, "lock", out)
+
+    lineages: list[tuple[pathlib.Path, dict]] = []
+    declared: set[str] = set()
+    for path in sorted(sources.rglob("*.yaml")):
+        if path.name in facts_mod.RESERVED or path.name.endswith(".facts.yaml"):
+            continue
+        try:
+            lineage = yaml.safe_load(path.read_text()) or {}
+            declared.update(facts_mod.declared(lineage))
+        except (yaml.YAMLError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            _failed(out, f"{path} is not a lineage source: {type(exc).__name__}: {exc}")
+        lineages.append((path, lineage))
 
     # Every join is by INSTALL PATH, never basename. Basenames repeat
     # (`diffusion_pytorch_model.safetensors` is HuggingFace's default), and a
@@ -456,25 +494,33 @@ def facts(
         for p in m.get("paths") or []
     }
     if headers_file is not None:
-        headers = json.loads(headers_file.read_text())
-        bare = sorted(k for k in headers if "/" not in k) if isinstance(headers, dict) else []
-        if not isinstance(headers, dict) or bare:
+        try:
+            headers = json.loads(headers_file.read_text())
+        except ValueError as exc:
+            _failed(out, f"--headers {headers_file} is not readable JSON: {exc}")
+        if not isinstance(headers, dict):
+            _usage(out, "--headers must be a JSON object, {install path: __metadata__}, "
+                        f"not a {type(headers).__name__}")
+        # Every declared path starts `models/` (the schema's `install` pattern),
+        # so a key that does not can never match.
+        bad = sorted(k for k in headers if not k.startswith("models/"))
+        if bad:
             _usage(out, "--headers keys must be install paths relative to the ComfyUI "
-                        "root (models/...), not basenames"
-                        + (f": {', '.join(bare[:3])}" if bare else ""))
+                        f"root, starting models/: {', '.join(bad[:3])}")
     else:
         headers = {
             p.relative_to(store).as_posix(): facts_mod.safetensors_header(p)
             for p in store.rglob("*.safetensors")
         }
+        wanted = {p for p in declared if p.endswith(".safetensors")}
+        if wanted and not wanted & headers.keys():
+            _usage(out, f"no declared .safetensors file is under {store}: --store takes "
+                        f"the ComfyUI root, the directory holding models/")
     out.note(f"{len(shas)} hashes from the lock, {len(headers)} safetensors headers read")
 
     stamp = generated or _time.strftime("%Y-%m-%d")
     written = 0
-    for path in sorted(sources.rglob("*.yaml")):
-        if path.name in facts_mod.RESERVED or path.name.endswith(".facts.yaml"):
-            continue
-        lineage = yaml.safe_load(path.read_text()) or {}
+    for path, lineage in lineages:
         rendered = facts_mod.render(
             lineage, headers=headers, shas=shas, token=token, generated=stamp)
         if rendered:

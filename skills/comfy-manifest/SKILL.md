@@ -31,15 +31,20 @@ replaced the `fetch` image in 6.0.0.
   refused, counted as `failed`, and the run exits 1.
 - **`facts`** writes a `<lineage>.facts.yaml` sidecar per source file, recording
   what the safetensors header says against what the publisher claims for the
-  file's hash: `comfyctl fetch facts models/ comfy-lock.yaml --store <root>`
-  (or `--headers <json>`). It needs the network. Its `files:` are keyed by
-  install path (`models/loras/x.safetensors`), not basename, and so are a
-  `--headers` file's keys; regenerate a sidecar from before 6.0.0.
-  `comfyctl fetch facts models/ --check` is the offline gate for committed
-  sidecars: it exits 1 when one names a file its lineage no longer declares.
+  file's hash: `comfyctl fetch facts models/ comfy-lock.yaml --store <ComfyUI root>`
+  (or `--headers <json>`). It needs the network. `--store` is the ComfyUI root,
+  not `models/`, as for `fetch`; given `models/` it exits 2. Its `files:` are
+  keyed by install path (`models/loras/x.safetensors`), not basename, and so
+  are a `--headers` file's keys, which must start `models/`; regenerate a
+  sidecar from before 6.0.0. `comfyctl fetch facts models/ --check` is the
+  offline gate for committed sidecars: it exits 1 when one names a file its
+  lineage no longer declares.
 - **`-o json`** on any verb (after the verb, not after `fetch`) prints the result as
-  stable JSON on stdout, failures included: a failure carries `"ok": false` and
-  its reasons in `problems`. Progress stays on stderr, so the output parses.
+  stable JSON on stdout. Every non-zero exit still prints one JSON object, with
+  `"ok": false` and its reasons in `problems` (`fetch` and `resolve` keep their
+  counters beside them); the reasons also go to stderr. Progress stays on
+  stderr, so the output parses. Only a command line the CLI can't parse at all,
+  such as an unknown option, exits 2 with usage text on stderr and no JSON.
 - **Exit codes:** `0` did what was asked, `1` a real failure (unresolved source,
   hash mismatch, a lock entry with no SHA256, manifest and lock disagree), `2` a
   bad request (missing file, unknown profile, incompatible flags).

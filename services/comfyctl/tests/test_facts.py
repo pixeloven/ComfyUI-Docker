@@ -311,6 +311,67 @@ def test_headers_keyed_by_basename_are_refused(tmp_path):
     assert "install paths" in result.output
 
 
+@pytest.mark.parametrize("key", ["loras/a.safetensors", "/models/loras/a.safetensors"])
+def test_headers_keys_must_start_at_models(tmp_path, key):
+    """Every declared path starts `models/`, so any other key can never match:
+    keyed from the models directory, the file would silently match nothing."""
+    from typer.testing import CliRunner
+
+    from comfyctl.fetch.cli import app
+
+    (tmp_path / "src").mkdir()
+    lock = tmp_path / "lock.yaml"
+    lock.write_text("models: []\n")
+    h = tmp_path / "h.json"
+    h.write_text(json.dumps({key: {}}))
+    result = CliRunner().invoke(app, ["facts", str(tmp_path / "src"), str(lock),
+                                      "--headers", str(h)])
+    assert result.exit_code == 2, result.output
+    assert "starting models/" in result.output
+
+
+def test_store_must_be_the_comfyui_root_not_models(tmp_path):
+    """`--store /workspace/models` was the CLI's own example. Keyed from there,
+    no path starts `models/`, nothing matches, and every sidecar came out empty
+    with exit 0."""
+    from typer.testing import CliRunner
+
+    from comfyctl.fetch.cli import app
+
+    root, src = tmp_path / "root", tmp_path / "src"
+    _safetensors(root / A, {"ss_sd_model_name": "base-A.safetensors"})
+    src.mkdir()
+    (src / "lineage.yaml").write_text(yaml.safe_dump(SAME_NAME))
+    lock = tmp_path / "lock.yaml"
+    lock.write_text("models: []\n")
+
+    wrong = CliRunner().invoke(app, ["facts", str(src), str(lock), "--store", str(root / "models")])
+    assert wrong.exit_code == 2, wrong.output
+    assert "ComfyUI root" in wrong.output
+    assert not (src / "lineage.facts.yaml").exists()
+
+    right = CliRunner().invoke(app, ["facts", str(src), str(lock), "--store", str(root)])
+    assert right.exit_code == 0, right.output
+
+
+def test_store_holding_none_of_the_declared_files_is_refused(tmp_path):
+    """A root with a models/ directory that holds none of the declared
+    safetensors files is the wrong root, not a store with nothing to say."""
+    from typer.testing import CliRunner
+
+    from comfyctl.fetch.cli import app
+
+    root, src = tmp_path / "root", tmp_path / "src"
+    _safetensors(root / "models" / "loras" / "other.safetensors", {})
+    src.mkdir()
+    (src / "lineage.yaml").write_text(yaml.safe_dump(SAME_NAME))
+    lock = tmp_path / "lock.yaml"
+    lock.write_text("models: []\n")
+    result = CliRunner().invoke(app, ["facts", str(src), str(lock), "--store", str(root)])
+    assert result.exit_code == 2, result.output
+    assert "no declared .safetensors file" in result.output
+
+
 # ---- facts --check: the offline freshness gate (#155) ----------------------
 
 def _sidecar(path: pathlib.Path, files: dict) -> None:
