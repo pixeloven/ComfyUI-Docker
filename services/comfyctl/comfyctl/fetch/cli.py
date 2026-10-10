@@ -33,6 +33,7 @@ import importlib.metadata
 import json
 import os
 import pathlib
+import stat
 from typing import Annotated
 
 import typer
@@ -86,23 +87,47 @@ def _load(path: pathlib.Path, what: str) -> dict:
     return lockfile.load(path)
 
 
+def _out_refusal(out_path: pathlib.Path, inputs: list[pathlib.Path]) -> str | None:
+    """Why --out can't be written, checked BEFORE the network pass.
+
+    A refusal found after resolving would throw the pass away, and one found
+    by the rename would be a traceback.
+    """
+    dest = out_path.resolve()
+    if dest.is_dir():
+        return f"--out is a directory: {out_path}"
+    if not dest.parent.is_dir():
+        return f"no such directory for --out: {dest.parent}"
+    if not os.access(dest.parent, os.W_OK):
+        return f"--out's directory is not writable: {dest.parent}"
+    for p in inputs:
+        if p.resolve() == dest:
+            return f"--out would overwrite an input: {p}"
+    return None
+
+
 def _write_or_print(rendered: str, out_path: pathlib.Path | None) -> None:
     """The lock to stdout, or to --out through a sibling and a rename.
 
     Only ever called once the lock is complete, so a failed resolve leaves the
     committed lock as it was. `> lock.yaml` can't: the shell truncates it
-    before resolve runs, and a failure leaves it empty.
+    before resolve runs, and a failure leaves it empty. A symlinked --out is
+    written through, and an existing file keeps its permission bits.
     """
     if out_path is None:
         typer.echo(rendered, nl=False)
         return
-    tmp = out_path.with_name(f".{out_path.name}.resolve-tmp")
+    dest = out_path.resolve()
+    tmp = dest.with_name(f".{dest.name}.resolve-tmp")
     try:
         tmp.write_text(rendered, encoding="utf-8")
-        os.replace(tmp, out_path)
-    except BaseException:
+        if dest.exists():
+            os.chmod(tmp, stat.S_IMODE(dest.stat().st_mode))
+        os.replace(tmp, dest)
+    except OSError as exc:
         tmp.unlink(missing_ok=True)
-        raise
+        typer.echo(f"could not write {out_path}: {exc.strerror or exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 @app.command()
@@ -115,7 +140,8 @@ def resolve(
     out_path: Annotated[pathlib.Path | None, typer.Option(
         "--out", "-O",
         help="Write the lock here, only if every source resolves; on failure the "
-             "file is left as it was. Default: stdout.")] = None,
+             "file is left as it was. A symlink is written through, and an "
+             "existing file keeps its permissions. Default: stdout.")] = None,
     header: Annotated[pathlib.Path | None, typer.Option(
         help="File whose contents are prepended to the lock, verbatim.")] = None,
     output: OutputOpt = Mode.auto,
@@ -138,9 +164,11 @@ def resolve(
         typer.echo("--from-lock needs --profile: without one it would copy "
                    "the lock verbatim", err=True)
         raise typer.Exit(2)
-    if out_path is not None and not out_path.parent.is_dir():
-        typer.echo(f"no such directory for --out: {out_path.parent}", err=True)
-        raise typer.Exit(2)
+    if out_path is not None:
+        refusal = _out_refusal(out_path, [manifest] + ([from_lock] if from_lock else []))
+        if refusal:
+            typer.echo(refusal, err=True)
+            raise typer.Exit(2)
     head = ""
     if header is not None:
         if not header.is_file():

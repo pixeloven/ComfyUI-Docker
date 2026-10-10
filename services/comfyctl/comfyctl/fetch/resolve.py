@@ -203,7 +203,7 @@ def from_lock(manifest: dict, profile: str, parent: dict) -> tuple[dict | None, 
     selected = _selected(manifest, profile)
     clash = lockfile.conflicts(selected)
     if clash:
-        raise Unresolved("\n".join(_conflict_message(p, g) for p, g in clash.items()))
+        raise Unresolved("\n".join(clash.values()))
     # Ordered and de-duplicated: a file two groups share is one entry.
     wanted = list(dict.fromkeys(lockfile.install_path(f)
                                 for m in selected for f in m["files"]))
@@ -237,10 +237,10 @@ def resolve_all(manifest: dict, profile: str | None,
     # Two different files for one path are refused before any network: the
     # last one fetched would win, and every fetch would download both.
     clash = lockfile.conflicts(selected)
-    for path, groups in clash.items():
-        failures.append(_conflict_message(path, groups))
+    for path, message in clash.items():
+        failures.append(message)
         if on_resolved:
-            on_resolved(groups[0], None, failures[-1])
+            on_resolved(path, None, message)
     # One file declared identically by several groups resolves ONCE, into one
     # entry. Resolving it twice could pin two commits of a moving revision.
     done: set[str] = set(clash)
@@ -252,21 +252,19 @@ def resolve_all(manifest: dict, profile: str | None,
             done.add(path)
             try:
                 model = _resolve_file(entry, auth)
-            except Unresolved as exc:
-                failures.append(str(exc))
+            except (Unresolved, httpx.HTTPError) as exc:
+                # A timeout or a refused connection is this source's failure,
+                # not the pass's: the other entries still resolve.
+                why = str(exc) if isinstance(exc, Unresolved) else \
+                    f"{entry['source']}: {type(exc).__name__}: {exc}"
+                failures.append(why)
                 if on_resolved:
-                    on_resolved(capability["name"], None, str(exc))
+                    on_resolved(capability["name"], None, why)
                 continue
             models.append(model)
             if on_resolved:
                 on_resolved(capability["name"], model["model"], None)
     return models, failures
-
-
-def _conflict_message(path: str, groups: list[str]) -> str:
-    who = ", ".join(repr(g) for g in groups)
-    return (f"{path}: declared differently by {who} -- two different files "
-            f"can't install to one path")
 
 
 def declared_count(manifest: dict, profile: str | None) -> int:

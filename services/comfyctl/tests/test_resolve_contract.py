@@ -5,6 +5,7 @@ the network, and the hf:/gh: cases stub the two HTTP calls `resolve` makes.
 """
 import hashlib
 import json
+import os
 import pathlib
 import tempfile
 
@@ -146,8 +147,9 @@ def test_two_different_files_at_one_path_are_unresolved(tmp_path, no_network):
     assert payload["declared"] == 2
     assert payload["resolved"] == 1
     (failure,) = payload["failures"]
-    assert failure.startswith("models/checkpoints/vae.safetensors: declared "
-                              "differently by 'base', 'addon'")
+    assert failure == ("models/checkpoints/vae.safetensors: declared by 'base' and "
+                       "'addon' with a different sha256 and source; one install path "
+                       "can hold only one file")
 
 
 def test_a_shared_file_is_resolved_once_not_once_per_group(tmp_path, monkeypatch):
@@ -193,7 +195,7 @@ def test_from_lock_refuses_a_conflicting_selection(tmp_path):
     r = runner.invoke(app, ["resolve", str(m), "--profile", "all", "--from-lock", str(parent)])
     assert r.exit_code == 1
     assert r.stdout == ""
-    assert "declared differently" in r.stderr
+    assert "with a different source" in " ".join(r.stderr.split())
 
 
 def test_from_lock_refuses_a_parent_listing_a_path_twice(tmp_path):
@@ -232,7 +234,8 @@ def test_check_reports_a_manifest_conflict_offline(tmp_path):
     lock = _hf_parent(tmp_path, "models/vae/vae.safetensors")
     r = runner.invoke(app, ["check", str(m), str(lock), "-o", "json"])
     assert r.exit_code == 1
-    assert ("CONFLICT     models/vae/vae.safetensors: declared differently by base, addon"
+    assert ("CONFLICT     models/vae/vae.safetensors: declared by 'base' and 'addon' "
+            "with a different source; one install path can hold only one file"
             in json.loads(r.stdout)["problems"])
 
 
@@ -392,3 +395,171 @@ def test_a_missing_header_or_out_directory_is_a_request_error(tmp_path, args, wh
     r = runner.invoke(app, ["resolve", str(m), *args])
     assert r.exit_code == 2, r.output
     assert why in r.stderr
+
+
+# --- review round: names, containment, conflicts, -O, network errors -------------
+
+@pytest.mark.parametrize("bad", [
+    {"as": "sub/"}, {"as": ""}, {"as": ".."}, {"as": "."}, {"as": "a/b"},
+    {"file": ""}, {"file": "sub/.."}, {"file": "../x.safetensors"}, {"file": "/x.safetensors"},
+    {"install": "models/../"}, {"install": "models/../../etc/"}, {"install": "models/./vae/"},
+    {"install": "models//"},
+])
+def test_names_and_directories_cannot_be_empty_or_climb_out(bad):
+    entry = url_file(**{"as": "a.safetensors"}) | bad
+    assert schema.validate(manifest(("g", [entry])), "comfy") != [], bad
+
+
+@pytest.mark.parametrize("path", [
+    "models/../x.safetensors", "models/vae/../../x", "models/./x", "models//x", "models/vae/..",
+])
+def test_the_lock_schema_refuses_a_path_that_climbs_out(path):
+    lock = {"models": [{"model": "x", "url": "https://example.invalid/x",
+                        "paths": [{"path": path}]}]}
+    assert any("models/0/paths/0/path" in p for p in schema.validate(lock, "comfy-lock"))
+
+
+def test_an_as_with_a_trailing_slash_is_refused_before_anything_is_written(tmp_path, no_network):
+    """It once resolved, exit 0, to a directory path that `check` then refused."""
+    m = write(tmp_path / "comfy.yaml", manifest(("g", [url_file(**{"as": "sub/"})])))
+    lock = tmp_path / "lock.yaml"
+    r = runner.invoke(app, ["resolve", str(m), "-O", str(lock)])
+    assert r.exit_code == 2, r.output
+    assert "models/0/files/0/as: 'sub/' does not match" in " ".join(r.stderr.split())
+    assert not lock.exists()
+
+
+def test_fetch_refuses_a_path_outside_the_root_even_without_the_schema(tmp_path, monkeypatch):
+    from comfyctl.fetch import fetch as fetch_mod
+
+    def refuse(*a, **k):
+        raise AssertionError("fetched a path outside the root")
+    monkeypatch.setattr(fetch_mod.http, "request", refuse)
+    lock = write(tmp_path / "lock.yaml", {"models": [{
+        "model": "x", "url": "https://example.invalid/x",
+        "paths": [{"path": "models/../../escaped.safetensors"}],
+        "hashes": [{"hash": SHA_A, "type": "SHA256"}]}]})
+    root = tmp_path / "a" / "root"
+    root.mkdir(parents=True)
+    report = fetch_mod.run(lock, root, dry_run=False)
+    assert report.failed == 1
+    assert "leaves the root" in report.lines[0]
+    assert not (tmp_path / "escaped.safetensors").exists()
+
+
+def test_the_schema_is_plain_json_schema():
+    """No ajv-errors keyword: Ajv's strict mode refuses unknown keywords."""
+    for name in ("comfy", "comfy-lock"):
+        assert "errorMessage" not in json.dumps(schema.load(name))
+
+
+@pytest.mark.parametrize("one, two", [
+    ({"revision": "main"}, {}),
+    ({"as": "vae.safetensors"}, {}),
+    ({"sha256": SHA_A.upper()}, {"sha256": SHA_A}),
+])
+def test_two_spellings_of_one_file_do_not_conflict(one, two):
+    base = {"source": "hf:o/r", "file": "sub/vae.safetensors", "install": "models/vae/"}
+    groups = [{"name": "a", "files": [base | one]}, {"name": "b", "files": [base | two]}]
+    assert lockfile.conflicts(groups) == {}
+
+
+def test_a_conflict_names_only_the_groups_and_keys_that_differ():
+    base = {"source": "hf:o/r", "file": "vae.safetensors", "install": "models/vae/", "type": "vae"}
+    groups = [{"name": "a", "files": [base]}, {"name": "b", "files": [dict(base)]},
+              {"name": "c", "files": [base | {"source": "hf:o/other"}]}]
+    assert lockfile.conflicts(groups) == {
+        "models/vae/vae.safetensors": "models/vae/vae.safetensors: declared by 'a' and "
+        "'c' with a different source; one install path can hold only one file"}
+
+
+def test_an_error_mid_stream_fails_that_entry_only(tmp_path, monkeypatch):
+    class Broken(_Body):
+        def read(self, n=-1):
+            if self._data:
+                return super().read(n)
+            raise httpx.ReadError("connection reset")
+    monkeypatch.setattr(resolve.http, "head_headers", lambda url, token=None: {
+        "x-repo-commit": "abc", "x-linked-etag": "1" * 40})
+    monkeypatch.setattr(resolve.http, "request", lambda url, **k: Broken(b"partial"))
+    m = write(tmp_path / "comfy.yaml", manifest(
+        ("a", [{"source": "hf:o/r", "file": "config.json", "install": "models/configs/"}]),
+        ("b", [url_file(**{"as": "b.safetensors"})])))
+    r = runner.invoke(app, ["resolve", str(m), "-o", "json"])
+    assert r.exit_code == 1, r.output
+    payload = json.loads(r.stdout)
+    assert payload["resolved"] == 1
+    (failure,) = payload["failures"]
+    assert "download to hash it failed: connection reset" in failure
+
+
+@pytest.mark.parametrize("where", ["hf", "gh", "civitai"])
+def test_a_network_error_in_any_source_fails_that_entry_only(tmp_path, monkeypatch, where):
+    def down(*a, **k):
+        raise httpx.ConnectTimeout("timed out")
+    monkeypatch.setattr(resolve.http, "head_headers", down)
+    monkeypatch.setattr(resolve.http, "request", down)
+    entry = {
+        "hf": {"source": "hf:o/r", "file": "a.safetensors", "install": "models/a/"},
+        "gh": {"source": "gh:o/r@v1", "file": "a.pth", "install": "models/a/"},
+        "civitai": {"source": "civitai:1", "as": "a.safetensors", "install": "models/a/"},
+    }[where]
+    m = write(tmp_path / "comfy.yaml", manifest(
+        ("a", [entry]), ("b", [url_file(**{"as": "b.safetensors"})])))
+    r = runner.invoke(app, ["resolve", str(m), "-o", "json"])
+    assert r.exit_code == 1, r.output
+    payload = json.loads(r.stdout)
+    assert payload["resolved"] == 1
+    (failure,) = payload["failures"]
+    assert failure.startswith(entry["source"]) and "ConnectTimeout" in failure
+
+
+def _ok_manifest(tmp_path) -> pathlib.Path:
+    return write(tmp_path / "comfy.yaml", manifest(("a", [url_file(**{"as": "a.safetensors"})])))
+
+
+def test_out_naming_a_directory_is_a_request_error(tmp_path, no_network):
+    (tmp_path / "locks").mkdir()
+    r = runner.invoke(app, ["resolve", str(_ok_manifest(tmp_path)), "-O", str(tmp_path / "locks")])
+    assert r.exit_code == 2
+    assert "is a directory" in r.stderr
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes anywhere")
+def test_out_in_an_unwritable_directory_is_a_request_error(tmp_path, no_network):
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    ro.chmod(0o555)
+    try:
+        r = runner.invoke(app, ["resolve", str(_ok_manifest(tmp_path)), "-O", str(ro / "l.yaml")])
+    finally:
+        ro.chmod(0o755)
+    assert r.exit_code == 2
+    assert "not writable" in r.stderr
+
+
+def test_out_refuses_to_overwrite_an_input(tmp_path):
+    hf = {"source": "hf:o/r", "file": "vae.safetensors", "install": "models/vae/"}
+    m = write(tmp_path / "comfy.yaml", manifest(("base", [hf]), profiles={"p": ["base"]}))
+    parent = _hf_parent(tmp_path, "models/vae/vae.safetensors")
+    before = parent.read_text()
+    r = runner.invoke(app, ["resolve", str(m), "--profile", "p", "--from-lock", str(parent),
+                            "-O", str(parent)])
+    assert r.exit_code == 2
+    assert "would overwrite an input" in r.stderr
+    assert parent.read_text() == before
+    r = runner.invoke(app, ["resolve", str(m), "-O", str(m)])
+    assert r.exit_code == 2
+
+
+def test_out_writes_through_a_symlink_and_keeps_the_mode(tmp_path):
+    real = tmp_path / "real.yaml"
+    real.write_text("# old\n")
+    real.chmod(0o640)
+    link = tmp_path / "link.yaml"
+    link.symlink_to(real)
+    r = runner.invoke(app, ["resolve", str(_ok_manifest(tmp_path)), "-O", str(link)])
+    assert r.exit_code == 0, r.output
+    assert link.is_symlink()
+    assert real.read_text().startswith("models:")
+    assert real.stat().st_mode & 0o777 == 0o640

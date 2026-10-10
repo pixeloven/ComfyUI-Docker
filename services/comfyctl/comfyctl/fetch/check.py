@@ -36,8 +36,7 @@ def check(manifest: dict, lock: dict, profile: str | None = None) -> tuple[list[
     if not locked:
         problems.append("GATE BROKEN: the lock contains no entries")
 
-    problems += [f"CONFLICT     {p}: declared differently by {', '.join(g)}"
-                 for p, g in lockfile.conflicts(models).items()]
+    problems += [f"CONFLICT     {m}" for m in lockfile.conflicts(models).values()]
     # The set comparison below can't see a path listed twice.
     problems += [f"DUPLICATE    {p}" for p in lockfile.duplicate_paths(lock)]
     problems += [f"NOT LOCKED   {p}" for p in declared if p not in set(locked)]

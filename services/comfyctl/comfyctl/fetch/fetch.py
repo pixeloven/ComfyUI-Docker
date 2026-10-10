@@ -95,6 +95,18 @@ class Report:
         return "\n".join(out)
 
 
+def _inside_root(rel: str) -> bool:
+    """A lock path stays under the root it is joined to.
+
+    The lock schema already refuses `..`, `.` and empty segments; this holds
+    even for a lock that skipped it. Lexical on purpose: a symlink INSIDE the
+    root, such as `models` pointing at a shared store, is the deployment's
+    choice, not an escape.
+    """
+    path = pathlib.PurePosixPath(rel)
+    return bool(path.parts) and not path.is_absolute() and ".." not in path.parts
+
+
 def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
                report: Report, progress=None) -> None:
     name = model.get("model") or "<unnamed>"
@@ -106,6 +118,12 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     if not rel:
         report.lines.append(f"  SKIP    {name}: no path recorded")
         report.skipped += 1
+        return
+
+    escapes = [p for p in paths if not _inside_root(p)]
+    if escapes:
+        report.lines.append(f"  FAILED  {name}: path leaves the root: {escapes[0]}")
+        report.failed += 1
         return
 
     target = root / rel

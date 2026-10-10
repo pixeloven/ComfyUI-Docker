@@ -50,7 +50,9 @@
                 },
                 "file": {
                   "type": "string",
-                  "description": "Path within the source repo, for hf: and gh:. Its basename names the installed file unless `as` does. A direct URL needs `file` or `as`."
+                  "minLength": 1,
+                  "pattern": "^(?!\\.{1,2}(?:/|$))[^/]+(?:/(?!\\.{1,2}(?:/|$))[^/]+)*$",
+                  "description": "Path within the source repo, for hf: and gh:. Its basename names the installed file unless `as` does. A direct URL needs `file` or `as`. Relative, with no empty, `.` or `..` segment."
                 },
                 "revision": {
                   "type": "string",
@@ -59,12 +61,14 @@
                 },
                 "install": {
                   "type": "string",
-                  "pattern": "^models/.+/$",
-                  "description": "Directory to install into."
+                  "pattern": "^models/(?:(?!\\.{1,2}(?:/|$))[^/]+/)+$",
+                  "description": "Directory to install into: `models/`, then one or more segments, ending `/`. No empty, `.` or `..` segment, so it can't leave the ComfyUI root."
                 },
                 "as": {
                   "type": "string",
-                  "description": "Local filename, if it should differ from upstream's."
+                  "minLength": 1,
+                  "pattern": "^(?!\\.{1,2}$)[^/]+$",
+                  "description": "Local filename, if it should differ from upstream's. A name, not a path: no `/`, and not `.` or `..`."
                 },
                 "type": {
                   "type": "string",
@@ -115,7 +119,6 @@
                     "required": [
                       "as"
                     ],
-                    "errorMessage": "a direct-URL source needs `as` (or `file`) to name the installed file",
                     "$comment": "Without either, the install path is the `install` DIRECTORY, and fetch writes the file over it. Taking the name from the URL isn't derivable the way check derives paths, so the manifest names it."
                   }
                 }

@@ -30,15 +30,17 @@ that breaks one is a bug.
   `comfyctl fetch -o json check …` is an error. `auto`
   colours at a terminal and goes plain when piped, which covers every CI job and
   every container. `json` gives stable keys.
-- **stdout is the result, stderr is everything else.** `comfyctl fetch resolve … > lock.yaml`
-  captures the lock and none of the progress, and `-o json | jq` always parses.
+- **stdout is the result, stderr is everything else.** `comfyctl fetch resolve …`
+  prints the lock and none of the progress, and `-o json | jq` always parses.
+  To write a lock file, use `resolve -O lock.yaml`: it writes only when every
+  source resolved, where `> lock.yaml` has already emptied the file if one fails.
 - **One exit-code scheme:**
 
   | exit | meaning |
   |---|---|
   | `0` | did what was asked |
-  | `1` | a real failure: a source did not resolve, a hash did not match, a lock and its manifest disagree |
-  | `2` | the request itself was wrong: a missing file, an unknown profile, incompatible flags |
+  | `1` | a real failure: a source did not resolve, a hash did not match, a lock and its manifest disagree, two groups install different files at one path |
+  | `2` | the request itself was wrong: a missing file, an unknown profile, incompatible flags, an `-O` that can't be written, or a manifest (or `--from-lock` parent) that `resolve` refuses because it fails the checks `check` runs |
 
 `comfyctl --help` says the same. `tests/test_comfyctl.py` asserts that every
 verb (every leaf command) takes the output flag, and that `comfyctl fetch` gives the same stdout

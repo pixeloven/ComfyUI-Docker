@@ -59,7 +59,7 @@ already emptied the file when a resolve fails.
 |---|---|
 | `0` | did what was asked |
 | `1` | a real failure — a source did not resolve, a hash did not match, a lock and its manifest disagree, two groups install different files at one path |
-| `2` | the request was wrong — missing file, unknown profile, incompatible flags, or a manifest (or `--from-lock` parent) that `resolve` refuses because it fails the checks `check` runs |
+| `2` | the request was wrong — missing file, unknown profile, incompatible flags, an `-O` that can't be written, or a manifest (or `--from-lock` parent) that `resolve` refuses because it fails the checks `check` runs |
 
 `resolve` validates its inputs the way `check` does, schema first and then the
 semantic checks, before it touches the network. `check` reports the same
@@ -410,6 +410,11 @@ A direct URL needs `as:` (or `file:`, whose basename is used) for the same
 reason: without either, the lock's path was the `install` directory itself, and
 `fetch` wrote the file over it. The manifest schema refuses that entry, and the
 lock schema refuses a `paths[].path` that ends in `/`.
+
+`as:` is a filename, never a path; a subdirectory belongs in `install`. No
+`install`, `as`, `file` or lock path may hold an empty, `.` or `..` segment, and
+`fetch` refuses any lock path that would land outside the root it was given, so
+a lock can't write elsewhere on the host.
 
 ## Why CI does not re-resolve
 

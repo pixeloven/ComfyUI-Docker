@@ -34,17 +34,29 @@ def load(name: str) -> dict[str, Any]:
     return json.loads(text)
 
 
+def _explain(error: jsonschema.ValidationError) -> str:
+    """jsonschema's message, or why a conditional rule exists.
+
+    The direct-URL rule fails as "'as' is a required property", which reads
+    as though `as` were always needed. The hint lives here, not in the schema,
+    so the schema stays plain JSON Schema (Ajv's strict mode refuses unknown
+    keywords).
+    """
+    entry = error.instance
+    if (error.validator == "required" and error.validator_value == ["as"]
+            and isinstance(entry, dict)
+            and str(entry.get("source", "")).startswith(("http://", "https://"))):
+        return "a direct-URL source needs `as` (or `file`) to name the installed file"
+    return error.message
+
+
 def validate(doc: dict, name: str) -> list[str]:
     """Structural problems, best-first. Empty means it conforms."""
     validator = jsonschema.Draft202012Validator(load(name))
     out = []
     for error in sorted(validator.iter_errors(doc), key=lambda e: list(e.path)):
         where = "/".join(str(p) for p in error.path) or "(root)"
-        # `errorMessage` (ajv-errors' keyword; an annotation to any other
-        # validator) says WHY a conditional rule failed, where jsonschema
-        # alone would only say "'as' is a required property".
-        hint = error.schema.get("errorMessage") if isinstance(error.schema, dict) else None
-        out.append(f"{where}: {hint or error.message}")
+        out.append(f"{where}: {_explain(error)}")
     return out
 
 

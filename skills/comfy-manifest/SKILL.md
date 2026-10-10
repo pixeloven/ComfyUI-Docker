@@ -64,12 +64,14 @@ models:
     files:
       - source: hf:Comfy-Org/Qwen-Image_ComfyUI
         file: split_files/vae/qwen_image_vae.safetensors
-        install: models/vae/   # a DIRECTORY, must start `models/` and end `/`
+        install: models/vae/   # a DIRECTORY, must start `models/` and end `/`, no `..`
         type: vae
 ```
 
 `install` is a directory because a human says "put it in vae"; the lock records
-the resolved full path.
+the resolved full path. `as:` is a filename, never a path: a subdirectory goes
+in `install`. No path may hold an empty, `.` or `..` segment, and `fetch`
+refuses a lock path that would land outside the root it was given.
 
 ## Source forms
 
@@ -130,7 +132,9 @@ Use `-O`/`--out` rather than `>`: it writes only once every source resolves,
 so a failed resolve leaves the committed lock as it was. The shell truncates a
 `>` target before `resolve` runs, so a failure there leaves an empty lock.
 `--header <file>` prepends that file to the lock verbatim, for a provenance
-comment.
+comment. A symlinked `-O` is written through, and an existing file keeps its
+permissions. `-O` exits `2` before resolving when it names a directory, an
+unwritable or missing directory, the manifest or the `--from-lock` parent.
 
 Resolving each independently is the mistake: locks made minutes apart can
 legitimately pin different commits.
