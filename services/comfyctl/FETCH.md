@@ -411,10 +411,14 @@ reason: without either, the lock's path was the `install` directory itself, and
 `fetch` wrote the file over it. The manifest schema refuses that entry, and the
 lock schema refuses a `paths[].path` that ends in `/`.
 
-`as:` is a filename, never a path; a subdirectory belongs in `install`. No
-`install`, `as`, `file` or lock path may hold an empty, `.` or `..` segment, and
-`fetch` refuses any lock path that would land outside the root it was given, so
-a lock can't write elsewhere on the host.
+`as:` names the file under `install` and may include a subdirectory
+(`as: sub/x.safetensors`), but never ends in `/`. No `install`, `as`, `file` or
+lock path may hold an empty, `.` or `..` segment or a `\` (a separator on
+Windows), and `fetch` refuses any lock path that would land outside the root it
+was given, so a lock can't name a place elsewhere on the host. A symlinked
+directory *under* the root is followed, by design: pointing `models/` at a
+shared store is the deployment's choice. An extra copy (`paths[1:]`) replaces a
+symlink at its destination rather than writing through it.
 
 ## Why CI does not re-resolve
 

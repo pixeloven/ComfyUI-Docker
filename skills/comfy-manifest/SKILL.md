@@ -69,9 +69,11 @@ models:
 ```
 
 `install` is a directory because a human says "put it in vae"; the lock records
-the resolved full path. `as:` is a filename, never a path: a subdirectory goes
-in `install`. No path may hold an empty, `.` or `..` segment, and `fetch`
-refuses a lock path that would land outside the root it was given.
+the resolved full path. `as:` names the file under `install`, and may include
+a subdirectory (`as: sub/x.safetensors`), but never ends in `/`. No path may
+hold an empty, `.` or `..` segment or a `\`, and `fetch` refuses a lock path
+that would land outside the root it was given. A symlinked directory under the
+root is followed, by design.
 
 ## Source forms
 

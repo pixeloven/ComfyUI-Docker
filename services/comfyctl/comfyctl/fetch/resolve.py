@@ -252,9 +252,11 @@ def resolve_all(manifest: dict, profile: str | None,
             done.add(path)
             try:
                 model = _resolve_file(entry, auth)
-            except (Unresolved, httpx.HTTPError) as exc:
-                # A timeout or a refused connection is this source's failure,
-                # not the pass's: the other entries still resolve.
+            except (Unresolved, httpx.HTTPError, ValueError, KeyError) as exc:
+                # A timeout, a refused connection, an HTML page where JSON was
+                # expected (ValueError) or a response missing a key is this
+                # source's failure, not the pass's: the other entries still
+                # resolve.
                 why = str(exc) if isinstance(exc, Unresolved) else \
                     f"{entry['source']}: {type(exc).__name__}: {exc}"
                 failures.append(why)

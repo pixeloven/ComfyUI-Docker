@@ -98,13 +98,15 @@ class Report:
 def _inside_root(rel: str) -> bool:
     """A lock path stays under the root it is joined to.
 
-    The lock schema already refuses `..`, `.` and empty segments; this holds
-    even for a lock that skipped it. Lexical on purpose: a symlink INSIDE the
-    root, such as `models` pointing at a shared store, is the deployment's
-    choice, not an escape.
+    The lock schema already refuses `..`, `.`, empty segments and `\\`; this
+    holds even for a lock that skipped it. A backslash is refused outright,
+    because on Windows `models/..\\..\\x` climbs out. Lexical on purpose: a
+    symlink INSIDE the root, such as `models` pointing at a shared store, is
+    followed, because that is the deployment's choice, not an escape.
     """
     path = pathlib.PurePosixPath(rel)
-    return bool(path.parts) and not path.is_absolute() and ".." not in path.parts
+    return (bool(path.parts) and "\\" not in rel and not path.is_absolute()
+            and ".." not in path.parts)
 
 
 def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
@@ -193,6 +195,9 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     for extra in paths[1:]:
         dest = root / extra
         dest.parent.mkdir(parents=True, exist_ok=True)
+        # copyfile writes THROUGH a symlink at dest; the main path's rename
+        # replaces one. Remove it first, so both behave the same.
+        dest.unlink(missing_ok=True)
         shutil.copyfile(target, dest)
 
 

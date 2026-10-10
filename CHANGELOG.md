@@ -90,29 +90,35 @@ moved:
   `check` exits 1. For a URL with `file:` and no `as:`, the lock's `model:` is
   now `file`'s basename, matching its path, where it was the URL's.
   *Migration:* add `as: <filename>` to each `https://` entry that has neither.
-- **`as:` is a filename, and `file:` can't be empty** (#161). `as` must be one
-  non-empty segment (no `/`, not `.` or `..`); `file` must be non-empty. An
-  `as: sub/` used to resolve to a directory path that `check` then refused.
-  *Migration:* move a subdirectory from `as` into `install`.
+- **`as:` and `file:` can't be empty or end in `/`** (#161). `as` may still
+  name a subdirectory (`as: sub/x.safetensors`). An `as: sub/` used to resolve
+  to a directory path that `check` then refused.
+  *Migration:* name the file in `as`, not just its directory.
 - **A lock's `paths[].path` must name a file:** the schema refuses a path
   ending in `/` (#161), so `check` and `fetch` do too.
   *Migration:* re-resolve a lock that has one, after adding `as:` as above.
 - **No path can leave the ComfyUI root.** `install`, `as`, `file` and a lock's
-  `paths[].path` refuse empty, `.` and `..` segments (and `file` a leading
-  `/`), and `fetch` refuses any lock path that would land outside the root it
-  was given, even from a lock that skipped the schema. A lock could otherwise
-  write anywhere the fetching user can.
+  `paths[].path` refuse empty, `.` and `..` segments, any `\` (a separator on
+  Windows), and in `as` and `file` a leading `/`. `fetch` refuses any lock path
+  that would land outside the root it was given, even from a lock that skipped
+  the schema. A lock could otherwise write anywhere the fetching user can. A
+  symlinked directory under the root is still followed, by design: pointing
+  `models/` at a shared store is the deployment's choice. An extra copy
+  (`paths[1:]`) replaces a symlink at its destination instead of writing
+  through it.
   *Migration:* rewrite such a path without `..`; nothing in a normal manifest
   uses one.
 - **One lock entry per install path** (#160). A file two groups declare
   identically is resolved once and locked once, by `resolve` and by
-  `--from-lock`. "Identically" ignores `x-` keys, a missing `revision` equals
-  `main`, an `as` equal to `file`'s basename equals none, and a `sha256` is
-  compared without case. Two groups declaring different files at one path make
-  `resolve` report the path as unresolved and exit 1, and `check` report
-  `CONFLICT <path>`, each naming the groups and the keys that differ. `check` also fails a lock listing a path twice
-  (`DUPLICATE <path>`), and `--from-lock` refuses a parent that does. A lock
-  no longer contains YAML anchors or aliases.
+  `--from-lock`. "Identically" ignores `x-` keys, a missing `revision`
+  equals `main`, an `as` equal to `file`'s basename equals none, a direct
+  URL named by `as: x` equals one named by `file: x`, and a `sha256` is
+  compared without case. Two groups declaring different files at one path
+  make `resolve` report the path as unresolved and exit 1, and `check`
+  report `CONFLICT <path>`, each naming the groups and the keys that differ.
+  `check` also fails a lock listing a path twice (`DUPLICATE <path>`), and
+  `--from-lock` refuses a parent that does. A lock no longer contains YAML
+  anchors or aliases.
   *Migration:* give the clashing files different `as:` names or install
   directories, then re-resolve any lock `check` now reports as `DUPLICATE`.
 - **`resolve` validates before it resolves** (#154): the manifest against
@@ -144,8 +150,10 @@ moved:
   outside LFS, copied the body into a temp file nobody read, so under a
   read-only root `resolve` crashed with a traceback and stopped the pass. It
   now streams the body through the hash. A connection error, timeout or HTTP
-  error on any source (`hf:`, `gh:`, `civitai:` or that download) is reported
-  as that entry's unresolved source, and the rest of the pass continues.
+  error on any source (`hf:`, `gh:`, `civitai:` or that download), and an
+  API body that isn't the JSON expected (an HTML proxy page, a missing key),
+  is reported as that entry's unresolved source, and the rest of the pass
+  continues.
 - **The `comfyctl` image installs from `services/uv.lock`** (#177), hash-checked,
   as the `mcp` image does, where the `fetch` image ran `pip install` against
   PyPI's latest versions. (A wheel install still resolves its dependencies at

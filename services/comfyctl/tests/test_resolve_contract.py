@@ -400,7 +400,8 @@ def test_a_missing_header_or_out_directory_is_a_request_error(tmp_path, args, wh
 # --- review round: names, containment, conflicts, -O, network errors -------------
 
 @pytest.mark.parametrize("bad", [
-    {"as": "sub/"}, {"as": ""}, {"as": ".."}, {"as": "."}, {"as": "a/b"},
+    {"as": "sub/"}, {"as": ""}, {"as": ".."}, {"as": "."}, {"as": "sub/../x"},
+    {"as": "..\\..\\evil"}, {"file": "sub\\..\\x"}, {"install": "models/a\\..\\"},
     {"file": ""}, {"file": "sub/.."}, {"file": "../x.safetensors"}, {"file": "/x.safetensors"},
     {"install": "models/../"}, {"install": "models/../../etc/"}, {"install": "models/./vae/"},
     {"install": "models//"},
@@ -412,6 +413,7 @@ def test_names_and_directories_cannot_be_empty_or_climb_out(bad):
 
 @pytest.mark.parametrize("path", [
     "models/../x.safetensors", "models/vae/../../x", "models/./x", "models//x", "models/vae/..",
+    "models/..\\..\\evil", "models/vae/a\\b",
 ])
 def test_the_lock_schema_refuses_a_path_that_climbs_out(path):
     lock = {"models": [{"model": "x", "url": "https://example.invalid/x",
@@ -563,3 +565,75 @@ def test_out_writes_through_a_symlink_and_keeps_the_mode(tmp_path):
     assert link.is_symlink()
     assert real.read_text().startswith("models:")
     assert real.stat().st_mode & 0o777 == 0o640
+
+
+# --- re-review: Windows separators, `as:` subdirectories, symlinks, bad bodies ----
+
+def test_as_may_name_a_subdirectory(tmp_path):
+    """Owner decision: `as: sub/x.safetensors` installs into `install`/sub/."""
+    m = write(tmp_path / "comfy.yaml", manifest(("g", [url_file(**{"as": "sub/x.safetensors"})])))
+    r = runner.invoke(app, ["resolve", str(m)])
+    assert r.exit_code == 0, r.output
+    (entry,) = yaml.safe_load(r.stdout)["models"]
+    assert entry["paths"] == [{"path": "models/checkpoints/sub/x.safetensors"}]
+
+
+@pytest.mark.parametrize("rel", ["models/..\\..\\evil", "models\\x", "models/vae/a\\b"])
+def test_fetch_refuses_a_backslash_even_without_the_schema(tmp_path, monkeypatch, rel):
+    """On Windows `models/..\\..\\evil` climbs out of the root."""
+    from comfyctl.fetch import fetch as fetch_mod
+
+    def refuse(*a, **k):
+        raise AssertionError("fetched a path with a backslash")
+    monkeypatch.setattr(fetch_mod.http, "request", refuse)
+    lock = write(tmp_path / "lock.yaml", {"models": [{
+        "model": "x", "url": "https://example.invalid/x", "paths": [{"path": rel}],
+        "hashes": [{"hash": SHA_A, "type": "SHA256"}]}]})
+    report = fetch_mod.run(lock, tmp_path / "root", dry_run=False)
+    assert report.failed == 1
+    assert "leaves the root" in report.lines[0]
+
+
+def test_an_extra_copy_replaces_a_symlink_rather_than_writing_through_it(tmp_path, monkeypatch):
+    from comfyctl.fetch import fetch as fetch_mod
+
+    body = b"model bytes"
+    monkeypatch.setattr(fetch_mod.http, "request", lambda url, **k: _Body(body))
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"precious")
+    root = tmp_path / "root"
+    (root / "models" / "b").mkdir(parents=True)
+    (root / "models" / "b" / "x.bin").symlink_to(outside)
+    lock = write(tmp_path / "lock.yaml", {"models": [{
+        "model": "x.bin", "url": "https://example.invalid/x.bin",
+        "paths": [{"path": "models/a/x.bin"}, {"path": "models/b/x.bin"}],
+        "hashes": [{"hash": hashlib.sha256(body).hexdigest(), "type": "SHA256"}]}]})
+    report = fetch_mod.run(lock, root, dry_run=False)
+    assert report.fetched == 1, report.lines
+    assert outside.read_bytes() == b"precious"
+    copy = root / "models" / "b" / "x.bin"
+    assert not copy.is_symlink() and copy.read_bytes() == body
+
+
+@pytest.mark.parametrize("body", [b"<html>a proxy's error page</html>", b'{"files": [{}]}'])
+def test_a_bad_api_body_fails_that_entry_only(tmp_path, monkeypatch, body):
+    """HTML where JSON was expected (ValueError), or JSON missing a key (KeyError)."""
+    monkeypatch.setattr(resolve.http, "request", lambda url, **k: _Body(body))
+    m = write(tmp_path / "comfy.yaml", manifest(
+        ("a", [{"source": "civitai:1", "as": "a.safetensors", "install": "models/a/"}]),
+        ("b", [url_file(**{"as": "b.safetensors"})])))
+    r = runner.invoke(app, ["resolve", str(m), "-o", "json"])
+    assert r.exit_code == 1, r.output
+    payload = json.loads(r.stdout)
+    assert payload["resolved"] == 1
+    (failure,) = payload["failures"]
+    assert failure.startswith("civitai:1: ")
+
+
+def test_a_direct_url_named_by_as_or_by_file_is_one_file(tmp_path):
+    a = url_file("x", **{"as": "x.safetensors"})
+    b = url_file("x", **{"file": "x.safetensors"})
+    m = write(tmp_path / "comfy.yaml", manifest(("base", [a]), ("addon", [b])))
+    r = runner.invoke(app, ["resolve", str(m)])
+    assert r.exit_code == 0, r.output
+    assert len(yaml.safe_load(r.stdout)["models"]) == 1

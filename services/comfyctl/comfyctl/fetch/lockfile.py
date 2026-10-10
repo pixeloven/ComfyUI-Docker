@@ -35,11 +35,17 @@ def _declaration(entry: dict) -> dict:
     """What a manifest entry says about its file, with the defaults filled in.
 
     `x-` keys are consumer metadata. A missing `revision` is `main`, an `as`
-    equal to `file`'s basename names nothing new, and a sha256 is the same
-    hash in either case. Without this, two spellings of one file conflict.
+    equal to `file`'s basename names nothing new (for a direct URL, `as` and
+    `file` are both just its name), and a sha256 is the same hash in either
+    case. Without this, two spellings of one file conflict.
     """
     decl = {k: v for k, v in entry.items() if not k.startswith("x-")}
     decl.setdefault("revision", "main")
+    if str(decl.get("source", "")).startswith(("http://", "https://")):
+        # A direct URL's `as` and `file` only NAME the file, so `as: x` and
+        # `file: x` declare the same one.
+        decl["as"] = decl.get("as") or pathlib.PurePosixPath(decl.pop("file", "") or "").name
+        decl.pop("file", None)
     if decl.get("as") == pathlib.PurePosixPath(decl.get("file") or "").name:
         decl.pop("as")
     if isinstance(decl.get("sha256"), str):
