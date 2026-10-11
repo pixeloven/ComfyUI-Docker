@@ -130,6 +130,17 @@ def _load(path: pathlib.Path, what: str, out: Out) -> dict:
     return doc
 
 
+def _read_header(out: Out, header: pathlib.Path) -> str:
+    """A --header file's text, or exit: 2 if it is missing, 1 if it can't be
+    read as UTF-8. Never a traceback with nothing on stdout (#209)."""
+    if not header.is_file():
+        _usage(out, f"no such header file: {header}")
+    try:
+        return header.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError) as exc:
+        _failed(out, f"header file {header} is not readable UTF-8 text: {exc}")
+
+
 def _out_refusal(out_path: pathlib.Path, inputs: list[pathlib.Path]) -> str | None:
     """Why --out can't be written, checked BEFORE the network pass.
 
@@ -213,9 +224,7 @@ def resolve(
             _usage(out, refusal)
     head = ""
     if header is not None:
-        if not header.is_file():
-            _usage(out, f"no such header file: {header}")
-        head = header.read_text()
+        head = _read_header(out, header)
 
     # VALIDATE FIRST, exactly as `check` does: a typo'd key otherwise surfaced
     # as a KeyError traceback, after the network had been used. Semantics only
@@ -467,9 +476,7 @@ def build(
 
     head = ""
     if header is not None:
-        if not header.is_file():
-            _usage(o, f"no such header file: {header}")
-        head = header.read_text()
+        head = _read_header(o, header)
 
     try:
         rendered, counts = build_mod.render(sources, header=head)
