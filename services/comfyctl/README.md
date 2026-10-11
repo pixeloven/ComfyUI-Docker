@@ -30,15 +30,17 @@ that breaks one is a bug.
   `comfyctl fetch -o json check …` is an error. `auto`
   colours at a terminal and goes plain when piped, which covers every CI job and
   every container. `json` gives stable keys.
-- **stdout is the result, stderr is everything else.** `comfyctl fetch resolve … > lock.yaml`
-  captures the lock and none of the progress, and `-o json | jq` always parses.
+- **stdout is the result, stderr is everything else.** `comfyctl fetch resolve …`
+  prints the lock and none of the progress, and `-o json | jq` always parses.
+  To write a lock file, use `resolve -O lock.yaml`: it writes only when every
+  source resolved, where `> lock.yaml` has already emptied the file if one fails.
 - **One exit-code scheme:**
 
   | exit | meaning |
   |---|---|
   | `0` | did what was asked |
-  | `1` | a real failure: a source did not resolve, a hash did not match, a lock and its manifest disagree |
-  | `2` | the request itself was wrong: a missing file, an unknown profile, incompatible flags |
+  | `1` | a real failure: an input that isn't valid YAML or JSON, or fails its schema or the semantic checks (`resolve` checks its manifest and `--from-lock` parent as `check` does); a source did not resolve, two groups install different files at one path, a hash did not match, a lock entry has no SHA256, a lock and its manifest disagree |
+  | `2` | the request itself was wrong: a missing file or directory, an unknown profile, bad or conflicting flags, a `--store` that isn't a ComfyUI root, an `-O` that names a directory, an unwritable directory or an input file |
 
 `comfyctl --help` says the same. `tests/test_comfyctl.py` asserts that every
 verb (every leaf command) takes the output flag, and that `comfyctl fetch` gives the same stdout

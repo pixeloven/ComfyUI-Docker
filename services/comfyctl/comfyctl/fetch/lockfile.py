@@ -31,6 +31,71 @@ def install_path(entry: dict) -> str:
     return f"{entry['install']}{name}"
 
 
+def _declaration(entry: dict) -> dict:
+    """What a manifest entry says about its file, with the defaults filled in.
+
+    `x-` keys are consumer metadata. A missing `revision` is `main`, an `as`
+    equal to `file`'s basename names nothing new (for a direct URL, `as` and
+    `file` are both just its name), and a sha256 is the same hash in either
+    case. Without this, two spellings of one file conflict.
+    """
+    decl = {k: v for k, v in entry.items() if not k.startswith("x-")}
+    decl.setdefault("revision", "main")
+    if str(decl.get("source", "")).startswith(("http://", "https://")):
+        # A direct URL's `as` and `file` only NAME the file, so `as: x` and
+        # `file: x` declare the same one.
+        decl["as"] = decl.get("as") or pathlib.PurePosixPath(decl.pop("file", "") or "").name
+        decl.pop("file", None)
+    if decl.get("as") == pathlib.PurePosixPath(decl.get("file") or "").name:
+        decl.pop("as")
+    if isinstance(decl.get("sha256"), str):
+        decl["sha256"] = decl["sha256"].lower()
+    return decl
+
+
+def conflicts(groups: list[dict]) -> dict[str, str]:
+    """Install paths that file entries declare DIFFERENTLY -> what differs.
+
+    The same file declared identically in two groups (a VAE shared by a base
+    and an add-on) is one install and one lock entry. Two different
+    declarations for one path are two files fighting over it: the last fetched
+    wins, and every fetch re-downloads both. Each message names the groups
+    that differ from the path's first declaration, and the keys that do.
+    """
+    first: dict[str, tuple[str, dict]] = {}
+    differ: dict[str, tuple[list[str], set[str]]] = {}
+    for group in groups:
+        for entry in group["files"]:
+            path, decl = install_path(entry), _declaration(entry)
+            if path not in first:
+                first[path] = (group["name"], decl)
+                continue
+            name0, decl0 = first[path]
+            if decl == decl0:
+                continue
+            names, keys = differ.setdefault(path, ([name0], set()))
+            if group["name"] not in names:
+                names.append(group["name"])
+            keys.update(k for k in decl.keys() | decl0.keys() if decl.get(k) != decl0.get(k))
+    out = {}
+    for path, (names, keys) in sorted(differ.items()):
+        who = " and ".join(repr(n) for n in names) if len(names) > 1 \
+            else f"{names[0]!r} twice"
+        what = " and ".join(sorted(keys))
+        out[path] = (f"{path}: declared by {who} with a different {what}; "
+                     f"one install path can hold only one file")
+    return out
+
+
+def duplicate_paths(lock: dict) -> list[str]:
+    """Install paths a lock lists more than once. A lock has one entry per file."""
+    counts: dict[str, int] = {}
+    for m in lock.get("models") or []:
+        if (p := lock_path(m)) is not None:
+            counts[p] = counts.get(p, 0) + 1
+    return [p for p, n in counts.items() if n > 1]
+
+
 def sha256_of(model: dict) -> str | None:
     for h in model.get("hashes") or []:
         if h.get("type") == "SHA256":
@@ -49,6 +114,11 @@ class _Dumper(yaml.SafeDumper):
 
     def increase_indent(self, flow: bool = False, indentless: bool = False) -> Any:
         return super().increase_indent(flow, False)
+
+    def ignore_aliases(self, data: Any) -> bool:
+        # A shared dict must never become an `&id001` anchor and `*id001`
+        # alias: a lock is read by tools that aren't PyYAML.
+        return True
 
 
 def dump(auth: dict | None, models: list[dict]) -> str:

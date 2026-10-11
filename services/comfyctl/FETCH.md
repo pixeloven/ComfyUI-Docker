@@ -51,13 +51,19 @@ shell version's 48.5 MB.
 `--output auto` colours at a terminal and goes plain when piped, which is every
 CI job and every container. `--output json` gives automation and agents stable
 keys. Human output goes to **stderr**; stdout carries the artifact, so
-`comfyctl fetch resolve … > lock.yaml` stays correct.
+`comfyctl fetch resolve … > lock.yaml` stays correct. Prefer `resolve -O
+lock.yaml`, though: it writes only when every source resolved, while `>` has
+already emptied the file when a resolve fails.
 
 | exit | meaning |
 |---|---|
 | `0` | did what was asked |
-| `1` | a real failure — an input that isn't valid YAML or JSON, or fails its schema; a source did not resolve, a hash did not match, a lock entry has no SHA256, a lock and its manifest disagree |
-| `2` | the request was wrong — a missing file or directory, an unknown profile, bad or conflicting flags, a `--store` that isn't a ComfyUI root |
+| `1` | a real failure — an input that isn't valid YAML or JSON, or fails its schema or the semantic checks; a source did not resolve, two groups install different files at one path, a hash did not match, a lock entry has no SHA256, a lock and its manifest disagree |
+| `2` | the request was wrong — a missing file or directory, an unknown profile, bad or conflicting flags, a `--store` that isn't a ComfyUI root, an `-O` that names a directory, an unwritable directory or an input file |
+
+`resolve` validates its inputs the way `check` does, schema first and then the
+semantic checks, before it touches the network, and exits `1` on a problem,
+as `check` does.
 
 Under `--output json`, every non-zero exit still writes one JSON object to
 stdout, with `"ok": false` and the reasons in `problems`; `fetch` and `resolve`
@@ -126,9 +132,9 @@ profiles:
 
 ```sh
 # Resolve the full set ONCE, then derive each profile from it.
-comfyctl fetch resolve comfy.yaml                                       > locks/everything.yaml
-comfyctl fetch resolve comfy.yaml --profile image --from-lock locks/everything.yaml > locks/image.yaml
-comfyctl fetch resolve comfy.yaml --profile video --from-lock locks/everything.yaml > locks/video.yaml
+comfyctl fetch resolve comfy.yaml -O locks/everything.yaml
+comfyctl fetch resolve comfy.yaml --profile image --from-lock locks/everything.yaml -O locks/image.yaml
+comfyctl fetch resolve comfy.yaml --profile video --from-lock locks/everything.yaml -O locks/video.yaml
 
 comfyctl fetch fetch locks/image.yaml /workspace --apply
 comfyctl fetch fetch locks/video.yaml /workspace --apply   # shared files already correct, skipped
@@ -143,6 +149,14 @@ derived lock is a **strict subset** of that parent, copied verbatim.
 
 If the parent does not hold a file the profile selects, it is stale: the command
 says so and writes nothing, rather than emitting a lock that is quietly short.
+It refuses a parent that lists a selected path twice, too.
+
+A lock has **one entry per install path**. A file that two groups declare
+identically (`x-` keys aside), such as a VAE shared by a base and an add-on, is
+resolved once and locked once. Two groups that declare *different* files at one
+path are refused: `resolve` reports the path as unresolved and writes nothing,
+and `check` reports it as `CONFLICT`, offline. A lock that lists a path twice
+fails `check` as `DUPLICATE`.
 
 Profiles compose by **set union**, not inheritance — no resolution order, no
 overrides, no diamonds. A model shared between two profiles is defined once and
@@ -298,7 +312,8 @@ entry is fine, because a file with nothing measurable gets none.
 ```sh
 comfyctl fetch build models/ -O comfy.yaml                 # offline; manifest from sources
 
-comfyctl fetch resolve comfy.yaml > /tmp/m.yaml            # then splice into comfy-lock.yaml
+comfyctl fetch resolve comfy.yaml -O /tmp/m.yaml           # then splice into comfy-lock.yaml
+comfyctl fetch resolve comfy.yaml -O comfy-lock.yaml --header header.txt   # or write it whole
 yq -i '.models = load("/tmp/m.yaml").models' comfy-lock.yaml
 
 comfyctl fetch fetch comfy-lock.yaml /workspace       # dry run
@@ -451,13 +466,26 @@ Civitai's `model-versions` endpoint is public, and GitHub's release API is too
 | `hf:<owner>/<repo>` + `file:` | the `x-repo-commit` and `x-linked-etag` headers; a file whose etag isn't a sha256 (one not stored in LFS) is downloaded and hashed |
 | `gh:<owner>/<repo>@<tag>` + `file:` | the release API's asset `digest` and `browser_download_url`; with no digest, the manifest's `sha256:` if it states one, and only otherwise the asset is downloaded and hashed |
 | `civitai:<modelVersionId>` | `files[0].hashes.SHA256` and `downloadUrl` |
-| `https://…` | nothing — **you must supply `sha256:`** |
+| `https://…` | nothing — **you must supply `sha256:`**, and `as:` or `file:` |
 
 `resolve` reads no file sizes. The lock has no size field, and no output
 reports bytes; `fetch`'s dry run counts files in `would_fetch`.
 
 `civitai:` sources require `as:`, because the filename comes from the API and
 would otherwise be unknowable offline — which `comfyctl fetch check` depends on.
+A direct URL needs `as:` (or `file:`, whose basename is used) for the same
+reason: without either, the lock's path was the `install` directory itself, and
+`fetch` wrote the file over it. The manifest schema refuses that entry, and the
+lock schema refuses a `paths[].path` that ends in `/`.
+
+`as:` names the file under `install` and may include a subdirectory
+(`as: sub/x.safetensors`), but never ends in `/`. No `install`, `as`, `file` or
+lock path may hold an empty, `.` or `..` segment or a `\` (a separator on
+Windows), and `fetch` refuses any lock path that would land outside the root it
+was given, so a lock can't name a place elsewhere on the host. A symlinked
+directory *under* the root is followed, by design: pointing `models/` at a
+shared store is the deployment's choice. An extra copy (`paths[1:]`) replaces a
+symlink at its destination rather than writing through it.
 
 ## Why CI does not re-resolve
 

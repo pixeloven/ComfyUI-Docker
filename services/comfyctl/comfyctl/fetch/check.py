@@ -36,6 +36,9 @@ def check(manifest: dict, lock: dict, profile: str | None = None) -> tuple[list[
     if not locked:
         problems.append("GATE BROKEN: the lock contains no entries")
 
+    problems += [f"CONFLICT     {m}" for m in lockfile.conflicts(models).values()]
+    # The set comparison below can't see a path listed twice.
+    problems += [f"DUPLICATE    {p}" for p in lockfile.duplicate_paths(lock)]
     problems += [f"NOT LOCKED   {p}" for p in declared if p not in set(locked)]
     problems += [f"NOT DECLARED {p}" for p in locked if p not in set(declared)]
     problems += [f"NO SHA256    {m.get('model')}" for m in (lock.get("models") or [])

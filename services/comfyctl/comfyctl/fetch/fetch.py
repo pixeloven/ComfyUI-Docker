@@ -95,6 +95,20 @@ class Report:
         return "\n".join(out)
 
 
+def _inside_root(rel: str) -> bool:
+    """A lock path stays under the root it is joined to.
+
+    The lock schema already refuses `..`, `.`, empty segments and `\\`; this
+    holds even for a lock that skipped it. A backslash is refused outright,
+    because on Windows `models/..\\..\\x` climbs out. Lexical on purpose: a
+    symlink INSIDE the root, such as `models` pointing at a shared store, is
+    followed, because that is the deployment's choice, not an escape.
+    """
+    path = pathlib.PurePosixPath(rel)
+    return (bool(path.parts) and "\\" not in rel and not path.is_absolute()
+            and ".." not in path.parts)
+
+
 def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
                report: Report, progress=None) -> None:
     name = model.get("model") or "<unnamed>"
@@ -106,6 +120,12 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     if not rel:
         report.lines.append(f"  SKIP    {name}: no path recorded")
         report.skipped += 1
+        return
+
+    escapes = [p for p in paths if not _inside_root(p)]
+    if escapes:
+        report.lines.append(f"  FAILED  {name}: path leaves the root: {escapes[0]}")
+        report.failed += 1
         return
 
     target = root / rel
@@ -177,6 +197,9 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
     for extra in paths[1:]:
         dest = root / extra
         dest.parent.mkdir(parents=True, exist_ok=True)
+        # copyfile writes THROUGH a symlink at dest; the main path's rename
+        # replaces one. Remove it first, so both behave the same.
+        dest.unlink(missing_ok=True)
         shutil.copyfile(target, dest)
 
 

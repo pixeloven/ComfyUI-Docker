@@ -47,10 +47,14 @@ replaced the `fetch` image in 6.0.0.
   stderr, so the output parses. Only a command line the CLI can't parse at all,
   such as an unknown option, exits 2 with usage text on stderr and no JSON.
 - **Exit codes:** `0` did what was asked, `1` a real failure (an input that isn't
-  valid YAML or JSON, or fails its schema; an unresolved source, a hash mismatch,
+  valid YAML or JSON, or fails its schema or the semantic checks; an unresolved
+  source, two groups installing different files at one path, a hash mismatch,
   a lock entry with no SHA256, manifest and lock disagree), `2` a bad request (a
   missing file or directory, an unknown profile, bad or conflicting flags, a
-  `--store` that isn't a ComfyUI root).
+  `--store` that isn't a ComfyUI root, an `-O` that names a directory, an
+  unwritable directory or an input file). Before it resolves anything,
+  `resolve` validates the manifest, and a `--from-lock` parent, exactly as
+  `check` does, and exits `1` if either fails, listing the problems.
 
 `comfy.yaml` may itself be generated. Past a few hundred lines a single manifest
 stops working — every family conflicts with every other on edit — so `build`
@@ -74,12 +78,16 @@ models:
     files:
       - source: hf:Comfy-Org/Qwen-Image_ComfyUI
         file: split_files/vae/qwen_image_vae.safetensors
-        install: models/vae/   # a DIRECTORY, must start `models/` and end `/`
+        install: models/vae/   # a DIRECTORY, must start `models/` and end `/`, no `..`
         type: vae
 ```
 
 `install` is a directory because a human says "put it in vae"; the lock records
-the resolved full path.
+the resolved full path. `as:` names the file under `install`, and may include
+a subdirectory (`as: sub/x.safetensors`), but never ends in `/`. No path may
+hold an empty, `.` or `..` segment or a `\`, and `fetch` refuses a lock path
+that would land outside the root it was given. A symlinked directory under the
+root is followed, by design.
 
 ## Source forms
 
@@ -88,16 +96,19 @@ the resolved full path.
 | `hf:<owner>/<repo>` | `file:` | `x-linked-etag` header |
 | `gh:<owner>/<repo>@<tag>` | `file:` (asset name) | release asset `digest`, else download-and-hash |
 | `civitai:<modelVersionId>` | **`as:`** | `files[0].hashes.SHA256` |
-| `https://…` | **`sha256:`** | nothing — you must state it |
+| `https://…` | **`sha256:`** and **`as:`** (or `file:`) | nothing — you must state it |
 
 Note the two that need something extra, because both fail in confusing ways:
 
 - **`civitai:` requires `as:`.** The filename comes from the API, so without it
   the install path is not knowable offline — and `check` cannot run without
   network. The schema enforces this.
-- **A direct URL requires `sha256:`.** Nothing about a bare URL can be resolved
-  from headers. Resolve refuses rather than writing a lock entry that verifies
-  nothing.
+- **A direct URL requires `sha256:`, and `as:` or `file:`.** Nothing about a
+  bare URL can be resolved from headers. Resolve refuses rather than writing a
+  lock entry that verifies nothing. The name says what the installed file is
+  called, and `check` derives the path from it offline. Up to 5.x a URL with
+  neither locked the `install` directory as the path, and fetch wrote the file
+  over it; the schema now refuses that entry.
 
 Use `as:` too whenever the local filename should differ from upstream's — e.g.
 upstream `4x-UltraSharp.pth` stored as `4xUltrasharp_4xUltrasharpV10.pt`.
@@ -129,9 +140,17 @@ Generate the full lock first, then **derive** the others so every profile pins
 identical commits:
 
 ```sh
-comfyctl fetch resolve comfy.yaml > comfy-lock.yaml
-comfyctl fetch resolve comfy.yaml --profile sdxl --from-lock comfy-lock.yaml > locks/sdxl.yaml
+comfyctl fetch resolve comfy.yaml -O comfy-lock.yaml
+comfyctl fetch resolve comfy.yaml --profile sdxl --from-lock comfy-lock.yaml -O locks/sdxl.yaml
 ```
+
+Use `-O`/`--out` rather than `>`: it writes only once every source resolves,
+so a failed resolve leaves the committed lock as it was. The shell truncates a
+`>` target before `resolve` runs, so a failure there leaves an empty lock.
+`--header <file>` prepends that file to the lock verbatim, for a provenance
+comment. A symlinked `-O` is written through, and an existing file keeps its
+permissions. `-O` exits `2` before resolving when it names a directory, an
+unwritable or missing directory, the manifest or the `--from-lock` parent.
 
 The first command rewrites `comfy-lock.yaml` with `auth` and `models` only, so
 it drops a `custom_nodes` section: carry that section over by hand. A derived
@@ -179,6 +198,10 @@ A host listed here whose variable is unset does **not** block public files.
   `check` on its own. A derived lock deliberately narrower than any profile adds
   `--subset-only`: it must still be a verbatim subset and declare nothing extra,
   but a declared file it lacks is reported under `narrowed`, not as a failure.
+- **Declaring one install path twice.** A file shared by two groups, declared
+  identically (`x-` keys aside), is one lock entry. Two *different* files at
+  one path are refused: `resolve` reports it as unresolved, and `check` as
+  `CONFLICT`. A lock listing a path twice fails `check` as `DUPLICATE`.
 - **Trusting a filename.** The same name routinely carries different bytes.
   `flux1-krea-dev` had a Civitai source that now 404s and an identical-byte copy
   on HuggingFace — only the hash proved they were the same file.

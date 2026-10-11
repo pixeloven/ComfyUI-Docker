@@ -9,7 +9,7 @@ Kubernetes Job, or an agent:
 
     comfyctl fetch build models/ -O comfy.yaml
     comfyctl fetch facts models/ comfy-lock.yaml --store /workspace
-    comfyctl fetch resolve comfy.yaml > comfy-lock.yaml
+    comfyctl fetch resolve comfy.yaml -O comfy-lock.yaml
     comfyctl fetch fetch comfy-lock.yaml /workspace --apply
     comfyctl fetch check comfy.yaml comfy-lock.yaml
 
@@ -17,11 +17,14 @@ EXIT CODES are part of the interface, because automation reads them:
 
     0  did what was asked
     1  a real failure -- an input that isn't valid YAML or JSON, or fails
-       its schema; a source did not resolve, a hash did not match, a lock
-       and its manifest disagree
+       its schema or the semantic checks (`resolve` checks its manifest and
+       --from-lock parent as `check` does); a source did not resolve, two
+       groups install different files at one path, a hash did not match, a
+       lock and its manifest disagree
     2  the request itself was wrong -- a missing file or directory, an
        unknown profile, bad or conflicting flags, a --store that isn't a
-       ComfyUI root
+       ComfyUI root, an -O that names a directory, an unwritable directory
+       or an input file
 
 Human output goes to stderr; stdout carries the artifact, so redirecting it into
 a lock file stays correct.
@@ -31,7 +34,9 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import os
 import pathlib
+import stat
 from typing import Annotated, Any, NoReturn
 
 import typer
@@ -125,6 +130,49 @@ def _load(path: pathlib.Path, what: str, out: Out) -> dict:
     return doc
 
 
+def _out_refusal(out_path: pathlib.Path, inputs: list[pathlib.Path]) -> str | None:
+    """Why --out can't be written, checked BEFORE the network pass.
+
+    A refusal found after resolving would throw the pass away, and one found
+    by the rename would be a traceback.
+    """
+    dest = out_path.resolve()
+    if dest.is_dir():
+        return f"--out is a directory: {out_path}"
+    if not dest.parent.is_dir():
+        return f"no such directory for --out: {dest.parent}"
+    if not os.access(dest.parent, os.W_OK):
+        return f"--out's directory is not writable: {dest.parent}"
+    for p in inputs:
+        if p.resolve() == dest:
+            return f"--out would overwrite an input: {p}"
+    return None
+
+
+def _write_or_print(out: Out, rendered: str, out_path: pathlib.Path | None) -> None:
+    """The lock to stdout, or to --out through a sibling and a rename.
+
+    Only ever called once the lock is complete, so a failed resolve leaves the
+    committed lock as it was. `> lock.yaml` can't: the shell truncates it
+    before resolve runs, and a failure leaves it empty. A symlinked --out is
+    written through, and an existing file keeps its permission bits.
+    """
+    if out_path is None:
+        typer.echo(rendered, nl=False)
+        return
+    dest = out_path.resolve()
+    tmp = dest.with_name(f".{dest.name}.resolve-tmp")
+    try:
+        tmp.write_text(rendered, encoding="utf-8")
+        if dest.exists():
+            os.chmod(tmp, stat.S_IMODE(dest.stat().st_mode))
+        os.replace(tmp, dest)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        _failed(out, f"could not write {out_path}: {exc.strerror or exc}",
+                lock_written=False)
+
+
 @app.command()
 def resolve(
     manifest: Annotated[pathlib.Path, typer.Argument(help="comfy.yaml")],
@@ -132,6 +180,13 @@ def resolve(
     from_lock: Annotated[pathlib.Path | None, typer.Option(
         "--from-lock",
         help="Select from an existing lock instead of resolving. Requires --profile.")] = None,
+    out_path: Annotated[pathlib.Path | None, typer.Option(
+        "--out", "-O",
+        help="Write the lock here, only if every source resolves; on failure the "
+             "file is left as it was. A symlink is written through, and an "
+             "existing file keeps its permissions. Default: stdout.")] = None,
+    header: Annotated[pathlib.Path | None, typer.Option(
+        help="File whose contents are prepended to the lock, verbatim.")] = None,
     output: OutputOpt = Mode.auto,
 ) -> None:
     """Manifest → lock. Talks to the network.
@@ -139,15 +194,50 @@ def resolve(
     NOT idempotent across time, deliberately: re-resolving a moving `revision:`
     after upstream advances is supposed to produce a new commit and a new hash.
     That is why CI never re-resolves as a drift check — use `check` instead.
+
+    Exits 1 when the manifest, or the --from-lock parent, fails the checks
+    `check` runs on it, when a source does not resolve, or when two groups
+    install different files at one path; nothing is written. Exits 2 for a
+    wrong request: an unknown profile, a missing file, or an -O that names a
+    directory, an unwritable directory or an input.
     """
     out = Out(output)
     doc = _load(manifest, "manifest", out)
 
+    if from_lock is not None and profile is None:
+        _usage(out, "--from-lock needs --profile: without one it would copy "
+                    "the lock verbatim")
+    if out_path is not None:
+        refusal = _out_refusal(out_path, [manifest] + ([from_lock] if from_lock else []))
+        if refusal:
+            _usage(out, refusal)
+    head = ""
+    if header is not None:
+        if not header.is_file():
+            _usage(out, f"no such header file: {header}")
+        head = header.read_text()
+
+    # VALIDATE FIRST, exactly as `check` does: a typo'd key otherwise surfaced
+    # as a KeyError traceback, after the network had been used. Semantics only
+    # once the structure holds, for the same reason as in `check`. A file that
+    # exists but whose content is bad is a failure (1), as in `check`.
+    problems = schema_mod.validate(doc, "comfy")
+    if not problems:
+        problems = schema_mod.validate_semantics(doc)
+    parent = None
     if from_lock is not None:
-        if profile is None:
-            _usage(out, "--from-lock needs --profile: without one it would copy "
-                        "the lock verbatim")
         parent = _load(from_lock, "lock", out)
+        problems += [f"parent: {p}" for p in schema_mod.validate(parent, "comfy-lock")]
+    if problems:
+        out.problem(f"{len(problems)} schema problem(s):")
+        for p in problems:
+            out.problem(f"  {p}")
+        out.problem("\nNo lock written.")
+        if out.is_json:
+            out.result("", {"problems": problems, "ok": False, "lock_written": False})
+        raise typer.Exit(1)
+
+    if parent is not None:
         try:
             auth, models = resolve_mod.from_lock(doc, profile, parent)
         except profiles_mod.ProfileError as exc:
@@ -158,10 +248,15 @@ def resolve(
             _failed(out, str(exc), profile=profile, entries=0)
         out.note(f"profile [bold]{profile}[/bold] selects {len(models)} entries "
                  f"from {from_lock}")
+        if not out.is_json or out_path is not None:
+            _write_or_print(out, head + lockfile.dump(auth, models), out_path)
+        if out_path is not None:
+            out.note(f"wrote {out_path}: {len(models)} entries")
         if out.is_json:
-            out.result("", {"profile": profile, "entries": len(models), "models": models})
-        else:
-            typer.echo(lockfile.dump(auth, models), nl=False)
+            result = {"profile": profile, "entries": len(models), "models": models}
+            if out_path is not None:
+                result["path"] = str(out_path)
+            out.result("", result)
         return
 
     try:
@@ -188,12 +283,17 @@ def resolve(
                             "problems": failures, "ok": False})
         raise typer.Exit(1)
 
+    if not out.is_json or out_path is not None:
+        _write_or_print(out, head + lockfile.dump(doc.get("auth"), models), out_path)
+    if out_path is not None:
+        out.note(f"wrote {out_path}: {len(models)} entries")
     if out.is_json:
-        out.result("", {"resolved": len(models), "declared": declared,
-                        "failures": [], "lock_written": True, "models": models,
-                        "problems": [], "ok": True})
-    else:
-        typer.echo(lockfile.dump(doc.get("auth"), models), nl=False)
+        result = {"resolved": len(models), "declared": declared,
+                  "failures": [], "lock_written": True, "models": models,
+                  "problems": [], "ok": True}
+        if out_path is not None:
+            result["path"] = str(out_path)
+        out.result("", result)
 
 
 @app.command()

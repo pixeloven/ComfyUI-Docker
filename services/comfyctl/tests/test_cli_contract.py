@@ -156,7 +156,8 @@ def _w(path, text):
 
 NOT_YAML = "models: [\n"
 UNRESOLVABLE = ("models:\n  - name: g\n    files:\n"
-                "      - {source: 'https://example.invalid/a.safetensors', install: models/loras/}\n")
+                "      - {source: 'https://example.invalid/a.safetensors', install: models/loras/,\n"
+                "         as: a.safetensors}\n")
 
 
 def _build_check_stale(f, t):

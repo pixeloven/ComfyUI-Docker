@@ -57,7 +57,8 @@
               "properties": {
                 "path": {
                   "type": "string",
-                  "pattern": "^models/"
+                  "pattern": "^models/(?:(?!\\.{1,2}(?:/|$))[^/\\\\]+/)*(?!\\.{1,2}(?:/|$))[^/\\\\]+$",
+                  "description": "The installed FILE's path, relative to the ComfyUI root: `models/`, then segments, never ending `/`. No empty, `.` or `..` segment and no `\\`, so fetch can't write outside the root or over a directory."
                 }
               }
             }

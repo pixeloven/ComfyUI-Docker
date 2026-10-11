@@ -15,4 +15,5 @@ models:
   - name: url-without-hash
     files:
       - source: https://example.com/thing.safetensors
+        as: thing.safetensors
         install: models/loras/

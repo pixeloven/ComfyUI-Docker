@@ -50,7 +50,9 @@
                 },
                 "file": {
                   "type": "string",
-                  "description": "Path within the source repo. Omit for sources that name a single file."
+                  "minLength": 1,
+                  "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\\\]+(?:/(?!\\.{1,2}(?:/|$))[^/\\\\]+)*$",
+                  "description": "Path within the source repo, for hf: and gh:. Its basename names the installed file unless `as` does. A direct URL needs `file` or `as`. Relative, with no empty, `.` or `..` segment, and no `\\`."
                 },
                 "revision": {
                   "type": "string",
@@ -59,12 +61,14 @@
                 },
                 "install": {
                   "type": "string",
-                  "pattern": "^models/.+/$",
-                  "description": "Directory to install into."
+                  "pattern": "^models/(?:(?!\\.{1,2}(?:/|$))[^/\\\\]+/)+$",
+                  "description": "Directory to install into: `models/`, then one or more segments, ending `/`. No empty, `.` or `..` segment and no `\\`, so it can't leave the ComfyUI root."
                 },
                 "as": {
                   "type": "string",
-                  "description": "Local filename, if it should differ from upstream's."
+                  "minLength": 1,
+                  "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\\\]+(?:/(?!\\.{1,2}(?:/|$))[^/\\\\]+)*$",
+                  "description": "Local filename, if it should differ from upstream's, relative to `install`; it may name a subdirectory (`sub/x.safetensors`). No empty, `.` or `..` segment, no `\\`, and no trailing `/`."
                 },
                 "type": {
                   "type": "string",
@@ -93,6 +97,29 @@
                       "as"
                     ],
                     "$comment": "A civitai source's filename comes from the API, so it is not knowable offline. `as` makes the install path derivable from the manifest alone, which is what lets check-lock.sh run without network."
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "source": {
+                        "pattern": "^https?://"
+                      }
+                    },
+                    "required": [
+                      "source"
+                    ],
+                    "not": {
+                      "required": [
+                        "file"
+                      ]
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "as"
+                    ],
+                    "$comment": "Without either, the install path is the `install` DIRECTORY, and fetch writes the file over it. Taking the name from the URL isn't derivable the way check derives paths, so the manifest names it."
                   }
                 }
               ],
