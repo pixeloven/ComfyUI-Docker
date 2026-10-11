@@ -62,7 +62,7 @@ def test_resolve_refuses_a_direct_url_without_as_or_file(tmp_path, no_network):
     """It used to lock `models/checkpoints/`, and fetch wrote a file over it."""
     m = write(tmp_path / "comfy.yaml", manifest(("g", [url_file()])))
     r = runner.invoke(app, ["resolve", str(m)])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert r.stdout == "", "a lock was written"
     assert "needs `as` (or `file`)" in r.stderr
 
@@ -250,7 +250,7 @@ def test_a_typo_is_a_schema_problem_not_a_traceback(tmp_path, no_network):
     m = write(tmp_path / "comfy.yaml", manifest(("a", [{
         "source": "hf:o/r", "file": "a.safetensors", "instal": "models/checkpoints/"}])))
     r = runner.invoke(app, ["resolve", str(m)])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert not isinstance(r.exception, KeyError)
     assert "'install' is a required property" in r.stderr
     assert r.stdout == ""
@@ -260,7 +260,7 @@ def test_json_mode_carries_the_schema_problems(tmp_path, no_network):
     m = write(tmp_path / "comfy.yaml", manifest(("a", [{
         "source": "hf:o/r", "file": "a.safetensors", "instal": "models/checkpoints/"}])))
     r = runner.invoke(app, ["resolve", str(m), "-o", "json"])
-    assert r.exit_code == 2
+    assert r.exit_code == 1
     payload = json.loads(r.stdout)
     assert payload["ok"] is False and payload["lock_written"] is False
     assert any("'install' is a required property" in p for p in payload["problems"])
@@ -273,7 +273,7 @@ def test_the_semantic_checks_run_too(tmp_path, no_network):
         profiles={"p": ["a"]},
         capabilities={"render": {"profiles": ["p"], "requires": ["vae"]}}))
     r = runner.invoke(app, ["resolve", str(m)])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "requires type 'vae'" in r.stderr
 
 
@@ -286,7 +286,7 @@ def test_a_malformed_parent_is_reported_as_the_parents_problem(tmp_path, no_netw
         "paths": [{}]}]})
     r = runner.invoke(app, ["resolve", str(m), "--profile", "p", "--from-lock", str(parent),
                             "-o", "json"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "parent: models/0/paths/0: 'path' is a required property" in \
         json.loads(r.stdout)["problems"]
 
@@ -360,7 +360,7 @@ def test_out_writes_the_lock_and_header_prepends(tmp_path):
 @pytest.mark.parametrize("entry, code, why", [
     ({"source": "https://example.invalid/a.safetensors", "as": "a.safetensors",
       "install": "models/checkpoints/"}, 1, "needs `sha256`"),   # unresolved
-    (url_file(), 2, "1 schema problem(s)"),                       # refused before resolving
+    (url_file(), 1, "1 schema problem(s)"),                       # refused before resolving
 ])
 def test_a_failed_resolve_leaves_the_existing_lock_untouched(tmp_path, entry, code, why):
     m = write(tmp_path / "comfy.yaml", manifest(("a", [entry])))
@@ -426,7 +426,7 @@ def test_an_as_with_a_trailing_slash_is_refused_before_anything_is_written(tmp_p
     m = write(tmp_path / "comfy.yaml", manifest(("g", [url_file(**{"as": "sub/"})])))
     lock = tmp_path / "lock.yaml"
     r = runner.invoke(app, ["resolve", str(m), "-O", str(lock)])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "models/0/files/0/as: 'sub/' does not match" in " ".join(r.stderr.split())
     assert not lock.exists()
 

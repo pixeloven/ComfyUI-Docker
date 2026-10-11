@@ -21,7 +21,7 @@ ARG PYTHON_VERSION=3.13
 # digest) is in comfyrelay/dockerfile.comfy.relay; move both together.
 FROM ghcr.io/astral-sh/uv:0.11.23@sha256:d0a0a753ab981624b49c97abc98821c1c09f4ca69d1ef5cee69c501be3d88479 AS uv
 
-FROM python:${PYTHON_VERSION}-alpine AS builder
+FROM mirror.gcr.io/library/python:${PYTHON_VERSION}-alpine AS builder
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_PYTHON=/usr/local/bin/python3 \
@@ -42,7 +42,7 @@ RUN uv sync --frozen --no-dev --package comfyctl --no-install-workspace
 COPY comfyctl/comfyctl comfyctl/comfyctl
 RUN uv sync --frozen --no-dev --package comfyctl --no-editable
 
-FROM python:${PYTHON_VERSION}-alpine
+FROM mirror.gcr.io/library/python:${PYTHON_VERSION}-alpine
 
 # pip, setuptools and the build machinery are removed: nothing at runtime
 # installs anything, and leaving them is both weight and attack surface. The

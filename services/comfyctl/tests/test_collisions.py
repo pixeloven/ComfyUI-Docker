@@ -94,10 +94,16 @@ def test_build_cli_exits_1_and_writes_nothing(colliding_tree, tmp_path):
     assert not out.exists(), "a colliding manifest reached disk"
 
 
-def test_resolve_cli_exits_2_on_a_colliding_profile(tmp_path):
-    """Exit 2 = the request was wrong. test_cli_contract pins that meaning, and
-    a manifest naming one thing twice is a wrong request, not a failed one."""
+def test_resolve_cli_exits_1_on_a_colliding_profile(tmp_path):
+    """A name that is both a profile and a model group makes the manifest
+    semantically invalid. `resolve` validates its manifest as `check` does,
+    and an input that exists but whose content is bad exits 1, as in `check`.
+    Up to 5.x this exited 2."""
+    # COLLIDING with schema-valid files, so the collision is what is reported.
+    doc = {**COLLIDING, "models": [{"name": "shared-vae", "files": [{
+        "source": "hf:o/r", "file": "a.safetensors", "install": "models/vae/"}]}]}
     m = tmp_path / "comfy.yaml"
-    m.write_text(yaml.safe_dump(COLLIDING))
+    m.write_text(yaml.safe_dump(doc))
     r = runner.invoke(app, ["resolve", str(m), "--profile", "shared-vae"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
+    assert "both a model group and a profile" in " ".join(r.stderr.split())

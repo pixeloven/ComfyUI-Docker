@@ -82,12 +82,39 @@ moved:
      where it was `comfyfetch/<version> (…)`. Update any proxy or allowlist
      rule that matches it.
 
-`comfyctl fetch resolve`, `check` and the manifest and lock formats:
+`comfyctl fetch` behaviour that changes, each fixing a consumer report:
 
+- **`facts` sidecars key `files:` by install path, not basename** (#153). Two
+  files with the same name, such as two `qwen_3_4b.safetensors` from different
+  repos, each get their own header and hash; before, one got the other's facts.
+  A `--headers` file is keyed the same way, by the path relative to the ComfyUI
+  root, and a basename key exits 1.
+  *Migration:* regenerate every sidecar with `comfyctl fetch facts`, and key
+  any `--headers` file by `models/…` path.
+- **`facts --store` takes the ComfyUI root, not `models/`** (#153), as `fetch`
+  does. Given a directory with no `models/` inside, it exits 2; a `--headers`
+  key that doesn't start `models/` exits 1. Before, such a store matched
+  nothing and wrote empty sidecars with exit 0. A `--headers` value of `null`
+  is an empty header; any other value that isn't an object exits 1.
+  *Migration:* pass `--store /workspace`, not `--store /workspace/models`.
+- **`fetch` fails on an entry with no SHA256** (#158). The entry is still
+  refused, but it counts as `failed`, not `skipped`, and the run exits 1, dry
+  run or `--apply`. Its line reads `FAILED  <model>: no SHA256 in the lock, …`
+  where it read `SKIP    <model>: …`.
+  *Migration:* resolve the lock again so every entry has a `SHA256` hash, or
+  drop the entry; match `FAILED`, not `SKIP`, in anything that greps the line.
+- **An unknown `--profile` with `resolve --from-lock` exits 2**, as it does
+  without `--from-lock` (#152, #154). It exited 1.
+  *Migration:* treat exit 2 as the bad-profile case in anything that checked for 1.
+- **Under `-o json`, `fetch`'s per-entry lines and `resolve`'s `UNRESOLVED`
+  lines go to stderr** (#152), as plain text, where json mode dropped them. stdout
+  still carries only the JSON result.
+  *Migration:* a caller that merges stderr into stdout (`2>&1`) before parsing
+  the JSON must stop merging, or read stdout alone.
 - **A direct-URL source needs `as:` or `file:`** (#161). Without either, the
   lock's path was the `install` directory, and `fetch` wrote the model over
-  it. The manifest schema now refuses the entry, so `resolve` exits 2 and
-  `check` exits 1. For a URL with `file:` and no `as:`, the lock's `model:` is
+  it. The manifest schema now refuses the entry, so `resolve` and `check`
+  exit 1. For a URL with `file:` and no `as:`, the lock's `model:` is
   now `file`'s basename, matching its path, where it was the URL's.
   *Migration:* add `as: <filename>` to each `https://` entry that has neither.
 - **`as:` and `file:` can't be empty or end in `/`** (#161). `as` may still
@@ -123,16 +150,34 @@ moved:
   directories, then re-resolve any lock `check` now reports as `DUPLICATE`.
 - **`resolve` validates before it resolves** (#154): the manifest against
   the schema and the semantic checks `check` runs, and a `--from-lock` parent
-  against the lock schema. A problem exits 2 with the list on stderr, or
-  `{"problems": [...], "ok": false, "lock_written": false}` under `-o json`,
-  where it was a `KeyError` traceback with exit 1, or no error at all for a
-  semantic problem such as a capability no profile can satisfy. An unknown
-  `--profile` with `--from-lock` now exits 2 as well, as it does without it.
+  against the lock schema. A problem exits 1, as in `check`, with the list on
+  stderr, plus `{"problems": [...], "ok": false, "lock_written": false}` under
+  `-o json`. Before, it was a `KeyError` traceback, or no error at all for a
+  semantic problem such as a capability no profile can satisfy. A name that is
+  both a profile and a model group is one of those semantic problems: up to
+  5.x `resolve` exited 2 for it, and from 6.0 it exits 1.
   *Migration:* run `comfyctl fetch check` on the manifest and fix what it
-  reports; treat exit 2 from `resolve` as "fix the input".
+  reports; treat exit 1 from `resolve` with `problems` and no `failures` as
+  "fix the input", and expect 1, not 2, for a profile/group name collision.
 
 ### Added
 
+- **`comfyctl fetch facts SOURCES --check`** (#155): an offline freshness gate
+  for committed `.facts.yaml` sidecars. It exits 1 when a sidecar has no sibling
+  lineage, or names a file its lineage doesn't declare. It takes no lock, store
+  or network.
+- **`comfyctl fetch check --parent PARENT --subset-only`** (#157), for a derived
+  lock narrower than any profile. The lock must still be a verbatim subset of
+  the parent and hold nothing undeclared; a declared file it lacks is listed
+  under `narrowed` in the JSON result instead of failing as `NOT LOCKED`.
+  Without `--parent` it exits 2.
+- **comfyrelay `node_describe`: several classes per call, and help optional**
+  ([#169](https://github.com/pixeloven/ComfyUI-Docker/issues/169)). `class_types` (up to 20, instead of
+  `class_type`) answers `{nodes, unknown, failed, omitted}`: an unknown class is listed in `unknown` with
+  `unknown_node_class` and its `suggestions`, a class ComfyUI fails to describe in `failed`, and the call still
+  succeeds. A batch's `nodes` take at most 40,000 characters of the answer: help is dropped first
+  (`help_omitted`), and only then classes (`omitted`, to ask for alone). `include_help: false` leaves the help
+  pages out. Both are optional, and a `class_type` call answers as before.
 - **`comfyctl fetch resolve -O/--out PATH` and `--header FILE`** (#159), as
   `build` has. `-O` writes the lock through a sibling file and a rename only
   once every source has resolved, so a failed resolve leaves the existing lock
@@ -142,6 +187,23 @@ moved:
   permissions. `-O` exits 2 before resolving anything when it names a
   directory, a directory that is missing or not writable, the manifest, or the
   `--from-lock` parent. stdout stays the default.
+
+### Changed
+
+- **Docker Hub images come through `mirror.gcr.io`**, Google's Docker Hub mirror, because Docker
+  Hub's anonymous pull limit was failing CI, `main`'s publishing runs included. The bases
+  (`ubuntu:24.04`, `nvidia/cuda:13.0.2-base-ubuntu24.04`, `python:3.13-alpine`, and
+  `python:3.13-slim` at the same digest), CI's actionlint and the BuildKit image `setup-buildx-action`
+  starts all keep their tags and digests, so the published images' layers don't change.
+- **The `comfyui-workflows` guides: a `custom_nodes` lock entry, and what `workflow_validate` doesn't check**
+  ([#169](https://github.com/pixeloven/ComfyUI-Docker/issues/169), [#145](https://github.com/pixeloven/ComfyUI-Docker/pull/145)).
+  `models-and-nodes` shows the fields of a node pack's entry: `git_custom_nodes`, keyed by repository URL,
+  with `hash` and `disabled`, and `cnr_custom_nodes`, a registry id mapped to its version, as ComfyUI-Manager's
+  snapshot has them. It also notes that `comfyctl fetch resolve` doesn't write that section.
+  `errors-and-validation` opens by saying that a graph `workflow_validate` calls `valid` and `runnable` can
+  still be rejected by ComfyUI for an input or link type, as T4's is.
+  `comfy-manifest`'s "never hand-edit a lock" now names `custom_nodes` as the one exception, since nothing in
+  `comfyctl` generates it, and its `resolve` example says that regenerating drops that section.
 
 ### Fixed
 
@@ -163,6 +225,23 @@ moved:
 - **`core-amd` and `core-intel` declare `comfy_network`** (#119), so
   `docker compose --profile models` no longer fails there. `make validate` and
   CI now check every example with `--profile models`.
+- **`comfyctl fetch -o json` always writes a JSON result** (#152). A failed
+  `resolve --from-lock`, `build` or `build --check` exited 1 with nothing on
+  stdout or stderr, and a bad request wrote only to stderr. Each now writes one
+  JSON object to stdout, with `"ok": false` and the reasons in `problems`, and
+  the reason to stderr too. `fetch`'s result gains `ok`, and a full `resolve`'s
+  gains `ok` and `problems`. An input that isn't readable YAML (or `--headers`
+  JSON), or a manifest that isn't a mapping, exits 1 the same way instead of
+  with a traceback.
+- **`FETCH.md` lists what `resolve` actually reads** (#162). It claimed file
+  sizes; `resolve` reads none, and no output reports bytes.
+- **comfyrelay: display names are cut to 120 characters** (#169) in `node_search`, `node_describe` and its
+  suggestions, since they come from ComfyUI.
+- **comfyrelay `node_describe`: help fetches are bounded** (#163, #169). A call's help fetches get 5 s in all;
+  after that help is left out, and `help_omitted` says why, instead of the call waiting on ComfyUI.
+- **comfyrelay `workflow_run`: a rejected run says it was never queued** (#169). `workflow_rejected` still
+  carries a `job_id`, which only repeats the rejection; its `job_status` now reports `comfyui_state: "rejected"`
+  instead of `submitting`, also when a cancel meets the rejection.
 
 ## 5.2.0 — 2026-10-09
 

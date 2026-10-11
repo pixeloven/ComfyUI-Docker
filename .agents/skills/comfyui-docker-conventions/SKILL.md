@@ -13,7 +13,7 @@ this skill disagree, the file is right, so fix the skill in the same change.
 | Path | What it is |
 |---|---|
 | `docker-bake.hcl` | Every image target and group. Pins `COMFYUI_VERSION`, `COMFY_DOCS_SHA` (the `mcp` image's docs index) and the SageAttention wheels, and passes `GIT_SHA` to the `mcp` build. |
-| `services/runtime/` | Base images: `dockerfile.cuda.runtime` (`nvidia/cuda:13.0.2-base-ubuntu24.04`) and `dockerfile.cpu.runtime` (`ubuntu:24.04`, used for cpu, **rocm and xpu**) |
+| `services/runtime/` | Base images: `dockerfile.cuda.runtime` (`mirror.gcr.io/nvidia/cuda:13.0.2-base-ubuntu24.04`) and `dockerfile.cpu.runtime` (`mirror.gcr.io/library/ubuntu:24.04`, used for cpu, **rocm and xpu**) |
 | `services/comfy/core/` | `dockerfile.comfy.core` (a builder stage, then the `core` stage), `entrypoint.sh`, `startup.sh` |
 | `services/comfy/complete/` | `dockerfile.comfy.cuda.complete`, built `FROM core`, and `extra-requirements.txt` |
 | `services/pyproject.toml`, `services/uv.lock` | The uv workspace: a virtual root (it publishes nothing) whose members are `comfyctl` and `comfyrelay`, with one lock. `uv run pytest -q` from `services/` runs every member's tests. |
@@ -130,6 +130,13 @@ There is no date tag.
   Only the `mcp` image pins its bases by digest (the `comfyctl` image's build-only uv stage
   is the same digest-pinned uv); `nvidia/cuda:13.0.2-base-ubuntu24.04`,
   `ubuntu:24.04` and `python:3.13-alpine` are pinned by tag alone.
+- **Docker Hub images come through `mirror.gcr.io`**, never `docker.io`: Docker Hub's
+  anonymous pull limit failed every CI run. Official images are
+  `mirror.gcr.io/library/<name>`, others `mirror.gcr.io/<owner>/<name>`, at the same tag
+  and digest. That covers the `FROM`s, CI's actionlint, and the BuildKit image every
+  `setup-buildx-action` names in `driver-opts`. The mirror holds only images Docker Hub
+  serves often and can lag a moved tag, so check a new or bumped ref with
+  `docker buildx imagetools inspect` on both. Dependabot has no `docker` ecosystem here.
 - **Multi-stage:** the venv, ComfyUI and torch are built in `builder` and copied into
   `core`. The runtime base keeps `build-essential` and `python3-dev`.
 - **Layer order:** base, then apt, then torch, then the ComfyUI clone. Nightly busts only the
@@ -212,7 +219,7 @@ tests/relay/corpus.sh --comfyui <core-cpu image> <mcp-convert image>
                                                  # own export and ComfyUI's /prompt validation, never queued. Needs the convert
                                                  # extra's Chromium on the host; CI's `mcp-convert template corpus` workflow runs it when
                                                  # the relay, its lock, its Dockerfile, the mcp-convert target or COMFYUI_VERSION changes
-docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:1.7.7 -color
+docker run --rm -v "$PWD":/repo -w /repo mirror.gcr.io/rhysd/actionlint:1.7.7 -color
 ```
 
 `make smoke` builds `core:cpu-smoke` from the tree and runs `tests/smoke/run.sh`,

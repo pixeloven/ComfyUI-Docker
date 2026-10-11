@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import httpx2
 import pytest
@@ -12,6 +13,7 @@ from comfyrelay import tools_introspection
 from comfyrelay.comfyui import ComfyUIClient
 from comfyrelay.server import build_server
 from mcp import Client
+from mcp_types import CallToolResult
 from relay_helpers import SYSTEM_STATS, settings
 
 pytestmark = pytest.mark.anyio
@@ -617,6 +619,246 @@ async def test_an_unknown_class_suggests_close_matches():
     err = await error("node_describe", {"class_type": "Load Checkpoint"})
     assert "CheckpointLoaderSimple" in [s["class_type"] for s in err["suggestions"]]
     assert (await error("node_describe", {"class_type": "Zzzzzz"}))["suggestions"] == []
+
+
+async def _describe_recording(args: dict, **overrides) -> tuple[CallToolResult, list[str]]:
+    """node_describe through a ComfyUI that records each path asked for."""
+    seen = []
+    table = routes(**overrides)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        path = request.url.raw_path.decode()
+        seen.append(path)
+        if path in table:
+            return table[path]
+        return httpx2.Response(200, json={}) if path.startswith("/object_info/") else httpx2.Response(404)
+
+    client = ComfyUIClient("http://comfyui.test:8188", transport=httpx2.MockTransport(handler))
+    server, _ = build_server(settings(profiles=("read",)), comfyui=client)
+    async with Client(server, mode="legacy") as mcp:
+        return await mcp.call_tool("node_describe", args), seen
+
+
+async def test_describe_several_classes_in_one_call_with_unknown_ones_listed_not_failed():
+    """class_types (#169): each class as class_type describes it, in the order asked and once each; an unknown one
+    is reported with the code and suggestions class_type fails with, and the rest are still answered."""
+    got = await ok(
+        "node_describe", {"class_types": ["KSampler", "checkpointloadersimple", "OpenAIDalle3", "KSampler", "Zzzzzz"]}
+    )
+    assert [n["class_type"] for n in got["nodes"]] == ["KSampler", "OpenAIDalle3"]
+    assert got["nodes"][0] == await ok("node_describe", {"class_type": "KSampler"})
+    single = await error("node_describe", {"class_type": "checkpointloadersimple"})
+    unknown, nothing = got["unknown"]
+    assert unknown == {
+        "class_type": "checkpointloadersimple",
+        "code": "unknown_node_class",
+        "message": single["message"],
+        "suggestions": single["suggestions"],
+    }
+    assert (nothing["class_type"], nothing["suggestions"]) == ("Zzzzzz", [])
+
+
+async def test_a_class_type_answer_is_the_node_spec_itself_in_content_and_structured_content():
+    """class_type answers as before class_types (#169): the NodeSpec, not wrapped, in both forms."""
+    result = await call("node_describe", {"class_type": "KSampler"})
+    assert json.loads(result.content[0].text) == result.structured_content
+    assert result.structured_content["class_type"] == "KSampler" and "nodes" not in result.structured_content
+
+
+async def test_a_batch_still_answers_when_the_suggestions_cannot_be_read():
+    """Suggestions are optional detail: a failing /object_info leaves the unknown class without them."""
+    got = await ok(
+        "node_describe",
+        {"class_types": ["KSampler", "checkpointloadersimple"]},
+        **{"/object_info": httpx2.Response(500, text="boom")},
+    )
+    assert [n["class_type"] for n in got["nodes"]] == ["KSampler"]
+    (unknown,) = got["unknown"]
+    assert (unknown["code"], unknown["suggestions"]) == ("unknown_node_class", [])
+    assert "no suggestions" in unknown["message"]
+
+
+async def test_comfyui_failing_on_one_class_fails_that_class_not_the_batch():
+    """A class_type call still fails; in a batch the failure is reported per class, and the rest are answered."""
+    boom = {"/object_info/OpenAIDalle3": httpx2.Response(500, text="boom")}
+    got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **boom)
+    assert [n["class_type"] for n in got["nodes"]] == ["KSampler"]
+    (failed,) = got["failed"]
+    assert (failed["class_type"], failed["code"]) == ("OpenAIDalle3", "comfyui_http_error")
+    assert failed["message"].startswith("OpenAIDalle3: ")
+    assert (await error("node_describe", {"class_type": "OpenAIDalle3"}, **boom))["code"] == "comfyui_http_error"
+
+
+async def test_a_batch_whose_object_info_read_times_out_lists_its_unknown_classes_without_suggestions(monkeypatch):
+    monkeypatch.setattr(tools_introspection, "OBJECT_INFO_SECONDS", 0.05)
+
+    async def stalled() -> httpx2.Response:
+        await asyncio.sleep(5)
+        return httpx2.Response(200, json=OBJECT_INFO)
+
+    asked = {"class_types": ["KSampler", "checkpointloadersimple"]}
+    got = await ok("node_describe", asked, **{"/object_info": stalled})
+    assert [n["class_type"] for n in got["nodes"]] == ["KSampler"]
+    (unknown,) = got["unknown"]
+    assert unknown["suggestions"] == [] and "no suggestions: /object_info timeout" in unknown["message"]
+
+
+async def test_a_slow_suggestion_scan_degrades_to_no_suggestions_with_the_reason(monkeypatch):
+    monkeypatch.setattr(tools_introspection, "SUGGEST_SECONDS", 0.05)
+    index = tools_introspection._name_index
+    monkeypatch.setattr(tools_introspection, "_name_index", lambda names: time.sleep(0.3) or index(names))
+    got = await ok("node_describe", {"class_types": ["checkpointloadersimple", "Zzzzzz"]})
+    assert [u["suggestions"] for u in got["unknown"]] == [[], []]
+    assert all("the scan took over 0.05s" in u["message"] for u in got["unknown"])
+
+
+async def test_the_suggestion_index_is_built_once_per_batch(monkeypatch):
+    built = []
+    index = tools_introspection._name_index
+    monkeypatch.setattr(tools_introspection, "_name_index", lambda names: built.append(1) or index(names))
+    got = await ok("node_describe", {"class_types": ["checkpointloadersimple", "Load Checkpoint", "Zzzzzz"]})
+    assert len(got["unknown"]) == 3 and built == [1]
+    assert got["unknown"][0]["suggestions"][0]["class_type"] == "CheckpointLoaderSimple"
+
+
+async def test_help_slower_than_its_bound_is_left_out_with_the_reason(monkeypatch):
+    """Help is optional detail (#163): ComfyUI too slow to serve it leaves the answer as it would be without it."""
+    monkeypatch.setattr(tools_introspection, "HELP_SECONDS", 0.05)
+
+    async def stalled() -> httpx2.Response:
+        await asyncio.sleep(5)
+        return httpx2.Response(200, text="late")
+
+    slow = {"/docs/KSampler/en.md": stalled}
+    single = await ok("node_describe", {"class_type": "KSampler"}, **slow)
+    assert "help" not in single and single["help_omitted"].startswith("timeout")
+    batch = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **slow)
+    assert "help" not in batch["nodes"][0] and batch["nodes"][0]["help_omitted"].startswith("timeout")
+
+
+def _spec_chars(node: dict) -> int:
+    return tools_introspection._answer_chars(tools_introspection.NodeSpec.model_validate(node))
+
+
+async def test_a_batch_measures_each_class_as_it_sits_in_the_answer():
+    """_answer_chars is what a class takes of the answer's text, nested in `nodes`: the cap holds on what the client
+    gets, not on each spec at the top level."""
+    result = await call("node_describe", {"class_types": ["KSampler", "OpenAIDalle3", "ResizeImageMaskNode"]})
+    nodes = result.structured_content["nodes"]
+    wrapper = len('{\n  "nodes": [\n') + len("\n  ]\n}") - 2  # the last item has no separator
+    assert len(result.content[0].text) == wrapper + sum(_spec_chars(n) for n in nodes)
+
+
+async def test_a_batch_over_its_budget_drops_help_from_the_last_class_back_before_omitting_any(monkeypatch):
+    help_md = {
+        "/docs/KSampler/en.md": httpx2.Response(200, text="k" * 3_000),
+        "/docs/OpenAIDalle3/en.md": httpx2.Response(200, text="d" * 30_000),
+    }
+    bare = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"], "include_help": False})
+    room = sum(_spec_chars(n) for n in bare["nodes"]) + 3_000 * 2  # both bare fit, and so does KSampler's help
+    monkeypatch.setattr(tools_introspection, "BATCH_MAX_CHARS", room)
+    got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **help_md)
+    ksampler, dalle = got["nodes"]
+    assert "omitted" not in got
+    assert len(ksampler["help"]) == 3_000 and "help_omitted" not in ksampler
+    assert "help" not in dalle and "ask for it alone" in dalle["help_omitted"]
+
+
+async def test_an_early_classs_help_never_costs_a_later_class_its_place(monkeypatch):
+    """KSampler with its help would fit, leaving too little for OpenAIDalle3; both fit without the help. A batch
+    drops the help, not the class (#198 re-review: 17 of 20 common classes came back with help, 3 omitted)."""
+    bare = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"], "include_help": False})
+    k_bare, d_bare = (_spec_chars(n) for n in bare["nodes"])
+    help_md = {"/docs/KSampler/en.md": httpx2.Response(200, text="k" * (d_bare // 2 + 400))}
+    monkeypatch.setattr(tools_introspection, "BATCH_MAX_CHARS", k_bare + d_bare + 300)  # + help_omitted
+    got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **help_md)
+    assert "omitted" not in got and [n["class_type"] for n in got["nodes"]] == ["KSampler", "OpenAIDalle3"]
+    assert "help" not in got["nodes"][0] and "ask for it alone" in got["nodes"][0]["help_omitted"]
+
+
+async def test_a_batch_still_over_its_budget_without_help_omits_classes(monkeypatch):
+    """What fits comes back in order, each class left out is named, to ask for alone; a class_type call is never
+    cut."""
+    help_md = {"/docs/KSampler/en.md": httpx2.Response(200, text="x" * 30_000)}
+    bare = await ok("node_describe", {"class_type": "KSampler", "include_help": False})
+    monkeypatch.setattr(tools_introspection, "BATCH_MAX_CHARS", _spec_chars(bare) + 200)  # + help_omitted
+    got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]}, **help_md)
+    (ksampler,) = got["nodes"]
+    assert "help" not in ksampler and "ask for it alone" in ksampler["help_omitted"]
+    assert [(o["class_type"], o["reason"].startswith("over ")) for o in got["omitted"]] == [("OpenAIDalle3", True)]
+    assert len((await ok("node_describe", {"class_type": "KSampler"}, **help_md))["help"]) == 30_000
+
+
+async def test_display_names_are_cut_to_a_fixed_width_wherever_they_are_passed_on():
+    """ComfyUI's data is untrusted: a 200,000-character display name reaches no answer whole."""
+    cap = tools_introspection.DISPLAY_NAME_MAX_CHARS
+    long_node = {**OBJECT_INFO["KSampler"], "display_name": "Long " * 40_000}
+    info = {**OBJECT_INFO, "LongNode": long_node}
+    routes_ = {
+        "/object_info": httpx2.Response(200, json=info),
+        "/object_info/LongNode": httpx2.Response(200, json={"LongNode": long_node}),
+    }
+    hits = (await ok("node_search", {"query": "LongNode"}, **routes_))["results"]
+    assert hits[0]["class_type"] == "LongNode" and len(hits[0]["display_name"]) == cap
+    assert len((await ok("node_describe", {"class_type": "LongNode"}, **routes_))["display_name"]) == cap
+    (suggested,) = (await error("node_describe", {"class_type": "LongNod"}, **routes_))["suggestions"]
+    assert suggested["class_type"] == "LongNode" and len(suggested["display_name"]) == cap
+    batch = await ok("node_describe", {"class_types": ["LongNod"]}, **routes_)
+    assert [len(s["display_name"]) for s in batch["unknown"][0]["suggestions"]] == [cap]
+
+
+async def test_a_batch_within_its_budget_is_not_cut():
+    got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]})
+    assert "omitted" not in got and all("help_omitted" not in n for n in got["nodes"])
+
+
+async def test_a_batch_takes_up_to_its_cap():
+    names = [f"Node{i}" for i in range(tools_introspection.MAX_DESCRIBE_CLASSES)]
+    got = await ok("node_describe", {"class_types": names})
+    assert (got["nodes"], len(got["unknown"])) == ([], tools_introspection.MAX_DESCRIBE_CLASSES)
+
+
+async def test_a_batch_of_known_classes_reads_only_their_own_object_info():
+    result, seen = await _describe_recording({"class_types": ["KSampler", "OpenAIDalle3"], "include_help": False})
+    assert not result.is_error and "unknown" not in result.structured_content
+    assert sorted(seen) == ["/object_info/KSampler", "/object_info/OpenAIDalle3"]
+
+
+async def test_include_help_false_leaves_the_help_page_out_and_never_fetches_it():
+    help_md = httpx2.Response(200, text="# KSampler\n\nDenoises.", headers={"content-type": "text/markdown"})
+    result, seen = await _describe_recording(
+        {"class_type": "KSampler", "include_help": False}, **{"/docs/KSampler/en.md": help_md}
+    )
+    assert not result.is_error and "help" not in result.structured_content
+    assert seen == ["/object_info/KSampler"]
+    batch = await ok(
+        "node_describe", {"class_types": ["KSampler"], "include_help": False}, **{"/docs/KSampler/en.md": help_md}
+    )
+    assert "help" not in batch["nodes"][0]
+    batch = await ok("node_describe", {"class_types": ["KSampler"]}, **{"/docs/KSampler/en.md": help_md})
+    assert batch["nodes"][0]["help"] == "# KSampler\n\nDenoises."
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {},
+        {"class_type": "KSampler", "class_types": ["KSampler"]},
+    ],
+    ids=["neither", "both"],
+)
+async def test_describe_takes_class_type_or_class_types(args):
+    assert (await error("node_describe", args))["code"] == "invalid_arguments"
+
+
+@pytest.mark.parametrize(
+    "class_types",
+    [[], [""], [f"Node{i}" for i in range(tools_introspection.MAX_DESCRIBE_CLASSES + 1)]],
+    ids=["empty", "an-empty-name", "over-the-cap"],
+)
+async def test_a_batch_is_refused_past_its_bounds_before_comfyui_is_asked(class_types):
+    result, seen = await _describe_recording({"class_types": class_types})
+    assert result.is_error and seen == []
 
 
 # -- model_list -------------------------------------------------------------------

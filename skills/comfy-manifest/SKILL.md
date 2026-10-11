@@ -6,7 +6,8 @@ description: Author comfy.yaml and generate locks — source forms, when `as:` i
 # Authoring `comfy.yaml`
 
 `comfy.yaml` is hand-authored and declares **intent**. `comfy-lock.yaml` records
-the **resolution** and is generated — never hand-edit a lock.
+the **resolution** and is generated — never hand-edit a lock (its `custom_nodes`
+section aside: see *Mistakes that fail quietly*).
 
 ```
 models/  --comfyctl fetch build-->  comfy.yaml  --comfyctl fetch resolve-->  comfy-lock.yaml  --comfyctl fetch fetch-->  disk
@@ -27,20 +28,33 @@ replaced the `fetch` image in 6.0.0.
 
 - **`fetch` is a dry run by default.** `comfyctl fetch fetch <lock> <ComfyUI root>`
   only reports; add `--apply` to download. The root is the ComfyUI root, not
-  `models/`, because lock paths begin `models/`.
+  `models/`, because lock paths begin `models/`. An entry with no SHA256 is
+  refused, counted as `failed`, and the run exits 1.
 - **`facts`** writes a `<lineage>.facts.yaml` sidecar per source file, recording
   what the safetensors header says against what the publisher claims for the
-  file's hash: `comfyctl fetch facts models/ comfy-lock.yaml --store <root>`
-  (or `--headers <json>`). It needs the network.
+  file's hash: `comfyctl fetch facts models/ comfy-lock.yaml --store <ComfyUI root>`
+  (or `--headers <json>`). It needs the network. `--store` is the ComfyUI root,
+  not `models/`, as for `fetch`; given `models/` it exits 2. Its `files:` are
+  keyed by install path (`models/loras/x.safetensors`), not basename, and so
+  are a `--headers` file's keys, which must start `models/`; regenerate a
+  sidecar from before 6.0.0. `comfyctl fetch facts models/ --check` is the
+  offline gate for committed sidecars: it exits 1 when one names a file its
+  lineage no longer declares.
 - **`-o json`** on any verb (after the verb, not after `fetch`) prints the result as
-  stable JSON on stdout. Progress stays on stderr, so the output parses.
-- **Exit codes:** `0` did what was asked, `1` a real failure (unresolved source,
-  hash mismatch, manifest and lock disagree, two groups installing different
-  files at one path), `2` a bad request (missing file, unknown profile,
-  incompatible flags). Before it resolves anything, `resolve` validates the
-  manifest, and a `--from-lock` parent, exactly as `check` does, and exits `2`
-  if either fails, listing the problems. `check` reports the same problems as
-  its verdict, with `1`.
+  stable JSON on stdout. Every non-zero exit still prints one JSON object, with
+  `"ok": false` and its reasons in `problems` (`fetch` and `resolve` keep their
+  counters beside them); the reasons also go to stderr. Progress stays on
+  stderr, so the output parses. Only a command line the CLI can't parse at all,
+  such as an unknown option, exits 2 with usage text on stderr and no JSON.
+- **Exit codes:** `0` did what was asked, `1` a real failure (an input that isn't
+  valid YAML or JSON, or fails its schema or the semantic checks; an unresolved
+  source, two groups installing different files at one path, a hash mismatch,
+  a lock entry with no SHA256, manifest and lock disagree), `2` a bad request (a
+  missing file or directory, an unknown profile, bad or conflicting flags, a
+  `--store` that isn't a ComfyUI root, an `-O` that names a directory, an
+  unwritable directory or an input file). Before it resolves anything,
+  `resolve` validates the manifest, and a `--from-lock` parent, exactly as
+  `check` does, and exits `1` if either fails, listing the problems.
 
 `comfy.yaml` may itself be generated. Past a few hundred lines a single manifest
 stops working — every family conflicts with every other on edit — so `build`
@@ -138,6 +152,10 @@ comment. A symlinked `-O` is written through, and an existing file keeps its
 permissions. `-O` exits `2` before resolving when it names a directory, an
 unwritable or missing directory, the manifest or the `--from-lock` parent.
 
+The first command rewrites `comfy-lock.yaml` with `auth` and `models` only, so
+it drops a `custom_nodes` section: carry that section over by hand. A derived
+`--from-lock` lock never carries it either.
+
 Resolving each independently is the mistake: locks made minutes apart can
 legitimately pin different commits.
 
@@ -159,7 +177,9 @@ A host listed here whose variable is unset does **not** block public files.
 ## Mistakes that fail quietly
 
 - **Hand-editing a lock.** It is generated. The sha256 in it then describes
-  bytes nobody verified.
+  bytes nobody verified. The one exception is `custom_nodes`, which nothing
+  in `comfyctl` generates: `resolve` writes only `auth` and `models`, so carry
+  that section over by hand when you regenerate.
 - **Editing `comfy.yaml` without regenerating.** The fetcher reads the lock, so
   your new model is simply never fetched and nothing says so.
 - **Assuming a gated repo is missing.** `black-forest-labs` publishes as
@@ -175,7 +195,9 @@ A host listed here whose variable is unset does **not** block public files.
 - **Deriving locks independently.** `comfyctl fetch check --parent` asserts a
   profile lock is a verbatim subset of the full lock. Without it, locks made
   minutes apart can pin different upstream commits and every one of them passes
-  `check` on its own.
+  `check` on its own. A derived lock deliberately narrower than any profile adds
+  `--subset-only`: it must still be a verbatim subset and declare nothing extra,
+  but a declared file it lacks is reported under `narrowed`, not as a failure.
 - **Declaring one install path twice.** A file shared by two groups, declared
   identically (`x-` keys aside), is one lock entry. Two *different* files at
   one path are refused: `resolve` reports it as unresolved, and `check` as
