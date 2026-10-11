@@ -3,6 +3,7 @@
 Automation and agents read these. A change here is a breaking change even when
 every other test passes, so they are asserted rather than assumed.
 """
+import hashlib
 import json
 
 import pytest
@@ -191,6 +192,29 @@ def _facts_check_malformed_lineage(f, t):
     return ["facts", str(t / "src"), "--check"]
 
 
+BODY = b"model bytes"
+
+
+def _fetch_over_a_directory(f, t, extra: bool):
+    """A lock path naming a directory already in the store (#209)."""
+    paths = ["models/a/x.bin", "models/b/x.bin"] if extra else ["models/a/x.bin"]
+    (t / "root" / paths[-1]).mkdir(parents=True)
+    lock = _w(t / "l.yaml", "models:\n  - model: x.bin\n"
+              "    url: https://example.invalid/x.bin\n"
+              "    paths: [" + ", ".join(f"{{path: {p}}}" for p in paths) + "]\n"
+              "    hashes: [{hash: '" + hashlib.sha256(BODY).hexdigest() + "', type: SHA256}]\n")
+    return ["fetch", lock, str(t / "root"), "--apply"]
+
+
+NOT_UTF8 = b"# header \xff\xfe not utf-8\n"
+
+
+def _not_utf8(t):
+    h = t / "header.txt"
+    h.write_bytes(NOT_UTF8)
+    return str(h)
+
+
 # name -> (args builder taking (fixtures, tmp_path), expected exit)
 FAILURES = {
     "resolve --from-lock, stale parent": (lambda f, t: [
@@ -222,6 +246,13 @@ FAILURES = {
         "fetch", _w(t / "l.yaml", "models:\n  - {model: a, nonsense: 1}\n"), str(t)], 1),
     "fetch, a refused entry": (lambda f, t: [
         "fetch", str(f / "lock-no-hash.yaml"), str(t / "root"), "--apply"], 1),
+    "fetch, path is a directory": (lambda f, t: _fetch_over_a_directory(f, t, False), 1),
+    "fetch, extra path is a directory": (lambda f, t: _fetch_over_a_directory(f, t, True), 1),
+    "resolve --header, not UTF-8": (lambda f, t: [
+        "resolve", str(f / "manifest-two-profiles.yaml"), "--profile", "just-a",
+        "--from-lock", str(f / "lock-two-entries.yaml"), "--header", _not_utf8(t)], 1),
+    "build --header, not UTF-8": (lambda f, t: [
+        "build", str(_stale_build(t)[0]), "--header", _not_utf8(t)], 1),
     "facts, missing sources": (lambda f, t: [
         "facts", str(t / "nope"), str(f / "lock-good.yaml"), "--store", str(t)], 2),
     "facts, --store is the models dir": (_facts_store_is_models_dir, 2),
@@ -288,3 +319,29 @@ def test_an_unknown_profile_with_from_lock_is_a_request_error(fixtures):
                             "--from-lock", str(fixtures / "lock-two-entries.yaml")])
     assert r.exit_code == 2, r.output
     assert "no such profile" in r.output
+
+
+@pytest.mark.parametrize("extra", [False, True])
+def test_a_directory_in_the_way_is_refused_before_downloading(fixtures, tmp_path, monkeypatch,
+                                                              extra):
+    """Not after a download that succeeds, by a rename (or copy) that raises
+    IsADirectoryError and leaves the .fetch-tmp behind (#209). The source is
+    stubbed to serve the right bytes, so only the directory can fail it."""
+    import io
+
+    from comfyctl.fetch import fetch as fetch_mod
+
+    class Body(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+    monkeypatch.setattr(fetch_mod.http, "request", lambda url, **k: Body(BODY))
+    args = _fetch_over_a_directory(fixtures, tmp_path, extra)
+    r = runner.invoke(app, [*args, "-o", "json"])
+    assert r.exception is None or isinstance(r.exception, SystemExit), repr(r.exception)
+    assert r.exit_code == 1, r.output
+    (line,) = json.loads(r.stdout)["problems"]
+    assert "is a directory" in line
+    assert not list((tmp_path / "root").rglob("*.fetch-tmp"))

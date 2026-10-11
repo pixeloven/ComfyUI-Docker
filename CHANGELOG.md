@@ -222,6 +222,13 @@ moved:
 
 ### Fixed
 
+- **Three last tracebacks under `-o json` are gone** (#209). Each exited 1
+  with an empty stdout. `fetch` now refuses a lock path, or an extra path
+  (`paths[1:]`), that names an existing directory before it downloads, as
+  `FAILED  <model>: <path> is a directory`, and leaves no `.fetch-tmp`
+  behind. A `resolve --header` or `build --header` file that isn't UTF-8 text
+  exits 1 with the reason. Each writes the JSON result like every other
+  failure.
 - **`resolve` needs no temp directory, and a network error fails one entry,
   not the pass.** Hashing a `gh:` asset with no digest, or an `hf:` file
   outside LFS, copied the body into a temp file nobody read, so under a

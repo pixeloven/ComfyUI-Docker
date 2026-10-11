@@ -129,6 +129,14 @@ def _fetch_one(model: dict, root: pathlib.Path, auth: AuthMap, *, dry_run: bool,
         return
 
     target = root / rel
+    # A directory where the file belongs: the rename after the download would
+    # raise, after the network was used, and leave the .fetch-tmp behind (#209).
+    dirs = [p for p in paths if (root / p).is_dir()]
+    if dirs:
+        report.lines.append(f"  FAILED  {name}: {dirs[0]} is a directory")
+        report.failed += 1
+        return
+
     if target.is_file() and want and sha256_file(target).lower() == want:
         report.present += 1
         if progress:
