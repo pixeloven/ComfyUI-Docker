@@ -171,6 +171,21 @@ moved:
   the parent and hold nothing undeclared; a declared file it lacks is listed
   under `narrowed` in the JSON result instead of failing as `NOT LOCKED`.
   Without `--parent` it exits 2.
+- **A hash-locked requirements file in each release** (#175):
+  `comfyctl-X.Y.Z-requirements.txt` pins every comfyctl dependency to the
+  version and hashes in `services/uv.lock`, and names the wheel by its release
+  URL and hash. It is attested like the wheel and listed in `SHA256SUMS`. With
+  it, a pip or uv install checks every file it puts in the environment:
+
+  ```sh
+  v=6.0.0
+  python3 -m venv ~/.local/share/comfyctl
+  ~/.local/share/comfyctl/bin/pip install --require-hashes \
+    -r "https://github.com/pixeloven/ComfyUI-Docker/releases/download/v${v}/comfyctl-${v}-requirements.txt"
+  ```
+
+  The comfyctl README's install section has the uv equivalent, and how to
+  verify the file's attestation first.
 - **comfyrelay `node_describe`: several classes per call, and help optional**
   ([#169](https://github.com/pixeloven/ComfyUI-Docker/issues/169)). `class_types` (up to 20, instead of
   `class_type`) answers `{nodes, unknown, failed, omitted}`: an unknown class is listed in `unknown` with
@@ -235,6 +250,11 @@ moved:
   with a traceback.
 - **`FETCH.md` lists what `resolve` actually reads** (#162). It claimed file
   sizes; `resolve` reads none, and no output reports bytes.
+- **The runtime contract's *The `comfyctl` Image* is more complete.** Under a
+  read-only root, `resolve` needs a writable `/tmp` for any `hf:` file not stored
+  in LFS (a `config.json`, for example), not only for a `gh:` asset with no
+  digest. The Tags row names `comfyctl:cache`, the build cache, which is not
+  for pulling.
 - **comfyrelay: display names are cut to 120 characters** (#169) in `node_search`, `node_describe` and its
   suggestions, since they come from ComfyUI.
 - **comfyrelay `node_describe`: help fetches are bounded** (#163, #169). A call's help fetches get 5 s in all;
