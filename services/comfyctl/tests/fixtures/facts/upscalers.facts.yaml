@@ -6,7 +6,7 @@
 # disagreement is the point -- never infer lineage from a filename or folder.
 generated: '2026-09-12'
 files:
-  RealESRGAN_x4plus.pth:
+  models/upscale_models/RealESRGAN_x4plus.pth:
     declared_base: Upscaler
-  RealESRGAN_x4plus_anime_6B.pth:
+  models/upscale_models/RealESRGAN_x4plus_anime_6B.pth:
     declared_base: Upscaler

@@ -55,7 +55,15 @@ class Out:
             self._err.print(message)
 
     def problem(self, message: str) -> None:
-        if not self.is_json:
+        """A failure's reason, on stderr in EVERY mode.
+
+        In json mode it is written plain. It was once dropped there, so a verb
+        that reported through here and exited without a result wrote zero bytes
+        to both streams (#152).
+        """
+        if self.is_json:
+            sys.stderr.write(message + "\n")
+        else:
             self._err.print(f"[red]{message}[/red]" if self.mode is Mode.auto
                             else message)
 

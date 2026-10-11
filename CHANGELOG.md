@@ -80,8 +80,47 @@ the manifest and lock formats don't change. What moved:
      where it was `comfyfetch/<version> (…)`. Update any proxy or allowlist
      rule that matches it.
 
+`comfyctl fetch` behaviour that changes, each fixing a consumer report:
+
+- **`facts` sidecars key `files:` by install path, not basename** (#153). Two
+  files with the same name, such as two `qwen_3_4b.safetensors` from different
+  repos, each get their own header and hash; before, one got the other's facts.
+  A `--headers` file is keyed the same way, by the path relative to the ComfyUI
+  root, and a basename key exits 1.
+  *Migration:* regenerate every sidecar with `comfyctl fetch facts`, and key
+  any `--headers` file by `models/…` path.
+- **`facts --store` takes the ComfyUI root, not `models/`** (#153), as `fetch`
+  does. Given a directory with no `models/` inside, it exits 2; a `--headers`
+  key that doesn't start `models/` exits 1. Before, such a store matched
+  nothing and wrote empty sidecars with exit 0. A `--headers` value of `null`
+  is an empty header; any other value that isn't an object exits 1.
+  *Migration:* pass `--store /workspace`, not `--store /workspace/models`.
+- **`fetch` fails on an entry with no SHA256** (#158). The entry is still
+  refused, but it counts as `failed`, not `skipped`, and the run exits 1, dry
+  run or `--apply`. Its line reads `FAILED  <model>: no SHA256 in the lock, …`
+  where it read `SKIP    <model>: …`.
+  *Migration:* resolve the lock again so every entry has a `SHA256` hash, or
+  drop the entry; match `FAILED`, not `SKIP`, in anything that greps the line.
+- **An unknown `--profile` with `resolve --from-lock` exits 2**, as it does
+  without `--from-lock` (#152). It exited 1.
+  *Migration:* treat exit 2 as the bad-profile case in anything that checked for 1.
+- **Under `-o json`, `fetch`'s per-entry lines and `resolve`'s `UNRESOLVED`
+  lines go to stderr** (#152), as plain text, where json mode dropped them. stdout
+  still carries only the JSON result.
+  *Migration:* a caller that merges stderr into stdout (`2>&1`) before parsing
+  the JSON must stop merging, or read stdout alone.
+
 ### Added
 
+- **`comfyctl fetch facts SOURCES --check`** (#155): an offline freshness gate
+  for committed `.facts.yaml` sidecars. It exits 1 when a sidecar has no sibling
+  lineage, or names a file its lineage doesn't declare. It takes no lock, store
+  or network.
+- **`comfyctl fetch check --parent PARENT --subset-only`** (#157), for a derived
+  lock narrower than any profile. The lock must still be a verbatim subset of
+  the parent and hold nothing undeclared; a declared file it lacks is listed
+  under `narrowed` in the JSON result instead of failing as `NOT LOCKED`.
+  Without `--parent` it exits 2.
 - **comfyrelay `node_describe`: several classes per call, and help optional**
   ([#169](https://github.com/pixeloven/ComfyUI-Docker/issues/169)). `class_types` (up to 20, instead of
   `class_type`) answers `{nodes, unknown, failed, omitted}`: an unknown class is listed in `unknown` with
@@ -118,6 +157,16 @@ the manifest and lock formats don't change. What moved:
 - **`core-amd` and `core-intel` declare `comfy_network`** (#119), so
   `docker compose --profile models` no longer fails there. `make validate` and
   CI now check every example with `--profile models`.
+- **`comfyctl fetch -o json` always writes a JSON result** (#152). A failed
+  `resolve --from-lock`, `build` or `build --check` exited 1 with nothing on
+  stdout or stderr, and a bad request wrote only to stderr. Each now writes one
+  JSON object to stdout, with `"ok": false` and the reasons in `problems`, and
+  the reason to stderr too. `fetch`'s result gains `ok`, and a full `resolve`'s
+  gains `ok` and `problems`. An input that isn't readable YAML (or `--headers`
+  JSON), or a manifest that isn't a mapping, exits 1 the same way instead of
+  with a traceback.
+- **`FETCH.md` lists what `resolve` actually reads** (#162). It claimed file
+  sizes; `resolve` reads none, and no output reports bytes.
 - **comfyrelay: display names are cut to 120 characters** (#169) in `node_search`, `node_describe` and its
   suggestions, since they come from ComfyUI.
 - **comfyrelay `node_describe`: help fetches are bounded** (#163, #169). A call's help fetches get 5 s in all;
