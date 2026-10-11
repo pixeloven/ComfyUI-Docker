@@ -18,6 +18,15 @@ from comfyctl.fetch import facts
 
 FIX = pathlib.Path(__file__).parent / "fixtures" / "facts"
 
+# The recorded headers and shas are keyed by basename. Sidecars, and the maps
+# render() joins on, are keyed by INSTALL PATH since #153; every file in the
+# upscalers lineage installs here.
+UPSCALERS = "models/upscale_models/"
+
+
+def by_path(by_name: dict) -> dict:
+    return {UPSCALERS + name: value for name, value in by_name.items()}
+
 
 @pytest.fixture
 def civitai():
@@ -130,11 +139,11 @@ def test_render_is_byte_identical_given_the_inputs_the_original_run_had(civitai,
     """
     committed = (FIX / "upscalers.facts.yaml").read_text()
     lineage = yaml.safe_load((FIX / "upscalers.yaml").read_text())
-    shas = json.loads((FIX / "shas.json").read_text())
-    shas.pop("4xUltrasharp_4xUltrasharpV10.pt", None)
+    shas = by_path(json.loads((FIX / "shas.json").read_text()))
+    shas.pop(UPSCALERS + "4xUltrasharp_4xUltrasharpV10.pt", None)
 
     rendered = facts.render(
-        lineage, headers=headers, shas=shas, token=None, generated="2026-09-12",
+        lineage, headers=by_path(headers), shas=shas, token=None, generated="2026-09-12",
         generator="scripts/comfyui-model-facts.py",
     )
     assert rendered == committed
@@ -148,22 +157,22 @@ def test_taking_shas_from_the_lock_finds_a_file_the_original_run_missed(civitai,
     changed, and this is the evidence that it was not cosmetic.
     """
     lineage = yaml.safe_load((FIX / "upscalers.yaml").read_text())
-    full = json.loads((FIX / "shas.json").read_text())
-    assert "4xUltrasharp_4xUltrasharpV10.pt" in full
+    full = by_path(json.loads((FIX / "shas.json").read_text()))
+    assert UPSCALERS + "4xUltrasharp_4xUltrasharpV10.pt" in full
 
     rendered = facts.render(
-        lineage, headers=headers, shas=full, token=None, generated="2026-09-12"
+        lineage, headers=by_path(headers), shas=full, token=None, generated="2026-09-12"
     )
-    assert "4xUltrasharp_4xUltrasharpV10.pt" in rendered
+    assert UPSCALERS + "4xUltrasharp_4xUltrasharpV10.pt" in rendered
 
 
 def test_the_attribution_line_is_a_parameter_not_a_content_change(civitai, headers):
     """Renaming the generator must not read as the facts having changed."""
     lineage = yaml.safe_load((FIX / "upscalers.yaml").read_text())
-    shas = json.loads((FIX / "shas.json").read_text())
-    a = facts.render(lineage, headers=headers, shas=shas, token=None,
+    shas = by_path(json.loads((FIX / "shas.json").read_text()))
+    a = facts.render(lineage, headers=by_path(headers), shas=shas, token=None,
                      generated="2026-09-12", generator="one")
-    b = facts.render(lineage, headers=headers, shas=shas, token=None,
+    b = facts.render(lineage, headers=by_path(headers), shas=shas, token=None,
                      generated="2026-09-12", generator="two")
     assert a != b
     assert a.split("\n", 1)[1] == b.split("\n", 1)[1]
@@ -193,11 +202,12 @@ def test_headers_can_be_supplied_instead_of_read_from_a_store(civitai, tmp_path)
     lock = tmp_path / "lock.yaml"
     shas = json.loads((FIX / "shas.json").read_text())
     lock.write_text(yaml.safe_dump({
-        "models": [{"model": n, "hashes": [{"type": "SHA256", "hash": h}]}
+        "models": [{"model": n, "paths": [{"path": UPSCALERS + n}],
+                    "hashes": [{"type": "SHA256", "hash": h}]}
                    for n, h in shas.items()]}))
 
     headers_file = tmp_path / "headers.json"
-    headers_file.write_bytes((FIX / "headers.json").read_bytes())
+    headers_file.write_text(json.dumps(by_path(json.loads((FIX / "headers.json").read_text()))))
 
     result = CliRunner().invoke(app, [
         "facts", str(sources), str(lock),
@@ -224,3 +234,223 @@ def test_headers_and_store_are_mutually_exclusive(tmp_path):
         "--headers", str(h), "--store", str(tmp_path),
     ])
     assert result.exit_code == 2
+
+
+# ---- same basename, different files (#153) ---------------------------------
+#
+# Basenames repeat: `diffusion_pytorch_model.safetensors` is HuggingFace's
+# default, and a real store carries two `qwen_3_4b.safetensors` from different
+# repos. Joined by name, one file got the other's header and hash.
+
+SAME_NAME = {"groups": [
+    {"name": "enc-a", "files": [{"source": "hf:org-a/repo", "file": "qwen_3_4b.safetensors",
+                                 "install": "models/text_encoders/"}]},
+    {"name": "enc-b", "files": [{"source": "hf:org-b/repo", "file": "qwen_3_4b.safetensors",
+                                 "install": "models/clip/"}]},
+]}
+A, B = "models/text_encoders/qwen_3_4b.safetensors", "models/clip/qwen_3_4b.safetensors"
+
+
+def _safetensors(path: pathlib.Path, meta: dict) -> None:
+    import struct
+    path.parent.mkdir(parents=True, exist_ok=True)
+    head = json.dumps({"__metadata__": meta}).encode()
+    path.write_bytes(struct.pack("<Q", len(head)) + head)
+
+
+def test_same_named_files_each_keep_their_own_header(tmp_path):
+    """The issue's repro, offline: no hashes, and names that need no lookup."""
+    from typer.testing import CliRunner
+
+    from comfyctl.fetch.cli import app
+
+    store, src = tmp_path / "store", tmp_path / "src"
+    _safetensors(store / A, {"ss_sd_model_name": "base-A.safetensors"})
+    _safetensors(store / B, {"ss_sd_model_name": "base-B.safetensors"})
+    src.mkdir()
+    (src / "lineage.yaml").write_text(yaml.safe_dump(SAME_NAME))
+    lock = tmp_path / "lock.yaml"
+    lock.write_text(yaml.safe_dump({"models": [
+        {"model": "qwen_3_4b.safetensors", "paths": [{"path": A}]},
+        {"model": "qwen_3_4b.safetensors", "paths": [{"path": B}]}]}))
+
+    result = CliRunner().invoke(app, ["facts", str(src), str(lock), "--store", str(store),
+                                      "--generated", "2026-09-29"])
+    assert result.exit_code == 0, result.output
+    files = yaml.safe_load((src / "lineage.facts.yaml").read_text())["files"]
+    assert files == {A: {"trained_on": "base-A.safetensors"},
+                     B: {"trained_on": "base-B.safetensors"}}
+
+
+def test_same_named_files_each_keep_their_own_hash(civitai):
+    """The hash half: each file's by-hash lookup is its own."""
+    by_hash = json.loads((FIX / "by-hash.json").read_text())
+    pony, sdxl = (next(s for s, b in by_hash.items() if (b or {}).get("baseModel") == base)
+                  for base in ("Pony", "SDXL 1.0"))
+    rendered = facts.render(SAME_NAME, headers={}, shas={A: pony, B: sdxl},
+                            token=None, generated="2026-09-29")
+    files = yaml.safe_load(rendered)["files"]
+    assert (files[A]["declared_base"], files[B]["declared_base"]) == ("Pony", "SDXL 1.0")
+
+
+def test_headers_keyed_by_basename_are_refused(tmp_path):
+    """A pre-6.0.0 headers file is keyed by basename. Silently matching nothing
+    would write sidecars with no headers at all, so it is refused: exit 1, as
+    for any input whose content is wrong."""
+    from typer.testing import CliRunner
+
+    from comfyctl.fetch.cli import app
+
+    (tmp_path / "src").mkdir()
+    lock = tmp_path / "lock.yaml"
+    lock.write_text("models: []\n")
+    h = tmp_path / "h.json"
+    h.write_text(json.dumps({"qwen_3_4b.safetensors": {}}))
+    result = CliRunner().invoke(app, ["facts", str(tmp_path / "src"), str(lock),
+                                      "--headers", str(h)])
+    assert result.exit_code == 1, result.output
+    assert "install paths" in result.output
+
+
+@pytest.mark.parametrize("key", ["loras/a.safetensors", "/models/loras/a.safetensors"])
+def test_headers_keys_must_start_at_models(tmp_path, key):
+    """Every declared path starts `models/`, so any other key can never match:
+    keyed from the models directory, the file would silently match nothing."""
+    from typer.testing import CliRunner
+
+    from comfyctl.fetch.cli import app
+
+    (tmp_path / "src").mkdir()
+    lock = tmp_path / "lock.yaml"
+    lock.write_text("models: []\n")
+    h = tmp_path / "h.json"
+    h.write_text(json.dumps({key: {}}))
+    result = CliRunner().invoke(app, ["facts", str(tmp_path / "src"), str(lock),
+                                      "--headers", str(h)])
+    assert result.exit_code == 1, result.output
+    assert "starting models/" in " ".join(result.output.split())
+
+
+def test_store_must_be_the_comfyui_root_not_models(tmp_path):
+    """`--store /workspace/models` was the CLI's own example. Keyed from there,
+    no path starts `models/`, nothing matches, and every sidecar came out empty
+    with exit 0."""
+    from typer.testing import CliRunner
+
+    from comfyctl.fetch.cli import app
+
+    root, src = tmp_path / "root", tmp_path / "src"
+    _safetensors(root / A, {"ss_sd_model_name": "base-A.safetensors"})
+    src.mkdir()
+    (src / "lineage.yaml").write_text(yaml.safe_dump(SAME_NAME))
+    lock = tmp_path / "lock.yaml"
+    lock.write_text("models: []\n")
+
+    wrong = CliRunner().invoke(app, ["facts", str(src), str(lock), "--store", str(root / "models")])
+    assert wrong.exit_code == 2, wrong.output
+    assert "ComfyUI root" in wrong.output
+    assert not (src / "lineage.facts.yaml").exists()
+
+    right = CliRunner().invoke(app, ["facts", str(src), str(lock), "--store", str(root)])
+    assert right.exit_code == 0, right.output
+
+
+def test_a_root_whose_files_are_not_fetched_yet_still_gets_hash_facts(civitai, tmp_path):
+    """A correct root need not hold the files yet: the facts that come from the
+    lock's hashes do not need the bytes, so they are still written."""
+    from typer.testing import CliRunner
+
+    from comfyctl.fetch.cli import app
+
+    by_hash = json.loads((FIX / "by-hash.json").read_text())
+    pony = next(s for s, b in by_hash.items() if (b or {}).get("baseModel") == "Pony")
+    root, src = tmp_path / "root", tmp_path / "src"
+    (root / "models").mkdir(parents=True)
+    src.mkdir()
+    (src / "lineage.yaml").write_text(yaml.safe_dump(SAME_NAME))
+    lock = tmp_path / "lock.yaml"
+    lock.write_text(yaml.safe_dump({"models": [
+        {"model": "qwen_3_4b.safetensors", "paths": [{"path": A}],
+         "hashes": [{"type": "SHA256", "hash": pony}]}]}))
+    result = CliRunner().invoke(app, ["facts", str(src), str(lock), "--store", str(root)])
+    assert result.exit_code == 0, result.output
+    files = yaml.safe_load((src / "lineage.facts.yaml").read_text())["files"]
+    assert set(files) == {A}
+    assert files[A]["declared_base"] == "Pony"
+
+
+# ---- facts --check: the offline freshness gate (#155) ----------------------
+
+def _sidecar(path: pathlib.Path, files: dict) -> None:
+    path.write_text(yaml.safe_dump({"generated": "2026-09-29", "files": files}))
+
+
+def _check(src: pathlib.Path, *extra: str):
+    from typer.testing import CliRunner
+
+    from comfyctl.fetch.cli import app
+
+    return CliRunner().invoke(app, ["facts", str(src), "--check", "-o", "json", *extra])
+
+
+def test_check_passes_when_every_key_is_declared(tmp_path):
+    """A declared file with no entry is fine: render() omits a file with
+    nothing measurable. Only the other direction is stale."""
+    (tmp_path / "lineage.yaml").write_text(yaml.safe_dump(SAME_NAME))
+    _sidecar(tmp_path / "lineage.facts.yaml", {A: {"trained_on": "x"}})
+    result = _check(tmp_path)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {"sidecars": 1, "problems": [], "ok": True}
+
+
+def test_check_fails_a_key_the_lineage_no_longer_declares(tmp_path):
+    (tmp_path / "lineage.yaml").write_text(yaml.safe_dump(SAME_NAME))
+    _sidecar(tmp_path / "lineage.facts.yaml",
+             {A: {"trained_on": "x"}, "models/loras/gone.safetensors": {"nsfw": True}})
+    result = _check(tmp_path)
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert len(payload["problems"]) == 1
+    assert "models/loras/gone.safetensors" in payload["problems"][0]
+
+
+def test_check_fails_a_sidecar_with_no_lineage(tmp_path):
+    _sidecar(tmp_path / "orphan.facts.yaml", {A: {"trained_on": "x"}})
+    result = _check(tmp_path)
+    assert result.exit_code == 1
+    assert "no sibling lineage orphan.yaml" in json.loads(result.stdout)["problems"][0]
+
+
+def test_check_names_a_pre_6_sidecar_and_how_to_fix_it(tmp_path):
+    """Sidecars written before 6.0.0 are keyed by basename. Each such key is
+    stale, and the message says to regenerate."""
+    (tmp_path / "lineage.yaml").write_text(yaml.safe_dump(SAME_NAME))
+    _sidecar(tmp_path / "lineage.facts.yaml", {"qwen_3_4b.safetensors": {"trained_on": "x"}})
+    result = _check(tmp_path)
+    assert result.exit_code == 1
+    assert "regenerate" in json.loads(result.stdout)["problems"][0]
+
+
+def test_check_takes_no_lock_store_or_network(tmp_path):
+    lock = tmp_path / "lock.yaml"
+    lock.write_text("models: []\n")
+    assert _check(tmp_path, str(lock)).exit_code == 2
+
+
+def test_check_passes_on_what_facts_just_wrote(tmp_path):
+    """The round trip: a fresh sidecar is never stale."""
+    from typer.testing import CliRunner
+
+    from comfyctl.fetch.cli import app
+
+    store, src = tmp_path / "store", tmp_path / "src"
+    _safetensors(store / A, {"ss_sd_model_name": "base-A.safetensors"})
+    src.mkdir()
+    (src / "lineage.yaml").write_text(yaml.safe_dump(SAME_NAME))
+    lock = tmp_path / "lock.yaml"
+    lock.write_text("models: []\n")
+    wrote = CliRunner().invoke(app, ["facts", str(src), str(lock), "--store", str(store)])
+    assert wrote.exit_code == 0, wrote.output
+    assert (src / "lineage.facts.yaml").is_file()
+    assert _check(src).exit_code == 0
