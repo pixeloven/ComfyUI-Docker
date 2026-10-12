@@ -186,7 +186,7 @@ wheels = [
 
 [[package]]
 name = "comfyctl"
-version = "5.2.0"
+version = "6.0.0"
 source = { editable = "comfyctl" }
 dependencies = [
     { name = "httpx" },
@@ -217,7 +217,7 @@ dev = [
 
 [[package]]
 name = "comfyrelay"
-version = "5.2.0"
+version = "6.0.0"
 source = { editable = "comfyrelay" }
 dependencies = [
     { name = "httpx2" },
