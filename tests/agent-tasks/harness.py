@@ -1922,8 +1922,11 @@ def pass_verdict(a: list[float], b: list[float]) -> tuple[str, str]:
 
 
 def efficiency_verdict(ra: list[dict], rb: list[dict], col: str) -> tuple[str, str]:
-    """A number other than passes, over each arm's passing runs only, of which each needs 5."""
+    """A number other than passes, over each arm's passing runs only, of which each needs 5. When B passes
+    less often than A, its cheaper passing runs prove nothing (an arm topped up until 5 runs pass, say)."""
     pa, pb = [r for r in ra if passed(r)], [r for r in rb if passed(r)]
+    if len(pb) / len(rb) < len(pa) / len(ra):
+        return "", "inconclusive: the pass rate dropped (judge passes first)"
     if len(pa) < MIN_RUNS or len(pb) < MIN_RUNS:
         differ = "; the pass rates differ" if len(pa) / len(ra) != len(pb) / len(rb) else ""
         return "", f"inconclusive: needs {MIN_RUNS} passing runs per arm{differ}"

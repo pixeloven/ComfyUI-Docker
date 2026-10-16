@@ -208,6 +208,6 @@ if transcript:
     except (OSError, ValueError):
         pass
 with open(path, "a", newline="") as f:
-    csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), *row, turns, cost, *extra[:8]])
+    csv.writer(f, lineterminator="\n").writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), *row, turns, cost, *extra[:8]])
 EOF
 }

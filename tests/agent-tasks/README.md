@@ -226,7 +226,7 @@ for i in 1 2 3 4 5; do
 done
 ```
 
-- **Labels.** A label is letters, digits, `.`, `_` and `-`. Name it after what the arm runs (`baseline-6.0.0`, `dryrun-215`).
+- **Labels.** A label is letters, digits, `.`, `_` and `-`. Name it after what the arm runs (`dryrun-215`). `check` refuses (exit 2) the label of a committed baseline (`baselines/<label>.csv`), so a control run can't join `baseline-6.0.0`.
 - **Digests.** Record each arm's image digests where you report it. The scorecard has the label, not the digests.
 - **Drift check.** In the same session as each new arm, also run 1–2 runs on the baseline images, labelled e.g. `control-215`. The host, the agent model or ComfyUI's caches can drift between sessions. If the control runs fall outside the baseline's min–max, the session differs from the one that recorded the baseline, and its comparison isn't sound.
 
@@ -251,6 +251,7 @@ done
   - **How far apart.** "Pairs apart" counts the (A, B) run pairs on the side B's median moved to, ties counting half. That count is the Mann–Whitney U, so 25/25 at 5 per arm means no overlap. Beside it is the exact one-sided p-value, computed over every way to split the pooled runs between the two arms.
   - **The verdict.** It reads `improved: the medians differ and the runs don't overlap` (or `mostly don't overlap`) when the median is better and p ≤ 0.05. At 5 per arm, that means at least 21 of the 25 pairs. When the median is worse instead, it reads `worse: …`.
   - **When it's inconclusive,** it gives the reason: the medians are the same, the runs overlap, or an arm has fewer than 5 runs. For a number other than passes, the reason can also be fewer than 5 *passing* runs in an arm (`inconclusive: needs 5 passing runs per arm`), with `the pass rates differ` added when they do.
+  - **A lower pass rate blocks the other numbers.** When B passes less often than A, every other number reads `inconclusive: the pass rate dropped (judge passes first)`, however its passing runs compare. Otherwise an arm topped up until 5 runs pass (5 of 10, say) could show cheaper passing runs as an improvement.
   - **Pass rates.** None against all is conclusive at 5 per arm. A rate in between is judged, by the same test (here, Fisher's exact test), only when both arms have 10 runs.
 - **Compare within one server only.** `mcp_runs` counts `workflow_run` calls and `mcp_work_calls` leaves out `job_status`, which are comfyrelay's tool names. Another server's submissions and polling go by other names, so its `mcp_runs` is 0 and its polling counts as work. `compare` never sets one server against another, and its numbers aren't comparable across servers.
 

@@ -22,7 +22,8 @@
 #                                 agent's MCP calls from the client's log; --tokens and
 #                                 --tool-calls record what the lead's harness reported.
 #                                 --batch labels the row as one run of a set of
-#                                 repeats (letters, digits, . _ -), for summary and compare.
+#                                 repeats (letters, digits, . _ -), for summary and compare;
+#                                 a committed baseline's label (baselines/LABEL.csv) is refused.
 #   ./external.sh summary <task> [--batch LABEL] [--server NAME] [--scorecard PATH]...
 #                                 k/N passes, and over passing runs the median, min and
 #                                 max of the MCP calls without polling, the workflow_run
@@ -60,7 +61,7 @@ set -euo pipefail
 case "${1:-}" in summary|compare) exec python3 "$(dirname "$0")/harness.py" "$@" ;; esac
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
@@ -77,6 +78,11 @@ case "$cmd" in
           shift 2 ;;
         --batch)
           [ "$cmd" = check ] && [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9._-]+$ ]] || usage
+          # A committed baseline's label is reserved: a control run must not join it.
+          [ ! -e "$HARNESS_DIR/baselines/$2.csv" ] || {
+            echo "--batch $2 is a committed baseline (baselines/$2.csv); label this run otherwise, e.g. control-<n>" >&2
+            exit 2
+          }
           batch="$2"; shift 2 ;;
         -*) usage ;;
         *) [ -z "$task" ] || usage; task="$1"; shift ;;
