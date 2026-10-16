@@ -22,6 +22,34 @@ see `VERSIONING.md`.
   harness's MCP client now logs each call an agent makes, and the scorecard records
   those counts, plus the tokens and tool calls the lead reports (`external.sh check
   --tokens N --tool-calls N`). Nothing published changes.
+- **Custom-node dependencies survive a recreate (#115).** ComfyUI now runs from a
+  venv on the `user` volume, `/app/user/__node_venv`, layered over the image's, so
+  the Python packages Manager, `cm-cli` or `pip` install for custom nodes persist
+  and the image's venv is never changed. On by default; `COMFY_ENABLE_NODE_VENV=false`
+  turns it off. With it on, startup sets Manager's `use_uv` and
+  `use_unified_resolver` to `False`, since uv can't see the image's packages
+  through the layer. See the runtime contract's *The Node Venv*, including how to
+  recover after an image update.
+- **`COMFY_MANAGER_SECURITY_LEVEL` (#125)**, an opt-in that writes Manager's
+  `security_level` at start; unset, nothing changes. On these images only
+  `strong` changes anything: it closes Manager's reboot, uninstall and settings
+  routes. Installs over HTTP stay refused at every level. The runtime contract's
+  *Manager Security* now warns that Manager's reboot route is open to anyone who
+  can reach port 8188.
+
+### Changed
+
+- **ComfyUI runs under the node venv's interpreter**, `/app/user/__node_venv/bin/python`,
+  not `/app/.venv/bin/python`, and that venv's `bin/` is first on the image's
+  `PATH`. Startup repairs it at every start, and falls back to the image's venv
+  with a `WARNING` rather than failing.
+- **Manager's `use_uv` and `use_unified_resolver` are forced to `False`** in
+  `/app/user/__manager/config.ini` while the node venv is in use. A file that
+  can't be parsed or written gets a `WARNING`, never a failed start.
+- **Upgrading from 6.0.0:** packs installed on 6.0.0 show `IMPORT FAILED` after
+  the upgrade, because their dependencies were in the old container. Run
+  `cm-cli restore-dependencies --user-directory /app/user/__manager` once in a
+  `docker exec` session as the runtime user, then restart.
 
 ## 6.0.0 — 2026-10-11
 
