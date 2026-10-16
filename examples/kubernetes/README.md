@@ -106,8 +106,12 @@ every reschedule ([#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115)
 
 The Python packages custom nodes install persist: they go into the
 [node venv](../../docs/user-guides/runtime-contract.md#the-node-venv) at
-`/app/user/__node_venv`, on the `comfyui-user` volume. Size that volume for the
-packs you install; 5 GiB leaves little room for large dependencies.
+`/app/user/__node_venv`, on the `comfyui-user` volume, which also holds
+`comfyui.db`. That couples them: a pack that pulls in a large dependency (a
+torch reinstall is several GB) can fill the 5 GiB claim, and ComfyUI can then
+no longer write its database. Size `comfyui-user` for the packs you install, or
+mount a separate claim at `/app/user/__node_venv`; `fsGroup` makes it writable
+by the pod's UID.
 
 The Deployment makes that storage explicit:
 

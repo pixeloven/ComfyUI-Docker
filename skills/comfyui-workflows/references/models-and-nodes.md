@@ -75,7 +75,10 @@ custom_nodes:
   A registry entry pins a released version, never `nightly` or `latest`.
 - **A `cnr_custom_nodes` map is the whole set.** A deployer may apply the
   section as a ComfyUI-Manager snapshot (`cm-cli restore-snapshot`), and that
-  disables any installed registry pack the map doesn't list. Add to
+  disables any installed pack the section doesn't list. In ComfyUI-Manager
+  4.2.2 that restore also skips registry packs' Python dependencies, clones
+  git packs at their default branch rather than `hash`, and exits 0 when a pack
+  fails, so the deployer checks the result. Add to
   an existing map. If you start one, say in the proposal that it lists only
   this pack.
 - **This section is the part of the lock written by hand.**

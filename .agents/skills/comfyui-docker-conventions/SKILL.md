@@ -81,8 +81,10 @@ There is no date tag.
 - The node venv (#115): `startup.sh` makes `/app/user/__node_venv` as the runtime user
   (`--without-pip`, plus a `.pth` naming the image venv's `site-packages`) and runs ComfyUI
   from it, so custom-node dependencies land on the `user` volume and `/app/.venv` is never
-  changed. Its `bin/` (with `pip`, `pip3` and `cm-cli` wrappers) is first on the image's
-  `PATH`. With it on (`COMFY_ENABLE_NODE_VENV`, default `true`), startup forces
+  changed. Its `bin/` (with `pip`, `pip3` and `cm-cli` wrappers, and a `uv` that refuses
+  `uv pip`) is first on the image's `PATH`. Every start repairs it idempotently, warns about
+  image packages it shadows, and falls back to `/app/.venv` with a WARNING if it is unusable:
+  nothing about it, or about `config.ini`, may stop a start. With it on (`COMFY_ENABLE_NODE_VENV`, default `true`), startup forces
   `use_uv = False` and `use_unified_resolver = False` in `/app/user/__manager/config.ini`,
   because uv ignores the `.pth` and would reinstall the image's packages into it.
   `COMFY_MANAGER_SECURITY_LEVEL` (#125) writes Manager's `security_level` when set.
@@ -252,11 +254,13 @@ removed and changed classes go to `node-diff.md` and the job summary as a report
 A baseline that can't be pulled fails the run.
 
 `make smoke` and the `smoke-cpu` job then run `tests/smoke/node-deps.sh` on the same
-image: it `cm-cli install`s `comfyui-image-saver@1.26.1` (dependency `piexif`) under
-PUID/PGID 1001, restarts, recreates the container as non-root 1001:1001 with
-`COMFY_MANAGER_SECURITY_LEVEL=strong`, and checks the pack loads, `piexif` imports from
-the node venv, `use_uv` was forced off, the reboot route answers 403, and `docker diff`
-shows nothing under `/app/.venv`. It needs the Comfy Registry and PyPI.
+image: it `cm-cli install`s `comfyui-image-saver@1.26.1` (dependency `piexif`, three tries)
+under PUID/PGID 1001, restarts, recreates the container as non-root 1001:1001 with
+`COMFY_MANAGER_SECURITY_LEVEL=strong`, and checks the pack still loads (the #115 check,
+first), then that `piexif` imports from the node venv, `use_uv` was forced off, the reboot
+route answers 403, and `docker diff` shows nothing under `/app/.venv`. A third start, as
+non-root on a fresh user volume with a malformed `config.ini`, must make the venv, only warn,
+and repair a half-made venv after a restart. It needs the Comfy Registry and PyPI.
 
 A failed smoke test on a tag withholds the GitHub Release, but not the image pushes.
 Nothing else boots the non-root start, and nothing boots the other profiles or any GPU image.
