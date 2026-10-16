@@ -13,7 +13,7 @@
 #                                 Also written to <workspace>/TASK.md and
 #                                 results/<server>-<task>.handoff.json
 #   (the agent does the task, and writes its results under the workspace)
-#   ./external.sh check <task> [--server ...] [--tokens N] [--tool-calls N]
+#   ./external.sh check <task> [--server ...] [--tokens N] [--tool-calls N] [--batch LABEL]
 #                                 run the task's check.sh, append a scorecard row with
 #                                 the server and mode "external (not sandboxed)",
 #                                 exit 0 on PASS. It refuses (exit 2) a server the
@@ -21,6 +21,18 @@
 #                                 `up`, which empties the workspace. The row counts the
 #                                 agent's MCP calls from the client's log; --tokens and
 #                                 --tool-calls record what the lead's harness reported.
+#                                 --batch labels the row as one run of a set of
+#                                 repeats (letters, digits, . _ -), for summary and compare;
+#                                 a committed baseline's label (baselines/LABEL.csv) is refused.
+#   ./external.sh summary <task> [--batch LABEL] [--server NAME] [--scorecard PATH]...
+#                                 k/N passes, and over passing runs the median, min and
+#                                 max of the MCP calls without polling, the workflow_run
+#                                 submissions, tokens and seconds, per server and batch
+#   ./external.sh compare <batchA> <batchB> [--task T] [--server NAME] [--metric M] [--scorecard PATH]...
+#                                 B against A, per task and server: a verdict on the
+#                                 task's number to beat (or M), the rest as context.
+#                                 Both read baselines/*.csv, results/scorecard*.csv and
+#                                 every --scorecard
 #   ./external.sh down [--purge]  stop ComfyUI and every server (down.sh)
 #
 # Tasks: T1, T3, T4, T5, T6-neutral and the tier-2 T7, T8 and T9 on every server;
@@ -44,15 +56,18 @@
 # HARNESS_CONTAINER (the prefix of the container names), COMFY_PORT,
 # COMFYRELAY_PORT, ARTOKUN_PORT, HARNESS_DATA and HARNESS_RESULTS.
 set -euo pipefail
+# summary and compare only read scorecards, so they skip lib.sh, whose sourcing creates the
+# servers' HOMEs and token files.
+case "${1:-}" in summary|compare) exec python3 "$(dirname "$0")/harness.py" "$@" ;; esac
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
   up|check)
     shift
-    task="" server=comfyrelay tokens="" tool_calls=""
+    task="" server=comfyrelay tokens="" tool_calls="" batch=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --server) [ $# -ge 2 ] || usage; server="$2"; shift 2 ;;
@@ -61,6 +76,14 @@ case "$cmd" in
           [ "$cmd" = check ] && [ $# -ge 2 ] && [[ "$2" =~ ^[0-9]+$ ]] || usage
           if [ "$1" = --tokens ]; then tokens="$2"; else tool_calls="$2"; fi
           shift 2 ;;
+        --batch)
+          [ "$cmd" = check ] && [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9._-]+$ ]] || usage
+          # A committed baseline's label is reserved: a control run must not join it.
+          [ ! -e "$HARNESS_DIR/baselines/$2.csv" ] || {
+            echo "--batch $2 is a committed baseline (baselines/$2.csv); label this run otherwise, e.g. control-<n>" >&2
+            exit 2
+          }
+          batch="$2"; shift 2 ;;
         -*) usage ;;
         *) [ -z "$task" ] || usage; task="$1"; shift ;;
       esac
@@ -190,5 +213,5 @@ IFS=$'\t' read -r mcp_calls mcp_work mcp_runs mcp_errors mcp_by_tool < <(hpy mcp
 echo "mcp: ${mcp_calls:-?} tool calls, ${mcp_work:-?} without polling, ${mcp_runs:-?} workflow_run," \
   "${mcp_errors:-?} failed${mcp_by_tool:+ ($mcp_by_tool)}"
 append_score "$server" "$task" "$verdict" "$detail" "$elapsed" "external (not sandboxed)" "" \
-  "$tokens" "$tool_calls" "$mcp_calls" "$mcp_work" "$mcp_runs" "$mcp_errors" "$mcp_by_tool"
+  "$tokens" "$tool_calls" "$mcp_calls" "$mcp_work" "$mcp_runs" "$mcp_errors" "$mcp_by_tool" "$batch"
 exit "$rc"

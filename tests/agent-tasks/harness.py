@@ -7,11 +7,15 @@ transcript. Usage: harness.py <command> [args]; see COMMANDS at the bottom.
 
 from __future__ import annotations
 
+import argparse
+import csv
 import json
+import math
 import os
 import re
 import shutil
 import sqlite3
+import statistics
 import struct
 import subprocess
 import sys
@@ -1070,13 +1074,19 @@ def values_upstream(g: dict, nid: str, *names: str) -> list:
     ]
 
 
+# The input that carries the positive conditioning, where it isn't named `positive` (#220).
+POSITIVE_INPUT = {"BasicGuider": "conditioning", "DualCFGGuider": "cond1"}
+
+
 def positive_texts(g: dict, nid: str) -> list[str]:
-    """The strings set upstream of the `positive` input of every sampler (or guider) that feeds a node."""
+    """The strings set upstream of the positive conditioning of every sampler (or guider) that feeds
+    a node: its `positive` input, or the one POSITIVE_INPUT names for its class."""
     return [
         v.strip()
         for u in upstream(g, nid)
-        if is_link((g[u].get("inputs") or {}).get("positive"))
-        for p in upstream(g, g[u]["inputs"]["positive"][0])
+        for name in [POSITIVE_INPUT.get(g[u].get("class_type"), "positive")]
+        if is_link((g[u].get("inputs") or {}).get(name))
+        for p in upstream(g, g[u]["inputs"][name][0])
         for v in (g[p].get("inputs") or {}).values()
         if isinstance(v, str)
     ]
@@ -1709,6 +1719,267 @@ def cmd_mcp_calls() -> None:
     print(f"{len(tools)}\t{work}\t{by_tool['workflow_run']}\t{errors}\t{breakdown}")
 
 
+# --- Repeats: summary and compare (external.sh) -------------------------------------
+#
+# The owner's rule (#221): a claim needs 5 runs per arm, on the same image digest, test model,
+# host and agent model. An improvement counts only when the median improves and the two arms'
+# runs mostly don't overlap. For pass rates, 0/5 against 5/5 is conclusive; anything in between
+# needs about 10 runs per arm.
+#
+# Pass rates are judged over every run, and the other numbers over passing runs only, with at
+# least 5 per arm: a run that gives up early is cheap, so counting it would read a regression in
+# passes as an improvement in calls (#222's review). Each task is judged on one number named in
+# advance (NUMBER_TO_BEAT); the others are shown as context, since judging four numbers at once
+# raises the chance of a false "improved" from about 4% to about 14%.
+
+MIN_RUNS = 5
+PASS_RATE_RUNS = 10
+# "Mostly don't overlap": the exact one-sided rank-sum (Mann-Whitney) p-value is at most this.
+# At 5 runs per arm that is 21 or more of the 25 pairs apart; 25 of 25 (no overlap) is p = 0.004.
+ALPHA = 0.05
+# The numbers each run records, as (scorecard column, label). Lower is better for every one.
+METRICS = (
+    ("mcp_work_calls", "MCP calls, polling aside"),
+    ("mcp_runs", "workflow_run"),
+    ("tokens", "tokens"),
+    ("seconds", "seconds"),
+)
+PASSES = "passes"
+LABELS = {PASSES: PASSES, **dict(METRICS)}
+# The number each tier-2 task is judged on, named in advance. A task not named here is judged on passes.
+NUMBER_TO_BEAT = {"T7": "mcp_work_calls", "T8": "mcp_work_calls", "T9": PASSES}
+NO_BATCH = "(none)"
+# Committed baselines (baselines/<batch>.csv), which summary and compare read beside the run scorecards.
+BASELINES = HERE / "baselines"
+
+
+def scorecard_files(extra: list[str]) -> list[Path]:
+    """The scorecards to read: the committed baselines, this HARNESS_RESULTS's scorecard and the ones
+    set aside when its columns changed (scorecard.before-*.csv), and every --scorecard."""
+    out: list[Path] = []
+    for p in [*sorted(BASELINES.glob("*.csv")), *sorted(RESULTS.glob("scorecard*.csv")), *map(Path, extra)]:
+        if not p.is_file():
+            sys.exit(f"no scorecard {p}")
+        if p.resolve() not in {o.resolve() for o in out}:
+            out.append(p)
+    return out
+
+
+def scorecard_runs(extra: list[str]) -> list[dict]:
+    """Every run in the scorecards but a dry run, each with the file it came from and that file's
+    columns (_file, _header). A row in two files (a baseline also in results/, say) counts once."""
+    files = scorecard_files(extra)
+    seen, rows = set(), []
+    for path in files:
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            header = tuple(reader.fieldnames or ())
+            for r in reader:
+                key = tuple(r.get(k) or "" for k in ("timestamp", "server", "task", "result", "detail", "batch"))
+                if r.get("mode") == "dry-run" or key in seen:
+                    continue
+                seen.add(key)
+                rows.append({**r, "_file": str(path), "_header": header})
+    if not files:
+        sys.exit(f"no scorecard in {BASELINES} or {RESULTS}")
+    return rows
+
+
+def batch_of(r: dict) -> str:
+    return r.get("batch") or NO_BATCH
+
+
+def passed(r: dict) -> bool:
+    return r.get("result") == "pass"
+
+
+def warn_mixed(rows: list[dict], what: str) -> None:
+    """Say so when a set of runs comes from scorecards with different columns: a column one of them
+    lacks reads as no value there, and its cells cover fewer runs."""
+    if len({r["_header"] for r in rows}) > 1:
+        files = ", ".join(sorted({r["_file"] for r in rows}))
+        print(f"warning: {what} spans scorecards with different columns: {files}", file=sys.stderr)
+
+
+def numbers(rows: list[dict], col: str) -> list[float]:
+    """A column's values as numbers; a run that didn't record one is left out."""
+    out = []
+    for r in rows:
+        try:
+            out.append(float(r.get(col) or ""))
+        except ValueError:
+            pass
+    return out
+
+
+def fmt(x: float) -> str:
+    return str(int(x)) if x == int(x) else f"{x:.1f}"
+
+
+def spread(values: list[float], runs: int) -> str:
+    """median (min-max), saying how many runs it covers when some recorded no value."""
+    if not values:
+        return "-"
+    s = f"{fmt(statistics.median(values))} ({fmt(min(values))}-{fmt(max(values))})"
+    return s if len(values) == runs else f"{s}, {len(values)} of {runs} runs"
+
+
+def groups(rows: list[dict]) -> dict[tuple[str, str], list[dict]]:
+    """Rows by (server, batch), in the order each first appears."""
+    out: dict[tuple[str, str], list[dict]] = {}
+    for r in rows:
+        out.setdefault((r["server"], batch_of(r)), []).append(r)
+    return out
+
+
+def cmd_summary(*args: str) -> None:
+    ap = argparse.ArgumentParser(prog="external.sh summary")
+    ap.add_argument("task")
+    ap.add_argument("--batch")
+    ap.add_argument("--server")
+    ap.add_argument("--scorecard", action="append", default=[], help="another scorecard to read (repeatable)")
+    a = ap.parse_args(args)
+    rows = [
+        r
+        for r in scorecard_runs(a.scorecard)
+        if r["task"] == a.task
+        and (a.batch is None or batch_of(r) == a.batch)
+        and (a.server is None or r["server"] == a.server)
+    ]
+    if not rows:
+        sys.exit(f"no {a.task} runs in the scorecards match")
+    print(
+        f"{a.task}: passes over every run; the other numbers are median (min-max) over passing runs. "
+        f"Number to beat: {LABELS[NUMBER_TO_BEAT.get(a.task, PASSES)]}\n"
+    )
+    print("| server | batch | passes | " + " | ".join(label for _, label in METRICS) + " |")
+    print("|---|---|---|" + "---|" * len(METRICS))
+    for (server, batch), runs in sorted(groups(rows).items(), key=lambda kv: kv[0][0]):
+        warn_mixed(runs, f"{server} {batch}")
+        ok = [r for r in runs if passed(r)]
+        cells = [spread(numbers(ok, col), len(ok)) for col, _ in METRICS]
+        print(f"| {server} | {batch} | {len(ok)}/{len(runs)} | " + " | ".join(cells) + " |")
+
+
+def pairs_apart(a: list[float], b: list[float], lower: bool) -> float:
+    """The (a, b) pairs in which b is on the `lower` side of a, ties counting half: the
+    Mann-Whitney U. len(a) * len(b) means the two sets don't overlap at all."""
+    return sum(1.0 if (y < x if lower else y > x) else 0.5 if y == x else 0.0 for x in a for y in b)
+
+
+def p_one_sided(a: list[float], b: list[float], lower: bool) -> float:
+    """The exact one-sided p-value of b's rank sum among the pooled runs (midranks for ties):
+    the share of every way of picking len(b) of the pooled runs whose rank sum is at least as far
+    to the `lower` side as b's. With 0/1 values (a pass rate) this is Fisher's exact test."""
+    pooled = sorted(a + b)
+    rank2 = {}  # twice the midrank, so ties stay integers
+    for v in set(pooled):
+        first, last = pooled.index(v), len(pooled) - pooled[::-1].index(v)
+        rank2[v] = first + last + 1
+    k = len(b)
+    ways: list[Counter] = [Counter() for _ in range(k + 1)]
+    ways[0][0] = 1
+    for v in pooled:
+        for j in range(k, 0, -1):
+            for s, c in list(ways[j - 1].items()):
+                ways[j][s + rank2[v]] += c
+    seen = sum(rank2[v] for v in b)
+    hits = sum(c for s, c in ways[k].items() if (s <= seen if lower else s >= seen))
+    return hits / math.comb(len(pooled), k)
+
+
+def verdict(
+    a: list[float], b: list[float], higher_is_better: bool = False, center=statistics.median
+) -> tuple[str, str]:
+    """How far apart B's runs are from A's, and the verdict for B against A."""
+    if len(a) < MIN_RUNS or len(b) < MIN_RUNS:
+        return "", f"inconclusive: fewer than {MIN_RUNS} runs in an arm"
+    ma, mb = center(a), center(b)
+    if ma == mb:
+        return "", "inconclusive: the medians are the same"
+    lower = mb < ma
+    better = lower != higher_is_better
+    apart = pairs_apart(a, b, lower)
+    p = p_one_sided(a, b, lower)
+    overlap = "don't overlap" if apart == len(a) * len(b) else "mostly don't overlap"
+    shown = f"{fmt(apart)}/{len(a) * len(b)} pairs (p={p:.3f})"
+    if p <= ALPHA:
+        return shown, f"{'improved' if better else 'worse'}: the medians differ and the runs {overlap}"
+    return shown, "inconclusive: the medians differ, but the runs overlap"
+
+
+def pass_verdict(a: list[float], b: list[float]) -> tuple[str, str]:
+    """Pass rates (1 a pass, 0 a fail): none against all is conclusive at 5 runs per arm,
+    anything in between only at about 10."""
+    if len(a) < MIN_RUNS or len(b) < MIN_RUNS:
+        return "", f"inconclusive: fewer than {MIN_RUNS} runs in an arm"
+    if sum(a) / len(a) == sum(b) / len(b):
+        return "", "inconclusive: the pass rates are the same"
+    if {sum(a) / len(a), sum(b) / len(b)} != {0.0, 1.0} and min(len(a), len(b)) < PASS_RATE_RUNS:
+        return "", f"inconclusive: a pass rate between none and all needs about {PASS_RATE_RUNS} runs per arm"
+    shown, v = verdict(a, b, higher_is_better=True, center=statistics.mean)
+    return shown, v.replace("the medians differ", "the pass rates differ")
+
+
+def efficiency_verdict(ra: list[dict], rb: list[dict], col: str) -> tuple[str, str]:
+    """A number other than passes, over each arm's passing runs only, of which each needs 5. When B passes
+    less often than A, its cheaper passing runs prove nothing (an arm topped up until 5 runs pass, say)."""
+    pa, pb = [r for r in ra if passed(r)], [r for r in rb if passed(r)]
+    if len(pb) / len(rb) < len(pa) / len(ra):
+        return "", "inconclusive: the pass rate dropped (judge passes first)"
+    if len(pa) < MIN_RUNS or len(pb) < MIN_RUNS:
+        differ = "; the pass rates differ" if len(pa) / len(ra) != len(pb) / len(rb) else ""
+        return "", f"inconclusive: needs {MIN_RUNS} passing runs per arm{differ}"
+    return verdict(numbers(pa, col), numbers(pb, col))
+
+
+def cmd_compare(*args: str) -> None:
+    ap = argparse.ArgumentParser(prog="external.sh compare")
+    ap.add_argument("batch_a")
+    ap.add_argument("batch_b")
+    ap.add_argument("--task")
+    ap.add_argument("--server")
+    ap.add_argument(
+        "--metric",
+        choices=[PASSES, *(col for col, _ in METRICS)],
+        help="the number to judge (default: the task's number to beat, else passes)",
+    )
+    ap.add_argument("--scorecard", action="append", default=[], help="another scorecard to read (repeatable)")
+    a = ap.parse_args(args)
+    by: dict[tuple[str, str, str], list[dict]] = {}
+    for r in scorecard_runs(a.scorecard):
+        if (a.task is None or r["task"] == a.task) and (a.server is None or r["server"] == a.server):
+            by.setdefault((r["task"], r["server"], batch_of(r)), []).append(r)
+    pairs = sorted({(t, s) for t, s, _ in by if (t, s, a.batch_a) in by and (t, s, a.batch_b) in by})
+    if not pairs:
+        sys.exit(f"no task and server has runs in both {a.batch_a} and {a.batch_b}")
+    for task, server in pairs:
+        ra, rb = by[(task, server, a.batch_a)], by[(task, server, a.batch_b)]
+        warn_mixed(ra, f"{task} {server} {a.batch_a}")
+        warn_mixed(rb, f"{task} {server} {a.batch_b}")
+        metric = a.metric or NUMBER_TO_BEAT.get(task, PASSES)
+        print(
+            f"\n{task} on {server}, B against A: passes over every run, the other numbers median (min-max) over "
+            f"passing runs. Judged on {LABELS[metric]}; the rest is context. Pairs apart counts the (A, B) run "
+            f"pairs on the side B moved to, ties half.\n"
+        )
+        print(f"| | A: {a.batch_a} | B: {a.batch_b} | pairs apart | verdict |")
+        print("|---|---|---|---|---|")
+        pa, pb = [float(passed(r)) for r in ra], [float(passed(r)) for r in rb]
+        judged = pass_verdict(pa, pb) if metric == PASSES else ("", "context")
+        print(f"| {PASSES} | {int(sum(pa))}/{len(pa)} | {int(sum(pb))}/{len(pb)} | {judged[0]} | {judged[1]} |")
+        oka, okb = [r for r in ra if passed(r)], [r for r in rb if passed(r)]
+        for col, label in METRICS:
+            row = efficiency_verdict(ra, rb, col) if col == metric else ("", "context")
+            if col == metric:
+                judged = row
+            print(
+                f"| {label} | {spread(numbers(oka, col), len(oka))} | {spread(numbers(okb, col), len(okb))} "
+                f"| {row[0]} | {row[1]} |"
+            )
+        print(f"\nverdict on {LABELS[metric]}: {judged[1]}")
+
+
 def cmd_check(task: str) -> None:
     try:
         print("PASS " + CHECKS[task]())
@@ -1732,10 +2003,13 @@ COMMANDS = {
     "handoff": cmd_handoff,
     "check": cmd_check,
     "mcp-calls": cmd_mcp_calls,
+    "summary": cmd_summary,
+    "compare": cmd_compare,
 }
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         sys.exit(f"usage: harness.py {{{'|'.join(COMMANDS)}}} [args]")
-    RESULTS.mkdir(exist_ok=True)
+    if sys.argv[1] not in ("summary", "compare"):  # these only read scorecards
+        RESULTS.mkdir(exist_ok=True)
     COMMANDS[sys.argv[1]](*sys.argv[2:])

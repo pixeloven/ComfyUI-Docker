@@ -41,6 +41,8 @@ Subagents run the tasks against comfyrelay, artokun and comfy-mcp through `exter
                                          # the brief to give the agent
 # the subagent does the task and writes its results file under the workspace
 ./external.sh check T5 [--server artokun]   # the task's check.sh; appends a scorecard row for that server; exit 0 on PASS
+                                            # (--batch LABEL marks it as one run of a set of repeats)
+./external.sh summary T8 | compare A B      # repeats, read from baselines/ and results/: see *Repeating runs*
 ./external.sh down       # stop ComfyUI and every server; --purge also deletes what the harness created in $HARNESS_DATA
 ```
 
@@ -152,7 +154,7 @@ Every server gets the same brief, the same client and a clean slate. What still 
 | T5 Template (#103) | A goal: a copy of an image at twice its width and height, from a workflow template. Choose one this instance can run with `template_search`, get it with `template_get`, run it unchanged with `workflow_run`, and write `results/T5.json`: `template`, `runnable` (as `template_get` said), `job_id` and `outputs`. Name only the files saved to `output/`, not temporary previews. Through `external.sh`, on every server. artokun and comfy-mcp get `prompt.neutral.md`, the same goal without comfyrelay's tool names, and the same check. | The template is one ComfyUI's `/templates/index.json` tags `Image Upscale`. Its job is a `/history` entry new since setup that completed, with the template's nodes and settings: the job runs each node class as many times as the template does (frontend-only nodes such as notes aside), and every value it sets on a node (every input that isn't a link; an empty dict or a null counts as unset, which is how a converter writes ImageCompare's display-only `compare_view`) is among the widget values of a template node of that class, so the input file, upscale method, factor and file prefix are the template's. Links aren't compared. Each output the index declares for it saved a new file (not there at setup) of that media type to `output/`, a PNG at twice the input's size; the report lists exactly those files and says `runnable: true`. Then a relay self-test, on the detail line: comfyrelay's `template_get`, asked by the check itself, says `runnable: true` for the template and `runnable: false`, with missing models, for the first candidate whose template declares a model. It fails comfyrelay's T5 only, never another server's. |
 | T6 Knowledge (#134) | Answer the 4 questions in `prompt.md` from the relay's built-in docs (`docs_search`, `docs_guide`), and write `results/T6.json`: each id maps to `{answer, path}`, the path being the search result or guide the answer came from. One question is from the workflow JSON spec, one from the server's routes, one only this project's guides answer, and one from a tutorial. It's run by a subagent, not a billed `claude -p` (owner, #134), through `external.sh`. comfyrelay only; every server, comfyrelay included, runs T6-neutral for the comparison. | Every answer equals the one in `answers.json` as a whole, so a hedge such as "either X or Y" fails. Case counts where the question says so, and a route may drop its leading slash. Every cited path is a page in the image's own index where the question's pattern finds that same answer. `derive.sh` copies that index out of the relay image (`COMFYRELAY_IMAGE`, or its argument) to `results/T6-docs.sqlite` and derives `results/T6.answers.json` from it: each question names its page and a pattern, and the answer is what the pattern captures there. The committed `answers.json` is derived the same way, never written by hand, and `derive.sh` reports where a new derivation differs from it, so a docs bump that moves an answer shows up. |
 | T6-neutral Knowledge, compared (owner, 2026-10-03) | Answer T6's q1, q2 and q4 (not q3, which is about comfyrelay) from whatever the MCP server can reach, and write `results/T6-neutral.json`: each id maps to `{answer, source}`, the source being a free-text note on where the answer came from, kept for the scorecard. Every server runs it, through `external.sh`. | Every answer equals an accepted answer as a whole, normalised as T6 normalises it: case counts for q1, and q2 may drop its leading slash. q1 accepts T6's docs answer, `lastGroupid` (a typo in the docs), or the spelling this instance's served templates use, `lastGroupId`, both derived at setup (`derive-t6-neutral`, into `results/T6-neutral.answers.json`). A hedge such as "either X or Y" fails. The `source` isn't checked, and a missing one is fine. Setup derives the key with `tasks/T6/derive.sh`, the same `results/T6.answers.json` that T6 uses, from the relay image. |
-| T7 Author and tweak (tier 2, #212) | Start from one of the instance's text-to-image templates and adapt it to the installed SD 1.5 checkpoint: `a red apple on a wooden table`, 256×256, 4 steps, seed 1, prefix `t7_`; run it. Then change the seed to 2 and the width to 384, keep everything else, and run it again. | Among the `/history` entries new since setup, one completed and saved a new 256×256 `t7_` PNG from a `SaveImage` that has, upstream, the checkpoint, 4 steps, seed 1, and that prompt text on the conditioning feeding a sampler's (or guider's) `positive` input, links followed; and a later one did the same with seed 2 and a new 384×256 `t7_` PNG, and its `SaveImage` computes exactly what the first one's does once seed and width are left out (compared as T8 compares). So the second run may change nothing but the seed and the width. A value a template routes through a backend `Primitive*` node (`PrimitiveInt`, `PrimitiveStringMultiline` and the like) counts as set where it is used. The graph's other nodes and values are the agent's choice, so any text-to-image template that runs on SD 1.5 can pass. Runs are ordered by their `execution_start`, or by `/history`'s order when one lacks it. |
+| T7 Author and tweak (tier 2, #212) | Start from one of the instance's text-to-image templates and adapt it to the installed SD 1.5 checkpoint: `a red apple on a wooden table`, 256×256, 4 steps, seed 1, prefix `t7_`; run it. Then change the seed to 2 and the width to 384, keep everything else, and run it again. | Two of the `/history` entries new since setup, in this order. The first completed and saved a new 256×256 `t7_` PNG from a `SaveImage` that has, upstream, the checkpoint, 4 steps, seed 1, and the prompt text on the conditioning that feeds a sampler's or guider's positive input, links followed. A later one did the same with seed 2 and a new 384×256 `t7_` PNG, and its `SaveImage` computes exactly what the first one's does once seed and width are left out (compared as T8 compares), so the second run may change nothing but the seed and the width. The positive input is `conditioning` on `BasicGuider`, `cond1` on `DualCFGGuider`, and `positive` on the samplers and every other guider in ComfyUI v0.38.0 (#220). A value a template routes through a backend `Primitive*` node (`PrimitiveInt`, `PrimitiveStringMultiline` and the like) counts as set where it is used. The graph's other nodes and values are the agent's choice, so any text-to-image template that runs on SD 1.5 can pass. Runs are ordered by their `execution_start`, or by `/history`'s order when one lacks it. |
 | T8 Fix a broken graph (tier 2, #212) | `T8-workflow.json` is an SD 1.5 txt2img graph in API format with four faults: a misspelled checkpoint name, a missing required input (`EmptyLatentImage.height`), a COMBO value that isn't one (`sampler_name: "eular"`), and a CLIP output wired into `VAEDecode`'s VAE input. The prompt states the intent (256×256, the SD 1.5 checkpoint, the euler sampler, prefix `t8_`), so each fault has one fix. Fix only what is broken, run it to completion. | A `/history` entry new since setup ran the intended graph, completed, and saved a new 256×256 `t8_` PNG. "The intended graph" is compared by what each `SaveImage` computes: its class, its set values (7 and 7.0 are the same) and, recursively, the nodes and output slots its links come from, whatever the node ids are. Extra nodes are allowed; a changed value or link fails. Setup submits the broken graph once and fails unless ComfyUI reports all four faults. The detail counts the runs since setup. The numbers to compare are the scorecard's `mcp_runs` (the submissions it took) and `mcp_work_calls` (the MCP calls, polling aside). |
 | T9 Edit a saved workflow (tier 2, #212) | `t9-portrait.json`, which setup saves among the user's workflows through `/userdata` (UI format, 512×768, 20 steps, prefix `portrait`), must render at 256×384 with 4 steps and the prefix `t9_`, keep everything else, be saved back under the same name in the same format, and run once. | `workflows/t9-portrait.json` read back from `/userdata` is still the UI format (`nodes` and `links` lists), with the same nodes and links (link ids aside) and every widget value as setup saved it except those three; and a `/history` entry new since setup ran that edited workflow (compared as T8 compares), completed and saved a new 256×384 `t9_` PNG. |
 
@@ -171,13 +173,15 @@ Every server gets the same brief, the same client and a clean slate. What still 
 
 T1–T6 use no model and are single-shot, and they have passed 6/6 on every release since 5.1.0, so they can't show whether a workflow-development feature helps. T7–T9 can: each runs a real checkpoint on CPU over several steps, and each is the baseline for later work, which must cite the task it improved (#201, D6 and D8):
 
-| Task | Baseline for |
-|---|---|
-| T7 Author and tweak | authoring in general: the requirements report (#213) and the relay polish (#217) |
-| T8 Fix a broken graph | the requirements report (#213) and the dry run (#215): today's `workflow_validate` checks neither input types nor values, so each fault costs a submission |
-| T9 Edit a saved workflow | saved workflows (#216): today's relay has no tool that reads or writes ComfyUI's user data, so T9 is expected to fail until it does |
+| Task | Baseline for | Number to beat | `baseline-6.0.0` |
+|---|---|---|---|
+| T7 Author and tweak | authoring in general: the requirements report (#213) and the relay polish (#217) | `mcp_work_calls` | 5/5 passes, 15 (13–17) work calls |
+| T8 Fix a broken graph | the requirements report (#213) and the dry run (#215). Today's `workflow_validate` checks neither input types nor values, and called the broken graph runnable in every baseline run. So agents check each input themselves before submitting (`node_describe` ×3 and `model_list` in each run), and all 5 submitted once. The target is those work calls, not the submissions: `mcp_runs` was 1 every time | `mcp_work_calls` | 5/5 passes, 9 (7–9) work calls |
+| T9 Edit a saved workflow | saved workflows (#216): today's relay has no tool that reads or writes ComfyUI's user data, so T9 is expected to fail until it does | passes | 0/5 passes |
 
-They aren't part of the release run (*Before each release*). Run them like any other task, through `external.sh`; T7 and T9 need a relay that converts UI-format workflows (`COMFYRELAY_IMAGE` set to an `mcp-convert` image), since templates and saved workflows are UI format, and T8 runs on `mcp`.
+Each task's number to beat is named in advance, and `compare` judges only that one (*Repeating runs*). The baseline is `baselines/baseline-6.0.0.csv`: 5 runs per task on main's images at `b6c7701e`, recorded in #222.
+
+They aren't part of the release run (*Before each release*). Run them like any other task, through `external.sh`, and 5 times per arm for a result anyone will cite (*Repeating runs*); T7 and T9 need a relay that converts UI-format workflows (`COMFYRELAY_IMAGE` set to an `mcp-convert` image), since templates and saved workflows are UI format, and T8 runs on `mcp`.
 
 **Saved workflows don't carry over.** Each tier-2 setup empties `user/default/workflows/` when the harness created the `user` volume, so T9's edited file, say, can't help a later T7. On a `user` volume the harness found, it removes only T9's own file and leaves the operator's workflows alone.
 
@@ -187,9 +191,73 @@ They aren't part of the release run (*Before each release*). Run them like any o
 - **What it costs.** On the 8-core CPU these baselines ran on, a 256×256, 4-step run takes about 16 s with the model load and 11 s warm, and 512×512 at 20 steps takes about 4 minutes. That's why every tier-2 prompt asks for small images and few steps.
 - **No template names it.** ComfyUI v0.38.0's template index has no SD 1.5 text-to-image template, so T7's agent has to adapt one made for another model (an SDXL one, say) to the checkpoint it has. That's part of the task.
 
+## Repeating runs (#221)
+
+One run of a tier-2 task says little. In #218's two T8 baselines, the same agent model on the same relay image took 7 MCP calls, polling aside, and then 4. To claim a feature improved a task, repeat it. The rule is the owner's (2026-10-16):
+
+- **Run 5 times per arm.** Run the baseline and the feature 5 times each, on the same core-cpu image digest, test model, host and agent model. Only the relay image under test differs between them.
+- **An improvement needs two things.** B's median must be better than A's, **and** the two arms' runs must mostly not overlap. At 5 per arm, full separation is the strongest result possible (one-sided Mann–Whitney p ≈ 0.004).
+- **Pass rates.** 0/5 against 5/5 is conclusive. Anything in between needs about 10 runs per arm.
+- **One number per task, named in advance.** Judging four numbers at once raises the chance of a false "improved" from about 4% to about 14%. So each task is judged on its *number to beat* (*Tier 2*: `mcp_work_calls` for T7 and T8, passes for T9), and the other numbers are context.
+
+**The baseline's images.** `baselines/baseline-6.0.0.csv` ran on main's images at `b6c7701e`. main's core has changed since: #219 added the node venv. To run on those exact images, pull them by digest. `up` never pulls: it builds a core-cpu it can't find, and the relay script refuses one it can't find.
+
+```sh
+docker pull ghcr.io/pixeloven/comfyui/core@sha256:2c2f8b3aab9a979d845ab6946be4062e8cc71127a2377449b7d781898e39cd49
+docker pull ghcr.io/pixeloven/comfyui/mcp@sha256:e0966b96aa8d8a1fc7ee5ec86725ad72275117cbccb7189d14d233992cf01847
+docker pull ghcr.io/pixeloven/comfyui/mcp-convert@sha256:1d463665cd2a9896784b9c49bdcb1565a822988d84b2273d88721b35241903b0
+
+export HARNESS_IMAGE=ghcr.io/pixeloven/comfyui/core@sha256:2c2f8b3aab9a979d845ab6946be4062e8cc71127a2377449b7d781898e39cd49
+# T7 and T9:
+export COMFYRELAY_IMAGE=ghcr.io/pixeloven/comfyui/mcp-convert@sha256:1d463665cd2a9896784b9c49bdcb1565a822988d84b2273d88721b35241903b0
+# T8:
+export COMFYRELAY_IMAGE=ghcr.io/pixeloven/comfyui/mcp@sha256:e0966b96aa8d8a1fc7ee5ec86725ad72275117cbccb7189d14d233992cf01847
+```
+
+A feature arm keeps that `HARNESS_IMAGE` and sets `COMFYRELAY_IMAGE` to the relay under test. When the feature needs a newer core, it needs a new baseline on that core too.
+
+**How to run an arm.** Give every run of the arm one label with `--batch`, and run each with a fresh subagent:
+
+```sh
+for i in 1 2 3 4 5; do
+  ./external.sh up T8
+  # dispatch one fresh subagent with the brief, verbatim; note its tokens and tool calls
+  ./external.sh check T8 --batch dryrun-215 --tokens N --tool-calls N
+done
+```
+
+- **Labels.** A label is letters, digits, `.`, `_` and `-`. Name it after what the arm runs (`dryrun-215`). `check` refuses (exit 2) the label of a committed baseline (`baselines/<label>.csv`), so a control run can't join `baseline-6.0.0`.
+- **Digests.** Record each arm's image digests where you report it. The scorecard has the label, not the digests.
+- **Drift check.** In the same session as each new arm, also run 1–2 runs on the baseline images, labelled e.g. `control-215`. The host, the agent model or ComfyUI's caches can drift between sessions. If the control runs fall outside the baseline's min–max, the session differs from the one that recorded the baseline, and its comparison isn't sound.
+
+**How to read the arms:**
+
+```sh
+./external.sh summary T8 [--batch dryrun-215] [--server comfyrelay] [--scorecard PATH]...
+./external.sh compare baseline-6.0.0 dryrun-215 [--task T8] [--server comfyrelay] [--metric M] [--scorecard PATH]...
+```
+
+- **What both read.** Both read the committed baselines (`baselines/*.csv`) and this `HARNESS_RESULTS`'s scorecards (`scorecard.csv`, plus the `scorecard.before-*.csv` files set aside when its columns changed), plus every `--scorecard` given.
+  - A row that appears in two files counts once.
+  - A batch whose rows come from files with different columns gets a warning on stderr, since a column one file lacks reads as no value there.
+  - Neither command writes anything, and neither starts or creates anything in `HARNESS_DATA`.
+- **Passing runs only.** Passes are counted over every run. The other numbers come from passing runs only, because a run that gives up early is cheap: counting it would read a drop in passes as fewer calls.
+- **`summary`** prints a Markdown table with one line per server and batch. It shows k/N passes, then the median and (min-max) of `mcp_work_calls`, `mcp_runs`, `tokens` and `seconds` over the passing runs.
+  - When some passing runs didn't record a number (`--tokens` not passed, say), the cell says how many runs it covers.
+  - An unlabelled run counts under `(none)`, and a `dry-run` row doesn't count at all.
+- **`compare`** prints a table for each task and server that has runs in both batches. Each number gets A's and B's median (min-max).
+  - **What it judges.** Only the task's number to beat, or `--metric` (`passes`, `mcp_work_calls`, `mcp_runs`, `tokens` or `seconds`), gets a verdict. The others say `context`. A task with no number named is judged on passes.
+  - **The verdict line.** The table ends with `verdict on <number>: …`.
+  - **How far apart.** "Pairs apart" counts the (A, B) run pairs on the side B's median moved to, ties counting half. That count is the Mann–Whitney U, so 25/25 at 5 per arm means no overlap. Beside it is the exact one-sided p-value, computed over every way to split the pooled runs between the two arms.
+  - **The verdict.** It reads `improved: the medians differ and the runs don't overlap` (or `mostly don't overlap`) when the median is better and p ≤ 0.05. At 5 per arm, that means at least 21 of the 25 pairs. When the median is worse instead, it reads `worse: …`.
+  - **When it's inconclusive,** it gives the reason: the medians are the same, the runs overlap, or an arm has fewer than 5 runs. For a number other than passes, the reason can also be fewer than 5 *passing* runs in an arm (`inconclusive: needs 5 passing runs per arm`), with `the pass rates differ` added when they do.
+  - **A lower pass rate blocks the other numbers.** When B passes less often than A, every other number reads `inconclusive: the pass rate dropped (judge passes first)`, however its passing runs compare. Otherwise an arm topped up until 5 runs pass (5 of 10, say) could show cheaper passing runs as an improvement.
+  - **Pass rates.** None against all is conclusive at 5 per arm. A rate in between is judged, by the same test (here, Fisher's exact test), only when both arms have 10 runs.
+- **Compare within one server only.** `mcp_runs` counts `workflow_run` calls and `mcp_work_calls` leaves out `job_status`, which are comfyrelay's tool names. Another server's submissions and polling go by other names, so its `mcp_runs` is 0 and its polling counts as work. `compare` never sets one server against another, and its numbers aren't comparable across servers.
+
 ## Recording scores
 
-`run.sh` and `external.sh check` append one row per run to `results/scorecard.csv`, with these columns: `timestamp, server, task, result, detail, seconds, mode, turns, cost_usd_notional, tokens, tool_calls, mcp_calls, mcp_work_calls, mcp_runs, mcp_errors, mcp_by_tool`. A scorecard with other columns is renamed `scorecard.before-<time>.csv` rather than appended to.
+`run.sh` and `external.sh check` append one row per run to `results/scorecard.csv`, with these columns: `timestamp, server, task, result, detail, seconds, mode, turns, cost_usd_notional, tokens, tool_calls, mcp_calls, mcp_work_calls, mcp_runs, mcp_errors, mcp_by_tool, batch`. A scorecard with other columns is renamed `scorecard.before-<time>.csv` rather than appended to.
 
 - **`tokens` and `tool_calls`** are what the lead's harness reported for an external agent, passed to `external.sh check` as `--tokens` and `--tool-calls`. They are empty when not passed, and for `run.sh`.
 - **The `mcp_*` columns** come from the harness's client, so they don't depend on the agent's own report. The broker appends one line per request it forwards (the method, the tool, whether it failed and how long it took, never the arguments or the result) to `$HARNESS_DATA/mcp-calls.jsonl`, which the spec names and each `up` empties. A line that doesn't parse is skipped, and a logging failure never fails the call. `check` prints the summary too.
@@ -197,6 +265,7 @@ They aren't part of the release run (*Before each release*). Run them like any o
   - `mcp_work_calls`: the same without polling (`job_status`), which counts how long the agent waited, not how many steps it took. This and `mcp_runs` are the numbers a later feature should lower.
   - `mcp_runs`: the `workflow_run` submissions.
   - `mcp_errors` and `mcp_by_tool`: how many calls failed, and a count per tool, polling included.
+- **`batch`** is the label `external.sh check --batch` gave the run, which `summary` and `compare` group repeats by (*Repeating runs*). It is empty when none was given, and for `run.sh`.
 
 `mode` is one of:
 
