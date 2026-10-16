@@ -165,17 +165,35 @@ prepare_task() {
   "$HARNESS_DIR/tasks/$1/setup.sh"
 }
 
+# The tier-2 tasks' checkpoint (T7-T9), into the models volume: tests/agent-tasks/models/comfy-lock.yaml,
+# materialised by this repo's own `comfyctl fetch`, which verifies its sha256 and skips it when it is
+# already there. COMFYCTL overrides the command (default: comfyctl from services/, through uv).
+fetch_tier2_model() {
+  local -a comfyctl
+  read -r -a comfyctl <<< "${COMFYCTL:-uv run --project $HARNESS_REPO/services --locked --quiet comfyctl}"
+  "${comfyctl[@]}" fetch fetch "$HARNESS_DIR/models/comfy-lock.yaml" "$HARNESS_DATA" --apply --output plain >&2
+}
+
 # Append a row to results/scorecard.csv:
-#   append_score <server> <task> <pass|fail> <detail> <seconds> <mode> <transcript or "">
+#   append_score <server> <task> <pass|fail> <detail> <seconds> <mode> <transcript or ""> \
+#                [<tokens> <tool_calls> <mcp_calls> <mcp_errors> <mcp_by_tool>]
 # cost_usd_notional is what claude reports; on a subscription it is plan quota,
-# not a charge.
+# not a charge. tokens and tool_calls are what the lead's harness reported for an
+# external agent; the mcp_* columns come from the harness's client log (external.sh).
+# A scorecard written before these columns existed is set aside, not appended to.
 append_score() {
   local sc="$RESULTS/scorecard.csv"
-  [ -s "$sc" ] || echo "timestamp,server,task,result,detail,seconds,mode,turns,cost_usd_notional" > "$sc"
+  local header="timestamp,server,task,result,detail,seconds,mode,turns,cost_usd_notional,tokens,tool_calls,mcp_calls,mcp_errors,mcp_by_tool"
+  if [ -s "$sc" ] && [ "$(head -1 "$sc")" != "$header" ]; then
+    mv "$sc" "$RESULTS/scorecard.before-$(date +%s).csv"
+  fi
+  [ -s "$sc" ] || echo "$header" > "$sc"
   python3 - "$sc" "$@" <<'EOF'
 import csv, json, sys
 from datetime import datetime, timezone
-path, *row, transcript = sys.argv[1:]
+path, *row = sys.argv[1:]
+row, transcript, extra = row[:6], row[6], row[7:]
+extra += [""] * (5 - len(extra))
 turns = cost = ""
 if transcript:
     try:
@@ -186,6 +204,6 @@ if transcript:
     except (OSError, ValueError):
         pass
 with open(path, "a", newline="") as f:
-    csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), *row, turns, cost])
+    csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), *row, turns, cost, *extra[:5]])
 EOF
 }

@@ -10,6 +10,19 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## Unreleased
+
+### Added
+
+- **The agent harness has a second tier, which measures workflow development (#212).**
+  T7 (author a txt2img workflow from a template, then change it), T8 (fix a graph
+  with four faults) and T9 (edit a saved workflow in ComfyUI's user data) run Stable
+  Diffusion 1.5 on CPU, which their setups fetch with `comfyctl fetch` from a lock in
+  `tests/agent-tasks/models/`. Each check grades what ComfyUI ran and saved. The
+  harness's MCP client now logs each call an agent makes, and the scorecard records
+  those counts, plus the tokens and tool calls the lead reports (`external.sh check
+  --tokens N --tool-calls N`). Nothing published changes.
+
 ## 6.0.0 — 2026-10-11
 
 ### Breaking
