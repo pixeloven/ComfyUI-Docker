@@ -1,0 +1,9 @@
+models:
+  - model: v1-5-pruned-emaonly-fp16.safetensors
+    url: https://huggingface.co/Comfy-Org/stable-diffusion-v1-5-archive/resolve/9cfd069101959ca3828bf9c04a4419870832b74f/v1-5-pruned-emaonly-fp16.safetensors
+    paths:
+      - path: models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors
+    hashes:
+      - hash: e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916
+        type: SHA256
+    type: checkpoint

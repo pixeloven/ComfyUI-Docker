@@ -13,15 +13,18 @@
 #                                 Also written to <workspace>/TASK.md and
 #                                 results/<server>-<task>.handoff.json
 #   (the agent does the task, and writes its results under the workspace)
-#   ./external.sh check <task> [--server ...]
+#   ./external.sh check <task> [--server ...] [--tokens N] [--tool-calls N]
 #                                 run the task's check.sh, append a scorecard row with
 #                                 the server and mode "external (not sandboxed)",
 #                                 exit 0 on PASS. It refuses (exit 2) a server the
 #                                 workspace wasn't set up for. Run it before the next
-#                                 `up`, which empties the workspace.
+#                                 `up`, which empties the workspace. The row counts the
+#                                 agent's MCP calls from the client's log; --tokens and
+#                                 --tool-calls record what the lead's harness reported.
 #   ./external.sh down [--purge]  stop ComfyUI and every server (down.sh)
 #
-# Tasks: T1, T3, T4, T5 and T6-neutral on every server; T2-refuse and the full
+# Tasks: T1, T3, T4, T5, T6-neutral and the tier-2 T7, T8 and T9 on every server;
+# T2-refuse and the full
 # T6 (with citations) on comfyrelay, T2 on the others. `up` can be repeated for
 # the next task on the same instance. Each one restarts the server, empties the
 # workspace, both servers' HOMEs and ComfyUI's queue, removes a T2 pack (from a
@@ -43,17 +46,21 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
   up|check)
     shift
-    task="" server=comfyrelay
+    task="" server=comfyrelay tokens="" tool_calls=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --server) [ $# -ge 2 ] || usage; server="$2"; shift 2 ;;
         --server=*) server="${1#--server=}"; shift ;;
+        --tokens|--tool-calls)
+          [ "$cmd" = check ] && [ $# -ge 2 ] && [[ "$2" =~ ^[0-9]+$ ]] || usage
+          if [ "$1" = --tokens ]; then tokens="$2"; else tool_calls="$2"; fi
+          shift 2 ;;
         -*) usage ;;
         *) [ -z "$task" ] || usage; task="$1"; shift ;;
       esac
@@ -178,5 +185,10 @@ echo "$detail"
 # Keep what the agent wrote beside the other runs' files.
 mkdir -p "$RESULTS/runs/$server-$task.files"
 cp -r "$HARNESS_DATA/workspace/results/." "$RESULTS/runs/$server-$task.files/" 2>/dev/null || true
-append_score "$server" "$task" "$verdict" "$detail" "$elapsed" "external (not sandboxed)" ""
+mcp_calls="" mcp_work="" mcp_runs="" mcp_errors="" mcp_by_tool=""
+IFS=$'\t' read -r mcp_calls mcp_work mcp_runs mcp_errors mcp_by_tool < <(hpy mcp-calls || true) || true
+echo "mcp: ${mcp_calls:-?} tool calls, ${mcp_work:-?} without polling, ${mcp_runs:-?} workflow_run," \
+  "${mcp_errors:-?} failed${mcp_by_tool:+ ($mcp_by_tool)}"
+append_score "$server" "$task" "$verdict" "$detail" "$elapsed" "external (not sandboxed)" "" \
+  "$tokens" "$tool_calls" "$mcp_calls" "$mcp_work" "$mcp_runs" "$mcp_errors" "$mcp_by_tool"
 exit "$rc"

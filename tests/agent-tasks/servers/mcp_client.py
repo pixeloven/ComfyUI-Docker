@@ -29,6 +29,11 @@ The spec picks the transport:
       locale variables from this environment, plus the spec's env; its stderr
       goes to the spec's log.
 
+A spec may also name a `calls_log`: the broker then appends one JSON line per
+request it forwards (the method, the tool for tools/call, whether it failed,
+and how long it took), which is how the harness counts an agent's tool calls.
+It holds no arguments or results.
+
 Stdlib only. The client is the same for every server: protocol 2025-06-18 and
 no client capabilities. A request a server sends anyway is answered the way a
 headless client answers it: `ping` with an empty result, `elicitation/create`
@@ -220,6 +225,27 @@ def checked(req: object) -> str | None:
     return None
 
 
+def log_call(spec: dict, req: dict, reply: dict, seconds: float) -> None:
+    """One line in the spec's calls_log, if it names one: what was asked and whether it failed, never its
+    content. Logging never fails the call: whatever goes wrong here, the line is dropped."""
+    try:
+        if not spec.get("calls_log"):
+            return
+        params = req.get("params") or {}
+        result = reply.get("result")
+        line = {
+            "time": round(time.time(), 3),
+            "method": req["method"],
+            "tool": params.get("name") if req["method"] == "tools/call" else None,
+            "error": "error" in reply or (isinstance(result, dict) and bool(result.get("isError"))),
+            "seconds": round(seconds, 3),
+        }
+        with open(spec["calls_log"], "a") as f:
+            f.write(json.dumps(line) + "\n")
+    except Exception:  # noqa: BLE001, S110  (a log line is never worth a call)
+        pass
+
+
 def serve(spec: dict) -> None:
     """Run in the background by `start`. Reports one line on stdout (the initialize
     reply, or an error), then serves requests until `stop` or SIGTERM."""
@@ -260,10 +286,12 @@ def serve(spec: dict) -> None:
                     conn.sendall(b'{"result":{}}\n')
                     return
                 else:
+                    began = time.monotonic()
                     try:
                         reply = server.request(req["method"], req.get("params"))
                     except Exception as e:  # noqa: BLE001  (keep serving whatever one request does)
                         reply = error(f"{type(e).__name__}: {e}")
+                    log_call(spec, req, reply, time.monotonic() - began)
                 try:
                     conn.sendall((json.dumps(reply) + "\n").encode())
                 except OSError:

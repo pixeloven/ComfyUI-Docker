@@ -1,0 +1,22 @@
+# The model the harness's tier-2 tasks (T7-T9) run on CPU. comfy-lock.yaml
+# beside it pins it by commit and sha256; regenerate the lock with
+#   cd services && uv run --locked comfyctl fetch resolve ../tests/agent-tasks/models/comfy.yaml \
+#     -O ../tests/agent-tasks/models/comfy-lock.yaml
+# and the tasks' setup fetches it with `comfyctl fetch fetch`, verified.
+#
+# Why this one: no "tiny" SD checkpoint on Hugging Face loads in ComfyUI's
+# stock CheckpointLoaderSimple (see the README, "The tier-2 model"), so this is
+# the smallest one that does: Stable Diffusion 1.5, pruned, EMA-only, fp16,
+# 2.13 GB, as Comfy-Org repackages it. It is also the file ComfyUI's default
+# txt2img template names. Licence: CreativeML OpenRAIL-M.
+name: agent-tasks-tier2
+description: The checkpoint the harness's tier-2 agent tasks run.
+
+models:
+  - name: sd15
+    description: Stable Diffusion 1.5, pruned EMA-only, fp16 (CreativeML OpenRAIL-M).
+    files:
+      - source: hf:Comfy-Org/stable-diffusion-v1-5-archive
+        file: v1-5-pruned-emaonly-fp16.safetensors
+        install: models/checkpoints/
+        type: checkpoint

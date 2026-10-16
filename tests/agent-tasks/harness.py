@@ -10,12 +10,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sqlite3
 import struct
 import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 from collections import Counter
@@ -29,6 +31,8 @@ DATA = Path(os.environ.get("HARNESS_DATA", "/tmp/comfyui-harness"))
 # The agent's working directory. Its file tools are confined to it, so it
 # cannot read answers.json or the ground-truth dump.
 WORKSPACE = DATA / "workspace"
+# What an external agent's client logged, one line per MCP request (servers/mcp_client.py).
+CALLS_LOG = DATA / "mcp-calls.jsonl"
 
 INPUT_IMAGE = "harness-input.png"
 
@@ -989,6 +993,491 @@ def t5_relay_selftest(name: str, index: dict, candidates: list[str]) -> tuple[bo
     return True, f"{name} is runnable and {needs_model} is not (missing models)"
 
 
+# --- Tier 2 (#212): workflow development on a real checkpoint -----------------------
+#
+# T7 to T9 run Stable Diffusion 1.5 on CPU (tests/agent-tasks/models, fetched
+# by `comfyctl fetch` in their setups). Every check reads /history, the output
+# files and ComfyUI's user data, never a transcript.
+
+TIER2_MODEL = "v1-5-pruned-emaonly-fp16.safetensors"
+
+
+def png_outputs(entry: dict, prefix: str) -> list[dict]:
+    """The PNGs a /history entry saved to output/ under a filename prefix."""
+    return [
+        i
+        for out in entry.get("outputs", {}).values()
+        for i in out.get("images", [])
+        if i.get("type") == "output" and i["filename"].startswith(prefix)
+    ]
+
+
+def started(entry: dict) -> int:
+    """When ComfyUI started running the entry (ms), from its execution_start message; 0 if it never did."""
+    for kind, msg in (entry.get("status") or {}).get("messages", []):
+        if kind == "execution_start":
+            return int(msg.get("timestamp", 0))
+    return 0
+
+
+def ordered(entries: dict) -> list[tuple[str, dict]]:
+    """The entries in the order ComfyUI ran them: by execution_start, or in /history's own
+    order when any entry lacks one."""
+    items = list(entries.items())
+    return sorted(items, key=lambda kv: started(kv[1])) if all(started(e) for _, e in items) else items
+
+
+def resolve_primitives(g: dict) -> dict:
+    """The graph with every link from a backend Primitive* node (PrimitiveInt, PrimitiveStringMultiline
+    and the like, which output their `value` input unchanged) replaced by that value, so a setting a
+    template routes through one counts where it is used, as if it were set there."""
+    g = json.loads(json.dumps(g))
+    for _ in range(16):
+        changed = False
+        for n in g.values():
+            ins = n.get("inputs") or {}
+            for k, v in ins.items():
+                src = g.get(v[0]) if is_link(v) else None
+                if (
+                    isinstance(src, dict)
+                    and str(src.get("class_type", "")).startswith("Primitive")
+                    and "value" in (src.get("inputs") or {})
+                    and not is_link(src["inputs"]["value"])
+                ):
+                    ins[k] = src["inputs"]["value"]
+                    changed = True
+        if not changed:
+            break
+    return g
+
+
+def upstream(g: dict, nid: str) -> set[str]:
+    """The node and every node its links reach, recursively."""
+    seen, todo = set(), [nid]
+    while todo:
+        cur = todo.pop()
+        if cur in seen or cur not in g:
+            continue
+        seen.add(cur)
+        todo += [v[0] for v in (g[cur].get("inputs") or {}).values() if is_link(v)]
+    return seen
+
+
+def values_upstream(g: dict, nid: str, *names: str) -> list:
+    """Every value set (not linked) on an input with one of these names, at or upstream of a node."""
+    return [
+        v for u in upstream(g, nid) for k, v in (g[u].get("inputs") or {}).items() if k in names and not is_link(v)
+    ]
+
+
+def positive_texts(g: dict, nid: str) -> list[str]:
+    """The strings set upstream of the `positive` input of every sampler (or guider) that feeds a node."""
+    return [
+        v.strip()
+        for u in upstream(g, nid)
+        if is_link((g[u].get("inputs") or {}).get("positive"))
+        for p in upstream(g, g[u]["inputs"]["positive"][0])
+        for v in (g[p].get("inputs") or {}).values()
+        if isinstance(v, str)
+    ]
+
+
+def same(a: object, b: object) -> bool:
+    """Equal as JSON values, with 7 and 7.0 the same number."""
+    return canon(a) == canon(b)
+
+
+def canon(v: object) -> object:
+    if isinstance(v, bool) or v is None or isinstance(v, str):
+        return v
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, list):
+        return [canon(x) for x in v]
+    if isinstance(v, dict):
+        return {k: canon(x) for k, x in sorted(v.items())}
+    return v
+
+
+def signature(g: dict, nid: str, depth: int = 0, mask: frozenset[str] = frozenset()) -> object:
+    """A node as what it computes: its class, its set values, and the signatures of the
+    nodes (and output slots) its links come from, whatever the node ids are. A set value
+    on an input named in `mask` is left out, wherever it is upstream."""
+    n = g.get(nid)
+    if n is None or depth > 64:
+        return ("missing", nid)
+    ins = []
+    for k, v in sorted((n.get("inputs") or {}).items()):
+        if is_link(v):
+            ins.append((k, ("link", signature(g, v[0], depth + 1, mask), v[1])))
+        elif k not in mask:
+            ins.append((k, json.dumps(canon(v))))
+    return (n.get("class_type"), tuple(ins))
+
+
+def runs_graph(g: dict, intended: dict) -> bool:
+    """Whether a run's graph has every output node of the intended graph, computing exactly
+    what it computes: the same classes, values and links upstream. Extra nodes are allowed."""
+    want = [signature(intended, nid) for nid, n in intended.items() if n["class_type"] == "SaveImage"]
+    got = {repr(signature(g, nid)) for nid, n in g.items() if n.get("class_type") == "SaveImage"}
+    return all(repr(w) in got for w in want)
+
+
+def new_pngs(task: str, entry: dict, prefix: str, size: tuple[int, int]) -> tuple[list[str], str]:
+    """The entry's new prefix PNGs of the given size, or why there are none."""
+    imgs = png_outputs(entry, prefix)
+    if not imgs:
+        return [], f"saved no {prefix}* PNG"
+    for img in imgs:
+        p = output_path(img)
+        if not p.is_file():
+            return [], f"{p} is missing on disk"
+        if not made_since_setup(task, img):
+            return [], f"{img['filename']} was already there at setup (served from ComfyUI's cache?)"
+        w, h, _ = read_png(p)
+        if (w, h) != size:
+            return [], f"{img['filename']} is {w}x{h}, want {size[0]}x{size[1]}"
+    return [i["filename"] for i in imgs], ""
+
+
+# T7, author and tweak. The values the prompt names; the template the agent starts from is its choice.
+T7_PROMPT_TEXT = "a red apple on a wooden table"
+T7_STEPS = 4
+T7_FIRST = {"seed": 1, "size": (256, 256)}
+T7_SECOND = {"seed": 2, "size": (384, 256)}
+# What the second run may change: the seed and the width. Anything else that differs fails.
+T7_TWEAKED = frozenset({"seed", "noise_seed", "width"})
+
+
+def t7_run(entry: dict, want: dict) -> tuple[list[str], set[str], str]:
+    """For a completed entry that is the run `want` describes: the t7_ files it saved and the
+    signatures of the SaveImage nodes that saved them, with the seed and width masked out.
+    Otherwise why not. Values routed through backend Primitive* nodes count as set."""
+    if not completed(entry):
+        return [], set(), f"not completed ({(entry.get('status') or {}).get('status_str')})"
+    g = resolve_primitives(graph(entry))
+    savers = [
+        nid
+        for nid, out in (entry.get("outputs") or {}).items()
+        if nid in g and any(i.get("type") == "output" and i["filename"].startswith("t7_") for i in out.get("images", []))
+    ]
+    if not savers:
+        return [], set(), "saved no t7_* PNG"
+    why = ""
+    sigs = set()
+    for nid in savers:
+        if not any(same(v, TIER2_MODEL) for v in values_upstream(g, nid, "ckpt_name")):
+            why = f"loads no {TIER2_MODEL}"
+        elif T7_PROMPT_TEXT not in positive_texts(g, nid):
+            why = f"no sampler's positive conditioning is {T7_PROMPT_TEXT!r}"
+        elif not any(same(v, T7_STEPS) for v in values_upstream(g, nid, "steps")):
+            why = f"no steps input is {T7_STEPS}"
+        elif not any(same(v, want["seed"]) for v in values_upstream(g, nid, "seed", "noise_seed")):
+            why = f"no seed is {want['seed']}"
+        else:
+            sigs.add(repr(signature(g, nid, mask=T7_TWEAKED)))
+    if not sigs:
+        return [], set(), why
+    files, why = new_pngs("T7", entry, "t7_", want["size"])
+    return files, sigs, why
+
+
+def reset_workflows() -> None:
+    """Start each tier-2 task with no saved workflow an earlier task or run left (T9's edit would
+    help T7). On a `user` volume the harness created, user/default/workflows/ is emptied; on one it
+    found, only T9's own file goes, and an operator's workflows stay."""
+    root = DATA / "user" / "default" / "workflows"
+    created = (DATA / ".harness-created").read_text().split() if (DATA / ".harness-created").exists() else []
+    if "user" in created:
+        for p in root.iterdir() if root.is_dir() else []:
+            shutil.rmtree(p) if p.is_dir() and not p.is_symlink() else p.unlink()
+    else:
+        (DATA / "user" / "default" / T9_FILE).unlink(missing_ok=True)
+
+
+def cmd_setup_tier2(task: str) -> None:
+    """Mark /history and the output files; the model is fetched by lib.sh beforehand."""
+    if not (DATA / "models" / "checkpoints" / TIER2_MODEL).is_file():
+        sys.exit(f"{TIER2_MODEL} is not in {DATA / 'models' / 'checkpoints'}; fetch it with lib.sh's fetch_tier2_model")
+    names = get("/models/checkpoints")
+    if TIER2_MODEL not in names:  # type: ignore[operator]
+        sys.exit(f"ComfyUI doesn't list {TIER2_MODEL} in /models/checkpoints: {names}")
+    reset_workflows()
+    {"T7": lambda: None, "T8": setup_t8, "T9": setup_t9}[task]()
+    mark(task)
+
+
+def check_t7() -> str:
+    runs = ordered(new_entries("T7"))
+    if not runs:
+        raise CheckFailed("no new /history entry since setup")
+    firsts, why_first = [], []
+    for i, (pid, e) in enumerate(runs):
+        files, sigs, why = t7_run(e, T7_FIRST)
+        if files:
+            firsts.append((i, pid, files, sigs))
+        else:
+            why_first.append(f"{pid[:8]}: {why}")
+    if not firsts:
+        raise CheckFailed(f"no run matches the first request (seed {T7_FIRST['seed']}, 256x256): " + "; ".join(why_first))
+    why_second = []
+    for i, pid1, files1, sigs1 in firsts:
+        for pid, e in runs[i + 1 :]:
+            files, sigs, why = t7_run(e, T7_SECOND)
+            if not files:
+                why_second.append(f"{pid[:8]}: {why}")
+            elif not sigs & sigs1:
+                why_second.append(f"{pid[:8]}: changes more than the seed and width of {pid1[:8]}")
+            else:
+                return (
+                    f"{pid1[:8]} saved {files1[0]} (256x256, seed {T7_FIRST['seed']}), then {pid[:8]} saved "
+                    f"{files[0]} (384x256, seed {T7_SECOND['seed']}), changing only the seed and width; "
+                    f"{len(runs)} runs since setup"
+                )
+    raise CheckFailed(
+        f"{firsts[0][1][:8]} matches the first request, but no later run matches the second (seed "
+        f"{T7_SECOND['seed']}, 384x256, nothing else changed): "
+        + ("; ".join(dict.fromkeys(why_second)) or "there is no later run")
+    )
+
+
+# T8, fix a broken graph: the graph it is meant to be, and the four faults setup puts in it.
+T8_INTENDED = {
+    "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": TIER2_MODEL}},
+    "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "a lighthouse on a cliff at sunset", "clip": ["1", 1]}},
+    "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "blurry, low quality", "clip": ["1", 1]}},
+    "4": {"class_type": "EmptyLatentImage", "inputs": {"width": 256, "height": 256, "batch_size": 1}},
+    "5": {
+        "class_type": "KSampler",
+        "inputs": {
+            "seed": 42,
+            "steps": 4,
+            "cfg": 7.0,
+            "sampler_name": "euler",
+            "scheduler": "normal",
+            "denoise": 1.0,
+            "model": ["1", 0],
+            "positive": ["2", 0],
+            "negative": ["3", 0],
+            "latent_image": ["4", 0],
+        },
+    },
+    "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
+    "7": {"class_type": "SaveImage", "inputs": {"filename_prefix": "t8_", "images": ["6", 0]}},
+}
+
+
+def t8_broken() -> dict:
+    g = json.loads(json.dumps(T8_INTENDED))
+    g["1"]["inputs"]["ckpt_name"] = "v1-5-prunned-emaonly-fp16.safetensors"  # a misspelled model name
+    g["4"]["inputs"].pop("height")  # a missing required input
+    g["5"]["inputs"]["sampler_name"] = "eular"  # a COMBO value that isn't one
+    g["6"]["inputs"]["vae"] = ["1", 1]  # a CLIP output wired into a VAE input
+    return g
+
+
+# What ComfyUI must say about the broken graph: each fault, as (node, error type, input).
+T8_FAULTS = {
+    ("1", "value_not_in_list", "ckpt_name"),
+    ("4", "required_input_missing", "height"),
+    ("5", "value_not_in_list", "sampler_name"),
+    ("6", "return_type_mismatch", "vae"),
+}
+
+
+def setup_t8() -> None:
+    """Put the broken graph in the workspace, and submit it once to confirm ComfyUI rejects
+    it for each of the four faults: a ComfyUI that stops reporting one fails setup."""
+    broken = t8_broken()
+    (WORKSPACE / "T8-workflow.json").write_text(json.dumps(broken, indent=2) + "\n")
+    status, body = http("POST", "/prompt", {"prompt": broken})
+    if status == 200:
+        sys.exit("the T8 workflow was ACCEPTED; it is supposed to be broken")
+    found = {
+        (nid, err.get("type"), (err.get("extra_info") or {}).get("input_name"))
+        for nid, ne in ((body or {}).get("node_errors") or {}).items()  # type: ignore[union-attr]
+        for err in ne.get("errors", [])
+    }
+    if not T8_FAULTS <= found:
+        sys.exit(f"ComfyUI no longer reports every T8 fault: want {sorted(T8_FAULTS)}, got {sorted(found)}")
+    (RESULTS / "T8.expected.json").write_text(json.dumps({"http_status": status, "response": body}, indent=2) + "\n")
+
+
+def check_t8() -> str:
+    entries = ordered(new_entries("T8"))
+    reasons = []
+    for pid, e in entries:
+        if not runs_graph(graph(e), T8_INTENDED):
+            reasons.append(f"{pid[:8]}: not the intended graph")
+            continue
+        if not completed(e):
+            reasons.append(f"{pid[:8]}: the intended graph did not complete ({(e.get('status') or {}).get('status_str')})")
+            continue
+        files, why = new_pngs("T8", e, "t8_", (256, 256))
+        if not files:
+            reasons.append(f"{pid[:8]}: {why}")
+            continue
+        return f"{pid[:8]} ran the intended graph and saved {files[0]} (256x256); {len(entries)} runs since setup"
+    raise CheckFailed("; ".join(reasons) or "no new /history entry since setup")
+
+
+# T9, edit a saved workflow. Setup saves T9_WORKFLOW (UI format, as the editor saves it) to
+# ComfyUI's user data; the agent must change three things in it, save it back, and run it.
+T9_FILE = "workflows/t9-portrait.json"
+T9_SEED = 1234
+T9_POSITIVE = "a portrait photo of an old fisherman, detailed"
+T9_NEGATIVE = "blurry, low quality"
+
+
+def t9_ui(width: int, height: int, steps: int, prefix: str) -> dict:
+    """A txt2img workflow in the UI format, the shape ComfyUI's editor saves."""
+
+    def node(nid, typ, order, pos, inputs, outputs, widgets):
+        return {
+            "id": nid,
+            "type": typ,
+            "pos": pos,
+            "size": [315, 100],
+            "flags": {},
+            "order": order,
+            "mode": 0,
+            "inputs": [{"name": n, "type": t, "link": link} for n, t, link in inputs],
+            "outputs": [
+                {"name": n, "type": t, "links": links, "slot_index": i} for i, (n, t, links) in enumerate(outputs)
+            ],
+            "properties": {"Node name for S&R": typ},
+            "widgets_values": widgets,
+        }
+
+    return {
+        "last_node_id": 9,
+        "last_link_id": 9,
+        "nodes": [
+            node(4, "CheckpointLoaderSimple", 0, [26, 474],
+                 [], [("MODEL", "MODEL", [1]), ("CLIP", "CLIP", [3, 5]), ("VAE", "VAE", [8])], [TIER2_MODEL]),
+            node(6, "CLIPTextEncode", 2, [415, 186],
+                 [("clip", "CLIP", 3)], [("CONDITIONING", "CONDITIONING", [4])], [T9_POSITIVE]),
+            node(7, "CLIPTextEncode", 3, [413, 389],
+                 [("clip", "CLIP", 5)], [("CONDITIONING", "CONDITIONING", [6])], [T9_NEGATIVE]),
+            node(5, "EmptyLatentImage", 1, [473, 609],
+                 [], [("LATENT", "LATENT", [2])], [width, height, 1]),
+            node(3, "KSampler", 4, [863, 186],
+                 [("model", "MODEL", 1), ("positive", "CONDITIONING", 4), ("negative", "CONDITIONING", 6),
+                  ("latent_image", "LATENT", 2)],
+                 [("LATENT", "LATENT", [7])], [T9_SEED, "fixed", steps, 7, "euler", "normal", 1]),
+            node(8, "VAEDecode", 5, [1209, 188],
+                 [("samples", "LATENT", 7), ("vae", "VAE", 8)], [("IMAGE", "IMAGE", [9])], []),
+            node(9, "SaveImage", 6, [1451, 189],
+                 [("images", "IMAGE", 9)], [], [prefix]),
+        ],
+        "links": [
+            [1, 4, 0, 3, 0, "MODEL"],
+            [2, 5, 0, 3, 3, "LATENT"],
+            [3, 4, 1, 6, 0, "CLIP"],
+            [4, 6, 0, 3, 1, "CONDITIONING"],
+            [5, 4, 1, 7, 0, "CLIP"],
+            [6, 7, 0, 3, 2, "CONDITIONING"],
+            [7, 3, 0, 8, 0, "LATENT"],
+            [8, 4, 2, 8, 1, "VAE"],
+            [9, 8, 0, 9, 0, "IMAGE"],
+        ],
+        "groups": [],
+        "config": {},
+        "extra": {},
+        "version": 0.4,
+    }
+
+
+# As saved at setup, and as the task asks for it: 256x384 (the same portrait shape), 4 steps, prefix t9_.
+T9_BEFORE = {"width": 512, "height": 768, "steps": 20, "prefix": "portrait"}
+T9_AFTER = {"width": 256, "height": 384, "steps": 4, "prefix": "t9_"}
+
+
+def t9_api(width: int, height: int, steps: int, prefix: str) -> dict:
+    """The same workflow in API format: what a run of it must compute."""
+    return {
+        "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": TIER2_MODEL}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": T9_POSITIVE, "clip": ["4", 1]}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"text": T9_NEGATIVE, "clip": ["4", 1]}},
+        "5": {"class_type": "EmptyLatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}},
+        "3": {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": T9_SEED, "steps": steps, "cfg": 7, "sampler_name": "euler", "scheduler": "normal",
+                "denoise": 1, "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0],
+            },
+        },
+        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+        "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": prefix, "images": ["8", 0]}},
+    }
+
+
+def userdata_path(name: str) -> str:
+    return "/userdata/" + urllib.parse.quote(name, safe="")
+
+
+def setup_t9() -> None:
+    """Save the workflow as it starts, overwriting what an earlier run left."""
+    body = json.dumps(t9_ui(**T9_BEFORE), indent=2).encode()
+    req = urllib.request.Request(
+        COMFY_URL + userdata_path(T9_FILE) + "?overwrite=true", data=body, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        if r.status != 200:
+            sys.exit(f"saving {T9_FILE} returned HTTP {r.status}")
+    if get(userdata_path(T9_FILE)) != json.loads(body):
+        sys.exit(f"{T9_FILE} doesn't read back as saved")
+
+
+def t9_saved_problem() -> str | None:
+    """Why the saved file isn't the requested edit, or None: still the UI format, with the same
+    nodes and links, and exactly the three requested widget changes."""
+    status, saved = http("GET", userdata_path(T9_FILE))
+    if status != 200:
+        return f"{T9_FILE} can't be read back (HTTP {status})"
+    if not isinstance(saved, dict) or not isinstance(saved.get("nodes"), list) or not isinstance(saved.get("links"), list):
+        return f"{T9_FILE} is no longer a UI-format workflow (no nodes and links lists)"
+    want = t9_ui(**T9_AFTER)
+    by_id = {n.get("id"): n for n in saved["nodes"] if isinstance(n, dict)}
+    if sorted((n["id"], n["type"]) for n in want["nodes"]) != sorted((i, n.get("type")) for i, n in by_id.items()):
+        return f"{T9_FILE}'s nodes changed: {sorted((i, n.get('type')) for i, n in by_id.items())}"
+    links = {tuple(link[1:6]) for link in saved["links"] if isinstance(link, list) and len(link) >= 6}
+    if links != {tuple(link[1:6]) for link in want["links"]}:
+        return f"{T9_FILE}'s links changed: {sorted(links)}"
+    for n in want["nodes"]:
+        got = by_id[n["id"]].get("widgets_values", [])
+        if not same(got, n["widgets_values"]):
+            return f"{T9_FILE}'s {n['type']} {n['id']} has {got!r}, want {n['widgets_values']!r}"
+    return None
+
+
+def check_t9() -> str:
+    problem = t9_saved_problem()
+    entries = ordered(new_entries("T9"))
+    ran, reasons = None, []
+    for pid, e in entries:
+        if not runs_graph(graph(e), t9_api(**T9_AFTER)):
+            reasons.append(f"{pid[:8]}: not the edited workflow")
+            continue
+        if not completed(e):
+            reasons.append(f"{pid[:8]}: did not complete ({(e.get('status') or {}).get('status_str')})")
+            continue
+        files, why = new_pngs("T9", e, "t9_", (T9_AFTER["width"], T9_AFTER["height"]))
+        if files:
+            ran = f"{pid[:8]} ran it and saved {files[0]} (256x384)"
+            break
+        reasons.append(f"{pid[:8]}: {why}")
+    if problem or ran is None:
+        raise CheckFailed(
+            "; ".join(
+                [problem or f"{T9_FILE} has the requested edit"]
+                + [ran or ("no run of the edited workflow: " + ("; ".join(reasons) or "no new /history entry since setup"))]
+            )
+        )
+    return f"{T9_FILE} has the requested edit, still in the UI format; {ran}; {len(entries)} runs since setup"
+
+
 # --- External-agent mode (external.sh) -------------------------------------------
 
 # The same brief for every server: it names neither the server nor anything
@@ -1055,6 +1544,10 @@ def write_spec(server: str, token_file: str, spec_file: str) -> dict:
         # RESULTS holds the answer keys, so no spec path points there.
         log = str(DATA / f"{server}.log")
         spec = {"transport": "stdio", "command": [cfg["command"], *cfg.get("args", [])], "env": env, "cwd": cwd, "log": log}
+    # The client logs each call here (never its arguments or result), and the
+    # check counts them. Outside the workspace and RESULTS, and emptied per run.
+    spec["calls_log"] = str(CALLS_LOG)
+    CALLS_LOG.unlink(missing_ok=True)
     p = Path(spec_file)
     p.unlink(missing_ok=True)
     p.write_text(json.dumps(spec, indent=2) + "\n")
@@ -1179,7 +1672,41 @@ CHECKS = {
     "t5": check_t5,
     "t6": check_t6,
     "t6-neutral": check_t6_neutral,
+    "t7": check_t7,
+    "t8": check_t8,
+    "t9": check_t9,
 }
+
+
+# The relay tool an agent polls a run with: its calls say how long the agent waited, not how
+# many steps it took, so mcp_work_calls leaves them out.
+POLL_TOOLS = {"job_status"}
+
+
+def log_lines() -> list[dict]:
+    """The client's log, one object per line; a line that isn't one is skipped."""
+    out = []
+    for ln in CALLS_LOG.read_text(errors="replace").splitlines() if CALLS_LOG.exists() else []:
+        try:
+            c = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(c, dict):
+            out.append(c)
+    return out
+
+
+def cmd_mcp_calls() -> None:
+    """The agent's MCP calls, from the client's log, as five tab-separated fields for the scorecard:
+    every tools/call, those without polling (POLL_TOOLS), the workflow_run submissions, how many
+    calls failed, and a per-tool breakdown of all of them. `up` names the log in the client's spec
+    and removes any earlier one, so no log means the agent made no call."""
+    tools = [c for c in log_lines() if c.get("method") == "tools/call"]
+    by_tool = Counter(str(c.get("tool")) for c in tools)
+    breakdown = " ".join(f"{t}={n}" for t, n in sorted(by_tool.items()))
+    work = sum(n for t, n in by_tool.items() if t not in POLL_TOOLS)
+    errors = sum(1 for c in tools if c.get("error"))
+    print(f"{len(tools)}\t{work}\t{by_tool['workflow_run']}\t{errors}\t{breakdown}")
 
 
 def cmd_check(task: str) -> None:
@@ -1201,8 +1728,10 @@ COMMANDS = {
     "setup-t2-refuse": cmd_setup_t2_refuse,
     "setup-t4": cmd_setup_t4,
     "setup-t5": cmd_setup_t5,
+    "setup-tier2": cmd_setup_tier2,
     "handoff": cmd_handoff,
     "check": cmd_check,
+    "mcp-calls": cmd_mcp_calls,
 }
 
 if __name__ == "__main__":
