@@ -1725,6 +1725,12 @@ def cmd_mcp_calls() -> None:
 # host and agent model. An improvement counts only when the median improves and the two arms'
 # runs mostly don't overlap. For pass rates, 0/5 against 5/5 is conclusive; anything in between
 # needs about 10 runs per arm.
+#
+# Pass rates are judged over every run, and the other numbers over passing runs only, with at
+# least 5 per arm: a run that gives up early is cheap, so counting it would read a regression in
+# passes as an improvement in calls (#222's review). Each task is judged on one number named in
+# advance (NUMBER_TO_BEAT); the others are shown as context, since judging four numbers at once
+# raises the chance of a false "improved" from about 4% to about 14%.
 
 MIN_RUNS = 5
 PASS_RATE_RUNS = 10
@@ -1738,19 +1744,61 @@ METRICS = (
     ("tokens", "tokens"),
     ("seconds", "seconds"),
 )
+PASSES = "passes"
+LABELS = {PASSES: PASSES, **dict(METRICS)}
+# The number each tier-2 task is judged on, named in advance. A task not named here is judged on passes.
+NUMBER_TO_BEAT = {"T7": "mcp_work_calls", "T8": "mcp_work_calls", "T9": PASSES}
 NO_BATCH = "(none)"
+# Committed baselines (baselines/<batch>.csv), which summary and compare read beside the run scorecards.
+BASELINES = HERE / "baselines"
 
 
-def scorecard_runs() -> list[dict]:
-    """The scorecard's rows that count: every run but a dry run."""
-    path = RESULTS / "scorecard.csv"
-    if not path.is_file():
-        sys.exit(f"no {path}")
-    with path.open(newline="") as f:
-        reader = csv.DictReader(f)
-        if "batch" not in (reader.fieldnames or []):
-            sys.exit(f"{path} predates run labels (no batch column)")
-        return [r for r in reader if r.get("mode") != "dry-run"]
+def scorecard_files(extra: list[str]) -> list[Path]:
+    """The scorecards to read: the committed baselines, this HARNESS_RESULTS's scorecard and the ones
+    set aside when its columns changed (scorecard.before-*.csv), and every --scorecard."""
+    out: list[Path] = []
+    for p in [*sorted(BASELINES.glob("*.csv")), *sorted(RESULTS.glob("scorecard*.csv")), *map(Path, extra)]:
+        if not p.is_file():
+            sys.exit(f"no scorecard {p}")
+        if p.resolve() not in {o.resolve() for o in out}:
+            out.append(p)
+    return out
+
+
+def scorecard_runs(extra: list[str]) -> list[dict]:
+    """Every run in the scorecards but a dry run, each with the file it came from and that file's
+    columns (_file, _header). A row in two files (a baseline also in results/, say) counts once."""
+    files = scorecard_files(extra)
+    seen, rows = set(), []
+    for path in files:
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            header = tuple(reader.fieldnames or ())
+            for r in reader:
+                key = tuple(r.get(k) or "" for k in ("timestamp", "server", "task", "result", "detail", "batch"))
+                if r.get("mode") == "dry-run" or key in seen:
+                    continue
+                seen.add(key)
+                rows.append({**r, "_file": str(path), "_header": header})
+    if not files:
+        sys.exit(f"no scorecard in {BASELINES} or {RESULTS}")
+    return rows
+
+
+def batch_of(r: dict) -> str:
+    return r.get("batch") or NO_BATCH
+
+
+def passed(r: dict) -> bool:
+    return r.get("result") == "pass"
+
+
+def warn_mixed(rows: list[dict], what: str) -> None:
+    """Say so when a set of runs comes from scorecards with different columns: a column one of them
+    lacks reads as no value there, and its cells cover fewer runs."""
+    if len({r["_header"] for r in rows}) > 1:
+        files = ", ".join(sorted({r["_file"] for r in rows}))
+        print(f"warning: {what} spans scorecards with different columns: {files}", file=sys.stderr)
 
 
 def numbers(rows: list[dict], col: str) -> list[float]:
@@ -1780,7 +1828,7 @@ def groups(rows: list[dict]) -> dict[tuple[str, str], list[dict]]:
     """Rows by (server, batch), in the order each first appears."""
     out: dict[tuple[str, str], list[dict]] = {}
     for r in rows:
-        out.setdefault((r["server"], r.get("batch") or NO_BATCH), []).append(r)
+        out.setdefault((r["server"], batch_of(r)), []).append(r)
     return out
 
 
@@ -1789,23 +1837,28 @@ def cmd_summary(*args: str) -> None:
     ap.add_argument("task")
     ap.add_argument("--batch")
     ap.add_argument("--server")
+    ap.add_argument("--scorecard", action="append", default=[], help="another scorecard to read (repeatable)")
     a = ap.parse_args(args)
     rows = [
         r
-        for r in scorecard_runs()
+        for r in scorecard_runs(a.scorecard)
         if r["task"] == a.task
-        and (a.batch is None or (r.get("batch") or NO_BATCH) == a.batch)
+        and (a.batch is None or batch_of(r) == a.batch)
         and (a.server is None or r["server"] == a.server)
     ]
     if not rows:
-        sys.exit(f"no {a.task} runs in the scorecard match")
-    print(f"{a.task}: median (min-max) per run\n")
+        sys.exit(f"no {a.task} runs in the scorecards match")
+    print(
+        f"{a.task}: passes over every run; the other numbers are median (min-max) over passing runs. "
+        f"Number to beat: {LABELS[NUMBER_TO_BEAT.get(a.task, PASSES)]}\n"
+    )
     print("| server | batch | passes | " + " | ".join(label for _, label in METRICS) + " |")
     print("|---|---|---|" + "---|" * len(METRICS))
     for (server, batch), runs in sorted(groups(rows).items(), key=lambda kv: kv[0][0]):
-        passes = sum(r["result"] == "pass" for r in runs)
-        cells = [spread(numbers(runs, col), len(runs)) for col, _ in METRICS]
-        print(f"| {server} | {batch} | {passes}/{len(runs)} | " + " | ".join(cells) + " |")
+        warn_mixed(runs, f"{server} {batch}")
+        ok = [r for r in runs if passed(r)]
+        cells = [spread(numbers(ok, col), len(ok)) for col, _ in METRICS]
+        print(f"| {server} | {batch} | {len(ok)}/{len(runs)} | " + " | ".join(cells) + " |")
 
 
 def pairs_apart(a: list[float], b: list[float], lower: bool) -> float:
@@ -1868,40 +1921,60 @@ def pass_verdict(a: list[float], b: list[float]) -> tuple[str, str]:
     return shown, v.replace("the medians differ", "the pass rates differ")
 
 
+def efficiency_verdict(ra: list[dict], rb: list[dict], col: str) -> tuple[str, str]:
+    """A number other than passes, over each arm's passing runs only, of which each needs 5."""
+    pa, pb = [r for r in ra if passed(r)], [r for r in rb if passed(r)]
+    if len(pa) < MIN_RUNS or len(pb) < MIN_RUNS:
+        differ = "; the pass rates differ" if len(pa) / len(ra) != len(pb) / len(rb) else ""
+        return "", f"inconclusive: needs {MIN_RUNS} passing runs per arm{differ}"
+    return verdict(numbers(pa, col), numbers(pb, col))
+
+
 def cmd_compare(*args: str) -> None:
     ap = argparse.ArgumentParser(prog="external.sh compare")
     ap.add_argument("batch_a")
     ap.add_argument("batch_b")
     ap.add_argument("--task")
     ap.add_argument("--server")
+    ap.add_argument(
+        "--metric",
+        choices=[PASSES, *(col for col, _ in METRICS)],
+        help="the number to judge (default: the task's number to beat, else passes)",
+    )
+    ap.add_argument("--scorecard", action="append", default=[], help="another scorecard to read (repeatable)")
     a = ap.parse_args(args)
-    rows = [
-        r
-        for r in scorecard_runs()
-        if (a.task is None or r["task"] == a.task) and (a.server is None or r["server"] == a.server)
-    ]
-    by = {}
-    for r in rows:
-        by.setdefault((r["task"], r["server"], r.get("batch") or NO_BATCH), []).append(r)
-    pairs = sorted({(t, s) for t, s, b in by if (t, s, a.batch_a) in by and (t, s, a.batch_b) in by})
+    by: dict[tuple[str, str, str], list[dict]] = {}
+    for r in scorecard_runs(a.scorecard):
+        if (a.task is None or r["task"] == a.task) and (a.server is None or r["server"] == a.server):
+            by.setdefault((r["task"], r["server"], batch_of(r)), []).append(r)
+    pairs = sorted({(t, s) for t, s, _ in by if (t, s, a.batch_a) in by and (t, s, a.batch_b) in by})
     if not pairs:
         sys.exit(f"no task and server has runs in both {a.batch_a} and {a.batch_b}")
     for task, server in pairs:
         ra, rb = by[(task, server, a.batch_a)], by[(task, server, a.batch_b)]
+        warn_mixed(ra, f"{task} {server} {a.batch_a}")
+        warn_mixed(rb, f"{task} {server} {a.batch_b}")
+        metric = a.metric or NUMBER_TO_BEAT.get(task, PASSES)
         print(
-            f"\n{task} on {server}: B against A, median (min-max); pairs counts the (A, B) run pairs "
-            f"on the side B's median moved, ties half\n"
+            f"\n{task} on {server}, B against A: passes over every run, the other numbers median (min-max) over "
+            f"passing runs. Judged on {LABELS[metric]}; the rest is context. Pairs apart counts the (A, B) run "
+            f"pairs on the side B moved to, ties half.\n"
         )
         print(f"| | A: {a.batch_a} | B: {a.batch_b} | pairs apart | verdict |")
         print("|---|---|---|---|---|")
-        pa = [float(r["result"] == "pass") for r in ra]
-        pb = [float(r["result"] == "pass") for r in rb]
-        shown, v = pass_verdict(pa, pb)
-        print(f"| passes | {int(sum(pa))}/{len(pa)} | {int(sum(pb))}/{len(pb)} | {shown} | {v} |")
+        pa, pb = [float(passed(r)) for r in ra], [float(passed(r)) for r in rb]
+        judged = pass_verdict(pa, pb) if metric == PASSES else ("", "context")
+        print(f"| {PASSES} | {int(sum(pa))}/{len(pa)} | {int(sum(pb))}/{len(pb)} | {judged[0]} | {judged[1]} |")
+        oka, okb = [r for r in ra if passed(r)], [r for r in rb if passed(r)]
         for col, label in METRICS:
-            xa, xb = numbers(ra, col), numbers(rb, col)
-            shown, v = verdict(xa, xb) if xa and xb else ("", "inconclusive: an arm recorded no value")
-            print(f"| {label} | {spread(xa, len(ra))} | {spread(xb, len(rb))} | {shown} | {v} |")
+            row = efficiency_verdict(ra, rb, col) if col == metric else ("", "context")
+            if col == metric:
+                judged = row
+            print(
+                f"| {label} | {spread(numbers(oka, col), len(oka))} | {spread(numbers(okb, col), len(okb))} "
+                f"| {row[0]} | {row[1]} |"
+            )
+        print(f"\nverdict on {LABELS[metric]}: {judged[1]}")
 
 
 def cmd_check(task: str) -> None:
@@ -1934,5 +2007,6 @@ COMMANDS = {
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         sys.exit(f"usage: harness.py {{{'|'.join(COMMANDS)}}} [args]")
-    RESULTS.mkdir(exist_ok=True)
+    if sys.argv[1] not in ("summary", "compare"):  # these only read scorecards
+        RESULTS.mkdir(exist_ok=True)
     COMMANDS[sys.argv[1]](*sys.argv[2:])

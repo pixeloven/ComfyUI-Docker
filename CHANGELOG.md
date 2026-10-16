@@ -27,7 +27,10 @@ see `VERSIONING.md`.
   summary` and `external.sh compare` report the passes and the median, min and max per
   batch, then whether two batches differ. The README gives the procedure: 5 runs per
   arm. T7 now also accepts the prompt on `BasicGuider`'s `conditioning` and
-  `DualCFGGuider`'s `cond1` (#220). Nothing published changes.
+  `DualCFGGuider`'s `cond1` (#220). `compare` judges each task on one number named in
+  advance, and counts it over passing runs only. Both commands read the committed
+  baseline, `tests/agent-tasks/baselines/baseline-6.0.0.csv` (5 runs each of T7–T9),
+  beside the run scorecards. Nothing published changes.
 - **Custom-node dependencies survive a recreate (#115).** ComfyUI now runs from a
   venv on the `user` volume, `/app/user/__node_venv`, layered over the image's, so
   the Python packages Manager, `cm-cli` or `pip` install for custom nodes persist

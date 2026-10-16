@@ -23,13 +23,15 @@
 #                                 --tool-calls record what the lead's harness reported.
 #                                 --batch labels the row as one run of a set of
 #                                 repeats (letters, digits, . _ -), for summary and compare.
-#   ./external.sh summary <task> [--batch LABEL] [--server NAME]
-#                                 k/N passes, and the median, min and max of the MCP
-#                                 calls without polling, the workflow_run submissions,
-#                                 tokens and seconds, per server and batch
-#   ./external.sh compare <batchA> <batchB> [--task T] [--server NAME]
-#                                 B against A, per task and server: the medians, how
-#                                 much the runs overlap, and a verdict per number
+#   ./external.sh summary <task> [--batch LABEL] [--server NAME] [--scorecard PATH]...
+#                                 k/N passes, and over passing runs the median, min and
+#                                 max of the MCP calls without polling, the workflow_run
+#                                 submissions, tokens and seconds, per server and batch
+#   ./external.sh compare <batchA> <batchB> [--task T] [--server NAME] [--metric M] [--scorecard PATH]...
+#                                 B against A, per task and server: a verdict on the
+#                                 task's number to beat (or M), the rest as context.
+#                                 Both read baselines/*.csv, results/scorecard*.csv and
+#                                 every --scorecard
 #   ./external.sh down [--purge]  stop ComfyUI and every server (down.sh)
 #
 # Tasks: T1, T3, T4, T5, T6-neutral and the tier-2 T7, T8 and T9 on every server;
@@ -53,9 +55,12 @@
 # HARNESS_CONTAINER (the prefix of the container names), COMFY_PORT,
 # COMFYRELAY_PORT, ARTOKUN_PORT, HARNESS_DATA and HARNESS_RESULTS.
 set -euo pipefail
+# summary and compare only read scorecards, so they skip lib.sh, whose sourcing creates the
+# servers' HOMEs and token files.
+case "${1:-}" in summary|compare) exec python3 "$(dirname "$0")/harness.py" "$@" ;; esac
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,54p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
@@ -81,7 +86,6 @@ case "$cmd" in
     [ -f "$HARNESS_DIR/tasks/$task/prompt.md" ] || { echo "no task $task" >&2; exit 2; }
     handoff="$RESULTS/$server-$task.handoff.json"
     ;;
-  summary|compare) exec python3 "$HARNESS_DIR/harness.py" "$@" ;;
   down) shift; exec "$HARNESS_DIR/down.sh" "$@" ;;
   *) usage ;;
 esac
