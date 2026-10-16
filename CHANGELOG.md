@@ -14,6 +14,14 @@ see `VERSIONING.md`.
 
 ### Added
 
+- **The agent harness has a second tier, which measures workflow development (#212).**
+  T7 (author a txt2img workflow from a template, then change it), T8 (fix a graph
+  with four faults) and T9 (edit a saved workflow in ComfyUI's user data) run Stable
+  Diffusion 1.5 on CPU, which their setups fetch with `comfyctl fetch` from a lock in
+  `tests/agent-tasks/models/`. Each check grades what ComfyUI ran and saved. The
+  harness's MCP client now logs each call an agent makes, and the scorecard records
+  those counts, plus the tokens and tool calls the lead reports (`external.sh check
+  --tokens N --tool-calls N`). Nothing published changes.
 - **Custom-node dependencies survive a recreate (#115).** ComfyUI now runs from a
   venv on the `user` volume, `/app/user/__node_venv`, layered over the image's, so
   the Python packages Manager, `cm-cli` or `pip` install for custom nodes persist
