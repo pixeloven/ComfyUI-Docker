@@ -183,9 +183,10 @@ A host listed here whose variable is unset does **not** block public files.
 ## Mistakes that fail quietly
 
 - **Hand-editing a lock.** It is generated. The sha256 in it then describes
-  bytes nobody verified. The one exception is `custom_nodes`, which nothing
-  in `comfyctl` generates: `resolve` writes only `auth` and `models`, so carry
-  that section over by hand when you regenerate.
+  bytes nobody verified. The one exception is `custom_nodes`, a hand-written
+  ComfyUI-Manager snapshot that nothing in this repository generates or
+  applies: `resolve` writes only `auth` and `models`, so carry that section over
+  by hand when you regenerate, and whoever deploys installs the packs it lists.
 - **Editing `comfy.yaml` without regenerating.** The fetcher reads the lock, so
   your new model is simply never fetched and nothing says so.
 - **Assuming a gated repo is missing.** `black-forest-labs` publishes as

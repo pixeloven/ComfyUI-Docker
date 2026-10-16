@@ -95,20 +95,19 @@ on a large model store. The default policy (`Always`) does that on every mount.
 
 Any UID works. If you change `runAsUser`, change `runAsGroup` and `fsGroup` with
 it. The root filesystem has to stay writable (`readOnlyRootFilesystem: false`):
-startup relies on it for a UID the image doesn't know, and the Manager installs
-custom-node dependencies into the venv.
+startup relies on it for a UID the image doesn't know, and pip and Hugging Face
+cache to `/app/.cache`.
 
 ## What Is Lost on Restart
 
-Only the seven volumes persist. Two things live in the container's writable layer
-instead, and are lost on every container restart and every reschedule:
+Only the seven volumes persist. The caches under `/app/.cache` live in the
+container's writable layer instead, and are lost on every container restart and
+every reschedule ([#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115)).
 
-- the Python packages the Manager installs with pip for custom nodes. The nodes
-  stay on `/app/custom_nodes`, but their dependencies don't.
-- the caches under `/app/.cache`.
-
-This is a known defect,
-[#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115).
+The Python packages custom nodes install persist: they go into the
+[node venv](../../docs/user-guides/runtime-contract.md#the-node-venv) at
+`/app/user/__node_venv`, on the `comfyui-user` volume. Size that volume for the
+packs you install; 5 GiB leaves little room for large dependencies.
 
 The Deployment makes that storage explicit:
 

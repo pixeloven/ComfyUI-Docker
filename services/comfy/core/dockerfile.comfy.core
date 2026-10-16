@@ -95,7 +95,10 @@ WORKDIR /app/ComfyUI
 
 # Setup Environment
 ENV VENV_PATH=/app/.venv
-ENV PATH="$VENV_PATH/bin:$PATH"
+# The node venv startup.sh makes on the user volume (#115) comes first, so a
+# `docker exec` session's python, pip and cm-cli install into it. Until it
+# exists, the entry finds nothing.
+ENV PATH="/app/user/__node_venv/bin:$VENV_PATH/bin:$PATH"
 ENV PYTHONPATH="/app/ComfyUI"
 ENV HOME=/app
 ENV XDG_CACHE_HOME=/app/.cache

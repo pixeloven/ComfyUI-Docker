@@ -1011,6 +1011,16 @@ jobs:
           --baseline "${REGISTRY_URL}core:cpu-latest" \
           "$IMAGE"
 
+    # #115: a node pack installed with cm-cli, as a user would, keeps its
+    # Python dependency across a container recreate, because it lands in the
+    # node venv on the user volume; the image venv is untouched. Also checks
+    # the Manager settings startup.sh writes (#125). Needs the Comfy Registry
+    # and PyPI. `make smoke` runs it too.
+    - name: Install a node pack, recreate, and check it still imports
+      env:
+        IMAGE: ${{ needs.context.outputs.registry_url }}core:cpu-smoke
+      run: tests/smoke/node-deps.sh "$IMAGE"
+
     - name: Record the startup time and node diff
       if: always()
       run: |

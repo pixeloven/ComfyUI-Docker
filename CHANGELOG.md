@@ -10,6 +10,23 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## Unreleased
+
+### Added
+
+- **Custom-node dependencies survive a recreate (#115).** ComfyUI now runs from a
+  venv on the `user` volume, `/app/user/__node_venv`, layered over the image's, so
+  the Python packages Manager, `cm-cli` or `pip` install for custom nodes persist
+  and the image's venv is never changed. On by default; `COMFY_ENABLE_NODE_VENV=false`
+  turns it off. With it on, startup sets Manager's `use_uv` and
+  `use_unified_resolver` to `False`, since uv can't see the image's packages
+  through the layer. See the runtime contract's *The Node Venv*, including how to
+  recover after an image update.
+- **`COMFY_MANAGER_SECURITY_LEVEL` (#125)**, an opt-in that writes Manager's
+  `security_level` at start; unset, nothing changes. The runtime contract's
+  *Manager Security* now warns that Manager's reboot route is open to anyone who
+  can reach port 8188.
+
 ## 6.0.0 — 2026-10-11
 
 ### Breaking

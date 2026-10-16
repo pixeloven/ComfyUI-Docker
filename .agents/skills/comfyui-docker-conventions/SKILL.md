@@ -78,6 +78,14 @@ There is no date tag.
   `/app/output` (`COMFY_OUTPUT_PATH`), `/app/temp` (`COMFY_TEMP_PATH`), `/app/user` (`COMFY_USER_PATH`).
   Config is `extra_model_paths.yaml`, mounted read-only at `/app/extra_model_paths.yaml`.
   The ComfyUI database is `/app/user/comfyui.db`.
+- The node venv (#115): `startup.sh` makes `/app/user/__node_venv` as the runtime user
+  (`--without-pip`, plus a `.pth` naming the image venv's `site-packages`) and runs ComfyUI
+  from it, so custom-node dependencies land on the `user` volume and `/app/.venv` is never
+  changed. Its `bin/` (with `pip`, `pip3` and `cm-cli` wrappers) is first on the image's
+  `PATH`. With it on (`COMFY_ENABLE_NODE_VENV`, default `true`), startup forces
+  `use_uv = False` and `use_unified_resolver = False` in `/app/user/__manager/config.ini`,
+  because uv ignores the `.pth` and would reinstall the image's packages into it.
+  `COMFY_MANAGER_SECURITY_LEVEL` (#125) writes Manager's `security_level` when set.
 - `startup.sh` flags: `--base-directory /app`, `COMFY_PORT` (8188),
   `COMFY_ENABLE_MANAGER` (true), `COMFY_ENABLE_ASSETS` (true), `--cpu` when
   `COMFY_RUNTIME=cpu`, and `CLI_ARGS` as the whitespace-split escape hatch.
@@ -153,8 +161,10 @@ There is no date tag.
 - **Custom nodes are not baked into images.** They are installed at runtime onto the
   `/app/custom_nodes` volume (through Manager or a mount). `complete` pre-installs the
   Python *dependencies* common nodes need, because a missing import crash-loops ComfyUI.
-  `comfy.yaml` covers **models only** today. `comfy-lock.yaml` has a `custom_nodes`
-  section in comfy-cli's shape, but `comfyctl fetch` does not act on it.
+  `comfy.yaml` covers **models only** today. `comfy-lock.yaml` has a hand-written
+  `custom_nodes` section in ComfyUI-Manager's snapshot shape, and nothing here applies it.
+  Manager's `cm-cli restore-snapshot` 4.2.2 can't apply it unattended: it skips registry
+  packs' dependencies, clones git packs at HEAD rather than `hash`, and exits 0 on failure.
 - Pins that move only on purpose: `COMFYUI_VERSION`, the SageAttention URL and sha256 values,
   `COMFY_DOCS_SHA` (CI's `docs-pin` job fails a PR whose pin isn't on Comfy-Org/docs `main`),
   comfyrelay's exact `mcp==` pin and `services/uv.lock`, `tini`'s apt version in
@@ -241,8 +251,15 @@ tag's own commit, and falls back to `cpu-latest`. After a pin bump, the added,
 removed and changed classes go to `node-diff.md` and the job summary as a report.
 A baseline that can't be pulled fails the run.
 
+`make smoke` and the `smoke-cpu` job then run `tests/smoke/node-deps.sh` on the same
+image: it `cm-cli install`s `comfyui-image-saver@1.26.1` (dependency `piexif`) under
+PUID/PGID 1001, restarts, recreates the container as non-root 1001:1001 with
+`COMFY_MANAGER_SECURITY_LEVEL=strong`, and checks the pack loads, `piexif` imports from
+the node venv, `use_uv` was forced off, the reboot route answers 403, and `docker diff`
+shows nothing under `/app/.venv`. It needs the Comfy Registry and PyPI.
+
 A failed smoke test on a tag withholds the GitHub Release, but not the image pushes.
-Nothing boots the non-root start, the other profiles or any GPU image.
+Nothing else boots the non-root start, and nothing boots the other profiles or any GPU image.
 
 `uv run` creates `services/.venv`, which `.gitignore` covers (`.venv/`), but
 stage files by name anyway. No Python or shell linter or formatter is configured. The one
