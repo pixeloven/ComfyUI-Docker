@@ -177,15 +177,17 @@ fetch_tier2_model() {
 
 # Append a row to results/scorecard.csv:
 #   append_score <server> <task> <pass|fail> <detail> <seconds> <mode> <transcript or ""> \
-#                [<tokens> <tool_calls> <mcp_calls> <mcp_work_calls> <mcp_runs> <mcp_errors> <mcp_by_tool>]
+#                [<tokens> <tool_calls> <mcp_calls> <mcp_work_calls> <mcp_runs> <mcp_errors> <mcp_by_tool> <batch>]
 # cost_usd_notional is what claude reports; on a subscription it is plan quota,
 # not a charge. tokens and tool_calls are what the lead's harness reported for an
 # external agent; the mcp_* columns come from the harness's client log (external.sh).
+# batch is the run label `external.sh check --batch` records, which `harness.py
+# summary` and `compare` group repeats by.
 # A scorecard written with other columns is set aside, not appended to.
 append_score() {
   local sc="$RESULTS/scorecard.csv"
   local header="timestamp,server,task,result,detail,seconds,mode,turns,cost_usd_notional,tokens,tool_calls"
-  header+=",mcp_calls,mcp_work_calls,mcp_runs,mcp_errors,mcp_by_tool"
+  header+=",mcp_calls,mcp_work_calls,mcp_runs,mcp_errors,mcp_by_tool,batch"
   if [ -s "$sc" ] && [ "$(head -1 "$sc")" != "$header" ]; then
     mv "$sc" "$RESULTS/scorecard.before-$(date +%s).csv"
   fi
@@ -195,7 +197,7 @@ import csv, json, sys
 from datetime import datetime, timezone
 path, *row = sys.argv[1:]
 row, transcript, extra = row[:6], row[6], row[7:]
-extra += [""] * (7 - len(extra))
+extra += [""] * (8 - len(extra))
 turns = cost = ""
 if transcript:
     try:
@@ -206,6 +208,6 @@ if transcript:
     except (OSError, ValueError):
         pass
 with open(path, "a", newline="") as f:
-    csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), *row, turns, cost, *extra[:7]])
+    csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), *row, turns, cost, *extra[:8]])
 EOF
 }

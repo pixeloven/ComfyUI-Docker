@@ -22,6 +22,12 @@ see `VERSIONING.md`.
   harness's MCP client now logs each call an agent makes, and the scorecard records
   those counts, plus the tokens and tool calls the lead reports (`external.sh check
   --tokens N --tool-calls N`). Nothing published changes.
+- **The agent harness repeats runs and compares them (#221).** `external.sh check
+  --batch <label>` labels a run, the scorecard records the label, and `external.sh
+  summary` and `external.sh compare` report the passes and the median, min and max per
+  batch, then whether two batches differ. The README gives the procedure: 5 runs per
+  arm. T7 now also accepts the prompt on `BasicGuider`'s `conditioning` and
+  `DualCFGGuider`'s `cond1` (#220). Nothing published changes.
 
 ## 6.0.0 — 2026-10-11
 

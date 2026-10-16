@@ -7,11 +7,15 @@ transcript. Usage: harness.py <command> [args]; see COMMANDS at the bottom.
 
 from __future__ import annotations
 
+import argparse
+import csv
 import json
+import math
 import os
 import re
 import shutil
 import sqlite3
+import statistics
 import struct
 import subprocess
 import sys
@@ -1070,13 +1074,19 @@ def values_upstream(g: dict, nid: str, *names: str) -> list:
     ]
 
 
+# The input that carries the positive conditioning, where it isn't named `positive` (#220).
+POSITIVE_INPUT = {"BasicGuider": "conditioning", "DualCFGGuider": "cond1"}
+
+
 def positive_texts(g: dict, nid: str) -> list[str]:
-    """The strings set upstream of the `positive` input of every sampler (or guider) that feeds a node."""
+    """The strings set upstream of the positive conditioning of every sampler (or guider) that feeds
+    a node: its `positive` input, or the one POSITIVE_INPUT names for its class."""
     return [
         v.strip()
         for u in upstream(g, nid)
-        if is_link((g[u].get("inputs") or {}).get("positive"))
-        for p in upstream(g, g[u]["inputs"]["positive"][0])
+        for name in [POSITIVE_INPUT.get(g[u].get("class_type"), "positive")]
+        if is_link((g[u].get("inputs") or {}).get(name))
+        for p in upstream(g, g[u]["inputs"][name][0])
         for v in (g[p].get("inputs") or {}).values()
         if isinstance(v, str)
     ]
@@ -1709,6 +1719,191 @@ def cmd_mcp_calls() -> None:
     print(f"{len(tools)}\t{work}\t{by_tool['workflow_run']}\t{errors}\t{breakdown}")
 
 
+# --- Repeats: summary and compare (external.sh) -------------------------------------
+#
+# The owner's rule (#221): a claim needs 5 runs per arm, on the same image digest, test model,
+# host and agent model. An improvement counts only when the median improves and the two arms'
+# runs mostly don't overlap. For pass rates, 0/5 against 5/5 is conclusive; anything in between
+# needs about 10 runs per arm.
+
+MIN_RUNS = 5
+PASS_RATE_RUNS = 10
+# "Mostly don't overlap": the exact one-sided rank-sum (Mann-Whitney) p-value is at most this.
+# At 5 runs per arm that is 21 or more of the 25 pairs apart; 25 of 25 (no overlap) is p = 0.004.
+ALPHA = 0.05
+# The numbers each run records, as (scorecard column, label). Lower is better for every one.
+METRICS = (
+    ("mcp_work_calls", "MCP calls, polling aside"),
+    ("mcp_runs", "workflow_run"),
+    ("tokens", "tokens"),
+    ("seconds", "seconds"),
+)
+NO_BATCH = "(none)"
+
+
+def scorecard_runs() -> list[dict]:
+    """The scorecard's rows that count: every run but a dry run."""
+    path = RESULTS / "scorecard.csv"
+    if not path.is_file():
+        sys.exit(f"no {path}")
+    with path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        if "batch" not in (reader.fieldnames or []):
+            sys.exit(f"{path} predates run labels (no batch column)")
+        return [r for r in reader if r.get("mode") != "dry-run"]
+
+
+def numbers(rows: list[dict], col: str) -> list[float]:
+    """A column's values as numbers; a run that didn't record one is left out."""
+    out = []
+    for r in rows:
+        try:
+            out.append(float(r.get(col) or ""))
+        except ValueError:
+            pass
+    return out
+
+
+def fmt(x: float) -> str:
+    return str(int(x)) if x == int(x) else f"{x:.1f}"
+
+
+def spread(values: list[float], runs: int) -> str:
+    """median (min-max), saying how many runs it covers when some recorded no value."""
+    if not values:
+        return "-"
+    s = f"{fmt(statistics.median(values))} ({fmt(min(values))}-{fmt(max(values))})"
+    return s if len(values) == runs else f"{s}, {len(values)} of {runs} runs"
+
+
+def groups(rows: list[dict]) -> dict[tuple[str, str], list[dict]]:
+    """Rows by (server, batch), in the order each first appears."""
+    out: dict[tuple[str, str], list[dict]] = {}
+    for r in rows:
+        out.setdefault((r["server"], r.get("batch") or NO_BATCH), []).append(r)
+    return out
+
+
+def cmd_summary(*args: str) -> None:
+    ap = argparse.ArgumentParser(prog="external.sh summary")
+    ap.add_argument("task")
+    ap.add_argument("--batch")
+    ap.add_argument("--server")
+    a = ap.parse_args(args)
+    rows = [
+        r
+        for r in scorecard_runs()
+        if r["task"] == a.task
+        and (a.batch is None or (r.get("batch") or NO_BATCH) == a.batch)
+        and (a.server is None or r["server"] == a.server)
+    ]
+    if not rows:
+        sys.exit(f"no {a.task} runs in the scorecard match")
+    print(f"{a.task}: median (min-max) per run\n")
+    print("| server | batch | passes | " + " | ".join(label for _, label in METRICS) + " |")
+    print("|---|---|---|" + "---|" * len(METRICS))
+    for (server, batch), runs in sorted(groups(rows).items(), key=lambda kv: kv[0][0]):
+        passes = sum(r["result"] == "pass" for r in runs)
+        cells = [spread(numbers(runs, col), len(runs)) for col, _ in METRICS]
+        print(f"| {server} | {batch} | {passes}/{len(runs)} | " + " | ".join(cells) + " |")
+
+
+def pairs_apart(a: list[float], b: list[float], lower: bool) -> float:
+    """The (a, b) pairs in which b is on the `lower` side of a, ties counting half: the
+    Mann-Whitney U. len(a) * len(b) means the two sets don't overlap at all."""
+    return sum(1.0 if (y < x if lower else y > x) else 0.5 if y == x else 0.0 for x in a for y in b)
+
+
+def p_one_sided(a: list[float], b: list[float], lower: bool) -> float:
+    """The exact one-sided p-value of b's rank sum among the pooled runs (midranks for ties):
+    the share of every way of picking len(b) of the pooled runs whose rank sum is at least as far
+    to the `lower` side as b's. With 0/1 values (a pass rate) this is Fisher's exact test."""
+    pooled = sorted(a + b)
+    rank2 = {}  # twice the midrank, so ties stay integers
+    for v in set(pooled):
+        first, last = pooled.index(v), len(pooled) - pooled[::-1].index(v)
+        rank2[v] = first + last + 1
+    k = len(b)
+    ways: list[Counter] = [Counter() for _ in range(k + 1)]
+    ways[0][0] = 1
+    for v in pooled:
+        for j in range(k, 0, -1):
+            for s, c in list(ways[j - 1].items()):
+                ways[j][s + rank2[v]] += c
+    seen = sum(rank2[v] for v in b)
+    hits = sum(c for s, c in ways[k].items() if (s <= seen if lower else s >= seen))
+    return hits / math.comb(len(pooled), k)
+
+
+def verdict(
+    a: list[float], b: list[float], higher_is_better: bool = False, center=statistics.median
+) -> tuple[str, str]:
+    """How far apart B's runs are from A's, and the verdict for B against A."""
+    if len(a) < MIN_RUNS or len(b) < MIN_RUNS:
+        return "", f"inconclusive: fewer than {MIN_RUNS} runs in an arm"
+    ma, mb = center(a), center(b)
+    if ma == mb:
+        return "", "inconclusive: the medians are the same"
+    lower = mb < ma
+    better = lower != higher_is_better
+    apart = pairs_apart(a, b, lower)
+    p = p_one_sided(a, b, lower)
+    overlap = "don't overlap" if apart == len(a) * len(b) else "mostly don't overlap"
+    shown = f"{fmt(apart)}/{len(a) * len(b)} pairs (p={p:.3f})"
+    if p <= ALPHA:
+        return shown, f"{'improved' if better else 'worse'}: the medians differ and the runs {overlap}"
+    return shown, "inconclusive: the medians differ, but the runs overlap"
+
+
+def pass_verdict(a: list[float], b: list[float]) -> tuple[str, str]:
+    """Pass rates (1 a pass, 0 a fail): none against all is conclusive at 5 runs per arm,
+    anything in between only at about 10."""
+    if len(a) < MIN_RUNS or len(b) < MIN_RUNS:
+        return "", f"inconclusive: fewer than {MIN_RUNS} runs in an arm"
+    if sum(a) / len(a) == sum(b) / len(b):
+        return "", "inconclusive: the pass rates are the same"
+    if {sum(a) / len(a), sum(b) / len(b)} != {0.0, 1.0} and min(len(a), len(b)) < PASS_RATE_RUNS:
+        return "", f"inconclusive: a pass rate between none and all needs about {PASS_RATE_RUNS} runs per arm"
+    shown, v = verdict(a, b, higher_is_better=True, center=statistics.mean)
+    return shown, v.replace("the medians differ", "the pass rates differ")
+
+
+def cmd_compare(*args: str) -> None:
+    ap = argparse.ArgumentParser(prog="external.sh compare")
+    ap.add_argument("batch_a")
+    ap.add_argument("batch_b")
+    ap.add_argument("--task")
+    ap.add_argument("--server")
+    a = ap.parse_args(args)
+    rows = [
+        r
+        for r in scorecard_runs()
+        if (a.task is None or r["task"] == a.task) and (a.server is None or r["server"] == a.server)
+    ]
+    by = {}
+    for r in rows:
+        by.setdefault((r["task"], r["server"], r.get("batch") or NO_BATCH), []).append(r)
+    pairs = sorted({(t, s) for t, s, b in by if (t, s, a.batch_a) in by and (t, s, a.batch_b) in by})
+    if not pairs:
+        sys.exit(f"no task and server has runs in both {a.batch_a} and {a.batch_b}")
+    for task, server in pairs:
+        ra, rb = by[(task, server, a.batch_a)], by[(task, server, a.batch_b)]
+        print(
+            f"\n{task} on {server}: B against A, median (min-max); pairs counts the (A, B) run pairs "
+            f"on the side B's median moved, ties half\n"
+        )
+        print(f"| | A: {a.batch_a} | B: {a.batch_b} | pairs apart | verdict |")
+        print("|---|---|---|---|---|")
+        pa = [float(r["result"] == "pass") for r in ra]
+        pb = [float(r["result"] == "pass") for r in rb]
+        shown, v = pass_verdict(pa, pb)
+        print(f"| passes | {int(sum(pa))}/{len(pa)} | {int(sum(pb))}/{len(pb)} | {shown} | {v} |")
+        for col, label in METRICS:
+            xa, xb = numbers(ra, col), numbers(rb, col)
+            shown, v = verdict(xa, xb) if xa and xb else ("", "inconclusive: an arm recorded no value")
+            print(f"| {label} | {spread(xa, len(ra))} | {spread(xb, len(rb))} | {shown} | {v} |")
+
+
 def cmd_check(task: str) -> None:
     try:
         print("PASS " + CHECKS[task]())
@@ -1732,6 +1927,8 @@ COMMANDS = {
     "handoff": cmd_handoff,
     "check": cmd_check,
     "mcp-calls": cmd_mcp_calls,
+    "summary": cmd_summary,
+    "compare": cmd_compare,
 }
 
 if __name__ == "__main__":
