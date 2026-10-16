@@ -113,6 +113,9 @@ if [ "$network" = host ]; then
   run_args+=(-e "CLI_ARGS=--listen 127.0.0.1")
 fi
 
+# The running container's log so far, in a file: grepping `docker logs`
+# through a pipe under pipefail fails when grep -q stops reading early.
+logs() { docker logs "$name" > "$work/container.log" 2>&1; echo "$work/container.log"; }
 api() { docker exec "$name" curl -fsS --max-time 60 "http://127.0.0.1:$port$1"; }
 # A docker exec session as the runtime user. COMFYUI_PATH is set here, not left
 # to the image's cm-cli wrapper, so the same steps run on an image without one.
@@ -138,7 +141,7 @@ check_loaded() {
   api /object_info > "$work/object_info.json" || fail "GET /object_info failed"
   docker exec -i "$name" jq -e --arg c "$node_class" 'has($c)' < "$work/object_info.json" >/dev/null \
     || fail "'$node_class' is not in /object_info ($1)"
-  if docker logs "$name" 2>&1 | grep -E 'IMPORT FAILED.*comfyui-image-saver|Cannot import .*comfyui-image-saver'; then
+  if grep -E 'IMPORT FAILED.*comfyui-image-saver|Cannot import .*comfyui-image-saver' "$(logs)"; then
     fail "comfyui-image-saver failed to import ($1)"
   fi
   as_user python -c 'import piexif' || fail "piexif does not import ($1)"
@@ -147,8 +150,9 @@ check_loaded() {
 
 # ComfyUI (PID 1) runs from the node venv.
 check_runs_from_venv() {
-  as_user sh -c "tr '\\0' '\\n' < /proc/1/environ" | grep -qx "VIRTUAL_ENV=$node_venv" \
-    || fail "ComfyUI does not run from $node_venv ($1)"
+  local env
+  env="$(as_user sh -c "tr '\\0' '\\n' < /proc/1/environ")" || fail "could not read ComfyUI's environment ($1)"
+  grep -qx "VIRTUAL_ENV=$node_venv" <<< "$env" || fail "ComfyUI does not run from $node_venv ($1)"
 }
 
 # Nothing under /app/.venv changed in a container's writable layer, as
@@ -231,7 +235,7 @@ docker run -d --name "$name" "${run_args[@]}" --user 1001:1001 \
   -v "$work/vol/custom_nodes:/app/custom_nodes" -v "$work/vol/user2:/app/user" "$image" >/dev/null
 ready
 check_runs_from_venv "fresh user volume, non-root"
-docker logs "$name" 2>&1 | grep -q "WARNING: could not set .* in $config" \
+grep -q "WARNING: could not set .* in $config" "$(logs)" \
   || fail "startup did not warn about the malformed $config"
 as_user sh -c "rm -f $node_venv/lib/python3*/site-packages/_comfyui_image.pth \
   $node_venv/bin/pip $node_venv/bin/pip3 $node_venv/bin/cm-cli $node_venv/bin/uv"
@@ -239,7 +243,7 @@ docker restart -t 3 "$name" >/dev/null
 ready
 check_runs_from_venv "after an interrupted first start"
 as_user test -x "$node_venv/bin/cm-cli" || fail "startup did not restore $node_venv/bin/cm-cli"
-if docker logs "$name" 2>&1 | grep -q 'made for Python'; then
+if grep -q 'made for Python' "$(logs)"; then
   fail "startup called a half-made node venv one made for another Python"
 fi
 echo "node-deps: startup made the node venv as non-root, warned about config.ini, and repaired a half-made venv"
