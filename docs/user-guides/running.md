@@ -135,6 +135,8 @@ See [Data Management](data.md) for details on directory structure.
 ```bash
 COMFY_ENABLE_MANAGER=true     # Registry-backed Manager UI and endpoints
 COMFY_ENABLE_ASSETS=true      # Assets API/sidebar and persistent index
+COMFY_ENABLE_NODE_VENV=true   # Custom-node dependencies on the user volume
+COMFY_MANAGER_SECURITY_LEVEL= # Opt-in Manager security_level (e.g. strong)
 CLI_ARGS="--vram-headroom 1" # Additional ComfyUI launch arguments
 COMFY_IMAGE=custom:latest    # Override Docker image
 ```
@@ -190,7 +192,7 @@ No PUID/PGID environment variables are needed in this mode — the UID/GID comes
 The image supports running as any UID without prior configuration:
 
 - **`/etc/passwd` injection**: The entrypoint dynamically adds a passwd entry for unknown UIDs so that Python's `getpass.getuser()`, `os.path.expanduser("~")`, and PyTorch's cache directory resolution all work correctly.
-- **World-writable directories**: `site-packages`, `.cache` are writable by any UID at build time so ComfyUI Manager can install custom node dependencies and uv/pip can cache packages.
+- **World-writable directories**: `site-packages` and `.cache` are writable by any UID at build time, so pip can cache packages and anything run with the image's own interpreter can install. Custom-node dependencies go to the [node venv](runtime-contract.md#the-node-venv) on the `user` volume instead, which startup creates as the runtime UID.
 - **File ownership**: All files under `/app` are owned by the `comfy` user (UID 1000) at build time. Runtime file creation in mounted volumes uses the effective UID.
 
 ### Verification

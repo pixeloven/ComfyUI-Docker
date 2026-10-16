@@ -20,23 +20,26 @@ agent's job is to propose the change to those files.
      covers the format.
    - **A node pack** goes in the `custom_nodes` section of `comfy-lock.yaml`,
      pinned to a commit (*A `custom_nodes` entry*, below, has the fields).
-     Name the pack's repository and the class you need from it.
-     `comfyctl fetch` fetches models only, so this entry records the request
-     for whoever deploys the instance.
+     Name the pack's repository and the class you need from it. Nothing in
+     this repository reads that section: `comfyctl fetch` fetches models only,
+     and the images don't install nodes. The entry records the request, and
+     whoever deploys the instance installs the pack.
 3. **Say what the workflow needs it for**, so the reviewer can judge it: which
    node, which input, and the model's license if it restricts use.
 
 Never suggest installing through ComfyUI-Manager, `git clone` into
 `custom_nodes`, `comfy node install`, `pip install`, or a direct download into
-the models directory. Each works once, on one instance, and the next rebuild
-or replica loses it.
+the models directory. Each changes one instance, outside the files a human
+reviews: another replica, or a deployment started from fresh volumes, doesn't
+have it.
 
 The comfyrelay sidecar refuses to install anything (see the `relay-limits`
 topic). *(needs the comfyrelay sidecar)*
 
 ## A `custom_nodes` entry
 
-The section has comfy-cli's shape. A pack from git goes under
+The section is hand-written, in the shape of a ComfyUI-Manager snapshot.
+A pack from git goes under
 `git_custom_nodes`, keyed by its repository URL, with the full commit SHA it's
 pinned to in `hash`. This is the entry in this repository's own lock:
 
@@ -70,16 +73,20 @@ custom_nodes:
   disabled the registry packs the section doesn't list.
 - **`hash` is a full commit SHA**, not a branch or a tag, so the pin can't move.
   A registry entry pins a released version, never `nightly` or `latest`.
-- **A `cnr_custom_nodes` map is the whole set.** Restoring a ComfyUI-Manager
-  snapshot disables any installed registry pack the map doesn't list. Add to
+- **A `cnr_custom_nodes` map is the whole set.** A deployer may apply the
+  section as a ComfyUI-Manager snapshot (`cm-cli restore-snapshot`), and that
+  disables any installed pack the section doesn't list. In ComfyUI-Manager
+  4.2.2 that restore also skips registry packs' Python dependencies, clones
+  git packs at their default branch rather than `hash`, and exits 0 when a pack
+  fails, so the deployer checks the result. Add to
   an existing map. If you start one, say in the proposal that it lists only
   this pack.
 - **This section is the part of the lock written by hand.**
   `comfyctl fetch resolve` writes only `auth` and `models`, so a lock
   regenerated with it has no `custom_nodes` section. Carry the section over
   when you regenerate.
-- `comfyctl fetch check` accepts any object here, and nothing in `comfyctl`
-  reads it.
+- `comfyctl fetch check` accepts any object here. Nothing in this repository
+  reads it: not `comfyctl`, and not the images.
 
 ## The subfolder gotcha
 

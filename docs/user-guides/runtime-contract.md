@@ -43,6 +43,8 @@ The variables fall into three groups. Only the first is read by the image's scri
 | `COMFY_PORT` | `8188` | Passed as `--port` | `startup.sh` |
 | `COMFY_ENABLE_MANAGER` | `true` | Only the exact string `true` adds `--enable-manager`. Any other value, including `True` or `1`, disables the Manager | `startup.sh` |
 | `COMFY_ENABLE_ASSETS` | `true` | Only the exact string `true` adds `--enable-assets` (the Assets API, sidebar and index) | `startup.sh` |
+| `COMFY_ENABLE_NODE_VENV` | `true` | Only the exact string `true` runs ComfyUI from the [node venv](#the-node-venv), so the Python packages custom nodes install survive a recreate, and sets Manager's `use_uv` and `use_unified_resolver` to `False`. If the node venv can't be used, startup warns and falls back to the image's venv; it never exits over it. Any other value runs ComfyUI from the image's venv, as earlier releases did | `startup.sh` |
+| `COMFY_MANAGER_SECURITY_LEVEL` | *(empty)* | Opt-in. `strong`, `normal`, `normal-` or `weak` is written to `security_level` in Manager's `config.ini` at every start. Empty leaves the file's own value, which is `normal` unless someone changed it. Any other value makes the container exit 1. See [Manager Security](#manager-security) | `startup.sh` |
 | `CLI_ARGS` | *(empty)* | Extra ComfyUI arguments, split on whitespace and appended **last**. Quoting inside the value is not honoured, so an argument can't contain a space | `startup.sh` |
 | `COMFY_RUNTIME` | set by the image: `cuda`, `cpu`, `rocm` or `xpu` | `cpu` adds `--cpu`. Every other value adds nothing. You don't normally set this, because each image already carries the right value | `startup.sh` |
 
@@ -68,7 +70,7 @@ what depends on it.
 | `HOME` | `/app`. A root start with an existing system user's `PUID` replaces it (see [What Startup Promises](#what-startup-promises)) |
 | `XDG_CACHE_HOME` | `/app/.cache` |
 | `VENV_PATH` | `/app/.venv` (the entrypoint activates `/app/.venv` directly, not through this variable) |
-| `PATH` | Starts with `/app/.venv/bin` |
+| `PATH` | Starts with `/app/user/__node_venv/bin`, then `/app/.venv/bin`. The first finds nothing until startup has made the [node venv](#the-node-venv) |
 | `PYTHONPATH` | `/app/ComfyUI` |
 | `PYTHONDONTWRITEBYTECODE` | `1`, so an arbitrary UID never fails trying to write `.pyc` files |
 
@@ -102,15 +104,16 @@ The GPU examples (`core-gpu`, `complete-gpu`) also set `NVIDIA_VISIBLE_DEVICES=a
 and `NVIDIA_DRIVER_CAPABILITIES=compute,utility` inside the compose file. Those two
 are hard-coded, not interpolated.
 
-`PUID`, `PGID`, `COMFY_PORT`, `COMFY_ENABLE_MANAGER`, `COMFY_ENABLE_ASSETS` and
-`CLI_ARGS` go through Compose too: each example passes them into the container, with
+`PUID`, `PGID`, `COMFY_PORT`, `COMFY_ENABLE_MANAGER`, `COMFY_ENABLE_ASSETS`,
+`COMFY_ENABLE_NODE_VENV`, `COMFY_MANAGER_SECURITY_LEVEL` and `CLI_ARGS` go through
+Compose too: each example passes them into the container, with
 the defaults from the first table. The `fetch` service runs as `${PUID}:${PGID}`.
 
 ### Which `.env.example` Documents What
 
 | Variable | core-gpu | complete-gpu | core-cpu | core-amd | core-intel |
 |----------|:--:|:--:|:--:|:--:|:--:|
-| `PUID`, `PGID`, `COMFY_PORT`, `COMFY_ENABLE_MANAGER`, `COMFY_ENABLE_ASSETS`, `CLI_ARGS` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `PUID`, `PGID`, `COMFY_PORT`, `COMFY_ENABLE_MANAGER`, `COMFY_ENABLE_ASSETS`, `COMFY_ENABLE_NODE_VENV`, `COMFY_MANAGER_SECURITY_LEVEL`, `CLI_ARGS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | The seven `COMFY_*_PATH` variables | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `COMFY_LOCK`, `HF_TOKEN`, `CIVITAI_TOKEN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `VIDEO_GID`, `RENDER_GID` | – | – | – | ✓ | ✓ |
@@ -138,7 +141,7 @@ inside the container itself can't be changed with an environment variable.
 | `/app/temp` | Temporary files | `COMFY_TEMP_PATH` | ✓ |
 | `/app/user` | Settings, saved workflows, and the database `comfyui.db` | `COMFY_USER_PATH` | ✓ |
 
-Two more paths are part of the contract:
+Four more paths are part of the contract:
 
 - **`/app/user/comfyui.db`**: `startup.sh` always passes
   `--database-url sqlite:////app/user/comfyui.db`, so the database lives on the
@@ -146,6 +149,14 @@ Two more paths are part of the contract:
 - **`/app/extra_model_paths.yaml`**: optional. When the file exists, `startup.sh`
   passes `--extra-model-paths-config /app/extra_model_paths.yaml`. The examples
   mount it read-only.
+- **`/app/user/__node_venv`**: the [node venv](#the-node-venv), on the `user`
+  volume. Startup makes it.
+- **`/app/user/__manager`**: ComfyUI-Manager's own directory, with its
+  `config.ini`. Manager makes it; startup writes the keys
+  [The Node Venv](#the-node-venv) and [Manager Security](#manager-security) name.
+
+ComfyUI never serves a directory under `/app/user` whose name starts with `__`
+over HTTP: it reserves those names for system data.
 
 Nothing else under `/app` is meant to be a volume. `/app/ComfyUI` and `/app/.venv`
 belong to the image.
@@ -275,8 +286,10 @@ must already be writable by the UID or GID the container runs as:
   GID. Prepare them with `chown` or `chmod` on the host.
 
 The root filesystem must stay writable on this path too. Startup relies on it for a
-UID the image doesn't know, and the Manager installs custom-node dependencies into
-the venv. `readOnlyRootFilesystem: true` breaks both.
+UID the image doesn't know, and pip and Hugging Face write their caches to
+`/app/.cache`. `readOnlyRootFilesystem: true` breaks both. Custom-node
+dependencies no longer need it: they go to the [node venv](#the-node-venv), on a
+volume.
 
 ### Side by Side
 
@@ -293,26 +306,186 @@ the venv. `readOnlyRootFilesystem: true` breaks both.
 
 Anything written outside the volumes lives in the container's writable layer:
 
-- the Python packages the Manager installs with pip into `/app/.venv` for custom nodes
 - the caches under `/app/.cache` (`XDG_CACHE_HOME`)
+- anything installed into `/app/.venv` itself: with
+  `COMFY_ENABLE_NODE_VENV` off, every custom-node dependency; with it on, only
+  what someone installs with the image's own interpreter, such as
+  `/app/.venv/bin/pip`
 
 That layer is lost whenever the container is recreated. In Compose, that happens when
 `docker compose up` replaces the container, for example after a pull. In Kubernetes,
 it happens on every container restart and every time the pod is rescheduled. The
-custom nodes themselves stay on `/app/custom_nodes`, but the dependencies they
-installed do not. This is tracked as a known defect,
-[#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115).
+custom nodes themselves stay on `/app/custom_nodes`, and, with the node venv on (the
+default), so do the Python packages they install
+([#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115)).
 
-### Hardening
+## The Node Venv
 
-We recommend turning off privilege escalation for the ComfyUI container:
-`no-new-privileges:true` under `security_opt` in Compose, or
-`allowPrivilegeEscalation: false` in the Kubernetes container `securityContext`.
-Both startup paths work with it.
+Custom nodes are installed at runtime, by hand or by an agent: through Manager's UI,
+`cm-cli`, or `git clone` into `/app/custom_nodes`. Their Python dependencies go into
+the **node venv**, `/app/user/__node_venv`, so they survive a recreate along with
+the nodes. Nothing in this repository installs custom nodes for you, and nothing
+reads a lock's `custom_nodes` section.
 
-Run `docker exec` and `kubectl exec` sessions as the runtime user, not as root: for
-example `docker exec -u "$PUID:$PGID" …`, or `kubectl exec` into a pod that already
-runs as `runAsUser`.
+**What it is.** A Python venv on the `user` volume, layered over the image's
+`/app/.venv`. It has no packages of its own until something installs one, and a
+`.pth` file puts the image's `site-packages` after its own on `sys.path`. So pip,
+run from it, sees every package the image has, installs only what is missing, and
+installs it into the node venv. When a pack needs another version of a package the
+image has, pip installs that version into the node venv too, and it wins over the
+image's (see [Shadowed image packages](#shadowed-image-packages)). The image's venv
+is never changed.
+
+**What runs from it.** At every start, `startup.sh`, as the runtime user, makes the
+node venv if it is missing and repairs it if an interrupted start left it half
+made: it rewrites the `.pth` file and the wrappers below whenever they differ, and
+keeps the packages. It then checks that the venv's Python runs and sees the
+image's packages, and starts ComfyUI with it. Manager installs dependencies with
+`sys.executable -m pip`, so they land in it.
+
+**It never stops ComfyUI from starting.** If the node venv can't be made or used,
+for example because the runtime UID can't write it, startup logs a `WARNING` and
+runs ComfyUI from the image's venv, as 6.0.0 did. What custom nodes install is then
+lost on a recreate again, until you fix the cause and restart.
+
+**In a `docker exec` session.** Its `bin/` is first on the image's `PATH`, and holds
+`python`, plus `pip`, `pip3` and `cm-cli` wrappers that run from it, so a session
+installs into it too:
+
+```bash
+docker exec -u "$PUID:$PGID" comfyui cm-cli install <registry id>@<version> --user-directory /app/user/__manager
+docker exec -u "$PUID:$PGID" comfyui pip install <package>
+```
+
+- The `cm-cli` wrapper sets `COMFYUI_PATH=/app/ComfyUI` unless you set it. Pass
+  `--user-directory /app/user/__manager` so it reads the same `config.ini` as the
+  Manager inside ComfyUI.
+- Restart ComfyUI afterwards to load a new pack.
+- Run the session as the runtime user, not root, or the files are root-owned.
+- **Don't use uv.** uv doesn't follow the `.pth` file, so `uv pip install` would
+  reinstall the image's packages, torch included, into the node venv, or into
+  `/app/.venv` in a session. The node venv's `uv` wrapper refuses `uv pip` with a
+  message and passes every other `uv` command through. `python -m uv pip` bypasses
+  the wrapper; don't use it either.
+- `/app/.venv/bin/pip` and `/app/.venv/bin/cm-cli` still install into the image's
+  venv, in the container layer, and those installs are lost on a recreate.
+
+**Manager uses pip, not uv.** For the same reason, while ComfyUI runs from the node
+venv, startup sets `use_uv = False` and `use_unified_resolver = False` in
+`/app/user/__manager/config.ini` at every start, and logs each change it makes. It
+writes no other key there, and leaves the file alone when both are already `False`,
+so your other settings stay. If the file doesn't exist yet, startup creates it with
+those two keys and `file_logging = True`, Manager's default, because Manager reads a
+missing boolean as false; Manager then uses that file instead of writing its own
+defaults. Setting `use_uv = True` again has no lasting effect while the node venv is
+on. If the file can't be parsed or written, startup logs a `WARNING` and leaves it as
+it is; Manager may then install with uv, with the result above.
+
+**Identity.** Both startup paths make the node venv as the runtime UID: under a root
+start, after the drop to `PUID:PGID`; under a non-root start, as that UID. The
+`user` volume must be writable by that UID, which the contract already requires. If
+the runtime UID changes later, the node venv still loads, but the new UID can't
+install into it until you `chown -R` it, as with the rest of the volume.
+
+**Size, and its own volume.** Packs can pull in large dependencies, and those now
+count against the `user` volume, beside `comfyui.db`; a full volume can stop the
+database from being written. Size it for the packs you install. To keep the node
+venv on other storage, mount a volume at `/app/user/__node_venv` itself, made
+writable by the runtime UID before the first start: `chown PUID:PGID` on the host
+side under Compose, or `fsGroup` under Kubernetes. The entrypoint doesn't `chown`
+it, and a fresh named Docker volume is `root:root`, so without that step startup
+can't make the node venv and runs ComfyUI from the image's venv, with a `WARNING`.
+
+### Shadowed image packages
+
+A package in the node venv wins over the image's copy of it. That is how a pack gets
+a version the image doesn't have, but it can also replace something ComfyUI itself
+depends on:
+
+- **Manager can put a whole torch there.** When an install changes the torch,
+  torchvision or torchaudio version Python sees, Manager reinstalls the previous
+  versions with pip (`torch_rollback`). From the node venv, that reinstall lands in
+  the node venv: gigabytes on the `user` volume, shadowing the image's torch even
+  when the versions match.
+- **On ROCm and XPU,** a pack whose dependencies require a torch version the
+  image's doesn't satisfy makes pip fetch torch from PyPI, which is a CUDA build.
+  Manager drops `torch` lines from a pack's own `requirements.txt`, but not a
+  dependency's requirement on it. It shadows the
+  image's ROCm or XPU torch, and ComfyUI loses the GPU. On the CPU image the same
+  thing pulls a CUDA torch of several GB.
+
+At every start, startup lists each package the node venv shadows, with both
+versions, in a `WARNING`, and adds a second `WARNING` when the list includes torch,
+torchvision, torchaudio, numpy or a `comfyui-*` package. To go back to the image's
+copies:
+
+```bash
+docker exec -u "$PUID:$PGID" comfyui pip uninstall -y torch torchvision torchaudio
+docker restart comfyui
+```
+
+Run from the node venv, `pip uninstall` removes only the node venv's copy, and
+refuses to touch `/app/.venv`. Name whatever the `WARNING` listed. A pack that
+needed that version may then fail to import.
+
+### When the Image Changes
+
+The node venv records the image's ComfyUI version and its torch and numpy versions.
+When they change, startup logs a `NOTICE` and carries on: a pack's compiled
+dependency, built against the old torch or numpy, can then fail to import, and a
+package the node venv pinned can shadow a newer one the image now ships. If a pack
+fails to import after an image update:
+
+1. stop the container;
+2. delete `/app/user/__node_venv` (on the host, `<COMFY_USER_PATH>/__node_venv`);
+3. start the container, which makes it again, empty;
+4. `docker exec -u "$PUID:$PGID" comfyui cm-cli restore-dependencies --user-directory /app/user/__manager`,
+   which reinstalls every installed pack's requirements and runs its `install.py`;
+5. restart ComfyUI.
+
+When the image's Python version changes, startup does steps 2 and 3 itself, with a
+`WARNING`, because packages built for another Python can't load. Steps 4 and 5 are
+still yours.
+
+**Upgrading from 6.0.0.** Packs installed on 6.0.0 had their dependencies in the old
+container's layer, so after the upgrade they show `IMPORT FAILED` in the log. Run
+steps 4 and 5 once; from then on their dependencies are in the node venv.
+
+**Turning it off.** `COMFY_ENABLE_NODE_VENV=false` runs ComfyUI from the image's
+venv, as before, and leaves `config.ini` alone. A node venv that already exists stays
+first on `PATH` for `docker exec` sessions, so delete it too.
+
+## Manager Security
+
+ComfyUI has no authentication, and Manager, enabled by default
+(`COMFY_ENABLE_MANAGER`), adds routes that change the instance.
+
+**Manager's reboot route is open to anyone who can reach port 8188.** At Manager's
+default `security_level`, `normal`, any client can `POST /v2/manager/reboot` to
+restart ComfyUI. The same level lets any client uninstall a pack, remove a snapshot,
+and change Manager's channel URL, update policy and database mode. Keep the port on a
+private network or behind an authenticating proxy.
+
+**What `COMFY_MANAGER_SECURITY_LEVEL` does on these images.** It writes Manager's
+`security_level` at every start; unset, the file's own value stands. With Manager
+4.2.2, on these images, which always listen on a non-loopback address and leave
+Manager's network mode at its default:
+
+| Value | Effect |
+|-------|--------|
+| `strong` | Refuses everything above: the reboot route answers `403`, and uninstalls, snapshot removal and the setting changes are refused. **The only value that changes anything here** |
+| `normal` | Manager's default: the routes above are open |
+| `normal-`, `weak` | The same as `normal` on these images. Their extra permissions apply only to a loopback listener or a different network mode |
+
+**Installs over HTTP stay refused at every level.** Manager's default UI refuses
+installs, update-all, fixes, snapshot restores and a ComfyUI version switch while
+ComfyUI listens on a non-loopback address, unless its network mode is
+`personal_cloud`, which the image doesn't set. The legacy UI's git-URL and pip
+installs have their own gate, Manager's `allow_git_url_install` and
+`allow_pip_install`, independent of `security_level`, and also need a loopback
+listener or `personal_cloud`. Installing over the network is tracked in
+[#125](https://github.com/pixeloven/ComfyUI-Docker/issues/125). `cm-cli` in a
+`docker exec` session is gated by none of this.
 
 ## The `mcp` Image
 
@@ -458,7 +631,7 @@ a major change.
 
 - [#113](https://github.com/pixeloven/ComfyUI-Docker/issues/113): a root start exits if a volume root is read-only or on a root-squashed NFS export.
 - [#114](https://github.com/pixeloven/ComfyUI-Docker/issues/114): a root start changes the owner of the host directory behind a bind-mounted volume root.
-- [#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115): dependencies and caches installed at runtime are lost when the container is recreated.
+- [#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115): the caches under `/app/.cache` are lost when the container is recreated. Custom-node dependencies are not, with the [node venv](#the-node-venv) on.
 - [#116](https://github.com/pixeloven/ComfyUI-Docker/issues/116): VRAM flags in `CLI_ARGS` make ComfyUI exit on the CPU image.
 - [#117](https://github.com/pixeloven/ComfyUI-Docker/issues/117): `COMFY_ENABLE_*` accept only the exact string `true`.
 

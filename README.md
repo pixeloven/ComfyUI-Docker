@@ -184,6 +184,10 @@ PGID=1000                            # Group ID for file ownership (default: 100
 # Performance Tuning
 CLI_ARGS="--lowvram"                # ComfyUI launch arguments
 
+# Custom Nodes and Manager
+COMFY_ENABLE_NODE_VENV=true         # Node dependencies on the user volume (default)
+COMFY_MANAGER_SECURITY_LEVEL=strong # Opt-in Manager security_level; unset by default
+
 # Custom Paths
 COMFY_MODEL_PATH=./data/models      # Override model directory
 COMFY_OUTPUT_PATH=./data/output     # Override output directory
@@ -205,7 +209,7 @@ securityContext:
   fsGroup: 3000
 ```
 
-The Python virtual environment's package and entry-point directories are world-writable at build time, so ComfyUI Manager can install custom node dependencies regardless of the runtime UID.
+Custom-node Python dependencies go into a venv on the `user` volume, which startup makes as the runtime UID, so they survive a recreate and the image's own venv is never changed. See [The Node Venv](docs/user-guides/runtime-contract.md#the-node-venv), and [Manager Security](docs/user-guides/runtime-contract.md#manager-security) before exposing port 8188.
 
 ### MCP Server for Agents
 
