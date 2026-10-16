@@ -60,6 +60,17 @@ see `VERSIONING.md`.
   `cm-cli restore-dependencies --user-directory /app/user/__manager` once in a
   `docker exec` session as the runtime user, then restart.
 
+### Fixed
+
+- **A crash-loop with the node venv when Manager's directory isn't writable (#223).**
+  With `/app/user/__manager` unwritable by the runtime UID and `use_uv = True` left
+  in its `config.ini`, Manager's startup check ran `uv pip freeze` through the node
+  venv's `uv` wrapper, which refused it, and the container exited on every start.
+  Startup now reads `use_uv` back and runs from the node venv only when it is
+  `False`, falling back to the image's venv with a `WARNING`. The wrapper refuses
+  only `uv pip install`, `sync` and `uninstall`, wherever options sit. The runtime
+  contract's *Hardening* section, dropped by mistake, is back.
+
 ## 6.0.0 — 2026-10-11
 
 ### Breaking

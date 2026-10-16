@@ -319,6 +319,17 @@ custom nodes themselves stay on `/app/custom_nodes`, and, with the node venv on 
 default), so do the Python packages they install
 ([#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115)).
 
+### Hardening
+
+We recommend turning off privilege escalation for the ComfyUI container:
+`no-new-privileges:true` under `security_opt` in Compose, or
+`allowPrivilegeEscalation: false` in the Kubernetes container `securityContext`.
+Both startup paths work with it.
+
+Run `docker exec` and `kubectl exec` sessions as the runtime user, not as root: for
+example `docker exec -u "$PUID:$PGID" …`, or `kubectl exec` into a pod that already
+runs as `runAsUser`.
+
 ## The Node Venv
 
 Custom nodes are installed at runtime, by hand or by an agent: through Manager's UI,
@@ -344,7 +355,8 @@ image's packages, and starts ComfyUI with it. Manager installs dependencies with
 `sys.executable -m pip`, so they land in it.
 
 **It never stops ComfyUI from starting.** If the node venv can't be made or used,
-for example because the runtime UID can't write it, startup logs a `WARNING` and
+for example because the runtime UID can't write it, or because Manager's `use_uv`
+can't be set to `False` (below), startup logs a `WARNING` and
 runs ComfyUI from the image's venv, as 6.0.0 did. What custom nodes install is then
 lost on a recreate again, until you fix the cause and restart.
 
@@ -364,9 +376,12 @@ docker exec -u "$PUID:$PGID" comfyui pip install <package>
 - Run the session as the runtime user, not root, or the files are root-owned.
 - **Don't use uv.** uv doesn't follow the `.pth` file, so `uv pip install` would
   reinstall the image's packages, torch included, into the node venv, or into
-  `/app/.venv` in a session. The node venv's `uv` wrapper refuses `uv pip` with a
-  message and passes every other `uv` command through. `python -m uv pip` bypasses
-  the wrapper; don't use it either.
+  `/app/.venv` in a session. The node venv's `uv` wrapper refuses, with exit code 2
+  and a message, the `uv pip` commands that change packages: `install`, `sync` and
+  `uninstall`, wherever options sit, so `uv -q pip install` is refused too. Every
+  other command, `uv pip freeze` and `uv pip list` included, passes through.
+  `python -m uv` from the node venv reaches the same wrapper, because uv's
+  launcher looks in the venv's `bin/` first.
 - `/app/.venv/bin/pip` and `/app/.venv/bin/cm-cli` still install into the image's
   venv, in the container layer, and those installs are lost on a recreate.
 
@@ -379,7 +394,10 @@ those two keys and `file_logging = True`, Manager's default, because Manager rea
 missing boolean as false; Manager then uses that file instead of writing its own
 defaults. Setting `use_uv = True` again has no lasting effect while the node venv is
 on. If the file can't be parsed or written, startup logs a `WARNING` and leaves it as
-it is; Manager may then install with uv, with the result above.
+it is. It then reads `use_uv` back, and runs ComfyUI from the node venv only if it is
+`False`. Anything else, including a file that is missing or can't be parsed, which
+Manager treats as uv, makes ComfyUI run from the image's venv for that start, with a
+`WARNING`, as described above.
 
 **Identity.** Both startup paths make the node venv as the runtime UID: under a root
 start, after the drop to `PUID:PGID`; under a non-root start, as that UID. The

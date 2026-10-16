@@ -30,10 +30,17 @@
 #      container changed /app/.venv (`docker diff`), config.ini says use_uv = False and security_level = strong
 #      and kept share_option, and Manager's reboot route answers 403.
 #   4. A fresh user volume, owned by 1001, with a config.ini that isn't INI.
-#      Start as non-root 1001:1001: startup makes the node venv, runs ComfyUI
-#      from it, and only warns about the file. Then break the venv as a killed
-#      first start leaves it (no .pth, no wrappers) and restart: startup
-#      repairs it, and doesn't call it "made for another Python".
+#      Start as non-root 1001:1001: startup makes the node venv, only warns
+#      about the file, and, since use_uv can't be read as False, runs ComfyUI
+#      from the image's venv. Then make the file valid with use_uv = True,
+#      break the venv as a killed first start leaves it (no .pth, no
+#      wrappers), and restart: startup sets use_uv = False, repairs the venv,
+#      runs from it, and doesn't call it "made for another Python". Its uv
+#      wrapper refuses `uv -q pip install` and lets `python -m uv pip freeze`
+#      through.
+#   5. A fresh user volume whose __manager directory is root-owned 0755, with
+#      use_uv = True (#223): startup can't change it, so ComfyUI must still
+#      boot, from the image's venv, with a WARNING.
 #   On any failure, print the container logs and exit 1.
 set -euo pipefail
 
@@ -155,6 +162,13 @@ check_runs_from_venv() {
   grep -qx "VIRTUAL_ENV=$node_venv" <<< "$env" || fail "ComfyUI does not run from $node_venv ($1)"
 }
 
+# ComfyUI (PID 1) runs from the image's venv: the fallback.
+check_runs_from_image() {
+  local env
+  env="$(as_user sh -c "tr '\\0' '\\n' < /proc/1/environ")" || fail "could not read ComfyUI's environment ($1)"
+  grep -qx "VIRTUAL_ENV=/app/.venv" <<< "$env" || fail "ComfyUI does not run from /app/.venv ($1)"
+}
+
 # Nothing under /app/.venv changed in a container's writable layer, as
 # recorded by `docker diff` in file $1.
 check_image_venv() {
@@ -234,19 +248,41 @@ echo "node-deps: starting as non-root 1001:1001 on a fresh user volume, config.i
 docker run -d --name "$name" "${run_args[@]}" --user 1001:1001 \
   -v "$work/vol/custom_nodes:/app/custom_nodes" -v "$work/vol/user2:/app/user" "$image" >/dev/null
 ready
-check_runs_from_venv "fresh user volume, non-root"
 grep -q "WARNING: could not set .* in $config" "$(logs)" \
   || fail "startup did not warn about the malformed $config"
-as_user sh -c "rm -f $node_venv/lib/python3*/site-packages/_comfyui_image.pth \
-  $node_venv/bin/pip $node_venv/bin/pip3 $node_venv/bin/cm-cli $node_venv/bin/uv"
+check_runs_from_image "malformed config.ini"
+as_user test -f "$node_venv/pyvenv.cfg" || fail "startup did not make $node_venv on a fresh user volume"
+as_user sh -c "printf '[default]\nuse_uv = True\n' > $config \
+  && rm -f $node_venv/lib/python3*/site-packages/_comfyui_image.pth \
+     $node_venv/bin/pip $node_venv/bin/pip3 $node_venv/bin/cm-cli $node_venv/bin/uv"
 docker restart -t 3 "$name" >/dev/null
 ready
 check_runs_from_venv "after an interrupted first start"
+[ "$(setting use_uv)" = False ] || fail "startup left use_uv = '$(setting use_uv)' in $config"
 as_user test -x "$node_venv/bin/cm-cli" || fail "startup did not restore $node_venv/bin/cm-cli"
 if grep -q 'made for Python' "$(logs)"; then
   fail "startup called a half-made node venv one made for another Python"
 fi
-echo "node-deps: startup made the node venv as non-root, warned about config.ini, and repaired a half-made venv"
+if as_user uv -q pip install piexif > "$work/uv.out" 2>&1; then
+  cat "$work/uv.out" >&2; fail "the node venv's uv wrapper let \`uv -q pip install\` through"
+fi
+grep -q "uv pip install is refused" "$work/uv.out" || { cat "$work/uv.out" >&2; fail "uv -q pip install failed, but not with the wrapper's refusal"; }
+as_user python -m uv pip freeze > /dev/null || fail "the uv wrapper refused \`python -m uv pip freeze\`, which Manager runs at start"
+echo "node-deps: malformed config.ini fell back with a WARNING; the half-made venv was repaired; uv -q pip install refused, uv pip freeze allowed"
 retire "$name" "$out/node-deps-3.log"
+
+# 5. __manager not writable by the runtime UID, with use_uv = True (#223).
+stage=4
+as_root "cd /vol && mkdir user3 && mkdir user3/__manager \
+  && printf '[default]\nuse_uv = True\n' > user3/__manager/config.ini \
+  && chmod 0755 user3/__manager && chmod 0644 user3/__manager/config.ini && chown 1001:1001 user3"
+echo "node-deps: starting as non-root 1001:1001 with a root-owned __manager holding use_uv = True"
+docker run -d --name "$name" "${run_args[@]}" --user 1001:1001 \
+  -v "$work/vol/custom_nodes:/app/custom_nodes" -v "$work/vol/user3:/app/user" "$image" >/dev/null
+ready
+check_runs_from_image "unwritable __manager"
+grep -q "WARNING: $node_venv can't be used" "$(logs)" || fail "startup did not warn that it fell back to the image's venv"
+echo "node-deps: with __manager unwritable and use_uv = True, ComfyUI booted from the image's venv"
+retire "$name" "$out/node-deps-4.log"
 
 echo "node-deps: PASS"

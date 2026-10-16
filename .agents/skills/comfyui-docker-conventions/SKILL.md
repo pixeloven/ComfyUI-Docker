@@ -82,9 +82,11 @@ There is no date tag.
   (`--without-pip`, plus a `.pth` naming the image venv's `site-packages`) and runs ComfyUI
   from it, so custom-node dependencies land on the `user` volume and `/app/.venv` is never
   changed. Its `bin/` (with `pip`, `pip3` and `cm-cli` wrappers, and a `uv` that refuses
-  `uv pip`) is first on the image's `PATH`. Every start repairs it idempotently, warns about
-  image packages it shadows, and falls back to `/app/.venv` with a WARNING if it is unusable:
-  nothing about it, or about `config.ini`, may stop a start. With it on (`COMFY_ENABLE_NODE_VENV`, default `true`), startup forces
+  `uv pip install`, `sync` and `uninstall`, but must let `uv pip freeze` through, since Manager
+  runs it at start and `python -m uv` finds the wrapper) is first on the image's `PATH`. Every
+  start repairs it idempotently, warns about image packages it shadows, and falls back to
+  `/app/.venv` with a WARNING if it is unusable or if `use_uv` in Manager's `config.ini` doesn't
+  read back as `False` (#223): nothing about it, or about `config.ini`, may stop a start. With it on (`COMFY_ENABLE_NODE_VENV`, default `true`), startup forces
   `use_uv = False` and `use_unified_resolver = False` in `/app/user/__manager/config.ini`,
   because uv ignores the `.pth` and would reinstall the image's packages into it.
   `COMFY_MANAGER_SECURITY_LEVEL` (#125) writes Manager's `security_level` when set.
@@ -259,8 +261,10 @@ under PUID/PGID 1001, restarts, recreates the container as non-root 1001:1001 wi
 `COMFY_MANAGER_SECURITY_LEVEL=strong`, and checks the pack still loads (the #115 check,
 first), then that `piexif` imports from the node venv, `use_uv` was forced off, the reboot
 route answers 403, and `docker diff` shows nothing under `/app/.venv`. A third start, as
-non-root on a fresh user volume with a malformed `config.ini`, must make the venv, only warn,
-and repair a half-made venv after a restart. It needs the Comfy Registry and PyPI.
+non-root on a fresh user volume with a malformed `config.ini`, must make the venv, only warn and
+fall back; after a restart with a valid file it must repair a half-made venv and its `uv`
+wrapper must refuse `uv -q pip install` but allow `python -m uv pip freeze`. A fourth, with a
+root-owned `__manager` holding `use_uv = True`, must boot from `/app/.venv` (#223). It needs the Comfy Registry and PyPI.
 
 A failed smoke test on a tag withholds the GitHub Release, but not the image pushes.
 Nothing else boots the non-root start, and nothing boots the other profiles or any GPU image.

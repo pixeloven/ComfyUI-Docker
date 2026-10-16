@@ -65,7 +65,8 @@ put() {
 # and through it Manager's `python -m pip`, runs from it, so those packages
 # survive a recreate. Its bin/ is first on the image's PATH, where its `pip`,
 # `pip3` and `cm-cli` do the same for a `docker exec` session, and its `uv`
-# refuses `uv pip`, which can't see the image's packages.
+# refuses the `uv pip` commands that change packages, since uv can't see the
+# image's packages. ComfyUI runs from it only once Manager's use_uv is False.
 #
 # Every start checks and repairs it, and nothing here stops ComfyUI from
 # starting: if the venv can't be made usable, ComfyUI runs from the image's
@@ -97,9 +98,38 @@ if [ "${COMFY_ENABLE_NODE_VENV:-true}" = "true" ]; then
         # shellcheck disable=SC2016  # expanded by the wrapper when it runs, not here
         put "$node_venv/bin/cm-cli" "$(printf '#!/bin/sh\nexport COMFYUI_PATH="${COMFYUI_PATH:-/app/ComfyUI}"\nexec %s/bin/python -m cm_cli "$@"' "$node_venv")" 0755 \
             || warn "could not write $node_venv/bin/cm-cli"
-        # shellcheck disable=SC2016  # expanded by the wrapper when it runs, not here
-        put "$node_venv/bin/uv" "$(printf '#!/bin/sh\nif [ "$1" = pip ]; then\n    echo "uv pip cannot see the image'"'"'s packages through %s and would reinstall them into it. Use pip (or python -m pip) instead." >&2\n    exit 2\nfi\nexec /app/.venv/bin/uv "$@"' "$node_venv")" 0755 \
-            || warn "could not write $node_venv/bin/uv"
+        # uv finds this wrapper even through `python -m uv` (its launcher looks
+        # in the venv's bin/ first), and Manager runs `uv pip freeze` and `list`,
+        # so only the subcommands that change packages are refused. The
+        # subcommand is the first argument that isn't an option, after `pip`.
+        put "$node_venv/bin/uv" "$(cat <<'EOF'
+#!/bin/sh
+# uv can't see the image's packages through the node venv, so `uv pip install`
+# would reinstall them, torch included, into it. Refuse what changes packages.
+want=pip
+skip=
+for arg in "$@"; do
+    if [ -n "$skip" ]; then skip=; continue; fi
+    case "$arg" in
+        --cache-dir|--directory|--project|--config-file|--color|--python-preference|--allow-insecure-host) skip=1; continue ;;
+        -*) continue ;;
+    esac
+    if [ "$want" = pip ]; then
+        [ "$arg" = pip ] || break
+        want=command
+        continue
+    fi
+    case "$arg" in
+        install|sync|uninstall)
+            echo "uv pip $arg is refused here: uv can't see the image's packages through /app/user/__node_venv, so it would reinstall or remove the wrong ones. Use pip (python -m pip) instead." >&2
+            exit 2
+            ;;
+    esac
+    break
+done
+exec /app/.venv/bin/uv "$@"
+EOF
+)" 0755 || warn "could not write $node_venv/bin/uv"
     fi
     # Usable means its python runs and sees the image's packages. Then: warn
     # about any image package it shadows, and note when the image changed
@@ -147,7 +177,9 @@ except Exception as e:
     print(f"WARNING: could not check {venv}: {type(e).__name__}: {e}", file=sys.stderr)
 EOF
     then
+        image_virtual_env="${VIRTUAL_ENV:-}"
         export VIRTUAL_ENV="$node_venv" PATH="$node_venv/bin:$PATH"
+        unset VIRTUAL_ENV_PROMPT
         node_venv_used=true
     else
         warn "$node_venv can't be used, so ComfyUI runs from the image's venv this time, and what custom nodes install there is lost on a recreate. Make it writable by $(id -u):$(id -g), or delete it, and restart."
@@ -182,18 +214,42 @@ try:
     section = config["default"]
     changed = {key: value for key, value in settings.items() if section.get(key, "").lower() != value.lower()}
     if changed:
+        was = {key: section.get(key, "(unset)") for key in changed}
         for key, value in changed.items():
-            if not created:
-                print(f"startup: {path}: {key} = {section.get(key, '(unset)')} -> {value}")
             section[key] = value
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path + ".tmp", "w") as f:
             config.write(f)
         os.replace(path + ".tmp", path)
+        if not created:
+            for key, value in changed.items():
+                print(f"startup: {path}: {key} = {was[key]} -> {value}")
 except Exception as e:
     wanted = ", ".join(f"{k} = {v}" for k, v in settings.items())
     print(f"WARNING: could not set {wanted} in {path} ({type(e).__name__}: {e}). Manager uses the file as it is.", file=sys.stderr)
 EOF
+fi
+
+# Run from the node venv only if Manager will use pip there: read use_uv back.
+# A missing or unparseable file counts as uv, since Manager then falls back to
+# its own default, which is uv. Otherwise Manager would run uv inside the node
+# venv, where the wrapper and uv's blindness to the image's packages bite.
+if [ "$node_venv_used" = true ] && ! python - /app/user/__manager/config.ini <<'EOF'
+import configparser, sys
+
+config = configparser.ConfigParser(strict=False)
+try:
+    ok = bool(config.read(sys.argv[1])) and config.has_section("default") \
+        and config["default"].get("use_uv", "False").strip().lower() == "false"
+except Exception:
+    ok = False
+sys.exit(0 if ok else 1)
+EOF
+then
+    PATH="${PATH#"$node_venv/bin:"}"
+    export VIRTUAL_ENV="$image_virtual_env"
+    node_venv_used=false
+    warn "$node_venv can't be used, so ComfyUI runs from the image's venv this time, and what custom nodes install there is lost on a recreate. use_uv isn't False in /app/user/__manager/config.ini, and startup couldn't set it: make the file and its directory writable by $(id -u):$(id -g), and restart."
 fi
 
 exec python "${args[@]}"
