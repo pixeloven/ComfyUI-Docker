@@ -12,6 +12,15 @@ agent's job is to propose the change to those files.
    (`/models/<folder>`). The relay's `node_search`, `node_describe` and
    `model_list` do the same, and its `template_get` reports a template's
    `missing_nodes`, `missing_models` and `missing_inputs` directly. *(needs the comfyrelay sidecar)*
+   For any other workflow, UI or API format, the relay's `workflow_validate`
+   returns the same lists as `requirements`, on either image. In UI format a
+   missing class names its pack (`pack` for a registry id, `aux_id` for a git
+   repository, with `version`), and a missing model its folder and source
+   `url`, from the nodes' `properties`. An API graph has no properties: there a
+   missing class gets close `suggestions`, and a missing model the loader
+   node, the folder whose files that loader lists (when only one matches) and
+   close names among them. `requirements` doesn't change `valid`, and
+   `satisfied: true` says nothing about values or types. *(needs the comfyrelay sidecar)*
 2. **Propose the change**, for a human to apply:
    - **A model** goes in the deployment's `comfy.yaml`, followed by a
      regenerated lock (`comfyctl fetch resolve`). Give its source (`hf:`,
@@ -26,6 +35,13 @@ agent's job is to propose the change to those files.
      whoever deploys the instance installs the pack.
 3. **Say what the workflow needs it for**, so the reviewer can judge it: which
    node, which input, and the model's license if it restricts use.
+
+`workflow_validate`'s `requirements.proposals` drafts both changes where the
+workflow says enough: `comfy_yaml_models` for a missing model with a source
+URL, and `custom_nodes` for a missing pack. They are drafts, and nothing
+applies them. Check them against the rules here, fill in any `<...>` value (a
+URL's `sha256`, a version or commit the workflow doesn't name), and hand them
+to a human. *(needs the comfyrelay sidecar)*
 
 Never suggest installing through ComfyUI-Manager, `git clone` into
 `custom_nodes`, `comfy node install`, `pip install`, or a direct download into
@@ -103,7 +119,8 @@ file.
 - `/models/<folder>` lists files the same way the loaders do, with the
   subfolder included.
 - The relay's template check reports this case separately, as
-  `models_need_value_change`, with `found_at` giving the path to use. *(needs the comfyrelay sidecar)*
+  `models_need_value_change`, with `found_at` giving the path to use, and so
+  does `workflow_validate`'s `requirements` for any workflow. *(needs the comfyrelay sidecar)*
 - When you propose a manifest entry, the folder in `install:` decides the
   path. `install: models/checkpoints/` gives the bare name, and
   `install: models/checkpoints/sdxl/` gives `sdxl/<file>`.

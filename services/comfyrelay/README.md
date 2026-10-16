@@ -330,6 +330,33 @@ converts it first (see *UI-to-API conversion*). The code is
   a class that's no longer installed). An old class name is therefore `missing_node_type`: use
   the class that replaced it.
 
+  **`requirements`** (#213) reports what this instance lacks to run the graph, from
+  `comfyrelay/requirements.py`. It is the template runnability check applied to any graph, and
+  it reports only: it never changes `valid` or `runnable`.
+  - **UI format,** on either image, even where the graph itself is refused as
+    `invalid_workflow`. It runs `template_get`'s check on the graph's own node `properties`.
+    That covers missing classes, with the pack each node names (`cnr_id` as `pack`, `aux_id`,
+    and `ver` as `version`), and declared models that aren't on disk, with their folder and
+    source `url`. It also covers declared models present only under another path (`found_at`),
+    and the files the core loaders name that the input directory lacks.
+  - **API format** has no properties, so it reads the values. A missing class gets close
+    `suggestions`. So does a value that names a file (it has an extension) and isn't among
+    its input's COMBO options, either under another path (`found_at`) or missing, with the loader
+    node and close names from those options. Its folder is the one whose `/models/<folder>`
+    listing equals those options; with no match, or several, there's no folder. Other values,
+    such as a sampler name, stay ComfyUI's to check.
+  - **A UI graph `mcp-convert` converted** is read both ways, so a model named only in a
+    widget value is found too.
+
+  `proposals` drafts, for a human or deployer to apply, `comfy.yaml` entries for missing models
+  that have a source URL, and a `custom_nodes` entry in ComfyUI-Manager's snapshot shape for
+  missing packs (never `comfy-core`). A value the graph doesn't give is left as a `<...>` to
+  fill in. Nothing applies them (#201, D1).
+
+  It is optional detail. It lists model folders only when a value names a file it can't
+  find, has 10 seconds in all, and caps each list at 50. A failure leaves it out, with
+  `requirements_unchecked` saying why, and never fails the call.
+
   The V3 dynamic-input naming (`images.image0` for an Autogrow, `resize_type.width` for a
   DynamicCombo's chosen option) lives in `workflow.py`, and `node_describe` renders it with the
   same helpers. Read-only.

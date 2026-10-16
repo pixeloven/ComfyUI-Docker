@@ -14,6 +14,16 @@ see `VERSIONING.md`.
 
 ### Added
 
+- **`workflow_validate` reports what any workflow needs (#213).** Its new `requirements`
+  field is the template runnability check applied to any graph, UI or API format, on the
+  `mcp` and `mcp-convert` images. It lists missing node classes (with the pack a UI node
+  names, or close names), missing models (folder, a UI node's source URL, or close names
+  among the loader's files), models present only under another path (`found_at`), and
+  missing input files. It adds `comfy.yaml` and `custom_nodes` proposals for a human to
+  apply. It is additive: `valid`, `runnable` and every argument are unchanged, and a report
+  that can't be made is left out (`requirements_unchecked`), never failing the call. The
+  `comfyui-workflows` guides say how to use it.
+
 - **The agent harness has a second tier, which measures workflow development (#212).**
   T7 (author a txt2img workflow from a template, then change it), T8 (fix a graph
   with four faults) and T9 (edit a saved workflow in ComfyUI's user data) run Stable

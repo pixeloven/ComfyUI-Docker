@@ -37,6 +37,16 @@ COMBO choices. Those are ComfyUI's checks, and they run only when the graph is
 submitted. The relay doesn't copy them, because a copy refused graphs ComfyUI
 accepts.
 
+Beside that check it reports `requirements`: what this instance lacks to run
+the graph, in UI or API format, on either image. It lists node classes,
+models, models present only under another path (`found_at` is the value to
+use), and input files that the input directory lacks. ComfyUI would refuse
+the graph on submit for each model or input file it lists. Every other value is still left to ComfyUI: a misspelled sampler, say,
+is not in `requirements`. The report never changes `valid` or `runnable`, and
+a report it couldn't make is left out, with `requirements_unchecked` saying
+why. The `models-and-nodes` topic covers what to do about a missing model or
+pack.
+
 ## 2. On submit: ComfyUI's `/prompt` checks
 
 When `/prompt` refuses a graph it answers HTTP 400 with an `error` and a
