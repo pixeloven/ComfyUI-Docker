@@ -226,21 +226,23 @@ def checked(req: object) -> str | None:
 
 
 def log_call(spec: dict, req: dict, reply: dict, seconds: float) -> None:
-    """One line in the spec's calls_log, if it names one: what was asked and whether it failed, never its content."""
-    if not spec.get("calls_log"):
-        return
-    params = req.get("params") or {}
-    line = {
-        "time": round(time.time(), 3),
-        "method": req["method"],
-        "tool": params.get("name") if req["method"] == "tools/call" else None,
-        "error": "error" in reply or bool((reply.get("result") or {}).get("isError")),
-        "seconds": round(seconds, 3),
-    }
+    """One line in the spec's calls_log, if it names one: what was asked and whether it failed, never its
+    content. Logging never fails the call: whatever goes wrong here, the line is dropped."""
     try:
+        if not spec.get("calls_log"):
+            return
+        params = req.get("params") or {}
+        result = reply.get("result")
+        line = {
+            "time": round(time.time(), 3),
+            "method": req["method"],
+            "tool": params.get("name") if req["method"] == "tools/call" else None,
+            "error": "error" in reply or (isinstance(result, dict) and bool(result.get("isError"))),
+            "seconds": round(seconds, 3),
+        }
         with open(spec["calls_log"], "a") as f:
             f.write(json.dumps(line) + "\n")
-    except OSError:
+    except Exception:  # noqa: BLE001, S110  (a log line is never worth a call)
         pass
 
 

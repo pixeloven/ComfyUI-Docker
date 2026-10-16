@@ -46,7 +46,7 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,44p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
@@ -185,8 +185,10 @@ echo "$detail"
 # Keep what the agent wrote beside the other runs' files.
 mkdir -p "$RESULTS/runs/$server-$task.files"
 cp -r "$HARNESS_DATA/workspace/results/." "$RESULTS/runs/$server-$task.files/" 2>/dev/null || true
-IFS=$'\t' read -r mcp_calls mcp_errors mcp_by_tool < <(hpy mcp-calls)
-echo "mcp: ${mcp_calls:-?} tool calls, ${mcp_errors:-?} failed${mcp_by_tool:+ ($mcp_by_tool)}"
+mcp_calls="" mcp_work="" mcp_runs="" mcp_errors="" mcp_by_tool=""
+IFS=$'\t' read -r mcp_calls mcp_work mcp_runs mcp_errors mcp_by_tool < <(hpy mcp-calls || true) || true
+echo "mcp: ${mcp_calls:-?} tool calls, ${mcp_work:-?} without polling, ${mcp_runs:-?} workflow_run," \
+  "${mcp_errors:-?} failed${mcp_by_tool:+ ($mcp_by_tool)}"
 append_score "$server" "$task" "$verdict" "$detail" "$elapsed" "external (not sandboxed)" "" \
-  "$tokens" "$tool_calls" "$mcp_calls" "$mcp_errors" "$mcp_by_tool"
+  "$tokens" "$tool_calls" "$mcp_calls" "$mcp_work" "$mcp_runs" "$mcp_errors" "$mcp_by_tool"
 exit "$rc"

@@ -167,23 +167,25 @@ prepare_task() {
 
 # The tier-2 tasks' checkpoint (T7-T9), into the models volume: tests/agent-tasks/models/comfy-lock.yaml,
 # materialised by this repo's own `comfyctl fetch`, which verifies its sha256 and skips it when it is
-# already there. COMFYCTL overrides the command (default: comfyctl from services/, through uv).
+# already there. COMFYCTL, the path of a comfyctl executable, overrides the default: comfyctl from
+# services/, through uv.
 fetch_tier2_model() {
-  local -a comfyctl
-  read -r -a comfyctl <<< "${COMFYCTL:-uv run --project $HARNESS_REPO/services --locked --quiet comfyctl}"
+  local -a comfyctl=(uv run --project "$HARNESS_REPO/services" --locked --quiet comfyctl)
+  [ -n "${COMFYCTL:-}" ] && comfyctl=("$COMFYCTL")
   "${comfyctl[@]}" fetch fetch "$HARNESS_DIR/models/comfy-lock.yaml" "$HARNESS_DATA" --apply --output plain >&2
 }
 
 # Append a row to results/scorecard.csv:
 #   append_score <server> <task> <pass|fail> <detail> <seconds> <mode> <transcript or ""> \
-#                [<tokens> <tool_calls> <mcp_calls> <mcp_errors> <mcp_by_tool>]
+#                [<tokens> <tool_calls> <mcp_calls> <mcp_work_calls> <mcp_runs> <mcp_errors> <mcp_by_tool>]
 # cost_usd_notional is what claude reports; on a subscription it is plan quota,
 # not a charge. tokens and tool_calls are what the lead's harness reported for an
 # external agent; the mcp_* columns come from the harness's client log (external.sh).
-# A scorecard written before these columns existed is set aside, not appended to.
+# A scorecard written with other columns is set aside, not appended to.
 append_score() {
   local sc="$RESULTS/scorecard.csv"
-  local header="timestamp,server,task,result,detail,seconds,mode,turns,cost_usd_notional,tokens,tool_calls,mcp_calls,mcp_errors,mcp_by_tool"
+  local header="timestamp,server,task,result,detail,seconds,mode,turns,cost_usd_notional,tokens,tool_calls"
+  header+=",mcp_calls,mcp_work_calls,mcp_runs,mcp_errors,mcp_by_tool"
   if [ -s "$sc" ] && [ "$(head -1 "$sc")" != "$header" ]; then
     mv "$sc" "$RESULTS/scorecard.before-$(date +%s).csv"
   fi
@@ -193,7 +195,7 @@ import csv, json, sys
 from datetime import datetime, timezone
 path, *row = sys.argv[1:]
 row, transcript, extra = row[:6], row[6], row[7:]
-extra += [""] * (5 - len(extra))
+extra += [""] * (7 - len(extra))
 turns = cost = ""
 if transcript:
     try:
@@ -204,6 +206,6 @@ if transcript:
     except (OSError, ValueError):
         pass
 with open(path, "a", newline="") as f:
-    csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), *row, turns, cost, *extra[:5]])
+    csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(timespec="seconds"), *row, turns, cost, *extra[:7]])
 EOF
 }

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sqlite3
 import struct
 import subprocess
@@ -1019,9 +1020,66 @@ def started(entry: dict) -> int:
     return 0
 
 
-def literal_values(g: dict, *names: str) -> list:
-    """Every value a graph sets on an input with one of these names (links excluded)."""
-    return [v for n in g.values() for k, v in (n.get("inputs") or {}).items() if k in names and not is_link(v)]
+def ordered(entries: dict) -> list[tuple[str, dict]]:
+    """The entries in the order ComfyUI ran them: by execution_start, or in /history's own
+    order when any entry lacks one."""
+    items = list(entries.items())
+    return sorted(items, key=lambda kv: started(kv[1])) if all(started(e) for _, e in items) else items
+
+
+def resolve_primitives(g: dict) -> dict:
+    """The graph with every link from a backend Primitive* node (PrimitiveInt, PrimitiveStringMultiline
+    and the like, which output their `value` input unchanged) replaced by that value, so a setting a
+    template routes through one counts where it is used, as if it were set there."""
+    g = json.loads(json.dumps(g))
+    for _ in range(16):
+        changed = False
+        for n in g.values():
+            ins = n.get("inputs") or {}
+            for k, v in ins.items():
+                src = g.get(v[0]) if is_link(v) else None
+                if (
+                    isinstance(src, dict)
+                    and str(src.get("class_type", "")).startswith("Primitive")
+                    and "value" in (src.get("inputs") or {})
+                    and not is_link(src["inputs"]["value"])
+                ):
+                    ins[k] = src["inputs"]["value"]
+                    changed = True
+        if not changed:
+            break
+    return g
+
+
+def upstream(g: dict, nid: str) -> set[str]:
+    """The node and every node its links reach, recursively."""
+    seen, todo = set(), [nid]
+    while todo:
+        cur = todo.pop()
+        if cur in seen or cur not in g:
+            continue
+        seen.add(cur)
+        todo += [v[0] for v in (g[cur].get("inputs") or {}).values() if is_link(v)]
+    return seen
+
+
+def values_upstream(g: dict, nid: str, *names: str) -> list:
+    """Every value set (not linked) on an input with one of these names, at or upstream of a node."""
+    return [
+        v for u in upstream(g, nid) for k, v in (g[u].get("inputs") or {}).items() if k in names and not is_link(v)
+    ]
+
+
+def positive_texts(g: dict, nid: str) -> list[str]:
+    """The strings set upstream of the `positive` input of every sampler (or guider) that feeds a node."""
+    return [
+        v.strip()
+        for u in upstream(g, nid)
+        if is_link((g[u].get("inputs") or {}).get("positive"))
+        for p in upstream(g, g[u]["inputs"]["positive"][0])
+        for v in (g[p].get("inputs") or {}).values()
+        if isinstance(v, str)
+    ]
 
 
 def same(a: object, b: object) -> bool:
@@ -1041,15 +1099,19 @@ def canon(v: object) -> object:
     return v
 
 
-def signature(g: dict, nid: str, depth: int = 0) -> object:
+def signature(g: dict, nid: str, depth: int = 0, mask: frozenset[str] = frozenset()) -> object:
     """A node as what it computes: its class, its set values, and the signatures of the
-    nodes (and output slots) its links come from, whatever the node ids are."""
+    nodes (and output slots) its links come from, whatever the node ids are. A set value
+    on an input named in `mask` is left out, wherever it is upstream."""
     n = g.get(nid)
     if n is None or depth > 64:
         return ("missing", nid)
     ins = []
     for k, v in sorted((n.get("inputs") or {}).items()):
-        ins.append((k, ("link", signature(g, v[0], depth + 1), v[1]) if is_link(v) else json.dumps(canon(v))))
+        if is_link(v):
+            ins.append((k, ("link", signature(g, v[0], depth + 1, mask), v[1])))
+        elif k not in mask:
+            ins.append((k, json.dumps(canon(v))))
     return (n.get("class_type"), tuple(ins))
 
 
@@ -1083,22 +1145,54 @@ T7_PROMPT_TEXT = "a red apple on a wooden table"
 T7_STEPS = 4
 T7_FIRST = {"seed": 1, "size": (256, 256)}
 T7_SECOND = {"seed": 2, "size": (384, 256)}
+# What the second run may change: the seed and the width. Anything else that differs fails.
+T7_TWEAKED = frozenset({"seed", "noise_seed", "width"})
 
 
-def t7_match(task: str, entry: dict, want: dict) -> tuple[list[str], str]:
-    """The t7_ files a completed entry saved, if it is the run `want` describes, or why not."""
-    g = graph(entry)
+def t7_run(entry: dict, want: dict) -> tuple[list[str], set[str], str]:
+    """For a completed entry that is the run `want` describes: the t7_ files it saved and the
+    signatures of the SaveImage nodes that saved them, with the seed and width masked out.
+    Otherwise why not. Values routed through backend Primitive* nodes count as set."""
     if not completed(entry):
-        return [], f"not completed ({(entry.get('status') or {}).get('status_str')})"
-    if not any(same(v, TIER2_MODEL) for v in literal_values(g, "ckpt_name")):
-        return [], f"loads no {TIER2_MODEL}"
-    if not any(v == T7_PROMPT_TEXT for v in literal_values(g, "text")):
-        return [], f"no text input is {T7_PROMPT_TEXT!r}"
-    if not any(same(v, T7_STEPS) for v in literal_values(g, "steps")):
-        return [], f"no steps input is {T7_STEPS}"
-    if not any(same(v, want["seed"]) for v in literal_values(g, "seed", "noise_seed")):
-        return [], f"no seed is {want['seed']}"
-    return new_pngs(task, entry, "t7_", want["size"])
+        return [], set(), f"not completed ({(entry.get('status') or {}).get('status_str')})"
+    g = resolve_primitives(graph(entry))
+    savers = [
+        nid
+        for nid, out in (entry.get("outputs") or {}).items()
+        if nid in g and any(i.get("type") == "output" and i["filename"].startswith("t7_") for i in out.get("images", []))
+    ]
+    if not savers:
+        return [], set(), "saved no t7_* PNG"
+    why = ""
+    sigs = set()
+    for nid in savers:
+        if not any(same(v, TIER2_MODEL) for v in values_upstream(g, nid, "ckpt_name")):
+            why = f"loads no {TIER2_MODEL}"
+        elif T7_PROMPT_TEXT not in positive_texts(g, nid):
+            why = f"no sampler's positive conditioning is {T7_PROMPT_TEXT!r}"
+        elif not any(same(v, T7_STEPS) for v in values_upstream(g, nid, "steps")):
+            why = f"no steps input is {T7_STEPS}"
+        elif not any(same(v, want["seed"]) for v in values_upstream(g, nid, "seed", "noise_seed")):
+            why = f"no seed is {want['seed']}"
+        else:
+            sigs.add(repr(signature(g, nid, mask=T7_TWEAKED)))
+    if not sigs:
+        return [], set(), why
+    files, why = new_pngs("T7", entry, "t7_", want["size"])
+    return files, sigs, why
+
+
+def reset_workflows() -> None:
+    """Start each tier-2 task with no saved workflow an earlier task or run left (T9's edit would
+    help T7). On a `user` volume the harness created, user/default/workflows/ is emptied; on one it
+    found, only T9's own file goes, and an operator's workflows stay."""
+    root = DATA / "user" / "default" / "workflows"
+    created = (DATA / ".harness-created").read_text().split() if (DATA / ".harness-created").exists() else []
+    if "user" in created:
+        for p in root.iterdir() if root.is_dir() else []:
+            shutil.rmtree(p) if p.is_dir() and not p.is_symlink() else p.unlink()
+    else:
+        (DATA / "user" / "default" / T9_FILE).unlink(missing_ok=True)
 
 
 def cmd_setup_tier2(task: str) -> None:
@@ -1108,38 +1202,42 @@ def cmd_setup_tier2(task: str) -> None:
     names = get("/models/checkpoints")
     if TIER2_MODEL not in names:  # type: ignore[operator]
         sys.exit(f"ComfyUI doesn't list {TIER2_MODEL} in /models/checkpoints: {names}")
+    reset_workflows()
     {"T7": lambda: None, "T8": setup_t8, "T9": setup_t9}[task]()
     mark(task)
 
 
 def check_t7() -> str:
-    entries = sorted(new_entries("T7").items(), key=lambda kv: started(kv[1]))
-    if not entries:
+    runs = ordered(new_entries("T7"))
+    if not runs:
         raise CheckFailed("no new /history entry since setup")
     firsts, why_first = [], []
-    for pid, e in entries:
-        files, why = t7_match("T7", e, T7_FIRST)
+    for i, (pid, e) in enumerate(runs):
+        files, sigs, why = t7_run(e, T7_FIRST)
         if files:
-            firsts.append((pid, e, files))
+            firsts.append((i, pid, files, sigs))
         else:
             why_first.append(f"{pid[:8]}: {why}")
     if not firsts:
         raise CheckFailed(f"no run matches the first request (seed {T7_FIRST['seed']}, 256x256): " + "; ".join(why_first))
-    pid1, e1, files1 = firsts[0]
     why_second = []
-    for pid, e in entries:
-        if started(e) <= started(e1):
-            continue
-        files, why = t7_match("T7", e, T7_SECOND)
-        if files:
-            return (
-                f"{pid1[:8]} saved {files1[0]} (256x256, seed {T7_FIRST['seed']}), then {pid[:8]} saved {files[0]} "
-                f"(384x256, seed {T7_SECOND['seed']}); {len(entries)} runs since setup"
-            )
-        why_second.append(f"{pid[:8]}: {why}")
+    for i, pid1, files1, sigs1 in firsts:
+        for pid, e in runs[i + 1 :]:
+            files, sigs, why = t7_run(e, T7_SECOND)
+            if not files:
+                why_second.append(f"{pid[:8]}: {why}")
+            elif not sigs & sigs1:
+                why_second.append(f"{pid[:8]}: changes more than the seed and width of {pid1[:8]}")
+            else:
+                return (
+                    f"{pid1[:8]} saved {files1[0]} (256x256, seed {T7_FIRST['seed']}), then {pid[:8]} saved "
+                    f"{files[0]} (384x256, seed {T7_SECOND['seed']}), changing only the seed and width; "
+                    f"{len(runs)} runs since setup"
+                )
     raise CheckFailed(
-        f"{pid1[:8]} matches the first request, but no later run matches the second (seed {T7_SECOND['seed']}, "
-        f"384x256): " + ("; ".join(why_second) or "there is no later run")
+        f"{firsts[0][1][:8]} matches the first request, but no later run matches the second (seed "
+        f"{T7_SECOND['seed']}, 384x256, nothing else changed): "
+        + ("; ".join(dict.fromkeys(why_second)) or "there is no later run")
     )
 
 
@@ -1206,7 +1304,7 @@ def setup_t8() -> None:
 
 
 def check_t8() -> str:
-    entries = sorted(new_entries("T8").items(), key=lambda kv: started(kv[1]))
+    entries = ordered(new_entries("T8"))
     reasons = []
     for pid, e in entries:
         if not runs_graph(graph(e), T8_INTENDED):
@@ -1356,7 +1454,7 @@ def t9_saved_problem() -> str | None:
 
 def check_t9() -> str:
     problem = t9_saved_problem()
-    entries = sorted(new_entries("T9").items(), key=lambda kv: started(kv[1]))
+    entries = ordered(new_entries("T9"))
     ran, reasons = None, []
     for pid, e in entries:
         if not runs_graph(graph(e), t9_api(**T9_AFTER)):
@@ -1580,16 +1678,35 @@ CHECKS = {
 }
 
 
+# The relay tool an agent polls a run with: its calls say how long the agent waited, not how
+# many steps it took, so mcp_work_calls leaves them out.
+POLL_TOOLS = {"job_status"}
+
+
+def log_lines() -> list[dict]:
+    """The client's log, one object per line; a line that isn't one is skipped."""
+    out = []
+    for ln in CALLS_LOG.read_text(errors="replace").splitlines() if CALLS_LOG.exists() else []:
+        try:
+            c = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(c, dict):
+            out.append(c)
+    return out
+
+
 def cmd_mcp_calls() -> None:
-    """The agent's MCP calls, from the client's log, as three tab-separated fields for the
-    scorecard: tools/call count, how many failed, and a per-tool breakdown. `up` names the log in
-    the client's spec and removes any earlier one, so no log means the agent made no call."""
-    lines = CALLS_LOG.read_text().splitlines() if CALLS_LOG.exists() else []
-    calls = [json.loads(ln) for ln in lines if ln.strip()]
-    tools = [c for c in calls if c.get("method") == "tools/call"]
+    """The agent's MCP calls, from the client's log, as five tab-separated fields for the scorecard:
+    every tools/call, those without polling (POLL_TOOLS), the workflow_run submissions, how many
+    calls failed, and a per-tool breakdown of all of them. `up` names the log in the client's spec
+    and removes any earlier one, so no log means the agent made no call."""
+    tools = [c for c in log_lines() if c.get("method") == "tools/call"]
     by_tool = Counter(str(c.get("tool")) for c in tools)
     breakdown = " ".join(f"{t}={n}" for t, n in sorted(by_tool.items()))
-    print(f"{len(tools)}\t{sum(1 for c in tools if c.get('error'))}\t{breakdown}")
+    work = sum(n for t, n in by_tool.items() if t not in POLL_TOOLS)
+    errors = sum(1 for c in tools if c.get("error"))
+    print(f"{len(tools)}\t{work}\t{by_tool['workflow_run']}\t{errors}\t{breakdown}")
 
 
 def cmd_check(task: str) -> None:
