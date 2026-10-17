@@ -44,8 +44,9 @@ that the input directory lacks. A loader value in a subfolder, or annotated
 like `x.png [output]`, is resolved by the loader itself, so it isn't checked
 and `notes` says so. Every other value is still left to ComfyUI: a misspelled
 sampler, say, is not in `requirements`. Nor is a model named only in a UI
-graph's widget values, on a server that doesn't convert (`satisfied` is then
-`null`, never `true`). The report never changes `valid` or `runnable`, and
+graph's widget values, on a server that doesn't convert. Whenever something
+went unchecked like this, `satisfied` is `null`, never `true`, and `notes`
+says what. The report never changes `valid` or `runnable`, and
 a report it couldn't make is left out, with `requirements_unchecked` saying
 why. The `models-and-nodes` topic covers what to do about a missing model or
 pack.

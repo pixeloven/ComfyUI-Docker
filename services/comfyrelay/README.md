@@ -341,7 +341,9 @@ converts it first (see *UI-to-API conversion*). The code is
     It also covers declared models present only under another path (`found_at`, or
     `candidates` when several paths have that name), and the files the core loaders name that
     the input directory lacks. On `mcp`, which doesn't convert, widget values aren't read, so
-    `satisfied` is `null` rather than `true`, with a note saying why.
+    `satisfied` is `null` rather than `true`, with a note saying why. The same goes for
+    anything else left unchecked: a folder that couldn't be listed, or input values the
+    loader resolves itself.
   - **API format** has no properties, so it reads the values. A missing class gets close
     `suggestions`. So does a value that names a file (it has an extension) and isn't among
     its input's COMBO options, either under another path (`found_at`) or missing, with the loader

@@ -20,10 +20,11 @@ see `VERSIONING.md`.
   names, or close names), missing models (folder, a UI node's source URL, or close names
   among the loader's files), models present only under another path (`found_at`), and
   missing input files. It adds `comfy.yaml` and `custom_nodes` proposals for a human to
-  apply. On `mcp`, which doesn't convert, a UI graph's widget values aren't read, so
-  `satisfied` is `null` there rather than `true`. It is additive: `valid`, `runnable` and every argument are unchanged, and a report
-  that can't be made is left out (`requirements_unchecked`), never failing the call. The
-  `comfyui-workflows` guides say how to use it.
+  apply. Whenever something couldn't be checked, `satisfied` is `null` rather than `true`,
+  and `notes` says what. One example is a UI graph's widget values on `mcp`, which doesn't
+  convert. It is additive: `valid`, `runnable` and every argument are unchanged, and a
+  report that can't be made is left out (`requirements_unchecked`), never failing the
+  call. The `comfyui-workflows` guides say how to use it.
 
 - **The agent harness has a second tier, which measures workflow development (#212).**
   T7 (author a txt2img workflow from a template, then change it), T8 (fix a graph

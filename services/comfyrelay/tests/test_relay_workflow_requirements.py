@@ -357,6 +357,30 @@ async def test_a_folder_that_cant_be_listed_is_noted_and_its_models_left_uncheck
     assert "comfyui_http_error" in note
 
 
+async def test_nothing_listed_is_not_satisfied_when_a_declared_models_folder_went_unlisted():
+    """A converted UI graph with nothing missing, but whose declared model's folder couldn't be listed: that model
+    wasn't checked, so satisfied is null, not true."""
+    graph = {
+        "nodes": [
+            {
+                "id": 1,
+                "type": "CheckpointLoaderSimple",
+                "mode": 0,
+                "properties": {"models": [{"name": "declared.safetensors", "directory": "checkpoints"}]},
+            }
+        ],
+        "links": [],
+    }
+    converted = {"1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": f"sd15/{SD15}"}}}
+    fake = Fake()
+    assert (await validate(graph, fake, FakeConverter(converted)))["requirements"]["satisfied"] is False  # control
+    fake = Fake()
+    fake.fail["/models/checkpoints"] = 500
+    got = (await validate(graph, fake, FakeConverter(converted)))["requirements"]
+    assert got["missing_models"] == [] and got["satisfied"] is None
+    assert any("couldn't be listed" in n for n in got["notes"])
+
+
 async def test_an_api_graphs_folders_that_cant_be_listed_leave_only_the_folder_out():
     fake = Fake()
     fake.fail["/models"] = 500
@@ -449,6 +473,19 @@ async def test_a_loader_value_in_a_subfolder_or_annotated_is_not_reported_missin
     }
     got = (await validate(ui))["requirements"]
     assert got["missing_inputs"] == [] and any(n.startswith("1 input file value(s)") for n in got["notes"])
+
+
+async def test_nothing_listed_is_not_satisfied_when_an_input_value_went_unchecked():
+    """An API graph with nothing missing but a LoadImage value the loader resolves itself: null, not true."""
+    graph = {
+        "1": {"class_type": "LoadImage", "inputs": {"image": "photo.png"}},
+        "9": {"class_type": "SaveImage", "inputs": {"images": ["1", 0], "filename_prefix": "x"}},
+    }
+    assert (await validate(graph))["requirements"]["satisfied"] is True  # control
+    graph["1"]["inputs"]["image"] = "pasted/photo.png"
+    got = (await validate(graph))["requirements"]
+    assert got["missing_inputs"] == [] and got["satisfied"] is None
+    assert got["notes"] == [req._input_note(1)]
 
 
 # -- found_at, folders and proposals --------------------------------------------------

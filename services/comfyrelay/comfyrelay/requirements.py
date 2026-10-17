@@ -647,14 +647,19 @@ async def _report(
         notes += [n for n in api_notes if n not in notes]
     lists = [_capped_list(x) for x in (nodes, models, moved, inputs)]
     (nodes, cut1), (models, cut2), (moved, cut3), (inputs, cut4) = lists
+    # Every note so far says something wasn't checked: a folder that couldn't be listed, input values the loader
+    # resolves itself. The ones added below (proposals, suggestions) don't.
+    unchecked = bool(notes)
     proposals = _proposals(nodes, models, urls, notes)  # of the capped lists, so each map is capped too
     note = await _suggest(nodes, models, info, choices)
     if note:
         notes.append(note)
-    satisfied: bool | None = not (nodes or models or moved or inputs)
     if ui and api_graph is None:
         notes.append(UNCONVERTED_NOTE)
-        satisfied = satisfied and None
+        unchecked = True
+    satisfied: bool | None = not (nodes or models or moved or inputs)
+    if unchecked:
+        satisfied = satisfied and None  # nothing listed is not everything checked: null, never true
     return WorkflowRequirements(
         format="ui" if ui else "api",
         satisfied=satisfied,
