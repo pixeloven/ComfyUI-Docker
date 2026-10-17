@@ -5,7 +5,7 @@
 # up.sh made, the agent workspace, external.sh's bin/ for the MCP client, and
 # the servers' HOMEs) and the files the harness writes beside them (the agents'
 # token files, comfy-mcp's log, the client's call log, the client and its spec in a bin/ it found, and
-# T10's placeholder LoRA in a models/ it found), then
+# T10's placeholder models in a models/ it found), then
 # $HARNESS_DATA if that leaves it empty. The package caches (npm-cache,
 # uv-cache, uv-python) are kept. A directory the harness found rather than
 # made, such as a real models/ mounted on purpose, is never removed.
@@ -19,7 +19,7 @@ stop_mcp_clients
 docker rm -f "$HARNESS_CONTAINER" >/dev/null 2>&1 || true
 
 if [ "${1:-}" = "--purge" ]; then
-  # T10's placeholder LoRA, and the directories its setup made, go first, also from a models/
+  # T10's placeholder models, and the directories its setup made, go first, also from a models/
   # the harness found. ComfyUI has stopped, so removing a directory it listed is safe now.
   hpy t10-clean --dirs
   # Files ComfyUI wrote are owned by $(id -u), so no sudo is needed.
