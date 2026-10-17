@@ -2273,7 +2273,8 @@ METRICS = (
 PASSES = "passes"
 LABELS = {PASSES: PASSES, **dict(METRICS)}
 # The number each tier-2 task is judged on, named in advance. A task not named here is judged on passes.
-NUMBER_TO_BEAT = {"T7": "mcp_work_calls", "T8": "mcp_work_calls", "T9": PASSES, "T10": "mcp_work_calls"}
+# T10 is judged on tokens (owner, 2026-10-17), pre-registered before its confirmatory run: see the README's Tier 2.
+NUMBER_TO_BEAT = {"T7": "mcp_work_calls", "T8": "mcp_work_calls", "T9": PASSES, "T10": "tokens"}
 NO_BATCH = "(none)"
 # Committed baselines (baselines/<batch>.csv), which summary and compare read beside the run scorecards.
 BASELINES = HERE / "baselines"

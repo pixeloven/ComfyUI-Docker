@@ -42,7 +42,8 @@ see `VERSIONING.md`.
   and validates the entries with comfyctl. The README's *Repeating runs* now requires the
   two arms to run interleaved in one session, with `COMFYRELAY_IMAGE` switched for each
   `up`. `external.sh up` and `check --batch` refuse a run whose relay image isn't the
-  one its batch ran that task on. Nothing published changes.
+  one its batch ran that task on. T10 is judged on the tokens an agent spends,
+  pre-registered before its confirmatory run. Nothing published changes.
 - **Custom-node dependencies survive a recreate (#115).** ComfyUI now runs from a
   venv on the `user` volume, `/app/user/__node_venv`, layered over the image's, so
   the Python packages Manager, `cm-cli` or `pip` install for custom nodes persist
