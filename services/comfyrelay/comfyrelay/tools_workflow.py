@@ -306,14 +306,16 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
         conversion that can't run fails with conversion_unavailable, one the frontend rejects with
         conversion_failed. There is no fallback converter.
 
-        requirements lists what this instance lacks to run it, UI or API format, on any server: node classes (with
-        close names; in UI format the node's pack), models (folder, close names among the loader's files; in UI
-        format the source URL), models only under another path (found_at: the value to use), and input files; with
-        comfy.yaml and custom_nodes proposals for a human to apply. Nothing is installed. It doesn't change valid.
+        requirements lists what this instance lacks to run it, UI or API format: node classes (with close names; in
+        UI format the node's pack), models (folder, close names among the loader's files; in UI format the source
+        URL), models only under another path (found_at: the value to use), and input files; with comfy.yaml and
+        custom_nodes proposals for a human to apply. Nothing is installed. It doesn't change valid. A UI graph this
+        server doesn't convert is read from its node properties only (satisfied is then never true; notes say so).
         """
         given = workflow
         workflow, converted = await _as_api(relay, workflow)
-        result = _result(await _validate(relay, workflow))
+        info = await _object_info_shared(relay)
+        result = _result(validate(workflow, info))
         if converted:
             result.converted_from_ui = True
             size = workflow_chars(workflow)
@@ -325,7 +327,7 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
         api_graph = workflow if converted or not (ui or shape_problems(given)) else None
         if ui or api_graph is not None:
             result.requirements, result.requirements_unchecked = await workflow_requirements(
-                relay.comfyui, given, api_graph, await _object_info_shared(relay), ui
+                relay.comfyui, given, api_graph, info, ui
             )
         else:
             result.requirements_unchecked = "invalid_workflow"

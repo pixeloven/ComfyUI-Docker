@@ -336,9 +336,12 @@ converts it first (see *UI-to-API conversion*). The code is
   - **UI format,** on either image, even where the graph itself is refused as
     `invalid_workflow`. It runs `template_get`'s check on the graph's own node `properties`.
     That covers missing classes, with the pack each node names (`cnr_id` as `pack`, `aux_id`,
-    and `ver` as `version`), and declared models that aren't on disk, with their folder and
-    source `url`. It also covers declared models present only under another path (`found_at`),
-    and the files the core loaders name that the input directory lacks.
+    and `ver` as `version`; a missing `comfy-core` class gets a `hint` that a newer ComfyUI may
+    be needed), and declared models that aren't on disk, with their folder and source `url`.
+    It also covers declared models present only under another path (`found_at`, or
+    `candidates` when several paths have that name), and the files the core loaders name that
+    the input directory lacks. On `mcp`, which doesn't convert, widget values aren't read, so
+    `satisfied` is `null` rather than `true`, with a note saying why.
   - **API format** has no properties, so it reads the values. A missing class gets close
     `suggestions`. So does a value that names a file (it has an extension) and isn't among
     its input's COMBO options, either under another path (`found_at`) or missing, with the loader
@@ -347,14 +350,24 @@ converts it first (see *UI-to-API conversion*). The code is
     such as a sampler name, stay ComfyUI's to check.
   - **A UI graph `mcp-convert` converted** is read both ways, so a model named only in a
     widget value is found too.
+  - **Input files** in a subfolder, or annotated (`x.png [output]`), are resolved by the
+    loader itself (its `VALIDATE_INPUTS`), so they are counted in `notes` as unchecked rather
+    than reported missing.
 
   `proposals` drafts, for a human or deployer to apply, `comfy.yaml` entries for missing models
-  that have a source URL, and a `custom_nodes` entry in ComfyUI-Manager's snapshot shape for
-  missing packs (never `comfy-core`). A value the graph doesn't give is left as a `<...>` to
-  fill in. Nothing applies them (#201, D1).
+  that have a source URL (`hf:` and `civitai:` sources are recognised, and percent-encoding is
+  decoded; none for a folder type the instance hasn't got), and a `custom_nodes` entry in
+  ComfyUI-Manager's snapshot shape for missing packs (never `comfy-core`). A value the graph
+  doesn't give is left as a `<...>` to fill in. Nothing applies them (#201, D1).
 
-  It is optional detail. It lists model folders only when a value names a file it can't
-  find, has 10 seconds in all, and caps each list at 50. A failure leaves it out, with
+  It is optional detail, with 10 seconds in all, and every list and proposal map capped at 50.
+  It lists model folders (not `configs`, `datasets` or `custom_nodes`) only when a value names
+  a file it can't find, and reuses the listing for 10 seconds. Suggestions go to the first 10
+  missing classes and models only, from a thread that checks a 5-second deadline and a stop
+  flag between chunks of 2,000 candidates, so it never outlives the call by more than a chunk.
+  A name ComfyUI lists that is too long to use whole (a class past 120 characters, a path past
+  500) is left out, never cut. It reads the `/object_info` the validation read, and an entry no
+  check can read costs only that class's detail. A failure leaves the report out, with
   `requirements_unchecked` saying why, and never fails the call.
 
   The V3 dynamic-input naming (`images.image0` for an Autogrow, `resize_type.width` for a

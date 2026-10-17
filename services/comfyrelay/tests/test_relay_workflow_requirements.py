@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import comfyrelay.requirements as req
 import httpx2
@@ -46,15 +47,19 @@ FOLDERS = {
     "vae": [],
     "upscale_models": [],
     "custom_nodes": ["style/detail.safetensors"],  # not a model folder: never matched
+    "configs": ["v1-inference.yaml"],  # nor these two: never listed
+    "datasets": [],
 }
 
 
 class Fake:
     """ComfyUI's /object_info, /models and /models/<folder>; `fail` maps a path to the status it answers with."""
 
-    def __init__(self) -> None:
+    def __init__(self, info: dict | None = None, folders: dict | None = None) -> None:
         self.calls: list[str] = []
         self.fail: dict[str, int] = {}
+        self.info = INFO if info is None else info
+        self.folders = FOLDERS if folders is None else folders
 
     def client(self) -> ComfyUIClient:
         return ComfyUIClient("http://comfyui.test:8188", transport=httpx2.MockTransport(self.handle))
@@ -67,11 +72,11 @@ class Fake:
         if path == "/system_stats":
             return httpx2.Response(200, json=SYSTEM_STATS)
         if path == "/object_info":
-            return httpx2.Response(200, json=INFO)
+            return httpx2.Response(200, json=self.info)
         if path == "/models":
-            return httpx2.Response(200, json=list(FOLDERS))
-        if path.startswith("/models/") and path.removeprefix("/models/") in FOLDERS:
-            return httpx2.Response(200, json=FOLDERS[path.removeprefix("/models/")])
+            return httpx2.Response(200, json=list(self.folders))
+        if path.startswith("/models/") and path.removeprefix("/models/") in self.folders:
+            return httpx2.Response(200, json=self.folders[path.removeprefix("/models/")])
         return httpx2.Response(404)
 
 
@@ -296,6 +301,29 @@ async def test_a_ui_graph_is_reported_where_this_server_does_not_convert():
     got = await validate(ui_graph())
     assert got["valid"] is False and got["errors"][0]["type"] == "invalid_workflow"  # as before
     assert got["requirements"]["satisfied"] is False
+    assert req.UNCONVERTED_NOTE in got["requirements"]["notes"]
+
+
+async def test_an_unconverted_ui_graph_with_nothing_declared_missing_is_never_satisfied():
+    """Its widget values weren't read, so a model named only there may be missing: satisfied is null, not true."""
+    graph = {
+        "nodes": [
+            {"id": 1, "type": "LoraLoader", "mode": 0, "widgets_values": ["undeclared.safetensors", 1.0, 1.0]},
+            {"id": 2, "type": "SaveImage", "mode": 0},
+        ],
+        "links": [],
+    }
+    got = (await validate(graph))["requirements"]
+    assert got["satisfied"] is None and got["missing_models"] == []
+    assert got["notes"] == [req.UNCONVERTED_NOTE]
+    converted = {"1": {"class_type": "LoraLoader", "inputs": {"lora_name": "style/detail.safetensors"}}}
+    assert (await validate(graph, converter=FakeConverter(converted)))["requirements"]["satisfied"] is True
+
+
+async def test_a_missing_core_node_says_a_newer_comfyui_may_be_needed():
+    nodes = {n["class_type"]: n for n in (await validate(ui_graph()))["requirements"]["missing_nodes"]}
+    assert "newer ComfyUI" in nodes["NewCoreNode"]["hint"] and "0.39.0" in nodes["NewCoreNode"]["hint"]
+    assert "hint" not in nodes["MathExpression|pysssss"]
 
 
 async def test_a_converted_ui_graph_also_finds_models_named_only_in_widget_values():
@@ -325,8 +353,8 @@ async def test_a_folder_that_cant_be_listed_is_noted_and_its_models_left_uncheck
     got = (await validate(ui_graph(), fake))["requirements"]
     assert [m["name"] for m in got["missing_models"]] == ["4x-Ultra.pth"]
     assert got["models_need_value_change"] == []
-    [note] = got["notes"]
-    assert "'checkpoints'" in note and "comfyui_http_error" in note
+    [note] = [n for n in got["notes"] if "'checkpoints'" in n]
+    assert "comfyui_http_error" in note
 
 
 async def test_an_api_graphs_folders_that_cant_be_listed_leave_only_the_folder_out():
@@ -366,3 +394,213 @@ async def test_every_list_is_capped(monkeypatch):
     graph = {str(i): {"class_type": f"Missing{i}", "inputs": {}} for i in range(10)}
     got = (await validate(graph))["requirements"]
     assert len(got["missing_nodes"]) == 3 and got["truncated"] is True
+
+
+async def test_proposals_are_capped_like_the_lists(monkeypatch):
+    monkeypatch.setattr(req, "MAX_ITEMS", 3)
+    graph = {
+        "nodes": [
+            {
+                "id": i,
+                "type": f"Pack{i}Node",
+                "mode": 0,
+                "properties": {
+                    "cnr_id": f"pack-{i}",
+                    "ver": "1.0.0",
+                    "models": [
+                        {
+                            "name": f"m{i}.safetensors",
+                            "directory": "loras",
+                            "url": f"https://huggingface.co/o/r/resolve/main/m{i}.safetensors",
+                        }
+                    ],
+                },
+            }
+            for i in range(10)
+        ],
+        "links": [],
+    }
+    got = (await validate(graph))["requirements"]
+    assert got["truncated"] is True
+    assert len(got["missing_nodes"]) == len(got["missing_models"]) == 3
+    assert len(got["proposals"]["comfy_yaml_models"]) == 3
+    assert len(got["proposals"]["custom_nodes"]["cnr_custom_nodes"]) == 3
+
+
+# -- input files the loader resolves itself ----------------------------------------------
+
+
+async def test_a_loader_value_in_a_subfolder_or_annotated_is_not_reported_missing():
+    """LoadImage validates its own value (VALIDATE_INPUTS): it takes pasted/x.png, x.png [output] and the like,
+    which its options never list, so they are noted as unchecked rather than reported missing."""
+    graph = {
+        "1": {"class_type": "LoadImage", "inputs": {"image": "pasted/image.png"}},
+        "2": {"class_type": "LoadImage", "inputs": {"image": "x.png [output]"}},
+        "3": {"class_type": "LoadImage", "inputs": {"image": "clipspace/a.png [input]"}},
+        "4": {"class_type": "LoadImage", "inputs": {"image": "gone.png"}},
+        "9": {"class_type": "SaveImage", "inputs": {"images": ["1", 0], "filename_prefix": "x"}},
+    }
+    got = (await validate(graph))["requirements"]
+    assert [i["file"] for i in got["missing_inputs"]] == ["gone.png"]
+    assert any(n.startswith("3 input file value(s)") for n in got["notes"])
+    ui = {
+        "nodes": [{"id": 1, "type": "LoadImage", "mode": 0, "widgets_values": ["pasted/image.png", "image"]}],
+        "links": [],
+    }
+    got = (await validate(ui))["requirements"]
+    assert got["missing_inputs"] == [] and any(n.startswith("1 input file value(s)") for n in got["notes"])
+
+
+# -- found_at, folders and proposals --------------------------------------------------
+
+
+async def test_several_files_of_that_name_are_reported_as_candidates():
+    loras = ["a/x.safetensors", "b/x.safetensors"]
+    info = {**INFO, "LoraLoader": node_spec(("MODEL",), input={"required": {"lora_name": combo(*loras)}})}
+    graph = {"1": {"class_type": "LoraLoader", "inputs": {"lora_name": "x.safetensors"}}}
+    [moved] = (await validate(graph, Fake(info, {**FOLDERS, "loras": loras})))["requirements"][
+        "models_need_value_change"
+    ]
+    assert "found_at" not in moved
+    assert moved["candidates"] == loras and moved["directory"] == "loras"
+    assert moved["needs_value_change"].startswith("2 files are named 'x.safetensors'")
+
+
+async def test_folder_listings_are_reused_and_skip_folders_that_hold_no_models():
+    fake = Fake()
+    server, _ = build_server(settings(), comfyui=fake.client())
+    async with Client(server, mode="legacy") as client:
+        for _ in range(2):
+            await client.call_tool("workflow_validate", {"workflow": api_graph()})
+    assert fake.calls.count("/models") == 1 and fake.calls.count("/models/checkpoints") == 1
+    assert not {"/models/configs", "/models/datasets", "/models/custom_nodes"} & set(fake.calls)
+
+
+async def test_model_proposals_decode_civitai_and_unknown_folders():
+    def model(name, directory, url):
+        return {"name": name, "directory": directory, "url": url}
+
+    long_path = "a" * 480
+    hf = "https://huggingface.co/o/r/resolve"
+    graph = {
+        "nodes": [
+            {
+                "id": 1,
+                "type": "LoraLoader",
+                "mode": 0,
+                "properties": {
+                    "models": [
+                        model("my lora.safetensors", "loras", f"{hf}/v%201/sub/my%20lora.safetensors"),
+                        model("cv.safetensors", "loras", "https://civitai.com/api/download/models/12345?type=Model"),
+                        model("x.safetensors", "no_such_folder", f"{hf}/main/x.safetensors"),
+                        model("long.safetensors", "loras", f"{hf}/main/{long_path}/long.safetensors"),
+                    ]
+                },
+            }
+        ],
+        "links": [],
+    }
+    got = (await validate(graph))["requirements"]
+    names = ["my lora.safetensors", "cv.safetensors", "x.safetensors", "long.safetensors"]
+    assert [m["name"] for m in got["missing_models"]] == names
+    assert got["missing_models"][-1]["url"].endswith("…")  # shown capped
+    entries = got["proposals"]["comfy_yaml_models"]
+    assert entries[0]["files"] == [
+        {"source": "hf:o/r", "file": "sub/my lora.safetensors", "install": "models/loras/", "revision": "v 1"}
+    ]
+    assert entries[1]["files"] == [{"source": "civitai:12345", "as": "cv.safetensors", "install": "models/loras/"}]
+    # Parsed from the full URL, not the capped one shown: the path fits once the host and revision are gone.
+    assert entries[2]["files"][0]["file"] == f"{long_path}/long.safetensors"
+    assert len(entries) == 3  # none for the folder this ComfyUI hasn't got: a note says so
+    assert any("'no_such_folder'" in n for n in got["notes"])
+
+
+# -- suggestions: bounded, and never outliving the call ---------------------------------
+
+
+def huge_loras(n: int) -> Fake:
+    files = [f"set{i % 50}/lora_{i:06d}_detail_style.safetensors" for i in range(n)]
+    info = {**INFO, "LoraLoader": node_spec(("MODEL",), input={"required": {"lora_name": [files, {}]}})}
+    return Fake(info, {**FOLDERS, "loras": files})
+
+
+def missing_loras(count: int) -> dict:
+    return {
+        str(i): {"class_type": "LoraLoader", "inputs": {"lora_name": f"nothing_like_{i}_anything.safetensors"}}
+        for i in range(count)
+    }
+
+
+@pytest.fixture
+def chunks(monkeypatch):
+    """How many chunks the suggestion scan has compared, counted as it goes."""
+    seen = [0, 0.0]  # chunks compared; seconds each one is held up, to make a scan as slow as a test needs
+    real = req.heapq.nlargest
+
+    def counting(*args, **kwargs):
+        seen[0] += 1
+        time.sleep(seen[1])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(req.heapq, "nlargest", counting)
+    return seen
+
+
+async def test_the_suggestion_scan_stops_at_its_deadline(monkeypatch, chunks):
+    monkeypatch.setattr(req, "SUGGEST_SECONDS", 0.5)
+    monkeypatch.setattr(req, "SCAN_CHUNK", 50)
+    chunks[1] = 0.005  # 400 chunks a model: the scan alone would take 20s
+    got = (await validate(missing_loras(20), huge_loras(20_000)))["requirements"]
+    assert len(got["missing_models"]) == 20
+    assert any(n.startswith("suggestions stopped after") for n in got["notes"])
+    before = chunks[0]
+    assert before > 0, "the scan never started"
+    await asyncio.sleep(0.5)
+    assert chunks[0] == before, "the scan went on after the call returned"
+
+
+async def test_the_suggestion_scan_stops_when_the_report_is_cut_short(monkeypatch, chunks):
+    monkeypatch.setattr(req, "SUGGEST_SECONDS", 60)
+    monkeypatch.setattr(req, "REQUIREMENTS_SECONDS", 1.0)
+    monkeypatch.setattr(req, "SCAN_CHUNK", 50)
+    chunks[1] = 0.005  # 400 chunks a model: the scan alone would take 40s
+    got = await validate(missing_loras(20), huge_loras(20_000))
+    assert got["requirements_unchecked"] == "timeout"
+    await asyncio.sleep(0.2)  # one chunk, at most, was in flight
+    before = chunks[0]
+    assert before > 0, "the scan never started"
+    await asyncio.sleep(0.5)
+    assert chunks[0] == before, "the scan went on after the report was cut short"
+
+
+async def test_only_the_first_few_missing_values_get_suggestions():
+    graph = {
+        str(i): {"class_type": "LoraLoader", "inputs": {"lora_name": f"detail{i}.safetensors"}}
+        for i in range(req.MAX_SUGGESTED + 5)
+    }
+    got = (await validate(graph))["requirements"]
+    assert len([m for m in got["missing_models"] if "suggestions" in m]) == req.MAX_SUGGESTED
+    assert f"the first {req.MAX_SUGGESTED} missing classes and models only" in " ".join(got["notes"])
+
+
+# -- ComfyUI's data, untrusted ---------------------------------------------------------
+
+
+async def test_a_malformed_object_info_entry_costs_only_its_own_detail():
+    info = {**INFO, "Broken": ["not", "an", "object"], "AlsoBroken": {"input": {"required": ["x"]}}}
+    graph = {
+        "1": {"class_type": "ImageInvertt", "inputs": {}},
+        "2": {"class_type": "AlsoBroken", "inputs": {"x": "y.safetensors"}},
+        "3": {"class_type": "Broken", "inputs": {}},
+    }
+    report, why = await req.workflow_requirements(Fake(info).client(), graph, graph, info, False)
+    assert why is None
+    assert [(n.class_type, n.suggestions) for n in report.missing_nodes] == [("ImageInvertt", ["ImageInvert"])]
+
+
+async def test_a_class_name_too_long_to_use_is_never_suggested():
+    long_name = "ImageInvert" + "x" * 200
+    info = {**INFO, long_name: node_spec(("IMAGE",))}
+    got = (await validate({"1": {"class_type": "ImageInvertt", "inputs": {}}}, Fake(info)))["requirements"]
+    [node] = got["missing_nodes"]
+    assert node["suggestions"] == ["ImageInvert"]

@@ -102,3 +102,24 @@ async def test_a_ui_graph_reports_its_declared_models_with_their_source(client):
         assert (model["directory"], model["url"]) == (declared["directory"], declared["url"])
         files = [f for e in got["proposals"]["comfy_yaml_models"] for f in e["files"]]
         assert any(f["install"] == f"models/{declared['directory']}/" for f in files)
+
+
+async def test_values_the_loader_resolves_itself_and_unread_widget_values_are_not_claimed(client):
+    """LoadImage takes a subfolder or annotated value that its options never list; and a UI graph this server
+    doesn't convert has its widget values unread, so it is never called satisfied."""
+    graph = {
+        "1": {"class_type": "LoadImage", "inputs": {"image": "pasted/relay-requirements.png"}},
+        "2": {"class_type": "LoadImage", "inputs": {"image": "relay-requirements.png [output]"}},
+        "3": {"class_type": "PreviewImage", "inputs": {"images": ["1", 0]}},
+    }
+    got = await requirements_of(client, graph)
+    assert got["missing_inputs"] == [] and any(n.startswith("2 input file value(s)") for n in got["notes"])
+    ui = {
+        "nodes": [
+            {"id": 1, "type": "LoraLoader", "mode": 0, "widgets_values": [ABSENT, 1.0, 1.0]},
+            {"id": 2, "type": "PreviewAny", "mode": 0},
+        ],
+        "links": [],
+    }
+    got = await requirements_of(client, ui)
+    assert got["satisfied"] is None and got["missing_models"] == []

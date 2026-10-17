@@ -13,14 +13,18 @@ agent's job is to propose the change to those files.
    `model_list` do the same, and its `template_get` reports a template's
    `missing_nodes`, `missing_models` and `missing_inputs` directly. *(needs the comfyrelay sidecar)*
    For any other workflow, UI or API format, the relay's `workflow_validate`
-   returns the same lists as `requirements`, on either image. In UI format a
-   missing class names its pack (`pack` for a registry id, `aux_id` for a git
-   repository, with `version`), and a missing model its folder and source
-   `url`, from the nodes' `properties`. An API graph has no properties: there a
-   missing class gets close `suggestions`, and a missing model the loader
-   node, the folder whose files that loader lists (when only one matches) and
-   close names among them. `requirements` doesn't change `valid`, and
-   `satisfied: true` says nothing about values or types. *(needs the comfyrelay sidecar)*
+   returns the same lists as `requirements`. In UI format a missing class
+   names its pack (`pack` for a registry id, `aux_id` for a git repository,
+   with `version`), and a missing model its folder and source `url`, from the
+   nodes' `properties`. An API graph has no properties: there a missing class
+   gets close `suggestions`, and a missing model the loader node, the folder
+   whose files that loader lists (when only one matches) and close names
+   among them. A model on disk under several paths lists them as
+   `candidates`. The `mcp` image reads a UI graph's `properties` only, not
+   its widget values, so a model named only in a widget isn't checked there,
+   and `satisfied` is `null` instead of `true`. The `mcp-convert` image reads
+   both. `requirements` doesn't change `valid`, and `satisfied: true` says
+   nothing about values or types. *(needs the comfyrelay sidecar)*
 2. **Propose the change**, for a human to apply:
    - **A model** goes in the deployment's `comfy.yaml`, followed by a
      regenerated lock (`comfyctl fetch resolve`). Give its source (`hf:`,

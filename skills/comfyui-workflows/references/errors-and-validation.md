@@ -38,11 +38,14 @@ submitted. The relay doesn't copy them, because a copy refused graphs ComfyUI
 accepts.
 
 Beside that check it reports `requirements`: what this instance lacks to run
-the graph, in UI or API format, on either image. It lists node classes,
-models, models present only under another path (`found_at` is the value to
-use), and input files that the input directory lacks. ComfyUI would refuse
-the graph on submit for each model or input file it lists. Every other value is still left to ComfyUI: a misspelled sampler, say,
-is not in `requirements`. The report never changes `valid` or `runnable`, and
+the graph, in UI or API format. It lists node classes, models, models present
+only under another path (`found_at` is the value to use), and input files
+that the input directory lacks. A loader value in a subfolder, or annotated
+like `x.png [output]`, is resolved by the loader itself, so it isn't checked
+and `notes` says so. Every other value is still left to ComfyUI: a misspelled
+sampler, say, is not in `requirements`. Nor is a model named only in a UI
+graph's widget values, on a server that doesn't convert (`satisfied` is then
+`null`, never `true`). The report never changes `valid` or `runnable`, and
 a report it couldn't make is left out, with `requirements_unchecked` saying
 why. The `models-and-nodes` topic covers what to do about a missing model or
 pack.

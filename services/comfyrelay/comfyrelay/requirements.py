@@ -13,24 +13,33 @@ It is the template runnability check (tools_introspection: _requirements, _runna
                 from those options and the folder whose listing they are; and the core loaders' input files, as
                 the template check reads them.
 
-A UI graph this server converted is read both ways, so a model named only in a widget value is found too.
+A UI graph this server converted is read both ways, so a model named only in a widget value is found too. One it
+didn't convert is read from its properties alone, and says so: `satisfied` is then never true.
 
 It only reports. Values and types are ComfyUI's to check at /prompt (#145), and nothing here installs or downloads:
 the proposals are for a human or deployer to review and apply (#201, D1). Everything it says comes from the graph
 it was given and from ComfyUI's own data, both capped. It is optional detail on workflow_validate, so it has a
-total time bound, and a failure leaves it out and says why (requirements_unchecked) without failing the call.
+total time bound, and a failure leaves it out and says why (requirements_unchecked) without failing the call. Its
+one CPU-heavy part, the fuzzy suggestions, runs in a thread that checks a deadline and a stop flag between chunks
+of work, so it ends with the call (jobs.py's rule for threads).
 """
 
 from __future__ import annotations
 
 import asyncio
+import difflib
+import heapq
 import logging
 import re
+import threading
+import time
+import weakref
 from collections import Counter
+from collections.abc import Callable
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
-from pydantic import Field
+from pydantic import BaseModel, Field, model_serializer
 
 from .comfyui import ComfyUIClient, ComfyUIError
 from .errors import RelayError
@@ -54,7 +63,6 @@ from .tools_introspection import (
     _missing_inputs,
     _name_index,
     _names,
-    _on_disk,
     _requirements,
     _runnability,
 )
@@ -63,20 +71,37 @@ log = logging.getLogger("comfyrelay")
 
 # The whole report gets this long, its model folder listings included; then it is left out (`timeout`).
 REQUIREMENTS_SECONDS = 10.0
-# Each list keeps at most this many entries (truncated says so), each suggestion list this many names.
+# Each list keeps at most this many entries (truncated says so), and so does each proposal map.
 MAX_ITEMS = 50
+# Suggestions: this many names each, for the first MAX_SUGGESTED missing classes and as many missing models.
 MAX_SUGGESTIONS = 3
-# Strings from the graph's own properties (a pack id, a version, a URL) are cut to this width.
+MAX_SUGGESTED = 10
+# The suggestion scan checks its deadline and stop flag after each chunk of this many candidates.
+SCAN_CHUNK = 2000
+# A missing file name is compared by difflib with only this many names: those sharing the most character pairs.
+PREFILTER = 50
+# Strings from the graph's own properties (a pack id, a version, a URL) are cut to this width. A name ComfyUI
+# lists, which an agent would put back into a graph (a class, a file path, a folder), is never cut: past its width
+# it is left out instead (#206).
 FIELD_MAX_CHARS = 200
 URL_MAX_CHARS = 500
+PATH_MAX_CHARS = 500
+# Model folders listed for an API graph's folder match, and how long a listing is reused: as long as
+# tools_workflow.OBJECT_INFO_TTL_SECONDS shares /object_info, since loaders list their options from the same place.
+LISTINGS_TTL_SECONDS = 10.0
+NOT_LISTED = NOT_MODEL_FOLDERS | DOT_SEGMENTS | {"datasets", "configs"}
 # A COMBO value that names a file: an extension that starts with a letter, so "v1.5" or "1.0" are not files.
 FILE_NAME = re.compile(r"\.[A-Za-z][A-Za-z0-9]{0,11}$")
+# LoadImage and its kind validate their own values (VALIDATE_INPUTS): a subfolder path or a value annotated with
+# the folder it is in is resolved by the node, not listed in its options, so it can't be checked from them.
+ANNOTATED = re.compile(r"\[(input|output|temp)\]\s*$")
 # A full git commit SHA, and the registry versions ComfyUI-Manager never pins (get_current_snapshot).
 GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 UNPINNED_VERSIONS = frozenset({"nightly", "latest", "unknown"})
 # ComfyUI's own nodes carry this cnr_id: a missing one needs a newer ComfyUI, not a node pack.
 CORE_PACK = "comfy-core"
-HF_URL = re.compile(r"^https://huggingface\.co/([^/]+/[^/]+)/(?:resolve|blob)/([^/]+)/(.+)$")
+HF_URL = re.compile(r"^/([^/]+/[^/]+)/(?:resolve|blob)/([^/]+)/(.+)$")
+CIVITAI_URL = re.compile(r"^/api/download/models/(\d+)/?$")
 
 
 class RequiredNode(_Compact):
@@ -85,6 +110,7 @@ class RequiredNode(_Compact):
     pack: str | None = Field(default=None, description="UI format: the registry pack (cnr_id) the node names")
     aux_id: str | None = Field(default=None, description="UI format: the git repository (owner/repo) the node names")
     version: str | None = Field(default=None, description="UI format: the pack version or commit the node names (ver)")
+    hint: str | None = None
     suggestions: list[str] | None = Field(default=None, description="Close class names this ComfyUI has")
 
 
@@ -107,6 +133,10 @@ class RequiredModel(_Compact):
 
 class ModelAtAnotherPath(_Compact, MisplacedModel):
     directory: str | None = None
+    found_at: str | None = None
+    candidates: list[str] | None = Field(
+        default=None, description="Several files have this name: the paths to choose from, instead of found_at"
+    )
     node_id: str | None = None
     class_type: str | None = None
     input: str | None = None
@@ -126,9 +156,16 @@ class Proposals(_Compact):
     )
 
 
-class WorkflowRequirements(_Compact):
+class WorkflowRequirements(BaseModel):
+    @model_serializer(mode="wrap")
+    def _drop_none(self, handler: Callable[[Any], dict[str, Any]]) -> dict[str, Any]:
+        return {k: v for k, v in handler(self).items() if v is not None or k == "satisfied"}
+
     format: Literal["ui", "api"] = Field(description="How it was read: ui (node properties), api (input values)")
-    satisfied: bool = Field(description="Nothing below is missing. It says nothing about values or types")
+    satisfied: bool | None = Field(
+        description="true: nothing below is missing. null: nothing listed, but not everything could be checked "
+        "(notes say what). It says nothing about values or types"
+    )
     missing_nodes: list[RequiredNode]
     missing_models: list[RequiredModel]
     models_need_value_change: list[ModelAtAnotherPath] = Field(
@@ -142,6 +179,61 @@ class WorkflowRequirements(_Compact):
 
 def _text(value: Any, limit: int = FIELD_MAX_CHARS) -> str | None:
     return _capped(value, limit) if isinstance(value, str) and value else None
+
+
+def _tolerant(info: dict[str, Any]) -> dict[str, Any]:
+    """/object_info with every entry no check can read (not an object, or with input sections that aren't) made
+    empty: that class is still present, but its inputs and names are skipped rather than failing the report."""
+
+    def readable(spec: Any) -> bool:
+        if not isinstance(spec, dict):
+            return False
+        sections = spec.get("input", {})
+        return isinstance(sections, dict) and all(
+            isinstance(sections[s], dict) for s in ("required", "optional") if s in sections
+        )
+
+    return {k: v if readable(v) else {} for k, v in info.items()}
+
+
+def _matches(name: str, files: list[str]) -> list[str]:
+    """Where `name` is among a folder's files: itself, else every path in a subfolder with that file name. The
+    template check's _on_disk, but every match, so several can be reported rather than the first chosen."""
+    if name in files:
+        return [name]
+    return [f for f in files if f.rsplit("/", 1)[-1] == name]
+
+
+def _moved(name: str, matches: list[str], **where: Any) -> ModelAtAnotherPath:
+    usable = [m for m in matches if len(m) <= PATH_MAX_CHARS]
+    if len(usable) == 1:
+        return ModelAtAnotherPath(
+            name=name,
+            found_at=usable[0],
+            needs_value_change=f"set the loader's value from {name!r} to {usable[0]!r}",
+            **where,
+        )
+    if usable:
+        return ModelAtAnotherPath(
+            name=name,
+            candidates=usable[:MAX_ITEMS],
+            needs_value_change=f"{len(usable)} files are named {name!r}: set the loader's value to the one meant",
+            **where,
+        )
+    return ModelAtAnotherPath(
+        name=name, needs_value_change=f"on disk under a path over {PATH_MAX_CHARS} characters, not shown", **where
+    )
+
+
+def _checkable_input(file: str) -> bool:
+    return "/" not in file and not ANNOTATED.search(file)
+
+
+def _input_note(skipped: int) -> str:
+    return (
+        f"{skipped} input file value(s) name a subfolder or carry an [input]/[output]/[temp] annotation: the loader "
+        "resolves those itself, so they weren't checked"
+    )
 
 
 # -- UI format: the template check ---------------------------------------------
@@ -163,16 +255,31 @@ def _node_sources(workflow: dict[str, Any]) -> dict[str, dict[str, str | None]]:
     return found
 
 
+def _core_hint(source: dict[str, str | None]) -> str | None:
+    if source.get("pack") != CORE_PACK:
+        return None
+    made = f" {source['version']}" if source.get("version") else ""
+    return f"one of ComfyUI's own nodes (comfy-core{made}): a newer ComfyUI may be needed; no node pack provides it"
+
+
 async def _ui_findings(
     comfyui: ComfyUIClient, workflow: dict[str, Any], info: dict[str, Any]
-) -> tuple[list[RequiredNode], list[RequiredModel], list[ModelAtAnotherPath], list[RequiredInput], list[str]]:
+) -> tuple[
+    list[RequiredNode], list[RequiredModel], list[ModelAtAnotherPath], list[RequiredInput], list[str], dict[str, str]
+]:
     needs = _requirements(workflow)
     folders = await _folder_files_or_why(comfyui, [needs])
     failed = {f: why for f, why in folders.items() if isinstance(why, str)}
-    check = _runnability(needs, info, {f: files for f, files in folders.items() if f not in failed})
+    listed = {f: files for f, files in folders.items() if f not in failed}
+    check = _runnability(needs, info, listed)
     sources = _node_sources(workflow)
     nodes = [
-        RequiredNode(class_type=_capped(m.class_type, DISPLAY_NAME_MAX_CHARS), count=m.count, **sources[m.class_type])
+        RequiredNode(
+            class_type=_capped(m.class_type, DISPLAY_NAME_MAX_CHARS),
+            count=m.count,
+            hint=_core_hint(sources[m.class_type]),
+            **sources[m.class_type],
+        )
         for m in check.missing_nodes
     ]
     models = [
@@ -180,14 +287,20 @@ async def _ui_findings(
         for m in check.missing_models
         if m.directory not in failed
     ]
-    moved = [ModelAtAnotherPath(**m.model_dump()) for m in check.models_need_value_change]
-    inputs = [RequiredInput(**m.model_dump()) for m in check.missing_inputs]
+    moved = [
+        _moved(m.name, _matches(m.name, listed.get(m.directory) or []), directory=m.directory)
+        for m in check.models_need_value_change
+    ]
+    inputs = [RequiredInput(**m.model_dump()) for m in check.missing_inputs if _checkable_input(m.file)]
     notes = [
         f"the model folder {_capped(f, DISPLAY_NAME_MAX_CHARS)!r} couldn't be listed ({why}), so the models declared "
         "in it weren't checked"
         for f, why in sorted(failed.items())
     ]
-    return nodes, models, moved, inputs, notes
+    if len(inputs) < len(check.missing_inputs):
+        notes.append(_input_note(len(check.missing_inputs) - len(inputs)))
+    urls = {m["name"]: m["url"] for m in needs.models if isinstance(m.get("url"), str)}
+    return nodes, models, moved, inputs, notes, urls
 
 
 # -- API format: the graph's values ---------------------------------------------
@@ -198,6 +311,9 @@ def _api_refs(graph: dict[str, Any], info: dict[str, Any]) -> tuple[Counter[str]
     uses: Counter[str] = Counter()
     refs: list[dict[str, Any]] = []
     inputs: dict[tuple[str, str], tuple[str, str, str, str]] = {}
+    # Each loader input's options as a set, and those that name files, worked out once however many nodes use it:
+    # a folder's listing can run to tens of thousands.
+    combos: dict[tuple[str, str], tuple[frozenset[Any], list[str] | None]] = {}
     for node_id, node in graph.items():
         if not isinstance(node, dict) or not isinstance(node.get("class_type"), str):
             continue
@@ -205,32 +321,42 @@ def _api_refs(graph: dict[str, Any], info: dict[str, Any]) -> tuple[Counter[str]
         uses[kind] += 1
         spec = info.get(kind)
         values = node.get("inputs")
-        if not isinstance(spec, dict) or not isinstance(values, dict):
+        if not spec or not isinstance(values, dict):
             continue
-        sections = spec.get("input") if isinstance(spec.get("input"), dict) else {}
-        specs = {
-            k: v
-            for section in ("optional", "required")
-            if isinstance(sections.get(section), dict)
-            for k, v in sections[section].items()
-        }
+        sections = spec.get("input", {})
+        specs = {k: v for section in ("optional", "required") for k, v in (sections.get(section) or {}).items()}
         for name, value in values.items():
             if not isinstance(value, str) or not value:
                 continue
             if name == INPUT_LOADERS.get(kind):
                 inputs.setdefault((kind, value), (kind, name, value, str(node_id)))
                 continue
-            options = _combo_values(specs.get(name))
-            if options is None or value in options or not FILE_NAME.search(value):
+            if not FILE_NAME.search(value):
                 continue
-            # The options that name files: VAELoader's, say, add names of approximate decoders to its folder's files.
-            files = [o for o in options if isinstance(o, str) and FILE_NAME.search(o)]
+            if (kind, name) not in combos:
+                options = _combo_values(specs.get(name))
+                # The options that name files: VAELoader's, say, add approximate decoders to its folder's files.
+                combos[kind, name] = (
+                    frozenset(o for o in options or () if isinstance(o, str)),
+                    [o for o in options if isinstance(o, str) and FILE_NAME.search(o)] if options is not None else None,
+                )
+            present, files = combos[kind, name]
+            if files is None or value in present:
+                continue
             refs.append({"node_id": str(node_id), "class_type": kind, "input": name, "value": value, "files": files})
     return uses, refs, list(inputs.values())
 
 
-async def _listings(comfyui: ComfyUIClient) -> dict[str, list[str]]:
-    """Every model folder's files, for at most MODEL_FOLDERS_SECONDS; a folder not listed in time is left out."""
+# Each ComfyUI's model folder listings, once complete: (when they were read, folder -> its files as a frozenset).
+_listed: weakref.WeakKeyDictionary[ComfyUIClient, tuple[float, dict[str, frozenset[str]]]] = weakref.WeakKeyDictionary()
+
+
+async def _listings(comfyui: ComfyUIClient) -> dict[str, frozenset[str]]:
+    """Every model folder's files, for at most MODEL_FOLDERS_SECONDS, reused for LISTINGS_TTL_SECONDS once complete.
+    A folder not listed in time, or whose name is too long to name in an install path, is left out."""
+    held = _listed.get(comfyui)
+    if held is not None and time.monotonic() - held[0] <= LISTINGS_TTL_SECONDS:
+        return held[1]
     try:
         folders = await asyncio.wait_for(comfyui.model_folders(), MODEL_FOLDERS_SECONDS)
     except (ComfyUIError, TimeoutError):
@@ -241,75 +367,177 @@ async def _listings(comfyui: ComfyUIClient) -> dict[str, list[str]]:
         async with gate:
             return await comfyui.model_files(folder)
 
-    wanted = [f for f in folders if f not in NOT_MODEL_FOLDERS | DOT_SEGMENTS]
+    wanted = [f for f in folders if f not in NOT_LISTED and len(f) <= DISPLAY_NAME_MAX_CHARS]
     got = await _bounded({f: lambda f=f: files(f) for f in wanted}, MODEL_FOLDERS_SECONDS)
-    return {f: v for f, v in got.items() if isinstance(v, list)}
+    listings = {f: frozenset(v) for f, v in got.items() if isinstance(v, list)}
+    if len(listings) == len(wanted):
+        _listed[comfyui] = (time.monotonic(), listings)
+    return listings
 
 
-def _folder_of(files: list[str], listings: dict[str, list[str]]) -> str | None:
+def _folder_of(files: frozenset[str], listings: dict[str, frozenset[str]]) -> str | None:
     """The one model folder whose listing is exactly a loader's file options, as ComfyUI lists both from it."""
     if not files:
         return None  # an empty listing matches every empty folder
-    matches = [f for f, listed in listings.items() if set(listed) == set(files)]
-    return _capped(matches[0], DISPLAY_NAME_MAX_CHARS) if len(matches) == 1 else None
-
-
-async def _suggest_files(models: list[RequiredModel], choices: list[list[str]]) -> None:
-    """Close names for each missing model among its loader's files (`choices`, in the same order), by the fuzzy
-    match node_describe's suggestions use: scanned off the event loop, since a model folder can hold thousands of
-    files, for at most SUGGEST_SECONDS, and left out past that."""
-    if not models:
-        return
-
-    def scan() -> list[list[str]]:
-        return [
-            [s["id"] for s in _closest(m.name, _name_index((c, c) for c in files), MAX_SUGGESTIONS)]
-            for m, files in zip(models, choices, strict=True)
-        ]
-
-    try:
-        found = await asyncio.wait_for(asyncio.to_thread(scan), SUGGEST_SECONDS)
-    except TimeoutError:
-        return
-    for model, names in zip(models, found, strict=True):
-        model.suggestions = [_capped(s, DISPLAY_NAME_MAX_CHARS) for s in names] or None
+    matches = [f for f, listed in listings.items() if len(listed) == len(files) and listed == files]
+    return matches[0] if len(matches) == 1 else None
 
 
 async def _api_findings(
     comfyui: ComfyUIClient, graph: dict[str, Any], info: dict[str, Any]
-) -> tuple[list[RequiredNode], list[RequiredModel], list[ModelAtAnotherPath], list[RequiredInput]]:
+) -> tuple[
+    list[RequiredNode], list[RequiredModel], list[ModelAtAnotherPath], list[RequiredInput], list[str], dict[Any, list]
+]:
+    """The findings, notes, and each missing model's loader options by (class_type, input), for its suggestions."""
     uses, refs, loader_inputs = _api_refs(graph, info)
     nodes = [
         RequiredNode(class_type=_capped(k, DISPLAY_NAME_MAX_CHARS), count=c) for k, c in uses.items() if k not in info
     ]
     listings = await _listings(comfyui) if refs else {}
+    choices: dict[Any, list[str]] = {}
+    folder: dict[Any, str | None] = {}
+    by_name: dict[Any, dict[str, list[str]]] = {}
     models, moved = [], []
     for ref in refs:
+        # The loader input as the report names it; _scan finds its options by the same key.
+        key = (_capped(ref["class_type"], DISPLAY_NAME_MAX_CHARS), _capped(ref["input"], DISPLAY_NAME_MAX_CHARS))
+        if key not in folder:  # worked out once per loader input, however many nodes use it
+            choices[key] = ref["files"]
+            folder[key] = _folder_of(frozenset(ref["files"]), listings)
+            by_name[key] = {}
+            for f in ref["files"]:  # _matches, as a lookup: the value itself isn't among the options
+                by_name[key].setdefault(f.rsplit("/", 1)[-1], []).append(f)
         where = {
-            "directory": _folder_of(ref["files"], listings),
+            "directory": folder[key],
             "node_id": _capped(ref["node_id"], DISPLAY_NAME_MAX_CHARS),
-            "class_type": ref["class_type"],
-            "input": _capped(ref["input"], DISPLAY_NAME_MAX_CHARS),
+            "class_type": key[0],
+            "input": key[1],
         }
-        found = _on_disk(ref["value"], ref["files"])
-        if found is not None:
-            moved.append(
-                ModelAtAnotherPath(
-                    name=ref["value"],
-                    found_at=found,
-                    needs_value_change=f"set the loader's value from {ref['value']!r} to {found!r}",
-                    **where,
-                )
-            )
+        found = by_name[key].get(ref["value"])
+        if found:
+            moved.append(_moved(ref["value"], found, **where))
         else:
             models.append(RequiredModel(name=ref["value"], **where))
-    await _suggest_files(models, [r["files"] for r in refs if _on_disk(r["value"], r["files"]) is None])
-    node_of = {(kind, value): node_id for kind, _, value, node_id in loader_inputs}
+    checkable = [i for i in loader_inputs if _checkable_input(i[2])]
+    node_of = {(kind, value): node_id for kind, _, value, node_id in checkable}
     inputs = [
         RequiredInput(**m.model_dump(), node_id=node_of.get((m.class_type, m.file)))
-        for m in _missing_inputs([i[:3] for i in loader_inputs], info)
+        for m in _missing_inputs([i[:3] for i in checkable], info)
     ]
-    return nodes, models, moved, inputs
+    notes = [_input_note(len(loader_inputs) - len(checkable))] if len(checkable) < len(loader_inputs) else []
+    return nodes, models, moved, inputs, notes, choices
+
+
+# -- suggestions ------------------------------------------------------------------
+
+
+def _bigrams(text: str) -> frozenset[str]:
+    return frozenset(text[i : i + 2] for i in range(len(text) - 1))
+
+
+def _file_index(
+    choices: list[str], stopped: Callable[[], bool]
+) -> tuple[dict[str, list[str]], list[tuple[str, frozenset[str]]]] | None:
+    """A loader's files by lowercased file name, the key _close compares, and each name's character pairs for its
+    prefilter. Paths too long to use whole are left out. Built once per loader input, a chunk at a time; None when
+    stopped."""
+    keys: dict[str, list[str]] = {}
+    for c in choices:
+        if len(c) <= PATH_MAX_CHARS:
+            keys.setdefault(c.rsplit("/", 1)[-1].lower(), []).append(c)
+    names = list(keys)
+    grams: list[tuple[str, frozenset[str]]] = []
+    for i in range(0, len(names), SCAN_CHUNK):
+        if stopped():
+            return None
+        grams += [(k, _bigrams(k)) for k in names[i : i + SCAN_CHUNK]]
+    return keys, grams
+
+
+def _close(
+    word: str, index: tuple[dict[str, list[str]], list[tuple[str, frozenset[str]]]], stopped: Callable[[], bool]
+) -> list[str] | None:
+    """The MAX_SUGGESTIONS closest files by difflib's ratio between lowercased file names (cutoff 0.6), among the
+    PREFILTER names sharing the most character pairs with it. difflib's ratio costs far more per name than a set
+    intersection, and a folder can hold tens of thousands, so only the prefilter sees them all, a chunk at a time,
+    checking for a stop between chunks. None when stopped."""
+    keys, grams = index
+    target = word.rsplit("/", 1)[-1].lower()
+    wanted = _bigrams(target)
+    best: list[tuple[int, str]] = []
+    for i in range(0, len(grams), SCAN_CHUNK):
+        if stopped():
+            return None
+        chunk = ((len(wanted & g), k) for k, g in grams[i : i + SCAN_CHUNK])
+        best = heapq.nlargest(PREFILTER, [*best, *chunk])
+    found = difflib.get_close_matches(target, [k for _, k in best], MAX_SUGGESTIONS, 0.6)
+    return [c for k in found for c in keys[k]][:MAX_SUGGESTIONS] or None
+
+
+def _scan(
+    nodes: list[RequiredNode],
+    models: list[RequiredModel],
+    info: dict[str, Any],
+    choices: dict[Any, list[str]],
+    stopped: Callable[[], bool],
+) -> tuple[list[list[str] | None], list[list[str] | None]]:
+    """Suggestions for the first MAX_SUGGESTED of each, in order, as far as it gets before `stopped`. Classes are
+    matched as node_describe matches them (_closest, over class and display names); class names too long to use
+    whole are never suggested."""
+    for_nodes: list[list[str] | None] = []
+    index = None
+    for node in nodes[:MAX_SUGGESTED]:
+        if stopped():
+            break
+        if index is None:
+            index = _name_index((k, d) for k, d in _names(info) if len(k) <= DISPLAY_NAME_MAX_CHARS)
+        for_nodes.append([s["id"] for s in _closest(node.class_type, index, MAX_SUGGESTIONS)] or None)
+    for_models: list[list[str] | None] = []
+    indexes: dict[Any, dict[str, list[str]]] = {}  # one per loader input, however many of its values are missing
+    for model in models[:MAX_SUGGESTED]:
+        if stopped():
+            break
+        key = (model.class_type, model.input)
+        if key not in indexes:
+            index = _file_index(choices.get(key) or [], stopped)
+            if index is None:
+                break
+            indexes[key] = index
+        found = _close(model.name, indexes[key], stopped)
+        if found is None and stopped():
+            break
+        for_models.append(found)
+    return for_nodes, for_models
+
+
+async def _suggest(
+    nodes: list[RequiredNode], models: list[RequiredModel], info: dict[str, Any], choices: dict[Any, list[str]]
+) -> str | None:
+    """Fill in suggestions, off the event loop, for at most SUGGEST_SECONDS: the thread checks the deadline, and a
+    stop flag set when this is cancelled, between chunks of work, so it never outlives the call by more than one.
+    Returns a note when some were left out."""
+    wanted = min(len(nodes), MAX_SUGGESTED) + min(len(models), MAX_SUGGESTED)
+    if not wanted:
+        return None
+    stop = threading.Event()
+    deadline = time.monotonic() + SUGGEST_SECONDS
+
+    def stopped() -> bool:
+        return stop.is_set() or time.monotonic() > deadline
+
+    try:
+        for_nodes, for_models = await asyncio.to_thread(_scan, nodes, models, info, choices, stopped)
+    finally:
+        stop.set()
+    for node, names in zip(nodes, for_nodes, strict=False):
+        node.suggestions = names
+    for model, names in zip(models, for_models, strict=False):
+        model.suggestions = names
+    if len(for_nodes) + len(for_models) < wanted:
+        return f"suggestions stopped after {SUGGEST_SECONDS:g}s; the entries after that have none"
+    if len(nodes) > MAX_SUGGESTED or len(models) > MAX_SUGGESTED:
+        return f"suggestions are given for the first {MAX_SUGGESTED} missing classes and models only"
+    return None
 
 
 # -- proposals ------------------------------------------------------------------
@@ -323,23 +551,36 @@ PROPOSAL_NOTE = (
 )
 
 
-def _model_entry(model: RequiredModel) -> dict[str, Any] | None:
-    if not (model.url and model.directory):
+def _model_entry(model: RequiredModel, url: str | None, notes: list[str]) -> dict[str, Any] | None:
+    """A comfy.yaml entry for a missing model, from the full URL the graph gives (never the capped one shown)."""
+    if not (url and model.directory):
         return None
-    stem = model.name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    if model.folder_known is False:
+        notes.append(
+            f"no comfy.yaml entry is proposed for {model.name!r}: this ComfyUI has no {model.directory!r} model "
+            "folder type, so no loader would offer it"
+        )
+        return None
+    parts = urlsplit(url)
+    if parts.scheme != "https":
+        return None
     entry: dict[str, Any] = {"install": f"models/{model.directory}/"}
-    hf = HF_URL.match(model.url.split("?", 1)[0])
+    hf = HF_URL.match(parts.path) if parts.netloc == "huggingface.co" else None
+    civitai = CIVITAI_URL.match(parts.path) if parts.netloc == "civitai.com" else None
     if hf:
-        repo, revision, path = hf.groups()
+        repo, revision, path = (unquote(g) for g in hf.groups())
         entry = {"source": f"hf:{repo}", "file": path, **entry}
         if revision != "main":
             entry["revision"] = revision
         if path.rsplit("/", 1)[-1] != model.name:
             entry["as"] = model.name
-    elif urlsplit(model.url).scheme == "https":
-        entry = {"source": model.url, "sha256": "<the file's SHA256>", "as": model.name, **entry}
+    elif civitai:
+        entry = {"source": f"civitai:{civitai.group(1)}", "as": model.name, **entry}
     else:
-        return None
+        entry = {"source": url, "sha256": "<the file's SHA256>", "as": model.name, **entry}
+    if any(isinstance(v, str) and len(v) > URL_MAX_CHARS for v in entry.values()):
+        return None  # a URL or path too long to give whole is not proposed in part
+    stem = model.name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
     return {"name": stem.lower(), "files": [entry]}
 
 
@@ -363,8 +604,10 @@ def _pack_entries(nodes: list[RequiredNode]) -> dict[str, Any] | None:
     return {"git_custom_nodes": git, **({"cnr_custom_nodes": cnr} if cnr else {})}
 
 
-def _proposals(nodes: list[RequiredNode], models: list[RequiredModel]) -> Proposals | None:
-    entries = [e for e in (_model_entry(m) for m in models) if e is not None]
+def _proposals(
+    nodes: list[RequiredNode], models: list[RequiredModel], urls: dict[str, str], notes: list[str]
+) -> Proposals | None:
+    entries = [e for e in (_model_entry(m, urls.get(m.name), notes) for m in models) if e is not None]
     packs = _pack_entries(nodes)
     if not (entries or packs):
         return None
@@ -373,23 +616,10 @@ def _proposals(nodes: list[RequiredNode], models: list[RequiredModel]) -> Propos
 
 # -- the report -----------------------------------------------------------------
 
-
-async def _suggest_classes(nodes: list[RequiredNode], info: dict[str, Any]) -> None:
-    """Close class names for each missing class, as node_describe suggests them: scanned off the event loop, for at
-    most SUGGEST_SECONDS, and left out past that."""
-    if not nodes:
-        return
-
-    def scan() -> list[list[str]]:
-        index = _name_index(_names(info))
-        return [[s["id"] for s in _closest(n.class_type, index, MAX_SUGGESTIONS)] for n in nodes]
-
-    try:
-        found = await asyncio.wait_for(asyncio.to_thread(scan), SUGGEST_SECONDS)
-    except TimeoutError:
-        return
-    for node, names in zip(nodes, found, strict=True):
-        node.suggestions = [_capped(s, DISPLAY_NAME_MAX_CHARS) for s in names] or None
+UNCONVERTED_NOTE = (
+    "a UI graph this server didn't convert is read from its nodes' properties alone: models named only in widget "
+    "values weren't checked, so satisfied is never true here. The mcp-convert image checks those too"
+)
 
 
 def _capped_list(items: list[Any]) -> tuple[list[Any], bool]:
@@ -399,11 +629,12 @@ def _capped_list(items: list[Any]) -> tuple[list[Any], bool]:
 async def _report(
     comfyui: ComfyUIClient, given: dict[str, Any], api_graph: dict[str, Any] | None, info: dict[str, Any], ui: bool
 ) -> WorkflowRequirements:
-    nodes, models, moved, inputs, notes = [], [], [], [], []
+    info = _tolerant(info)
+    nodes, models, moved, inputs, notes, urls, choices = [], [], [], [], [], {}, {}
     if ui:
-        nodes, models, moved, inputs, notes = await _ui_findings(comfyui, given, info)
+        nodes, models, moved, inputs, notes, urls = await _ui_findings(comfyui, given, info)
     if api_graph is not None:
-        api_nodes, api_models, api_moved, api_inputs = await _api_findings(comfyui, api_graph, info)
+        api_nodes, api_models, api_moved, api_inputs, api_notes, choices = await _api_findings(comfyui, api_graph, info)
         named: set[str] = set()
         if ui:  # the UI graph's own findings stand; its widget values add only models it didn't declare
             named = {m.name for m in (*models, *moved)} | {m["name"] for m in _requirements(given).models}
@@ -413,13 +644,20 @@ async def _report(
         moved += [m for m in api_moved if m.name not in named]
         seen = {(i.class_type, i.file) for i in inputs}
         inputs += [i for i in api_inputs if (i.class_type, i.file) not in seen]
-    proposals = _proposals(nodes, models)
+        notes += [n for n in api_notes if n not in notes]
     lists = [_capped_list(x) for x in (nodes, models, moved, inputs)]
     (nodes, cut1), (models, cut2), (moved, cut3), (inputs, cut4) = lists
-    await _suggest_classes(nodes, info)
+    proposals = _proposals(nodes, models, urls, notes)  # of the capped lists, so each map is capped too
+    note = await _suggest(nodes, models, info, choices)
+    if note:
+        notes.append(note)
+    satisfied: bool | None = not (nodes or models or moved or inputs)
+    if ui and api_graph is None:
+        notes.append(UNCONVERTED_NOTE)
+        satisfied = satisfied and None
     return WorkflowRequirements(
         format="ui" if ui else "api",
-        satisfied=not (nodes or models or moved or inputs),
+        satisfied=satisfied,
         missing_nodes=nodes,
         missing_models=models,
         models_need_value_change=moved,
@@ -440,7 +678,8 @@ async def workflow_requirements(
     """(the report, None), or (None, why there is none): `timeout`, an error code, or `check_failed`.
 
     `given` is the graph as the agent sent it; `ui` says it is the UI format. `api_graph` is the API graph to read
-    values from: the one given, or the one this server converted a UI graph to; None when there is none."""
+    values from: the one given, or the one this server converted a UI graph to; None when there is none. `info` is
+    the /object_info the validation used."""
     try:
         report = await asyncio.wait_for(_report(comfyui, given, api_graph, info, ui), REQUIREMENTS_SECONDS)
     except TimeoutError:

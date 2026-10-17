@@ -20,7 +20,8 @@ see `VERSIONING.md`.
   names, or close names), missing models (folder, a UI node's source URL, or close names
   among the loader's files), models present only under another path (`found_at`), and
   missing input files. It adds `comfy.yaml` and `custom_nodes` proposals for a human to
-  apply. It is additive: `valid`, `runnable` and every argument are unchanged, and a report
+  apply. On `mcp`, which doesn't convert, a UI graph's widget values aren't read, so
+  `satisfied` is `null` there rather than `true`. It is additive: `valid`, `runnable` and every argument are unchanged, and a report
   that can't be made is left out (`requirements_unchecked`), never failing the call. The
   `comfyui-workflows` guides say how to use it.
 
