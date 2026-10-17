@@ -104,6 +104,40 @@ async def test_a_ui_graph_reports_its_declared_models_with_their_source(client):
         assert any(f["install"] == f"models/{declared['directory']}/" for f in files)
 
 
+async def template_checkpoint() -> tuple[str, set[str]]:
+    """A checkpoint some stock template declares with a URL and this instance hasn't got, and every URL the
+    templates declare for it."""
+    async with httpx2.AsyncClient(base_url=URL, timeout=30) as http:
+        on_disk = set((await http.get("/models/checkpoints")).json())
+        index = (await http.get("/templates/index.json")).json()
+        urls: dict[str, set[str]] = {}
+        for name in [t["name"] for c in index for t in c.get("templates") or []]:
+            workflow = (await http.get(f"/templates/{name}.json")).json()
+            for node in workflow.get("nodes") or []:
+                for model in (node.get("properties") or {}).get("models") or []:
+                    if model.get("directory") == "checkpoints" and isinstance(model.get("url"), str):
+                        urls.setdefault(model["name"], set()).add(model["url"])
+    for name, found in sorted(urls.items()):
+        if name not in on_disk:
+            return name, found
+    pytest.fail("no stock template declares a checkpoint this instance lacks")
+
+
+async def test_a_bare_missing_model_takes_its_source_from_a_stock_template(client):
+    name, urls = await template_checkpoint()
+    graph = {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": name}},
+        "2": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ABSENT}},
+    }
+    got = await requirements_of(client, graph)
+    sourced, unsourced = got["missing_models"]
+    assert sourced["source"]["declared_by"] == "template" and sourced["source"]["url"] in urls
+    assert unsourced["source"] is None
+    assert any("1 missing model(s) have no source" in n for n in got["notes"])
+    files = [f for e in got["proposals"]["comfy_yaml_models"] for f in e["files"]]
+    assert [f["install"] for f in files] == ["models/checkpoints/"]
+
+
 async def test_values_the_loader_resolves_itself_and_unread_widget_values_are_not_claimed(client):
     """LoadImage takes a subfolder or annotated value that its options never list; and a UI graph this server
     doesn't convert has its widget values unread, so it is never called satisfied."""

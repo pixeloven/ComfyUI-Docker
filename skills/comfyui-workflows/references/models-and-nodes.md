@@ -20,7 +20,12 @@ agent's job is to propose the change to those files.
    gets close `suggestions`, and a missing model the loader node, the folder
    whose files that loader lists (when only one matches) and close names
    among them. A model on disk under several paths lists them as
-   `candidates`. The `mcp` image reads a UI graph's `properties` only, not
+   `candidates`. Every missing model has a `source`. In order, it is the
+   workflow's own declaration, or a stock template on the instance that
+   declares that file (named in `source.template`), or `null`. A `null` source
+   means nothing the relay checked declares it, and `notes` says how far it
+   checked. When the templates weren't all checked, look further before
+   concluding that nothing declares it. The `mcp` image reads a UI graph's `properties` only, not
    its widget values, so a model named only in a widget isn't checked there,
    and `satisfied` is `null` instead of `true`. The `mcp-convert` image reads
    both. `requirements` doesn't change `valid`, and `satisfied: true` says
@@ -41,8 +46,8 @@ agent's job is to propose the change to those files.
    node, which input, and the model's license if it restricts use.
 
 `workflow_validate`'s `requirements.proposals` drafts both changes where the
-workflow says enough: `comfy_yaml_models` for a missing model with a source
-URL, and `custom_nodes` for a missing pack. They are drafts, and nothing
+workflow, or a stock template, says enough: `comfy_yaml_models` for a missing
+model with a source URL, and `custom_nodes` for a missing pack. They are drafts, and nothing
 applies them. Check them against the rules here, fill in any `<...>` value (a
 URL's `sha256`, a version or commit the workflow doesn't name), and hand them
 to a human. *(needs the comfyrelay sidecar)*

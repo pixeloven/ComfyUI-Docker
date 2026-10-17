@@ -338,7 +338,9 @@ converts it first (see *UI-to-API conversion*). The code is
     That covers missing classes, with the pack each node names (`cnr_id` as `pack`, `aux_id`,
     and `ver` as `version`; a missing `comfy-core` class gets a `hint` that a newer ComfyUI may
     be needed), and declared models that aren't on disk, with their folder and source `url`.
-    It also covers declared models present only under another path (`found_at`, or
+    A declared model is judged by the value its node's widget actually uses, not the name in
+    `properties.models`, which only declares it: once the widget names the file's real path,
+    it is no longer flagged. It also covers declared models present only under another path (`found_at`, or
     `candidates` when several paths have that name), and the files the core loaders name that
     the input directory lacks. On `mcp`, which doesn't convert, widget values aren't read, so
     `satisfied` is `null` rather than `true`, with a note saying why. The same goes for
@@ -355,6 +357,20 @@ converts it first (see *UI-to-API conversion*). The code is
   - **Input files** in a subfolder, or annotated (`x.png [output]`), are resolved by the
     loader itself (its `VALIDATE_INPUTS`), so they are counted in `notes` as unchecked rather
     than reported missing.
+  - **Every missing model has a `source`.** It is the workflow's own declaration if it has one.
+    Otherwise it is a stock template on this instance that declares that file name, in the same
+    folder when the folder is known, with the template named. Otherwise it is `null`, and a note
+    says whether the templates were checked in full, in part, or not at all, so silence never
+    reads as "nothing declares it". The template index comes through `template_search`'s cache,
+    fetch gates and per-version requirements. It is built once per `installed_templates_version`,
+    within the report's time, and kept only when every template was read. A template's source
+    feeds the proposals like a workflow's. ComfyUI-Manager's model list isn't read: its route
+    isn't served on this image.
+  - **A converted UI graph's uninstalled classes keep their names (#231).** The frontend
+    converts such a node with no `class_type`. `workflow_validate`'s `missing_node_type` error for
+    it then gets `class_type`, `details` and close names (`expected`) from the UI node's `type`,
+    with subgraph ids (`a:b`) resolved through `definitions.subgraphs`. The message stays
+    ComfyUI's.
 
   `proposals` drafts, for a human or deployer to apply, `comfy.yaml` entries for missing models
   that have a source URL (`hf:` and `civitai:` sources are recognised, and percent-encoding is
@@ -362,7 +378,8 @@ converts it first (see *UI-to-API conversion*). The code is
   ComfyUI-Manager's snapshot shape for missing packs (never `comfy-core`). A value the graph
   doesn't give is left as a `<...>` to fill in. Nothing applies them (#201, D1).
 
-  It is optional detail, with 10 seconds in all, and every list and proposal map capped at 50.
+  It is optional detail, with 10 seconds in all (each step after the findings gets what is
+  left, the template lookup at most 6 seconds), and every list and proposal map capped at 50.
   It lists model folders (not `configs`, `datasets` or `custom_nodes`) only when a value names
   a file it can't find, and reuses the listing for 10 seconds. Suggestions go to the first 10
   missing classes and models only, from a thread that checks a 5-second deadline and a stop

@@ -36,6 +36,7 @@ import time
 import weakref
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any, Literal
 from urllib.parse import unquote, urlsplit
 
@@ -53,6 +54,7 @@ from .tools_introspection import (
     SUGGEST_SECONDS,
     MisplacedModel,
     MissingInput,
+    TemplateCache,
     _active_nodes,
     _bounded,
     _capped,
@@ -60,17 +62,26 @@ from .tools_introspection import (
     _combo_values,
     _Compact,
     _folder_files_or_why,
+    _index_entries,
     _missing_inputs,
     _name_index,
     _names,
     _requirements,
+    _requirements_of,
     _runnability,
+    _source,
 )
 
 log = logging.getLogger("comfyrelay")
 
-# The whole report gets this long, its model folder listings included; then it is left out (`timeout`).
+# The whole report gets this long, its model folder listings included; then it is left out (`timeout`). Each
+# step after the findings gets what is left, less a margin, so a slow one shortens the next rather than losing the
+# report: the template sources keep SUGGEST_RESERVE_SECONDS back for the suggestions.
 REQUIREMENTS_SECONDS = 10.0
+BUDGET_MARGIN_SECONDS = 0.5
+SUGGEST_RESERVE_SECONDS = 1.0
+# The stock templates' declared models, looked up for a missing model the workflow gives no source for.
+TEMPLATE_SOURCES_SECONDS = 6.0
 # Each list keeps at most this many entries (truncated says so), and so does each proposal map.
 MAX_ITEMS = 50
 # Suggestions: this many names each, for the first MAX_SUGGESTED missing classes and as many missing models.
@@ -114,7 +125,19 @@ class RequiredNode(_Compact):
     suggestions: list[str] | None = Field(default=None, description="Close class names this ComfyUI has")
 
 
-class RequiredModel(_Compact):
+class ModelSource(_Compact):
+    declared_by: Literal["workflow", "template"] = Field(
+        description="workflow: the graph's own properties.models. template: a stock template on this instance"
+    )
+    template: str | None = Field(default=None, description="The template that declares it")
+    url: str
+
+
+class RequiredModel(BaseModel):
+    @model_serializer(mode="wrap")
+    def _drop_none(self, handler: Callable[[Any], dict[str, Any]]) -> dict[str, Any]:
+        return {k: v for k, v in handler(self).items() if v is not None or k == "source"}
+
     name: str = Field(description="The file name the graph asks for")
     directory: str | None = Field(
         default=None,
@@ -128,6 +151,11 @@ class RequiredModel(_Compact):
     input: str | None = None
     suggestions: list[str] | None = Field(
         default=None, description="API format: close names among the loader's options"
+    )
+    source: ModelSource | None = Field(
+        default=None,
+        description="Where it comes from: the workflow's declaration, else a stock template's. null: neither "
+        "declares it, as far as was checked (notes say how far)",
     )
 
 
@@ -262,12 +290,42 @@ def _core_hint(source: dict[str, str | None]) -> str | None:
     return f"one of ComfyUI's own nodes (comfy-core{made}): a newer ComfyUI may be needed; no node pack provides it"
 
 
+def _base(path: str) -> str:
+    return re.split(r"[/\\]", path)[-1]
+
+
+def _used_name(node: dict[str, Any], declared: str) -> str:
+    """The value a node actually uses for a model it declares: its widget value that names that file, bare or under
+    a subfolder, else the declared name. properties.models is a declaration; the widget is what runs."""
+    values: list[Any] = []
+    for held in (node.get("widgets_values_named"), node.get("widgets_values")):
+        values += list(held.values()) if isinstance(held, dict) else held if isinstance(held, list) else []
+    return next((v for v in values if isinstance(v, str) and v and _base(v) == _base(declared)), declared)
+
+
+def _used_models(workflow: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """The models the active nodes declare (properties.models), each under the name its node's widget uses: the
+    template check's declared models, judged by what would run. `declared` keeps the name the property gives."""
+    seen: dict[tuple[str, str], dict[str, Any]] = {}
+    for node in _active_nodes(workflow):
+        props = node.get("properties") if isinstance(node.get("properties"), dict) else {}
+        for m in props.get("models") or []:
+            if isinstance(m, dict) and isinstance(m.get("name"), str) and isinstance(m.get("directory"), str):
+                name = _used_name(node, m["name"])
+                url = m.get("url") if isinstance(m.get("url"), str) else None
+                seen.setdefault(
+                    (m["directory"], name),
+                    {"name": name, "directory": m["directory"], "url": url, "declared": m["name"]},
+                )
+    return tuple(seen.values())
+
+
 async def _ui_findings(
     comfyui: ComfyUIClient, workflow: dict[str, Any], info: dict[str, Any]
 ) -> tuple[
     list[RequiredNode], list[RequiredModel], list[ModelAtAnotherPath], list[RequiredInput], list[str], dict[str, str]
 ]:
-    needs = _requirements(workflow)
+    needs = replace(_requirements(workflow), models=_used_models(workflow))
     folders = await _folder_files_or_why(comfyui, [needs])
     failed = {f: why for f, why in folders.items() if isinstance(why, str)}
     listed = {f: files for f, files in folders.items() if f not in failed}
@@ -283,7 +341,13 @@ async def _ui_findings(
         for m in check.missing_nodes
     ]
     models = [
-        RequiredModel(name=m.name, directory=m.directory, url=_text(m.url, URL_MAX_CHARS), folder_known=m.folder_known)
+        RequiredModel(
+            name=m.name,
+            directory=m.directory,
+            url=_text(m.url, URL_MAX_CHARS),
+            folder_known=m.folder_known,
+            source=ModelSource(declared_by="workflow", url=_capped(m.url, URL_MAX_CHARS)) if m.url else None,
+        )
         for m in check.missing_models
         if m.directory not in failed
     ]
@@ -511,16 +575,20 @@ def _scan(
 
 
 async def _suggest(
-    nodes: list[RequiredNode], models: list[RequiredModel], info: dict[str, Any], choices: dict[Any, list[str]]
+    nodes: list[RequiredNode],
+    models: list[RequiredModel],
+    info: dict[str, Any],
+    choices: dict[Any, list[str]],
+    seconds: float,
 ) -> str | None:
-    """Fill in suggestions, off the event loop, for at most SUGGEST_SECONDS: the thread checks the deadline, and a
-    stop flag set when this is cancelled, between chunks of work, so it never outlives the call by more than one.
+    """Fill in suggestions, off the event loop, for at most `seconds`: the thread checks the deadline, and a stop
+    flag set when this is cancelled, between chunks of work, so it never outlives the call by more than one.
     Returns a note when some were left out."""
     wanted = min(len(nodes), MAX_SUGGESTED) + min(len(models), MAX_SUGGESTED)
     if not wanted:
         return None
     stop = threading.Event()
-    deadline = time.monotonic() + SUGGEST_SECONDS
+    deadline = time.monotonic() + seconds
 
     def stopped() -> bool:
         return stop.is_set() or time.monotonic() > deadline
@@ -534,10 +602,107 @@ async def _suggest(
     for model, names in zip(models, for_models, strict=False):
         model.suggestions = names
     if len(for_nodes) + len(for_models) < wanted:
-        return f"suggestions stopped after {SUGGEST_SECONDS:g}s; the entries after that have none"
+        return f"suggestions stopped after {seconds:.3g}s; the entries after that have none"
     if len(nodes) > MAX_SUGGESTED or len(models) > MAX_SUGGESTED:
         return f"suggestions are given for the first {MAX_SUGGESTED} missing classes and models only"
     return None
+
+
+# -- sources from the instance's own declarations -----------------------------------
+#
+# A missing model the workflow gives no source for may still be declared by a stock template the instance serves,
+# as its properties.models with a URL: the template check's Requirements already read those. The index of them, by
+# file name, is built from the template cache (the same fetches, gates and per-version cache template_search uses)
+# once per templates version, and kept only when every template was read.
+
+_declared: weakref.WeakKeyDictionary[TemplateCache, tuple[str, dict[str, list[dict[str, str]]]]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+async def _template_index(
+    comfyui: ComfyUIClient, cache: TemplateCache
+) -> tuple[dict[str, list[dict[str, str]]], str | None]:
+    """(file name -> the templates that declare a URL for it, in index order; None when every template was read),
+    or, with what was read, why not all of them were."""
+    try:
+        source = await _source(comfyui)
+        version = source.get("version") if isinstance(source.get("version"), str) else None
+        held = _declared.get(cache)
+        if version and held and held[0] == version:
+            return held[1], None
+        names = [t["name"] for t, _ in _index_entries(await comfyui.templates_index())]
+    except RelayError as exc:
+        return {}, f"weren't checked ({exc.code})"
+    except (AttributeError, KeyError, TypeError):  # a /system_stats shaped unlike any ComfyUI's
+        return {}, "weren't checked (comfyui_bad_response)"
+    needs = await _requirements_of(comfyui, cache, version, names)
+    index: dict[str, list[dict[str, str]]] = {}
+    unread = 0
+    for name in names:
+        n = needs[name]
+        if isinstance(n, str):
+            unread += 1
+            continue
+        for m in n.models:
+            if isinstance(m.get("url"), str):
+                index.setdefault(_base(m["name"]), []).append(
+                    {"url": m["url"], "directory": m["directory"], "template": name}
+                )
+    if unread:
+        return index, f"were checked in part ({len(names) - unread} of {len(names)} read in time)"
+    if version:
+        _declared[cache] = (version, index)
+    return index, None
+
+
+async def _sources(
+    comfyui: ComfyUIClient,
+    cache: TemplateCache | None,
+    models: list[RequiredModel],
+    urls: dict[str, str],
+    seconds: float,
+) -> str | None:
+    """Give each missing model the workflow gives no source for the first stock template's that declares its file
+    name, in the same folder when the folder is known; add its full URL to `urls` for the proposals. Returns the
+    note that says how far the templates were checked, when any model is left without a source."""
+    unsourced = [m for m in models if m.source is None]
+    if not unsourced:
+        return None
+    scope: str | None
+    if cache is None:
+        index, scope = {}, "weren't checked (this server has no template cache)"
+    elif seconds <= 0:
+        index, scope = {}, "weren't checked (no time was left)"
+    else:
+        try:
+            index, scope = await asyncio.wait_for(
+                _template_index(comfyui, cache), min(TEMPLATE_SOURCES_SECONDS, seconds)
+            )
+        except TimeoutError:
+            index, scope = {}, "weren't checked (timeout)"
+    for model in unsourced:
+        found = [
+            c
+            for c in index.get(_base(model.name), [])
+            if model.directory in (None, c["directory"]) and len(c["directory"]) <= DISPLAY_NAME_MAX_CHARS
+        ]
+        if found:
+            model.source = ModelSource(
+                declared_by="template",
+                template=_capped(found[0]["template"], DISPLAY_NAME_MAX_CHARS),
+                url=_capped(found[0]["url"], URL_MAX_CHARS),
+            )
+            model.directory = model.directory or found[0]["directory"]
+            urls[model.name] = found[0]["url"]
+    left = sum(1 for m in unsourced if m.source is None)
+    if not left:
+        return None
+    templates = scope and f"the instance's templates {scope}" or "no stock template on this instance declares one"
+    return (
+        f"{left} missing model(s) have no source (source null): the workflow declares none for them, and "
+        f"{templates}. Matched by file name"
+    )
 
 
 # -- proposals ------------------------------------------------------------------
@@ -627,8 +792,15 @@ def _capped_list(items: list[Any]) -> tuple[list[Any], bool]:
 
 
 async def _report(
-    comfyui: ComfyUIClient, given: dict[str, Any], api_graph: dict[str, Any] | None, info: dict[str, Any], ui: bool
+    comfyui: ComfyUIClient,
+    given: dict[str, Any],
+    api_graph: dict[str, Any] | None,
+    info: dict[str, Any],
+    ui: bool,
+    cache: TemplateCache | None,
 ) -> WorkflowRequirements:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + REQUIREMENTS_SECONDS - BUDGET_MARGIN_SECONDS  # each later step gets what is left
     info = _tolerant(info)
     nodes, models, moved, inputs, notes, urls, choices = [], [], [], [], [], {}, {}
     if ui:
@@ -637,7 +809,7 @@ async def _report(
         api_nodes, api_models, api_moved, api_inputs, api_notes, choices = await _api_findings(comfyui, api_graph, info)
         named: set[str] = set()
         if ui:  # the UI graph's own findings stand; its widget values add only models it didn't declare
-            named = {m.name for m in (*models, *moved)} | {m["name"] for m in _requirements(given).models}
+            named = {n for m in _used_models(given) for n in (m["name"], m["declared"])}
         else:
             nodes = api_nodes
         models += [m for m in api_models if m.name not in named]
@@ -648,10 +820,13 @@ async def _report(
     lists = [_capped_list(x) for x in (nodes, models, moved, inputs)]
     (nodes, cut1), (models, cut2), (moved, cut3), (inputs, cut4) = lists
     # Every note so far says something wasn't checked: a folder that couldn't be listed, input values the loader
-    # resolves itself. The ones added below (proposals, suggestions) don't.
+    # resolves itself. The ones added below (sources, proposals, suggestions) don't.
     unchecked = bool(notes)
+    note = await _sources(comfyui, cache, models, urls, deadline - loop.time() - SUGGEST_RESERVE_SECONDS)
+    if note:
+        notes.append(note)
     proposals = _proposals(nodes, models, urls, notes)  # of the capped lists, so each map is capped too
-    note = await _suggest(nodes, models, info, choices)
+    note = await _suggest(nodes, models, info, choices, min(SUGGEST_SECONDS, max(0.0, deadline - loop.time())))
     if note:
         notes.append(note)
     if ui and api_graph is None:
@@ -679,14 +854,16 @@ async def workflow_requirements(
     api_graph: dict[str, Any] | None,
     info: dict[str, Any],
     ui: bool,
+    cache: TemplateCache | None = None,
 ) -> tuple[WorkflowRequirements | None, str | None]:
     """(the report, None), or (None, why there is none): `timeout`, an error code, or `check_failed`.
 
     `given` is the graph as the agent sent it; `ui` says it is the UI format. `api_graph` is the API graph to read
     values from: the one given, or the one this server converted a UI graph to; None when there is none. `info` is
-    the /object_info the validation used."""
+    the /object_info the validation used. `cache` is the relay's template cache, through which a missing model's
+    source is looked up in the stock templates; without it they aren't checked."""
     try:
-        report = await asyncio.wait_for(_report(comfyui, given, api_graph, info, ui), REQUIREMENTS_SECONDS)
+        report = await asyncio.wait_for(_report(comfyui, given, api_graph, info, ui, cache), REQUIREMENTS_SECONDS)
     except TimeoutError:
         return None, "timeout"
     except RelayError as exc:

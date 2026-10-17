@@ -53,24 +53,34 @@ FOLDERS = {
 
 
 class Fake:
-    """ComfyUI's /object_info, /models and /models/<folder>; `fail` maps a path to the status it answers with."""
+    """ComfyUI's /object_info, /models and /models/<folder>, and, given `templates` (name -> workflow), the
+    templates it serves; `fail` maps a path to the status it answers with, `delays` to seconds it waits first."""
 
-    def __init__(self, info: dict | None = None, folders: dict | None = None) -> None:
+    def __init__(self, info: dict | None = None, folders: dict | None = None, templates: dict | None = None) -> None:
         self.calls: list[str] = []
         self.fail: dict[str, int] = {}
+        self.delays: dict[str, float] = {}
         self.info = INFO if info is None else info
         self.folders = FOLDERS if folders is None else folders
+        self.templates = templates
 
     def client(self) -> ComfyUIClient:
         return ComfyUIClient("http://comfyui.test:8188", transport=httpx2.MockTransport(self.handle))
 
-    def handle(self, request: httpx2.Request) -> httpx2.Response:
+    async def handle(self, request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
         self.calls.append(path)
+        await asyncio.sleep(self.delays.get(path, 0))
         if path in self.fail:
             return httpx2.Response(self.fail[path])
         if path == "/system_stats":
-            return httpx2.Response(200, json=SYSTEM_STATS)
+            stats = {**SYSTEM_STATS, "system": {**SYSTEM_STATS["system"], "installed_templates_version": "0.1.0"}}
+            return httpx2.Response(200, json=stats)
+        if self.templates is not None and path == "/templates/index.json":
+            entries = [{"name": n, "title": n, "tags": []} for n in self.templates]
+            return httpx2.Response(200, json=[{"category": "c", "title": "t", "templates": entries}])
+        if self.templates is not None and path.removeprefix("/templates/").removesuffix(".json") in self.templates:
+            return httpx2.Response(200, json=self.templates[path.removeprefix("/templates/").removesuffix(".json")])
         if path == "/object_info":
             return httpx2.Response(200, json=self.info)
         if path == "/models":
@@ -131,9 +141,16 @@ async def test_an_api_graph_lists_a_missing_model_with_its_folder_and_close_name
         "class_type": "CheckpointLoaderSimple",
         "input": "ckpt_name",
         "suggestions": [f"sd15/{SD15}"],
+        "source": None,  # always present: the workflow declares none, and (no template cache here) nothing else was
     }
     # VAELoader lists no files, only approximate decoders: no folder can be told from that, and nothing is close.
-    assert vae == {"name": "vae-ft-mse.safetensors", "node_id": "7", "class_type": "VAELoader", "input": "vae_name"}
+    assert vae == {
+        "name": "vae-ft-mse.safetensors",
+        "node_id": "7",
+        "class_type": "VAELoader",
+        "input": "vae_name",
+        "source": None,
+    }
 
 
 async def test_an_api_graph_reports_a_model_under_another_path_with_found_at():
@@ -596,13 +613,20 @@ async def test_the_suggestion_scan_stops_at_its_deadline(monkeypatch, chunks):
     assert chunks[0] == before, "the scan went on after the call returned"
 
 
-async def test_the_suggestion_scan_stops_when_the_report_is_cut_short(monkeypatch, chunks):
-    monkeypatch.setattr(req, "SUGGEST_SECONDS", 60)
-    monkeypatch.setattr(req, "REQUIREMENTS_SECONDS", 1.0)
+async def test_the_suggestion_scan_stops_when_it_is_cancelled(monkeypatch, chunks):
+    """The report's own bound cancels whatever step it is in; a scan cancelled mid-way stops within a chunk."""
     monkeypatch.setattr(req, "SCAN_CHUNK", 50)
     chunks[1] = 0.005  # 400 chunks a model: the scan alone would take 40s
-    got = await validate(missing_loras(20), huge_loras(20_000))
-    assert got["requirements_unchecked"] == "timeout"
+    files = [f"set{i % 50}/lora_{i:06d}_detail_style.safetensors" for i in range(20_000)]
+    models = [
+        req.RequiredModel(name=f"nothing_like_{i}.safetensors", class_type="LoraLoader", input="lora_name")
+        for i in range(20)
+    ]
+    scan = asyncio.ensure_future(req._suggest([], models, {}, {("LoraLoader", "lora_name"): files}, 60))
+    await asyncio.sleep(0.5)
+    scan.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await scan
     await asyncio.sleep(0.2)  # one chunk, at most, was in flight
     before = chunks[0]
     assert before > 0, "the scan never started"
@@ -641,3 +665,182 @@ async def test_a_class_name_too_long_to_use_is_never_suggested():
     got = (await validate({"1": {"class_type": "ImageInvertt", "inputs": {}}}, Fake(info)))["requirements"]
     [node] = got["missing_nodes"]
     assert node["suggestions"] == ["ImageInvert"]
+
+
+# -- sources: the workflow's, else the instance's own templates ---------------------------
+
+TURBO = "sd_xl_turbo_1.0_fp16.safetensors"
+TURBO_URL = f"https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/{TURBO}"
+
+
+def template_declaring(name: str, directory: str, url: str) -> dict:
+    """A stock template in UI format whose loader declares one model."""
+    return {
+        "nodes": [
+            {
+                "id": 1,
+                "type": "CheckpointLoaderSimple",
+                "mode": 0,
+                "properties": {"models": [{"name": name, "directory": directory, "url": url}]},
+                "widgets_values": [name],
+            }
+        ],
+        "links": [],
+    }
+
+
+def stock_templates() -> dict:
+    return {
+        "unrelated": template_declaring(
+            "other.safetensors", "checkpoints", "https://huggingface.co/o/r/resolve/main/x"
+        ),
+        "wrong_folder": template_declaring(TURBO, "loras", "https://huggingface.co/o/wrong/resolve/main/x"),
+        "sdxlturbo_example": template_declaring(TURBO, "checkpoints", TURBO_URL),
+    }
+
+
+def bare_models() -> dict:
+    """An API graph naming two checkpoints it gives no source for: one a stock template declares, one nothing does."""
+    return {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": TURBO}},
+        "2": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "add-detail-xl.safetensors"}},
+    }
+
+
+async def test_a_bare_missing_model_takes_its_source_from_a_stock_template():
+    got = (await validate(bare_models(), Fake(templates=stock_templates())))["requirements"]
+    turbo, nothing = got["missing_models"]
+    assert turbo["source"] == {"declared_by": "template", "template": "sdxlturbo_example", "url": TURBO_URL}
+    assert turbo["directory"] == "checkpoints" and "url" not in turbo  # url stays the workflow's own declaration
+    assert nothing["source"] is None
+    [entry] = got["proposals"]["comfy_yaml_models"]
+    assert entry["files"] == [{"source": "hf:stabilityai/sdxl-turbo", "file": TURBO, "install": "models/checkpoints/"}]
+    [note] = [n for n in got["notes"] if "source null" in n]
+    assert note.startswith("1 missing model(s) have no source") and "no stock template on this instance" in note
+
+
+async def test_a_template_is_matched_in_the_models_folder_when_that_is_known():
+    """The loader's options are checkpoints'; a template declaring that file name under loras isn't its source."""
+    templates = {"wrong_folder": stock_templates()["wrong_folder"]}
+    got = (await validate(bare_models(), Fake(templates=templates)))["requirements"]
+    assert [m["source"] for m in got["missing_models"]] == [None, None]
+
+
+async def test_the_template_index_is_built_once_per_templates_version():
+    fake = Fake(templates=stock_templates())
+    server, _ = build_server(settings(), comfyui=fake.client())
+    async with Client(server, mode="legacy") as client:
+        for _ in range(2):
+            got = (await client.call_tool("workflow_validate", {"workflow": bare_models()})).structured_content
+            assert got["requirements"]["missing_models"][0]["source"]["template"] == "sdxlturbo_example"
+    assert fake.calls.count("/templates/index.json") == 1
+    assert fake.calls.count("/templates/sdxlturbo_example.json") == 1
+
+
+async def test_templates_that_cant_be_read_say_so_instead_of_implying_none_declare_it(monkeypatch):
+    got = (await validate(bare_models(), Fake()))["requirements"]  # this fake serves no templates at all
+    assert [m["source"] for m in got["missing_models"]] == [None, None]
+    assert any(
+        "2 missing model(s) have no source" in n and "weren't checked (comfyui_http_error)" in n for n in got["notes"]
+    )
+    monkeypatch.setattr(req, "TEMPLATE_SOURCES_SECONDS", 0.2)
+    fake = Fake(templates=stock_templates())
+    fake.delays["/templates/index.json"] = 2
+    got = (await validate(bare_models(), fake))["requirements"]
+    assert any("weren't checked (timeout)" in n for n in got["notes"])
+    assert got["satisfied"] is False
+
+
+async def test_a_template_read_in_part_says_how_far():
+    fake = Fake(templates=stock_templates())
+    fake.fail["/templates/unrelated.json"] = 500
+    got = (await validate(bare_models(), fake))["requirements"]
+    assert got["missing_models"][0]["source"]["template"] == "sdxlturbo_example"
+    assert any("were checked in part (2 of 3 read in time)" in n for n in got["notes"])
+
+
+async def test_a_workflow_declared_source_wins_and_says_so():
+    graph = {"nodes": [template_declaring("mine.safetensors", "checkpoints", "https://example.com/mine")["nodes"][0]]}
+    graph["links"] = []
+    got = (await validate(graph, Fake(templates=stock_templates())))["requirements"]
+    [model] = got["missing_models"]
+    assert model["source"] == {"declared_by": "workflow", "url": "https://example.com/mine"}
+    assert not any("source null" in n for n in got["notes"])
+
+
+# -- a UI node's model, judged by the widget value it uses --------------------------------
+
+
+def lora_node(widget: str) -> dict:
+    return {
+        "nodes": [
+            {
+                "id": 1,
+                "type": "LoraLoader",
+                "mode": 0,
+                "properties": {"models": [{"name": "detail.safetensors", "directory": "loras"}]},
+                "widgets_values": [widget, 1.0, 1.0],
+            }
+        ],
+        "links": [],
+    }
+
+
+async def test_a_ui_model_fixed_in_its_widget_is_no_longer_flagged():
+    """properties.models declares the bare name; once the widget names the file's real path, nothing is wrong."""
+    converted = {"1": {"class_type": "LoraLoader", "inputs": {"lora_name": "style/detail.safetensors"}}}
+    fixed = (await validate(lora_node("style/detail.safetensors"), converter=FakeConverter(converted)))["requirements"]
+    assert fixed["models_need_value_change"] == [] and fixed["missing_models"] == [] and fixed["satisfied"] is True
+    unfixed = (await validate(lora_node("detail.safetensors")))["requirements"]
+    [moved] = unfixed["models_need_value_change"]
+    assert (moved["name"], moved["found_at"]) == ("detail.safetensors", "style/detail.safetensors")
+
+
+async def test_a_ui_model_is_reported_under_the_name_its_widget_uses():
+    got = (await validate(lora_node("other/detail.safetensors")))["requirements"]
+    [model] = got["missing_models"]
+    assert (model["name"], model["directory"]) == ("other/detail.safetensors", "loras")
+
+
+# -- #231: a converted UI graph's missing classes keep their names --------------------------
+
+
+SUBGRAPH = "5b1f6c2e-8d4a-4c2e-9f61-3a7e0c9d2b10"
+
+
+def ui_with_uninstalled_classes() -> dict:
+    return {
+        "nodes": [
+            {"id": 8, "type": "ConstrainImage|pysssss", "mode": 0, "properties": {"cnr_id": "comfyui-custom-scripts"}},
+            {"id": 10, "type": SUBGRAPH, "mode": 0},
+            {"id": 11, "type": "SaveImage", "mode": 0},
+        ],
+        "links": [],
+        "definitions": {
+            "subgraphs": [
+                {
+                    "id": SUBGRAPH,
+                    "nodes": [{"id": 20, "type": "GetImageSizeAndCount", "mode": 0, "properties": {"aux_id": "a/b"}}],
+                }
+            ]
+        },
+    }
+
+
+async def test_a_converted_ui_graphs_missing_classes_are_named_in_errors_and_requirements():
+    """The frontend converts an uninstalled class with no class_type; the UI graph names it, subgraphs included."""
+    converted = {
+        "8": {"class_type": None, "inputs": {}},
+        "10:20": {"class_type": None, "inputs": {}},
+        "11": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": "x"}},
+    }
+    info = {**INFO, "GetImageSize": node_spec(("INT", "INT"))}
+    got = await validate(ui_with_uninstalled_classes(), Fake(info), FakeConverter(converted))
+    named = {e["node_id"]: e for e in got["errors"] if e["type"] == "missing_node_type"}
+    assert named["8"]["class_type"] == "ConstrainImage|pysssss"
+    assert named["10:20"]["class_type"] == "GetImageSizeAndCount"
+    assert named["10:20"]["expected"] == ["GetImageSize"]
+    assert "the UI graph's node 10:20 is a 'GetImageSizeAndCount'" in named["10:20"]["details"]
+    assert named["8"]["message"].startswith("Node 'ID #8' has no class_type")  # ComfyUI's wording, as before
+    classes = {n["class_type"] for n in got["requirements"]["missing_nodes"]}
+    assert classes == {"ConstrainImage|pysssss", "GetImageSizeAndCount"}
