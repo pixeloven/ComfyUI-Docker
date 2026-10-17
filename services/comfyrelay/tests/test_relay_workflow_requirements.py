@@ -745,11 +745,18 @@ async def test_a_bare_missing_model_takes_its_source_from_a_stock_template():
     assert note.startswith("1 missing model(s) have no source") and "no stock template on this instance" in note
 
 
-async def test_a_template_is_matched_in_the_models_folder_when_that_is_known():
-    """The loader's options are checkpoints'; a template declaring that file name under loras isn't its source."""
+async def test_a_template_in_another_folder_is_a_source_but_not_a_proposal():
+    """The loader's options are checkpoints'; a template declares that file name under loras. It is the source,
+    with its folder, but nothing is proposed: that folder doesn't suit this loader."""
     templates = {"wrong_folder": stock_templates()["wrong_folder"]}
     got = (await validate(bare_models(), Fake(templates=templates)))["requirements"]
-    assert [m["source"] for m in got["missing_models"]] == [None, None]
+    turbo, nothing = got["missing_models"]
+    assert (turbo["source"]["template"], turbo["source"]["directory"], turbo["directory"]) == (
+        "wrong_folder",
+        "loras",
+        "checkpoints",
+    )
+    assert nothing["source"] is None and "proposals" not in got
 
 
 async def test_the_template_index_is_built_once_per_templates_version():
@@ -1024,3 +1031,41 @@ async def test_a_windows_path_is_matched_with_forward_slashes():
     assert (moved["name"], moved["found_at"]) == (windows, f"sd15/{SD15}")
     [entry] = got["proposals"]["comfy_yaml_models"]
     assert entry["files"][0]["as"] == "sub/new.safetensors"  # comfy.yaml takes no backslash
+
+
+# -- the third review of 4292b62 ----------------------------------------------------------
+
+
+async def test_a_template_declaring_the_file_in_another_folder_is_a_source_never_none():
+    """UNETLoader's folder is known (diffusion_models lists one file); the only template declares the file in
+    checkpoints. That template is still the source, with its folder and no proposal: not "none declares it"."""
+    info = {**INFO, "UNETLoader": node_spec(("MODEL",), input={"required": {"unet_name": combo("other.safetensors")}})}
+    folders = {**FOLDERS, "diffusion_models": ["other.safetensors"]}
+    graph = {"1": {"class_type": "UNETLoader", "inputs": {"unet_name": TURBO}}}
+    templates = {"sdxlturbo_example": stock_templates()["sdxlturbo_example"]}
+    got = (await validate(graph, Fake(info, folders, templates)))["requirements"]
+    [model] = got["missing_models"]
+    assert model["directory"] == "diffusion_models"  # the loader's, as before
+    assert model["source"] == {
+        "declared_by": "template",
+        "template": "sdxlturbo_example",
+        "directory": "checkpoints",
+        "url": TURBO_URL,
+    }
+    assert "proposals" not in got
+    assert any("may not suit this graph's loader" in n for n in got["notes"])
+    assert not any("source null" in n for n in got["notes"])
+
+
+async def test_model_declarations_whose_name_or_folder_is_not_a_string_cost_nothing():
+    """In the graph or in a stock template, a properties.models entry with a list or an object for its name or
+    folder is skipped, as the template check skips it; the report is made all the same."""
+    broken = [{"name": ["x"], "directory": "checkpoints"}, {"name": "y.safetensors", "directory": {"a": 1}}]
+    template = template_declaring(TURBO, "checkpoints", TURBO_URL)
+    template["nodes"][0]["properties"]["models"] = broken + template["nodes"][0]["properties"]["models"]
+    ui = {"nodes": [{**template["nodes"][0], "id": 5}], "links": []}
+    got = await validate(ui, Fake(templates={"sdxlturbo_example": template}))
+    assert got["requirements_unchecked"] is None
+    assert [m["name"] for m in got["requirements"]["missing_models"]] == [TURBO]
+    api = await validate(bare_models(), Fake(templates={"sdxlturbo_example": template}))
+    assert api["requirements"]["missing_models"][0]["source"]["template"] == "sdxlturbo_example"

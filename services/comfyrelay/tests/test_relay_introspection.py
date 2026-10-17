@@ -1000,6 +1000,26 @@ async def test_template_runnability_a_model_only_in_a_subfolder_needs_a_value_ch
     ]
 
 
+async def test_a_model_declaration_with_a_name_or_folder_that_is_not_a_string_is_skipped():
+    """properties.models is the template's data: an entry whose name or folder is a list or an object is no
+    declaration, and template_get answers as if it weren't there."""
+    broken = {"name": ["not", "a", "name"], "directory": {"not": "a folder"}}
+    workflow = {
+        "nodes": [
+            node("CheckpointLoaderSimple", models=[broken, model("sdxl_base.safetensors", "checkpoints")]),
+            node("LoraLoader", models=[{"name": "x.safetensors", "directory": ["loras"]}]),
+        ]
+    }
+    got = await ok(
+        "template_get",
+        {"name": "sdxl_sub", "include_workflow": False},
+        **{"/templates/sdxl_sub.json": httpx2.Response(200, json=workflow)},
+    )
+    check = got["runnability"]
+    assert check["missing_models"] == [] and check["models_checked"] == 1
+    assert [m["found_at"] for m in check["models_need_value_change"]] == ["sdxl/sdxl_base.safetensors"]
+
+
 async def test_template_search_drops_hits_whose_graph_uses_partner_api_nodes():
     """restore_cloud isn't flagged in the index, but its graph has an API node."""
     got = await ok("template_search", {"query": "restore"})

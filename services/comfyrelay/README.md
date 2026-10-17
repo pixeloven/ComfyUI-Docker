@@ -363,10 +363,13 @@ converts it first (see *UI-to-API conversion*). The code is
     whether the templates were checked in full, in part, or not at all, so silence never reads as
     "nothing declares it". Templates are matched by file name only, and two can put one file in
     different folders, so the index records each declaring node's class:
-    - **Folder known from the graph's loader.** Only templates in that folder count, those of
-      the same loader class first, and the proposal installs there.
+    - **Folder known from the graph's loader.** Templates in that folder give the source, those
+      of the same loader class first, and the proposal installs there.
     - **Folder unknown.** Templates of the graph's loader class that agree on a folder give a
-      proposal in it. Any other match gives the source alone, with no proposal, and a note.
+      proposal in it.
+    - **Any other match** gives the source alone, with no proposal, and a note. That covers a
+      template in another folder than the loader's, or templates that disagree. A file some
+      template declares is never reported as declared by none.
     - **`directory` is never taken from a template.**
 
     The template index comes through `template_search`'s cache, fetch gates and per-version

@@ -1126,8 +1126,8 @@ def _requirements(workflow: dict[str, Any]) -> Requirements:
         if isinstance(props.get("cnr_id"), str):
             packs.setdefault(node["type"], props["cnr_id"])
         for m in props.get("models") or []:
-            if isinstance(m, dict):
-                loaders.setdefault((m.get("directory"), m.get("name")), node["type"])
+            if isinstance(m, dict) and isinstance(m.get("name"), str) and isinstance(m.get("directory"), str):
+                loaders.setdefault((m["directory"], m["name"]), node["type"])
     models = tuple(
         {
             "name": m["name"],

@@ -720,8 +720,10 @@ async def _sources(
     - the folder unknown: templates whose declaring node is the graph's loader class, when they agree on a folder;
       the proposal installs it in that folder (`installs`), and `directory` stays unset, since that comes only
       from the graph and its loader.
-    - otherwise, any template declaring the name: its source is given, with its folder on source.directory, but
-      no proposal, and a note says why: the folder may not suit this loader.
+    - otherwise, any template declaring the name, in another folder than the loader's or with no agreement on
+      one: its source is given (the graph's loader class first), with its folder on source.directory, but no
+      proposal, and a note says why: the folder may not suit this loader. A template that declares the file is
+      never reported as none declaring it.
     Adds each sourced model's full URL to `urls`. Returns notes: how far the templates were checked, when a model
     is left without a source, and which sources come without a proposal."""
     unsourced = [m for m in models if m.source is None]
@@ -743,14 +745,13 @@ async def _sources(
     for model in unsourced:
         declared = [c for c in index.get(_base(model.name), []) if len(c["directory"]) <= DISPLAY_NAME_MAX_CHARS]
         same_loader = [c for c in declared if model.class_type and c["class_type"] == model.class_type]
-        if model.directory is not None:
-            in_folder = [c for c in declared if c["directory"] == model.directory]
-            chosen = ([c for c in in_folder if c in same_loader] or in_folder)[:1]
-            proposed = bool(chosen)
-        elif same_loader and len({c["directory"] for c in same_loader}) == 1:
+        in_folder = [c for c in declared if model.directory is not None and c["directory"] == model.directory]
+        if in_folder:
+            chosen, proposed = ([c for c in in_folder if c in same_loader] or in_folder)[:1], True
+        elif model.directory is None and same_loader and len({c["directory"] for c in same_loader}) == 1:
             chosen, proposed = same_loader[:1], True
-        else:
-            chosen, proposed = declared[:1], False
+        else:  # declared, but in another folder than the loader's, or by templates that disagree: no proposal
+            chosen, proposed = (same_loader or declared)[:1], False
         if not chosen:
             continue
         c = chosen[0]
