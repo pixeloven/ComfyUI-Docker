@@ -1213,7 +1213,7 @@ def cmd_setup_tier2(task: str) -> None:
     if TIER2_MODEL not in names:  # type: ignore[operator]
         sys.exit(f"ComfyUI doesn't list {TIER2_MODEL} in /models/checkpoints: {names}")
     reset_workflows()
-    {"T7": lambda: None, "T8": setup_t8, "T9": setup_t9}[task]()
+    {"T7": lambda: None, "T8": setup_t8, "T9": setup_t9, "T10": setup_t10}[task]()
     mark(task)
 
 
@@ -1488,6 +1488,358 @@ def check_t9() -> str:
     return f"{T9_FILE} has the requested edit, still in the UI format; {ran}; {len(entries)} runs since setup"
 
 
+# T10, make a workflow runnable (#213): two workflows, one in API format and one in the editor's UI
+# format, each needing the same three things the instance lacks: a checkpoint that isn't there (its
+# Hugging Face URL declared in the UI graph's properties.models), a node class from a git pack that
+# isn't installed (aux_id and ver in the UI node's properties), and a LoRA named bare that is on disk
+# only in a subfolder. The agent changes nothing on the instance. It reports the three, fixes the LoRA
+# value in both graphs, and drafts a comfy.yaml entry and a custom_nodes entry. The check grades what
+# it wrote, and that the instance still lacks what it lacked.
+T10_REPO = "stabilityai/stable-diffusion-xl-base-1.0"
+T10_CKPT = "sd_xl_base_1.0.safetensors"
+T10_CKPT_URL = f"https://huggingface.co/{T10_REPO}/resolve/main/{T10_CKPT}"
+T10_LORA = "sd_xl_offset_example-lora_1.0.safetensors"
+T10_LORA_URL = f"https://huggingface.co/{T10_REPO}/resolve/main/{T10_LORA}"
+T10_LORA_AT = f"sdxl/{T10_LORA}"  # where setup puts the LoRA's placeholder, under models/loras/
+T10_CLASS = "GetImageSizeAndCount"
+T10_PACK = "kijai/ComfyUI-KJNodes"
+T10_PACK_URL = f"https://github.com/{T10_PACK}"
+T10_COMMIT = "a40cf52c4779454451c4480c95947045e3f31c94"  # a commit of that pack with the class
+T10_FILES = ("T10-api.json", "T10-ui.json")
+T10_SCHEMA = HERE.parent.parent / "services" / "comfyctl" / "comfyctl" / "fetch" / "schemas" / "comfy.schema.json"
+# What setup made for the placeholder, so t10-clean removes exactly that and never an operator's file.
+T10_PLACED = DATA / ".t10-placeholder.json"
+
+
+def t10_placeholder() -> bytes:
+    """A valid safetensors file with no tensors: what ComfyUI lists, and what a metadata read can parse."""
+    header = b"{}" + b" " * 6
+    return struct.pack("<Q", len(header)) + header
+
+
+def cmd_t10_clean(*args: str) -> None:
+    """Remove T10's placeholder LoRA, if it is still byte for byte the placeholder. Every other task's
+    setup runs this, so it sees no LoRA. With --dirs (down.sh --purge, once ComfyUI has stopped), also
+    remove the directories setup made for it, if empty. Never while ComfyUI runs: its filename cache
+    calls getmtime on every directory it has listed, so a removed one fails /object_info (ComfyUI v0.38.0)."""
+    if not T10_PLACED.exists():
+        return
+    placed = json.loads(T10_PLACED.read_text())
+    f = Path(placed["file"])
+    if f.is_file() and f.read_bytes() == t10_placeholder():
+        f.unlink()
+    if "--dirs" not in args:
+        return
+    for d in sorted(placed["made"], key=len, reverse=True):
+        try:
+            Path(d).rmdir()
+        except OSError:
+            pass
+    T10_PLACED.unlink()
+
+
+def t10_place_lora() -> None:
+    loras = DATA / "models" / "loras"
+    target = loras / T10_LORA_AT
+    if (loras / T10_LORA).exists():
+        sys.exit(f"{loras / T10_LORA} exists; T10 needs that LoRA only in a subfolder")
+    if target.exists() and target.read_bytes() != t10_placeholder():
+        sys.exit(f"{target} exists and isn't T10's placeholder; not overwriting it")
+    placed = json.loads(T10_PLACED.read_text()) if T10_PLACED.exists() else {"made": []}
+    made = [str(d) for d in (loras, target.parent) if not d.exists()]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(t10_placeholder())
+    T10_PLACED.write_text(json.dumps({"file": str(target), "made": sorted(set(placed["made"]) | set(made))}))
+
+
+def t10_api() -> dict:
+    return {
+        "10": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": T10_CKPT}},
+        "11": {
+            "class_type": "LoraLoader",
+            "inputs": {"lora_name": T10_LORA, "strength_model": 0.8, "strength_clip": 0.8,
+                       "model": ["10", 0], "clip": ["10", 1]},
+        },
+        "12": {"class_type": "CLIPTextEncode", "inputs": {"text": "a lighthouse on a rocky coast at dusk", "clip": ["11", 1]}},
+        "13": {"class_type": "CLIPTextEncode", "inputs": {"text": "blurry, low quality", "clip": ["11", 1]}},
+        "14": {"class_type": "EmptyLatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+        "15": {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": 7, "steps": 25, "cfg": 7.0, "sampler_name": "euler", "scheduler": "normal", "denoise": 1.0,
+                "model": ["11", 0], "positive": ["12", 0], "negative": ["13", 0], "latent_image": ["14", 0],
+            },
+        },
+        "16": {"class_type": "VAEDecode", "inputs": {"samples": ["15", 0], "vae": ["10", 2]}},
+        "17": {"class_type": T10_CLASS, "inputs": {"image": ["16", 0]}},
+        "18": {"class_type": "SaveImage", "inputs": {"filename_prefix": "lighthouse", "images": ["17", 0]}},
+    }
+
+
+def t10_ui(core_version: str) -> dict:
+    """The same pipeline in the UI format, with the properties ComfyUI's editor saves: core nodes name
+    comfy-core, the git pack's node its aux_id and commit, and each loader the model it needs."""
+
+    def node(nid, typ, order, inputs, outputs, widgets, props):
+        return {
+            "id": nid,
+            "type": typ,
+            "pos": [order * 320, 200],
+            "size": [300, 100],
+            "flags": {},
+            "order": order,
+            "mode": 0,
+            "inputs": [{"name": n, "type": t, "link": link} for n, t, link in inputs],
+            "outputs": [
+                {"name": n, "type": t, "links": links, "slot_index": i} for i, (n, t, links) in enumerate(outputs)
+            ],
+            "properties": {"Node name for S&R": typ, **props},
+            "widgets_values": widgets,
+        }
+
+    core = {"cnr_id": "comfy-core", "ver": core_version}
+    return {
+        "last_node_id": 9,
+        "last_link_id": 12,
+        "nodes": [
+            node(1, "CheckpointLoaderSimple", 0, [],
+                 [("MODEL", "MODEL", [1]), ("CLIP", "CLIP", [2]), ("VAE", "VAE", [3])], [T10_CKPT],
+                 {**core, "models": [{"name": T10_CKPT, "url": T10_CKPT_URL, "directory": "checkpoints"}]}),
+            node(2, "LoraLoader", 1, [("model", "MODEL", 1), ("clip", "CLIP", 2)],
+                 [("MODEL", "MODEL", [4]), ("CLIP", "CLIP", [5, 6])], [T10_LORA, 0.8, 0.8],
+                 {**core, "models": [{"name": T10_LORA, "url": T10_LORA_URL, "directory": "loras"}]}),
+            node(3, "CLIPTextEncode", 2, [("clip", "CLIP", 5)], [("CONDITIONING", "CONDITIONING", [7])],
+                 ["a portrait of a sailor in a storm, oil painting"], core),
+            node(4, "CLIPTextEncode", 3, [("clip", "CLIP", 6)], [("CONDITIONING", "CONDITIONING", [8])],
+                 ["blurry, low quality"], core),
+            node(5, "EmptyLatentImage", 4, [], [("LATENT", "LATENT", [9])], [832, 1216, 1], core),
+            node(6, "KSampler", 5,
+                 [("model", "MODEL", 4), ("positive", "CONDITIONING", 7), ("negative", "CONDITIONING", 8),
+                  ("latent_image", "LATENT", 9)],
+                 [("LATENT", "LATENT", [10])], [1234, "fixed", 25, 7, "euler", "normal", 1], core),
+            node(7, "VAEDecode", 6, [("samples", "LATENT", 10), ("vae", "VAE", 3)], [("IMAGE", "IMAGE", [11])], [], core),
+            node(8, T10_CLASS, 7, [("image", "IMAGE", 11)],
+                 [("image", "IMAGE", [12]), ("width", "INT", []), ("height", "INT", []), ("count", "INT", [])], [],
+                 {"aux_id": T10_PACK, "ver": T10_COMMIT}),
+            node(9, "SaveImage", 8, [("images", "IMAGE", 12)], [], ["sailor"], core),
+        ],
+        "links": [
+            [1, 1, 0, 2, 0, "MODEL"],
+            [2, 1, 1, 2, 1, "CLIP"],
+            [3, 1, 2, 7, 1, "VAE"],
+            [4, 2, 0, 6, 0, "MODEL"],
+            [5, 2, 1, 3, 0, "CLIP"],
+            [6, 2, 1, 4, 0, "CLIP"],
+            [7, 3, 0, 6, 1, "CONDITIONING"],
+            [8, 4, 0, 6, 2, "CONDITIONING"],
+            [9, 5, 0, 6, 3, "LATENT"],
+            [10, 6, 0, 7, 0, "LATENT"],
+            [11, 7, 0, 8, 0, "IMAGE"],
+            [12, 8, 0, 9, 0, "IMAGE"],
+        ],
+        "groups": [],
+        "config": {},
+        "extra": {},
+        "version": 0.4,
+    }
+
+
+def setup_t10() -> None:
+    """Place the LoRA in a subfolder, confirm from ComfyUI itself that the instance lacks all three
+    things, and put both workflows and the comfy.yaml schema in the workspace."""
+    t10_place_lora()
+    problems = []
+    if T10_CLASS in get("/object_info"):  # type: ignore[operator]
+        problems.append(f"{T10_CLASS} is installed; T10 needs an instance without {T10_PACK}")
+    ckpts = get("/models/checkpoints")
+    if any(str(c).rsplit("/", 1)[-1] == T10_CKPT for c in ckpts):  # type: ignore[union-attr]
+        problems.append(f"{T10_CKPT} is on the instance; T10 needs it missing")
+    loras = get("/models/loras")
+    if T10_LORA_AT not in loras or T10_LORA in loras:  # type: ignore[operator]
+        problems.append(f"ComfyUI lists {loras} in loras; T10 needs {T10_LORA_AT} and no bare {T10_LORA}")
+    if problems:
+        sys.exit("; ".join(problems))
+    version = str(get("/system_stats")["system"].get("comfyui_version"))  # type: ignore[index]
+    workflows = {T10_FILES[0]: t10_api(), T10_FILES[1]: t10_ui(version)}
+    for name, wf in workflows.items():
+        (WORKSPACE / name).write_text(json.dumps(wf, indent=2) + "\n")
+    shutil.copyfile(T10_SCHEMA, WORKSPACE / "comfy.schema.json")
+    (RESULTS / "T10.setup.json").write_text(
+        json.dumps({"workflows": workflows, "custom_nodes": custom_node_entries()}, indent=2) + "\n"
+    )
+
+
+def str_set(value: object) -> set[str] | None:
+    return {v.strip() for v in value} if isinstance(value, list) and all(isinstance(v, str) for v in value) else None
+
+
+def t10_findings(name: str, found: object) -> list[str]:
+    """Why one workflow's findings aren't exactly the three it has, or nothing."""
+    if not isinstance(found, dict):
+        return [f"no findings object for {name}"]
+    out = []
+    for key, want in (("missing_models", {T10_CKPT}), ("missing_node_classes", {T10_CLASS})):
+        if str_set(found.get(key)) != want:
+            out.append(f"{name}'s {key} is {found.get(key)!r}, want {sorted(want)}")
+    changes = found.get("model_value_changes")
+    got = (
+        {(str(c.get("from")).strip(), str(c.get("to")).strip()) for c in changes if isinstance(c, dict)}
+        if isinstance(changes, list) and all(isinstance(c, dict) for c in changes)
+        else None
+    )
+    if got != {(T10_LORA, T10_LORA_AT)}:
+        out.append(f"{name}'s model_value_changes is {changes!r}, want [from {T10_LORA!r} to {T10_LORA_AT!r}]")
+    return out
+
+
+def read_result(name: str) -> object:
+    p = WORKSPACE / "results" / name
+    if not p.exists():
+        raise CheckFailed(f"results/{name} not written")
+    try:
+        return json.loads(p.read_text())
+    except ValueError as e:
+        raise CheckFailed(f"results/{name} is not JSON: {e}") from e
+
+
+def t10_fixed(workflows: dict) -> list[str]:
+    """Why the fixed graphs aren't the originals with exactly the LoRA's value changed, or nothing."""
+    out = []
+    want = json.loads(json.dumps(workflows[T10_FILES[0]]))
+    want["11"]["inputs"]["lora_name"] = T10_LORA_AT
+    try:
+        got = read_result(T10_FILES[0])
+        node = got.get("11") if isinstance(got, dict) else None
+        lora = node["inputs"].get("lora_name") if isinstance(node, dict) and isinstance(node.get("inputs"), dict) else None
+        if not isinstance(got, dict):
+            out.append(f"results/{T10_FILES[0]} is not an API-format graph")
+        elif lora != T10_LORA_AT:
+            out.append(f"results/{T10_FILES[0]}'s LoRA value is {lora!r}, want {T10_LORA_AT!r}")
+        elif not same(got, want):
+            out.append(f"results/{T10_FILES[0]} changes more than the LoRA value")
+    except CheckFailed as e:
+        out.append(str(e))
+    want = json.loads(json.dumps(workflows[T10_FILES[1]]))
+    want["nodes"][1]["widgets_values"][0] = T10_LORA_AT
+    try:
+        got = read_result(T10_FILES[1])
+    except CheckFailed as e:
+        return out + [str(e)]
+    if not isinstance(got, dict) or not isinstance(got.get("nodes"), list) or not isinstance(got.get("links"), list):
+        return out + [f"results/{T10_FILES[1]} is not a UI-format workflow (no nodes and links lists)"]
+    by_id = {n.get("id"): n for n in got["nodes"] if isinstance(n, dict)}
+    if len(got["nodes"]) != len(want["nodes"]) or {(n["id"], n["type"]) for n in want["nodes"]} != {
+        (i, n.get("type")) for i, n in by_id.items()
+    }:
+        return out + [f"results/{T10_FILES[1]}'s nodes changed"]
+    links = {tuple(link[1:6]) for link in got["links"] if isinstance(link, list) and len(link) >= 6}
+    if links != {tuple(link[1:6]) for link in want["links"]}:
+        return out + [f"results/{T10_FILES[1]}'s links changed"]
+    for n in want["nodes"]:
+        values = by_id[n["id"]].get("widgets_values", [])
+        if not same(values, n["widgets_values"]):
+            return out + [f"results/{T10_FILES[1]}'s {n['type']} {n['id']} has {values!r}, want {n['widgets_values']!r}"]
+    return out
+
+
+# comfyctl's own validation of a manifest (its bundled schema, then its semantic checks), and where
+# each file would install, run with comfyctl from services/ through uv, as the tier-2 setups run it.
+T10_VALIDATE = """
+import json, sys
+from comfyctl.fetch import lockfile, schema
+doc = json.load(sys.stdin)
+problems = schema.validate(doc, "comfy") or schema.validate_semantics(doc)
+paths = [] if problems else [lockfile.install_path(f) for m in doc["models"] for f in m["files"]]
+print(json.dumps({"problems": problems, "paths": paths}))
+"""
+
+
+def t10_comfy_yaml(entries: object) -> list[str]:
+    """Why the comfy.yaml entries aren't one valid entry for the missing checkpoint, from the source the
+    UI graph declares, into models/checkpoints/; or nothing."""
+    if not isinstance(entries, list) or not entries:
+        return [f"comfy_yaml_models is {entries!r}, not a list of comfy.yaml model entries"]
+    r = subprocess.run(
+        ["uv", "run", "--project", str(HERE.parent.parent / "services"), "--locked", "--quiet",
+         "python", "-c", T10_VALIDATE],
+        input=json.dumps({"models": entries}), capture_output=True, text=True, check=False,
+    )
+    if r.returncode != 0:
+        raise CheckFailed(f"comfyctl's manifest validation didn't run: {r.stderr.strip()[-300:]}")
+    result = json.loads(r.stdout.strip().splitlines()[-1])
+    if result["problems"]:
+        return [f"comfy_yaml_models doesn't validate against comfy.schema.json: {'; '.join(result['problems'][:3])}"]
+    files = [f for m in entries for f in m["files"]]
+    if len(files) != 1:
+        return [f"comfy_yaml_models declares {len(files)} files; the instance lacks one model"]
+    f, path, out = files[0], result["paths"][0], []
+    if path != f"models/checkpoints/{T10_CKPT}":
+        out.append(f"the comfy.yaml entry installs {path}, want models/checkpoints/{T10_CKPT}")
+    if f["source"] == f"hf:{T10_REPO}":
+        if f.get("file") != T10_CKPT or f.get("revision", "main") != "main":
+            out.append(f"the comfy.yaml entry takes file {f.get('file')!r} at {f.get('revision', 'main')!r} "
+                       f"from hf:{T10_REPO}, want {T10_CKPT!r} at main")
+    elif f["source"] != T10_CKPT_URL:
+        out.append(f"the comfy.yaml entry's source is {f['source']!r}, want hf:{T10_REPO} or {T10_CKPT_URL}")
+    return out
+
+
+def t10_custom_nodes(nodes: object) -> list[str]:
+    """Why custom_nodes isn't exactly the git pack at its commit, in ComfyUI-Manager's snapshot shape; or nothing."""
+    if not isinstance(nodes, dict):
+        return [f"custom_nodes is {nodes!r}, not an object"]
+    git = nodes.get("git_custom_nodes")
+    if not isinstance(git, dict):
+        return [f"custom_nodes has no git_custom_nodes object: {nodes!r}"]
+    by_url = {str(k).strip().rstrip("/").removesuffix(".git").lower(): v for k, v in git.items()}
+    out = []
+    if set(by_url) != {T10_PACK_URL.lower()}:
+        out.append(f"git_custom_nodes lists {sorted(git)}, want only {T10_PACK_URL}")
+    entry = by_url.get(T10_PACK_URL.lower())
+    if isinstance(entry, dict):
+        if str(entry.get("hash", "")).lower() != T10_COMMIT:
+            out.append(f"{T10_PACK_URL} is at {entry.get('hash')!r}, want {T10_COMMIT}")
+        if entry.get("disabled") is not False:
+            out.append(f"{T10_PACK_URL} has disabled={entry.get('disabled')!r}, want false")
+    elif entry is not None:
+        out.append(f"{T10_PACK_URL} maps to {entry!r}, not {{hash, disabled}}")
+    if nodes.get("cnr_custom_nodes") not in (None, {}):
+        out.append(f"cnr_custom_nodes lists {nodes['cnr_custom_nodes']!r}; the instance lacks no registry pack")
+    return out
+
+
+def check_t10() -> str:
+    p = RESULTS / "T10.setup.json"
+    if not p.exists():
+        raise CheckFailed("no T10.setup.json; run tasks/T10/setup.sh first")
+    setup = json.loads(p.read_text())
+    # The instance still lacks what it lacked: nothing was installed or downloaded.
+    problems = []
+    if T10_CLASS in get("/object_info"):  # type: ignore[operator]
+        problems.append(f"{T10_CLASS} is now installed")
+    if any(str(c).rsplit("/", 1)[-1] == T10_CKPT for c in get("/models/checkpoints")):  # type: ignore[union-attr]
+        problems.append(f"{T10_CKPT} is now on the instance")
+    added = sorted(set(custom_node_entries()) - set(setup["custom_nodes"]))
+    if added:
+        problems.append(f"the custom_nodes volume changed: {added}")
+    report = read_result("T10.json")
+    if not isinstance(report, dict):
+        raise CheckFailed(f"results/T10.json is not a JSON object: {type(report).__name__}")
+    workflows = report.get("workflows") if isinstance(report.get("workflows"), dict) else {}
+    for name in T10_FILES:
+        problems += t10_findings(name, workflows.get(name, workflows.get(Path(name).stem)))
+    problems += t10_fixed(setup["workflows"])
+    problems += t10_comfy_yaml(report.get("comfy_yaml_models"))
+    problems += t10_custom_nodes(report.get("custom_nodes"))
+    if problems:
+        raise CheckFailed("; ".join(problems))
+    return (
+        f"both workflows: {T10_CKPT} and {T10_CLASS} missing, {T10_LORA} at {T10_LORA_AT}, fixed in both graphs; "
+        f"comfy.yaml installs models/checkpoints/{T10_CKPT}; custom_nodes {T10_PACK_URL} at {T10_COMMIT[:8]}; "
+        "nothing installed or downloaded"
+    )
+
+
 # --- External-agent mode (external.sh) -------------------------------------------
 
 # The same brief for every server: it names neither the server nor anything
@@ -1588,9 +1940,14 @@ def cmd_handoff(task: str, server: str, token_file: str, helper: str, spec_file:
         "confinement": "by instruction only: nothing stops the agent using other tools; see README",
         "check": f"./external.sh check {task} --server {server}",
         "started": int(time.time()),
+        # The image ID of the relay `up` started (comfyrelay only), which `check --batch` holds a batch to.
+        "relay_image": os.environ.get("HARNESS_RELAY_IMAGE") or None,
     }
     out = RESULTS / f"{server}-{task}.handoff.json"
     out.write_text(json.dumps(handoff, indent=2) + "\n")
+    if handoff["relay_image"]:
+        print(f"== relay: {os.environ.get('COMFYRELAY_IMAGE') or 'ghcr.io/pixeloven/comfyui/mcp:local'} "
+              f"({handoff['relay_image']})")
     print(f"== {task} on {server} is ready for an external agent. Give it the brief below, verbatim")
     print(f"== (also {brief_file}), with {WORKSPACE} as its working directory.")
     print(f"== Then: ./external.sh check {task} --server {server}")
@@ -1685,6 +2042,7 @@ CHECKS = {
     "t7": check_t7,
     "t8": check_t8,
     "t9": check_t9,
+    "t10": check_t10,
 }
 
 
@@ -1747,7 +2105,7 @@ METRICS = (
 PASSES = "passes"
 LABELS = {PASSES: PASSES, **dict(METRICS)}
 # The number each tier-2 task is judged on, named in advance. A task not named here is judged on passes.
-NUMBER_TO_BEAT = {"T7": "mcp_work_calls", "T8": "mcp_work_calls", "T9": PASSES}
+NUMBER_TO_BEAT = {"T7": "mcp_work_calls", "T8": "mcp_work_calls", "T9": PASSES, "T10": "mcp_work_calls"}
 NO_BATCH = "(none)"
 # Committed baselines (baselines/<batch>.csv), which summary and compare read beside the run scorecards.
 BASELINES = HERE / "baselines"
@@ -2000,6 +2358,7 @@ COMMANDS = {
     "setup-t4": cmd_setup_t4,
     "setup-t5": cmd_setup_t5,
     "setup-tier2": cmd_setup_tier2,
+    "t10-clean": cmd_t10_clean,
     "handoff": cmd_handoff,
     "check": cmd_check,
     "mcp-calls": cmd_mcp_calls,

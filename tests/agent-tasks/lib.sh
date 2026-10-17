@@ -162,6 +162,8 @@ prepare_task() {
   done
   curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' \
     -d '{"unload_models": true, "free_memory": true}' "$COMFY_URL/free"
+  # T10's placeholder LoRA (models/loras/sdxl/) is T10's alone: every other task starts without it.
+  [ "$1" = T10 ] || hpy t10-clean
   "$HARNESS_DIR/tasks/$1/setup.sh"
 }
 

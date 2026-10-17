@@ -23,7 +23,9 @@
 #                                 --tool-calls record what the lead's harness reported.
 #                                 --batch labels the row as one run of a set of
 #                                 repeats (letters, digits, . _ -), for summary and compare;
-#                                 a committed baseline's label (baselines/LABEL.csv) is refused.
+#                                 a committed baseline's label (baselines/LABEL.csv) is refused,
+#                                 and so is a comfyrelay run whose relay image (the one `up`
+#                                 started) isn't the image of the batch's earlier runs.
 #   ./external.sh summary <task> [--batch LABEL] [--server NAME] [--scorecard PATH]...
 #                                 k/N passes, and over passing runs the median, min and
 #                                 max of the MCP calls without polling, the workflow_run
@@ -35,7 +37,7 @@
 #                                 every --scorecard
 #   ./external.sh down [--purge]  stop ComfyUI and every server (down.sh)
 #
-# Tasks: T1, T3, T4, T5, T6-neutral and the tier-2 T7, T8 and T9 on every server;
+# Tasks: T1, T3, T4, T5, T6-neutral and the tier-2 T7, T8, T9 and T10 on every server;
 # T2-refuse and the full
 # T6 (with citations) on comfyrelay, T2 on the others. `up` can be repeated for
 # the next task on the same instance. Each one restarts the server, empties the
@@ -50,7 +52,8 @@
 #
 # The images: HARNESS_IMAGE (core-cpu, default the local build from build.sh;
 # e.g. ghcr.io/pixeloven/comfyui/core:cpu-latest) and COMFYRELAY_IMAGE (default
-# ghcr.io/pixeloven/comfyui/mcp:local, built locally). T5's, T6's and
+# ghcr.io/pixeloven/comfyui/mcp:local, built locally), read by each `up`: set it per `up`
+# to interleave two relays' runs on one instance. T5's, T6's and
 # T6-neutral's checks use the relay image whatever the server. The containers use --network host
 # and bind loopback. For several runs on one host, give each its own
 # HARNESS_CONTAINER (the prefix of the container names), COMFY_PORT,
@@ -61,7 +64,7 @@ set -euo pipefail
 case "${1:-}" in summary|compare) exec python3 "$(dirname "$0")/harness.py" "$@" ;; esac
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
@@ -161,6 +164,9 @@ if [ "$cmd" = up ]; then
     comfyrelay)
       "$HARNESS_DIR/servers/comfyrelay.sh" up
       token_file="$COMFYRELAY_TOKEN_FILE" token="$COMFYRELAY_MCP_TOKEN"
+      # The image the relay runs, by ID, for the handoff: `check --batch` holds a batch to one.
+      HARNESS_RELAY_IMAGE="$(docker inspect -f '{{.Image}}' "$HARNESS_CONTAINER-mcp-comfyrelay")"
+      export HARNESS_RELAY_IMAGE
       ;;
     artokun)
       "$HARNESS_DIR/servers/artokun.sh" up
@@ -188,6 +194,15 @@ set_up_for="$(cat "$HARNESS_DATA/workspace/.harness-server" 2>/dev/null || true)
   echo "the workspace was set up for ${set_up_for:-no server}, not $server; run ./external.sh up $task --server $server first" >&2
   exit 2
 }
+# A batch is one relay image. A run whose relay isn't the image of the batch's earlier runs (the
+# image was switched for the other arm and the label wasn't, or the reverse) is refused unrecorded.
+relay="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("relay_image") or "")' "$handoff")"
+pin="$RESULTS/batches/$batch.relay-image"
+if [ -n "$batch" ] && [ -n "$relay" ] && [ -s "$pin" ] && [ "$(cat "$pin")" != "$relay" ]; then
+  echo "batch $batch ran on relay image $(cat "$pin"), and this run's relay is $relay;" >&2
+  echo "check the --batch label, or the COMFYRELAY_IMAGE that \`up\` ran with" >&2
+  exit 2
+fi
 started="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["started"])' "$handoff")"
 elapsed=$(( $(date +%s) - started ))
 # T5's check ends with a self-test of comfyrelay's runnability verdicts,
@@ -214,4 +229,8 @@ echo "mcp: ${mcp_calls:-?} tool calls, ${mcp_work:-?} without polling, ${mcp_run
   "${mcp_errors:-?} failed${mcp_by_tool:+ ($mcp_by_tool)}"
 append_score "$server" "$task" "$verdict" "$detail" "$elapsed" "external (not sandboxed)" "" \
   "$tokens" "$tool_calls" "$mcp_calls" "$mcp_work" "$mcp_runs" "$mcp_errors" "$mcp_by_tool" "$batch"
+if [ -n "$batch" ] && [ -n "$relay" ] && [ ! -s "$pin" ]; then
+  mkdir -p "$RESULTS/batches"
+  echo "$relay" > "$pin"
+fi
 exit "$rc"
