@@ -130,6 +130,9 @@ class ModelSource(_Compact):
         description="workflow: the graph's own properties.models. template: a stock template on this instance"
     )
     template: str | None = Field(default=None, description="The template that declares it")
+    directory: str | None = Field(
+        default=None, description="The folder the template declares it in, which may not suit this graph's loader"
+    )
     url: str
 
 
@@ -229,7 +232,10 @@ def _matches(name: str, files: list[str]) -> list[str]:
     template check's _on_disk, but every match, so several can be reported rather than the first chosen."""
     if name in files:
         return [name]
-    return [f for f in files if f.rsplit("/", 1)[-1] == name]
+    norm = name.replace("\\", "/")  # a workflow saved on Windows names subfolders with backslashes
+    if norm in files:
+        return [norm]
+    return [f for f in files if f.rsplit("/", 1)[-1] == norm]
 
 
 def _moved(name: str, matches: list[str], **where: Any) -> ModelAtAnotherPath:
@@ -294,42 +300,80 @@ def _base(path: str) -> str:
     return re.split(r"[/\\]", path)[-1]
 
 
-def _used_name(node: dict[str, Any], declared: str) -> str:
+def _used_name(node: dict[str, Any], declared: str) -> str | None:
     """The value a node actually uses for a model it declares: its widget value that names that file, bare or under
-    a subfolder, else the declared name. properties.models is a declaration; the widget is what runs."""
+    a subfolder. properties.models is a declaration; the widget is what runs. The declared name when the node has
+    no widget value that names a file at all, so nothing says otherwise; None when its file-naming widgets all name
+    other files, so the declaration is stale."""
     values: list[Any] = []
     for held in (node.get("widgets_values_named"), node.get("widgets_values")):
         values += list(held.values()) if isinstance(held, dict) else held if isinstance(held, list) else []
-    return next((v for v in values if isinstance(v, str) and v and _base(v) == _base(declared)), declared)
+    files = [v for v in values if isinstance(v, str) and FILE_NAME.search(v)]
+    used = next((v for v in files if _base(v) == _base(declared)), None)
+    return used if used is not None or files else declared
 
 
-def _used_models(workflow: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+def _used_models(workflow: dict[str, Any]) -> tuple[tuple[dict[str, Any], ...], int]:
     """The models the active nodes declare (properties.models), each under the name its node's widget uses: the
-    template check's declared models, judged by what would run. `declared` keeps the name the property gives."""
+    template check's declared models, judged by what would run. `declared` keeps the name the property gives, and
+    `class_type` the declaring node's class. And how many declarations no widget of their node uses (skipped)."""
     seen: dict[tuple[str, str], dict[str, Any]] = {}
+    stale = 0
     for node in _active_nodes(workflow):
         props = node.get("properties") if isinstance(node.get("properties"), dict) else {}
         for m in props.get("models") or []:
             if isinstance(m, dict) and isinstance(m.get("name"), str) and isinstance(m.get("directory"), str):
                 name = _used_name(node, m["name"])
+                if name is None:
+                    stale += 1
+                    continue
                 url = m.get("url") if isinstance(m.get("url"), str) else None
                 seen.setdefault(
                     (m["directory"], name),
-                    {"name": name, "directory": m["directory"], "url": url, "declared": m["name"]},
+                    {
+                        "name": name,
+                        "directory": m["directory"],
+                        "url": url,
+                        "declared": m["name"],
+                        "class_type": node["type"],
+                    },
                 )
-    return tuple(seen.values())
+    return tuple(seen.values()), stale
+
+
+def _stale_note(stale: int) -> str:
+    return (
+        f"{stale} model declaration(s) in properties.models name a file no widget of their node uses (the widget's "
+        "value is what runs): skipped"
+    )
 
 
 async def _ui_findings(
     comfyui: ComfyUIClient, workflow: dict[str, Any], info: dict[str, Any]
 ) -> tuple[
-    list[RequiredNode], list[RequiredModel], list[ModelAtAnotherPath], list[RequiredInput], list[str], dict[str, str]
+    list[RequiredNode],
+    list[RequiredModel],
+    list[ModelAtAnotherPath],
+    list[RequiredInput],
+    list[str],
+    dict[str, str],
+    int,
 ]:
-    needs = replace(_requirements(workflow), models=_used_models(workflow))
+    """The findings, the notes on what wasn't checked, each declared model's URL by the name it's used under, and
+    how many declarations were stale (no widget of their node uses them)."""
+    used, stale = _used_models(workflow)
+    needs = replace(_requirements(workflow), models=used)
+    loader = {(m["directory"], m["name"]): m["class_type"] for m in used}
     folders = await _folder_files_or_why(comfyui, [needs])
     failed = {f: why for f, why in folders.items() if isinstance(why, str)}
     listed = {f: files for f, files in folders.items() if f not in failed}
     check = _runnability(needs, info, listed)
+    # A name the template check can't place because it is written with backslashes may be on disk all the same.
+    windows = {
+        (m.name, m.directory): found
+        for m in check.missing_models
+        if "\\" in m.name and (found := _matches(m.name, listed.get(m.directory) or []))
+    }
     sources = _node_sources(workflow)
     nodes = [
         RequiredNode(
@@ -346,15 +390,16 @@ async def _ui_findings(
             directory=m.directory,
             url=_text(m.url, URL_MAX_CHARS),
             folder_known=m.folder_known,
+            class_type=_capped(loader.get((m.directory, m.name)) or "", DISPLAY_NAME_MAX_CHARS) or None,
             source=ModelSource(declared_by="workflow", url=_capped(m.url, URL_MAX_CHARS)) if m.url else None,
         )
         for m in check.missing_models
-        if m.directory not in failed
+        if m.directory not in failed and (m.name, m.directory) not in windows
     ]
     moved = [
         _moved(m.name, _matches(m.name, listed.get(m.directory) or []), directory=m.directory)
         for m in check.models_need_value_change
-    ]
+    ] + [_moved(name, found, directory=directory) for (name, directory), found in windows.items()]
     inputs = [RequiredInput(**m.model_dump()) for m in check.missing_inputs if _checkable_input(m.file)]
     notes = [
         f"the model folder {_capped(f, DISPLAY_NAME_MAX_CHARS)!r} couldn't be listed ({why}), so the models declared "
@@ -363,8 +408,8 @@ async def _ui_findings(
     ]
     if len(inputs) < len(check.missing_inputs):
         notes.append(_input_note(len(check.missing_inputs) - len(inputs)))
-    urls = {m["name"]: m["url"] for m in needs.models if isinstance(m.get("url"), str)}
-    return nodes, models, moved, inputs, notes, urls
+    urls = {m["name"]: m["url"] for m in used if isinstance(m.get("url"), str)}
+    return nodes, models, moved, inputs, notes, urls, stale
 
 
 # -- API format: the graph's values ---------------------------------------------
@@ -460,6 +505,7 @@ async def _api_findings(
     listings = await _listings(comfyui) if refs else {}
     choices: dict[Any, list[str]] = {}
     folder: dict[Any, str | None] = {}
+    present: dict[Any, frozenset[str]] = {}
     by_name: dict[Any, dict[str, list[str]]] = {}
     models, moved = [], []
     for ref in refs:
@@ -467,17 +513,19 @@ async def _api_findings(
         key = (_capped(ref["class_type"], DISPLAY_NAME_MAX_CHARS), _capped(ref["input"], DISPLAY_NAME_MAX_CHARS))
         if key not in folder:  # worked out once per loader input, however many nodes use it
             choices[key] = ref["files"]
-            folder[key] = _folder_of(frozenset(ref["files"]), listings)
+            present[key] = frozenset(ref["files"])
+            folder[key] = _folder_of(present[key], listings)
             by_name[key] = {}
-            for f in ref["files"]:  # _matches, as a lookup: the value itself isn't among the options
+            for f in ref["files"]:  # _matches, as lookups: the value itself isn't among the options
                 by_name[key].setdefault(f.rsplit("/", 1)[-1], []).append(f)
+        norm = ref["value"].replace("\\", "/")  # a workflow saved on Windows names subfolders with backslashes
+        found = [norm] if norm in present[key] else by_name[key].get(norm)
         where = {
             "directory": folder[key],
             "node_id": _capped(ref["node_id"], DISPLAY_NAME_MAX_CHARS),
             "class_type": key[0],
             "input": key[1],
         }
-        found = by_name[key].get(ref["value"])
         if found:
             moved.append(_moved(ref["value"], found, **where))
         else:
@@ -647,7 +695,7 @@ async def _template_index(
         for m in n.models:
             if isinstance(m.get("url"), str):
                 index.setdefault(_base(m["name"]), []).append(
-                    {"url": m["url"], "directory": m["directory"], "template": name}
+                    {"url": m["url"], "directory": m["directory"], "template": name, "class_type": m.get("class_type")}
                 )
     if unread:
         return index, f"were checked in part ({len(names) - unread} of {len(names)} read in time)"
@@ -661,14 +709,24 @@ async def _sources(
     cache: TemplateCache | None,
     models: list[RequiredModel],
     urls: dict[str, str],
+    installs: dict[str, str],
     seconds: float,
-) -> str | None:
-    """Give each missing model the workflow gives no source for the first stock template's that declares its file
-    name, in the same folder when the folder is known; add its full URL to `urls` for the proposals. Returns the
-    note that says how far the templates were checked, when any model is left without a source."""
+) -> list[str]:
+    """Give each missing model the workflow gives no source for a stock template's that declares its file name.
+
+    Templates declare models by file name, and two may put one file in different folders, so which template counts:
+    - the model's folder known (from its loader): only templates in that folder, those whose declaring node is the
+      graph's loader class first. The proposal installs it there.
+    - the folder unknown: templates whose declaring node is the graph's loader class, when they agree on a folder;
+      the proposal installs it in that folder (`installs`), and `directory` stays unset, since that comes only
+      from the graph and its loader.
+    - otherwise, any template declaring the name: its source is given, with its folder on source.directory, but
+      no proposal, and a note says why: the folder may not suit this loader.
+    Adds each sourced model's full URL to `urls`. Returns notes: how far the templates were checked, when a model
+    is left without a source, and which sources come without a proposal."""
     unsourced = [m for m in models if m.source is None]
     if not unsourced:
-        return None
+        return []
     scope: str | None
     if cache is None:
         index, scope = {}, "weren't checked (this server has no template cache)"
@@ -681,28 +739,48 @@ async def _sources(
             )
         except TimeoutError:
             index, scope = {}, "weren't checked (timeout)"
+    unsure: list[str] = []
     for model in unsourced:
-        found = [
-            c
-            for c in index.get(_base(model.name), [])
-            if model.directory in (None, c["directory"]) and len(c["directory"]) <= DISPLAY_NAME_MAX_CHARS
-        ]
-        if found:
-            model.source = ModelSource(
-                declared_by="template",
-                template=_capped(found[0]["template"], DISPLAY_NAME_MAX_CHARS),
-                url=_capped(found[0]["url"], URL_MAX_CHARS),
-            )
-            model.directory = model.directory or found[0]["directory"]
-            urls[model.name] = found[0]["url"]
+        declared = [c for c in index.get(_base(model.name), []) if len(c["directory"]) <= DISPLAY_NAME_MAX_CHARS]
+        same_loader = [c for c in declared if model.class_type and c["class_type"] == model.class_type]
+        if model.directory is not None:
+            in_folder = [c for c in declared if c["directory"] == model.directory]
+            chosen = ([c for c in in_folder if c in same_loader] or in_folder)[:1]
+            proposed = bool(chosen)
+        elif same_loader and len({c["directory"] for c in same_loader}) == 1:
+            chosen, proposed = same_loader[:1], True
+        else:
+            chosen, proposed = declared[:1], False
+        if not chosen:
+            continue
+        c = chosen[0]
+        model.source = ModelSource(
+            declared_by="template",
+            template=_capped(c["template"], DISPLAY_NAME_MAX_CHARS),
+            directory=c["directory"],
+            url=_capped(c["url"], URL_MAX_CHARS),
+        )
+        if proposed:
+            urls[model.name] = c["url"]
+            if model.directory is None:
+                installs[model.name] = c["directory"]
+        else:
+            unsure.append(model.name)
+    notes = []
     left = sum(1 for m in unsourced if m.source is None)
-    if not left:
-        return None
-    templates = scope and f"the instance's templates {scope}" or "no stock template on this instance declares one"
-    return (
-        f"{left} missing model(s) have no source (source null): the workflow declares none for them, and "
-        f"{templates}. Matched by file name"
-    )
+    if left:
+        templates = scope and f"the instance's templates {scope}" or "no stock template on this instance declares one"
+        notes.append(
+            f"{left} missing model(s) have no source (source null): the workflow declares none for them, and "
+            f"{templates}. Templates are matched by file name only"
+        )
+    if unsure:
+        notes.append(
+            f"{len(unsure)} missing model(s) have a source only from a template whose loader isn't this graph's, or "
+            "from templates that disagree on its folder: source.directory is that template's folder, which may not "
+            "suit this graph's loader, so no comfy.yaml entry is proposed for them"
+        )
+    return notes
 
 
 # -- proposals ------------------------------------------------------------------
@@ -716,20 +794,22 @@ PROPOSAL_NOTE = (
 )
 
 
-def _model_entry(model: RequiredModel, url: str | None, notes: list[str]) -> dict[str, Any] | None:
-    """A comfy.yaml entry for a missing model, from the full URL the graph gives (never the capped one shown)."""
-    if not (url and model.directory):
+def _model_entry(model: RequiredModel, url: str | None, folder: str | None, notes: list[str]) -> dict[str, Any] | None:
+    """A comfy.yaml entry for a missing model, from the full URL the graph gives (never the capped one shown),
+    installed in `folder`: the model's own, or a template's its loader agrees with."""
+    if not (url and folder):
         return None
     if model.folder_known is False:
         notes.append(
-            f"no comfy.yaml entry is proposed for {model.name!r}: this ComfyUI has no {model.directory!r} model "
+            f"no comfy.yaml entry is proposed for {model.name!r}: this ComfyUI has no {folder!r} model "
             "folder type, so no loader would offer it"
         )
         return None
     parts = urlsplit(url)
     if parts.scheme != "https":
         return None
-    entry: dict[str, Any] = {"install": f"models/{model.directory}/"}
+    name = model.name.replace("\\", "/")  # the manifest's paths take forward slashes only
+    entry: dict[str, Any] = {"install": f"models/{folder}/"}
     hf = HF_URL.match(parts.path) if parts.netloc == "huggingface.co" else None
     civitai = CIVITAI_URL.match(parts.path) if parts.netloc == "civitai.com" else None
     if hf:
@@ -737,15 +817,15 @@ def _model_entry(model: RequiredModel, url: str | None, notes: list[str]) -> dic
         entry = {"source": f"hf:{repo}", "file": path, **entry}
         if revision != "main":
             entry["revision"] = revision
-        if path.rsplit("/", 1)[-1] != model.name:
-            entry["as"] = model.name
+        if path.rsplit("/", 1)[-1] != name:
+            entry["as"] = name
     elif civitai:
-        entry = {"source": f"civitai:{civitai.group(1)}", "as": model.name, **entry}
+        entry = {"source": f"civitai:{civitai.group(1)}", "as": name, **entry}
     else:
-        entry = {"source": url, "sha256": "<the file's SHA256>", "as": model.name, **entry}
+        entry = {"source": url, "sha256": "<the file's SHA256>", "as": name, **entry}
     if any(isinstance(v, str) and len(v) > URL_MAX_CHARS for v in entry.values()):
         return None  # a URL or path too long to give whole is not proposed in part
-    stem = model.name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    stem = _base(name).rsplit(".", 1)[0]
     return {"name": stem.lower(), "files": [entry]}
 
 
@@ -770,9 +850,17 @@ def _pack_entries(nodes: list[RequiredNode]) -> dict[str, Any] | None:
 
 
 def _proposals(
-    nodes: list[RequiredNode], models: list[RequiredModel], urls: dict[str, str], notes: list[str]
+    nodes: list[RequiredNode],
+    models: list[RequiredModel],
+    urls: dict[str, str],
+    installs: dict[str, str],
+    notes: list[str],
 ) -> Proposals | None:
-    entries = [e for e in (_model_entry(m, urls.get(m.name), notes) for m in models) if e is not None]
+    entries = [
+        e
+        for e in (_model_entry(m, urls.get(m.name), m.directory or installs.get(m.name), notes) for m in models)
+        if e is not None
+    ]
     packs = _pack_entries(nodes)
     if not (entries or packs):
         return None
@@ -802,14 +890,16 @@ async def _report(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + REQUIREMENTS_SECONDS - BUDGET_MARGIN_SECONDS  # each later step gets what is left
     info = _tolerant(info)
-    nodes, models, moved, inputs, notes, urls, choices = [], [], [], [], [], {}, {}
+    nodes, models, moved, inputs, notes, urls, choices, stale = [], [], [], [], [], {}, {}, 0
     if ui:
-        nodes, models, moved, inputs, notes, urls = await _ui_findings(comfyui, given, info)
+        nodes, models, moved, inputs, notes, urls, stale = await _ui_findings(comfyui, given, info)
     if api_graph is not None:
         api_nodes, api_models, api_moved, api_inputs, api_notes, choices = await _api_findings(comfyui, api_graph, info)
         named: set[str] = set()
-        if ui:  # the UI graph's own findings stand; its widget values add only models it didn't declare
-            named = {n for m in _used_models(given) for n in (m["name"], m["declared"])}
+        if ui:
+            # The UI graph's own findings stand for the names it checked: the values its declaring nodes use. A name
+            # only a declaration gives, or a node that declares nothing, is the widget values' to report.
+            named = {m["name"] for m in _used_models(given)[0]}
         else:
             nodes = api_nodes
         models += [m for m in api_models if m.name not in named]
@@ -822,10 +912,11 @@ async def _report(
     # Every note so far says something wasn't checked: a folder that couldn't be listed, input values the loader
     # resolves itself. The ones added below (sources, proposals, suggestions) don't.
     unchecked = bool(notes)
-    note = await _sources(comfyui, cache, models, urls, deadline - loop.time() - SUGGEST_RESERVE_SECONDS)
-    if note:
-        notes.append(note)
-    proposals = _proposals(nodes, models, urls, notes)  # of the capped lists, so each map is capped too
+    if stale:
+        notes.append(_stale_note(stale))
+    installs: dict[str, str] = {}
+    notes += await _sources(comfyui, cache, models, urls, installs, deadline - loop.time() - SUGGEST_RESERVE_SECONDS)
+    proposals = _proposals(nodes, models, urls, installs, notes)  # of the capped lists, so each map is capped too
     note = await _suggest(nodes, models, info, choices, min(SUGGEST_SECONDS, max(0.0, deadline - loop.time())))
     if note:
         notes.append(note)

@@ -358,14 +358,25 @@ converts it first (see *UI-to-API conversion*). The code is
     loader itself (its `VALIDATE_INPUTS`), so they are counted in `notes` as unchecked rather
     than reported missing.
   - **Every missing model has a `source`.** It is the workflow's own declaration if it has one.
-    Otherwise it is a stock template on this instance that declares that file name, in the same
-    folder when the folder is known, with the template named. Otherwise it is `null`, and a note
-    says whether the templates were checked in full, in part, or not at all, so silence never
-    reads as "nothing declares it". The template index comes through `template_search`'s cache,
-    fetch gates and per-version requirements. It is built once per `installed_templates_version`,
-    within the report's time, and kept only when every template was read. A template's source
-    feeds the proposals like a workflow's. ComfyUI-Manager's model list isn't read: its route
-    isn't served on this image.
+    Otherwise it is a stock template on this instance that declares that file name, with the
+    template and its folder (`source.directory`) named. Otherwise it is `null`, and a note says
+    whether the templates were checked in full, in part, or not at all, so silence never reads as
+    "nothing declares it". Templates are matched by file name only, and two can put one file in
+    different folders, so the index records each declaring node's class:
+    - **Folder known from the graph's loader.** Only templates in that folder count, those of
+      the same loader class first, and the proposal installs there.
+    - **Folder unknown.** Templates of the graph's loader class that agree on a folder give a
+      proposal in it. Any other match gives the source alone, with no proposal, and a note.
+    - **`directory` is never taken from a template.**
+
+    The template index comes through `template_search`'s cache, fetch gates and per-version
+    requirements. It is built once per `installed_templates_version`, within the report's time,
+    and kept only when every template was read. ComfyUI-Manager's model list isn't read: its
+    route isn't served on this image.
+  - **Stale declarations and Windows paths.** A declaration that no file-naming widget of its
+    node uses is skipped, with a note, because the widget's value is what runs. A widget value
+    written with backslashes is matched with forward slashes, and reported as a value change
+    when the file is there.
   - **A converted UI graph's uninstalled classes keep their names (#231).** The frontend
     converts such a node with no `class_type`. `workflow_validate`'s `missing_node_type` error for
     it then gets `class_type`, `details` and close names (`expected`) from the UI node's `type`,

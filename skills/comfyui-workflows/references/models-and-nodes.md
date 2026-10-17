@@ -25,7 +25,13 @@ agent's job is to propose the change to those files.
    declares that file (named in `source.template`), or `null`. A `null` source
    means nothing the relay checked declares it, and `notes` says how far it
    checked. When the templates weren't all checked, look further before
-   concluding that nothing declares it. The `mcp` image reads a UI graph's `properties` only, not
+   concluding that nothing declares it. A template source is matched by
+   file name only, and the template may load the file with another node
+   into another folder: `source.directory` is the template's folder, which
+   may not suit your loader. A template source is proposed for `comfy.yaml`
+   only when the folder is known from your loader, or when templates using
+   your loader's class agree on it. Otherwise a note says why there is no
+   proposal. The `mcp` image reads a UI graph's `properties` only, not
    its widget values, so a model named only in a widget isn't checked there,
    and `satisfied` is `null` instead of `true`. The `mcp-convert` image reads
    both. `requirements` doesn't change `valid`, and `satisfied: true` says

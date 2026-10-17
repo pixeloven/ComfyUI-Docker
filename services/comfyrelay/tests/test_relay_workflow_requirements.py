@@ -38,6 +38,7 @@ INFO = {
     "LoadVideo": node_spec(
         ("VIDEO",), input={"required": {"file": ["COMBO", {"options": ["clip.mp4"], "video_upload": True}]}}
     ),
+    "UpscaleModelLoader": node_spec(("UPSCALE_MODEL",), input={"required": {"model_name": combo()}}),
     "ImageInvert": node_spec(("IMAGE",), display_name="Invert Image"),
     "SaveImage": node_spec(("IMAGE",), output_node=True),
 }
@@ -225,11 +226,31 @@ def ui_graph() -> dict:
                             "directory": "checkpoints",
                             "url": f"https://huggingface.co/x/y/resolve/main/{SD15}",
                         },
+                    ],
+                },
+                widgets=[SD15],
+            ),
+            node(
+                12,
+                "CheckpointLoaderSimple",
+                {
+                    "cnr_id": "comfy-core",
+                    "models": [
                         {
                             "name": "flux1-dev-fp8.safetensors",
                             "directory": "checkpoints",
                             "url": "https://huggingface.co/Comfy-Org/flux1-dev/resolve/abc123/flux1-dev-fp8.safetensors?download=true",
                         },
+                    ],
+                },
+                widgets=["flux1-dev-fp8.safetensors"],
+            ),
+            node(
+                13,
+                "UpscaleModelLoader",
+                {
+                    "cnr_id": "comfy-core",
+                    "models": [
                         {
                             "name": "4x-Ultra.pth",
                             "directory": "upscale_models",
@@ -237,7 +258,7 @@ def ui_graph() -> dict:
                         },
                     ],
                 },
-                widgets=[SD15],
+                widgets=["4x-Ultra.pth"],
             ),
             node(2, "MathExpression|pysssss", {"cnr_id": "comfyui-custom-scripts", "ver": "1.2.5"}),
             node(3, "MathExpression|pysssss", {"cnr_id": "comfyui-custom-scripts", "ver": "1.2.5"}),
@@ -673,13 +694,13 @@ TURBO = "sd_xl_turbo_1.0_fp16.safetensors"
 TURBO_URL = f"https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/{TURBO}"
 
 
-def template_declaring(name: str, directory: str, url: str) -> dict:
+def template_declaring(name: str, directory: str, url: str, loader: str = "CheckpointLoaderSimple") -> dict:
     """A stock template in UI format whose loader declares one model."""
     return {
         "nodes": [
             {
                 "id": 1,
-                "type": "CheckpointLoaderSimple",
+                "type": loader,
                 "mode": 0,
                 "properties": {"models": [{"name": name, "directory": directory, "url": url}]},
                 "widgets_values": [name],
@@ -710,7 +731,12 @@ def bare_models() -> dict:
 async def test_a_bare_missing_model_takes_its_source_from_a_stock_template():
     got = (await validate(bare_models(), Fake(templates=stock_templates())))["requirements"]
     turbo, nothing = got["missing_models"]
-    assert turbo["source"] == {"declared_by": "template", "template": "sdxlturbo_example", "url": TURBO_URL}
+    assert turbo["source"] == {
+        "declared_by": "template",
+        "template": "sdxlturbo_example",
+        "directory": "checkpoints",
+        "url": TURBO_URL,
+    }
     assert turbo["directory"] == "checkpoints" and "url" not in turbo  # url stays the workflow's own declaration
     assert nothing["source"] is None
     [entry] = got["proposals"]["comfy_yaml_models"]
@@ -844,3 +870,157 @@ async def test_a_converted_ui_graphs_missing_classes_are_named_in_errors_and_req
     assert named["8"]["message"].startswith("Node 'ID #8' has no class_type")  # ComfyUI's wording, as before
     classes = {n["class_type"] for n in got["requirements"]["missing_nodes"]}
     assert classes == {"ConstrainImage|pysssss", "GetImageSizeAndCount"}
+
+
+# -- the second review of c7c4119 ----------------------------------------------------------
+
+
+async def test_an_undeclared_node_using_the_bare_name_is_still_checked():
+    """R-A: node 20 declares juggernaut and its widget uses the subfolder path that exists; node 999 declares
+    nothing and uses the bare name, which ComfyUI refuses. The second must still be reported."""
+    jugg = "juggernaut.safetensors"
+    info = {
+        **INFO,
+        "CheckpointLoaderSimple": node_spec(("MODEL",), input={"required": {"ckpt_name": combo(f"sdxl/{jugg}")}}),
+    }
+    fake = Fake(info, {**FOLDERS, "checkpoints": [f"sdxl/{jugg}"]})
+    ui = {
+        "nodes": [
+            {
+                "id": 20,
+                "type": "CheckpointLoaderSimple",
+                "mode": 0,
+                "properties": {"models": [{"name": jugg, "directory": "checkpoints", "url": "https://h/x"}]},
+                "widgets_values": [f"sdxl/{jugg}"],
+            },
+            {"id": 999, "type": "CheckpointLoaderSimple", "mode": 0, "widgets_values": [jugg]},
+        ],
+        "links": [],
+    }
+    converted = {
+        "20": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": f"sdxl/{jugg}"}},
+        "999": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": jugg}},
+    }
+    got = (await validate(ui, fake, FakeConverter(converted)))["requirements"]
+    [moved] = got["models_need_value_change"]
+    assert (moved["name"], moved["node_id"], moved["found_at"]) == (jugg, "999", f"sdxl/{jugg}")
+    assert got["satisfied"] is False
+
+
+def templates_for(name: str, *declared: tuple[str, str, str]) -> dict:
+    """Stock templates declaring `name`: (template, folder, declaring loader) each."""
+    return {
+        t: template_declaring(name, folder, f"https://huggingface.co/o/{t}/resolve/main/{name}", loader)
+        for t, folder, loader in declared
+    }
+
+
+def loader_graph(loader: str, name: str) -> tuple[dict, dict]:
+    """An API graph whose `loader` names `name`, and /object_info where that loader lists no files, so no folder can
+    be told from its options."""
+    info = {**INFO, loader: node_spec(("MODEL",), input={"required": {"model_name": combo()}})}
+    return {"1": {"class_type": loader, "inputs": {"model_name": name}}}, info
+
+
+async def test_a_template_for_another_loader_gives_a_source_but_no_folder_or_proposal():
+    """R-B: UNETLoader reads diffusion_models; a template's CheckpointLoaderSimple puts the file in checkpoints."""
+    graph, info = loader_graph("UNETLoader", TURBO)
+    templates = templates_for(TURBO, ("sdxlturbo_example", "checkpoints", "CheckpointLoaderSimple"))
+    got = (await validate(graph, Fake(info, templates=templates)))["requirements"]
+    [model] = got["missing_models"]
+    assert model["source"]["template"] == "sdxlturbo_example" and model["source"]["directory"] == "checkpoints"
+    assert "directory" not in model  # never taken from a template
+    assert "proposals" not in got
+    assert any("may not suit this graph's loader" in n for n in got["notes"])
+
+
+async def test_templates_of_the_same_loader_that_disagree_on_the_folder_give_no_proposal():
+    graph, info = loader_graph("FluxLoader", "flux1-dev-fp8.safetensors")
+    templates = templates_for(
+        "flux1-dev-fp8.safetensors",
+        ("flux_a", "checkpoints", "FluxLoader"),
+        ("flux_b", "diffusion_models", "FluxLoader"),
+    )
+    got = (await validate(graph, Fake(info, templates=templates)))["requirements"]
+    [model] = got["missing_models"]
+    assert model["source"]["template"] == "flux_a" and "directory" not in model
+    assert "proposals" not in got
+
+
+async def test_templates_of_the_same_loader_that_agree_give_a_proposal_in_their_folder():
+    graph, info = loader_graph("FluxLoader", "flux1-dev-fp8.safetensors")
+    templates = templates_for(
+        "flux1-dev-fp8.safetensors",
+        ("other_loader", "checkpoints", "CheckpointLoaderSimple"),
+        ("flux_a", "diffusion_models", "FluxLoader"),
+        ("flux_b", "diffusion_models", "FluxLoader"),
+    )
+    got = (await validate(graph, Fake(info, templates=templates)))["requirements"]
+    [model] = got["missing_models"]
+    assert model["source"]["template"] == "flux_a" and "directory" not in model
+    [entry] = got["proposals"]["comfy_yaml_models"]
+    assert entry["files"][0]["install"] == "models/diffusion_models/"
+
+
+async def test_in_a_known_folder_the_template_of_the_graphs_loader_is_preferred():
+    templates = templates_for(
+        TURBO,
+        ("first", "checkpoints", "SomeOtherLoader"),
+        ("second", "checkpoints", "CheckpointLoaderSimple"),
+    )
+    graph = {"1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": TURBO}}}
+    got = (await validate(graph, Fake(templates=templates)))["requirements"]
+    assert got["missing_models"][0]["source"]["template"] == "second"
+
+
+async def test_a_declaration_no_widget_uses_is_skipped_with_a_note():
+    """The node declares the turbo checkpoint, but its widget loads a file that is there: that's what runs."""
+    ui = {
+        "nodes": [
+            {
+                "id": 1,
+                "type": "CheckpointLoaderSimple",
+                "mode": 0,
+                "properties": {"models": [{"name": TURBO, "directory": "checkpoints", "url": TURBO_URL}]},
+                "widgets_values": [f"sd15/{SD15}"],
+            }
+        ],
+        "links": [],
+    }
+    converted = {"1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": f"sd15/{SD15}"}}}
+    got = (await validate(ui, converter=FakeConverter(converted)))["requirements"]
+    assert got["missing_models"] == [] and got["satisfied"] is True
+    assert got["notes"] == [req._stale_note(1)]
+
+
+async def test_a_windows_path_is_matched_with_forward_slashes():
+    windows = f"sd15\\{SD15}"
+    api = await validate({"1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": windows}}})
+    [moved] = api["requirements"]["models_need_value_change"]
+    assert (moved["name"], moved["found_at"]) == (windows, f"sd15/{SD15}")
+    ui = {
+        "nodes": [
+            {
+                "id": 1,
+                "type": "CheckpointLoaderSimple",
+                "mode": 0,
+                "properties": {"models": [{"name": SD15, "directory": "checkpoints"}]},
+                "widgets_values": [windows],
+            },
+            {
+                "id": 2,
+                "type": "CheckpointLoaderSimple",
+                "mode": 0,
+                "properties": {
+                    "models": [{"name": "sub\\new.safetensors", "directory": "checkpoints", "url": "https://h/n"}]
+                },
+                "widgets_values": ["sub\\new.safetensors"],
+            },
+        ],
+        "links": [],
+    }
+    got = (await validate(ui))["requirements"]
+    [moved] = got["models_need_value_change"]
+    assert (moved["name"], moved["found_at"]) == (windows, f"sd15/{SD15}")
+    [entry] = got["proposals"]["comfy_yaml_models"]
+    assert entry["files"][0]["as"] == "sub/new.safetensors"  # comfy.yaml takes no backslash
