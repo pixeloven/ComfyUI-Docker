@@ -1514,7 +1514,9 @@ T10_MODELS = {
     "sdxl_vae.safetensors": (
         "vae", "stabilityai/sdxl-vae", "63aeecb90ff7bc1c115395962d3e803571385b61938377bc7089b36e81e92e2e", "T10-ui.json",
     ),
-    # T10-api.json names it without a source; ComfyUI's stock template sdxlturbo_example declares its URL.
+    # T10-api.json names it without a source; ComfyUI's stock template sdxlturbo_example declares its URL, and so
+    # does Manager's bundled model-list.json (which also lists the base, the VAE and the offset LoRA, never
+    # add-detail-xl).
     "sd_xl_turbo_1.0_fp16.safetensors": (
         "checkpoints", "stabilityai/sdxl-turbo",
         "e869ac7d6942cb327d68d5ed83a40447aadf20e0c3358d98b2cc9e270db0da26", "sdxlturbo_example",
@@ -1863,8 +1865,33 @@ def t10_fixed(workflows: dict) -> list[str]:
         values = by_id[n["id"]].get("widgets_values", [])
         if not same(values, n["widgets_values"]):
             return out + [f"results/{name}'s {n['type']} {n['id']} has {values!r}, want {n['widgets_values']!r}"]
-    if not same(got.get("definitions"), want["definitions"]):
+    if subgraph_shape(got) != subgraph_shape(want):
         return out + [f"results/{name}'s subgraph changed"]
+    return out
+
+
+def subgraph_shape(wf: dict) -> object:
+    """A UI workflow's subgraphs as the top level is compared: by id, their inputs' and outputs' names and
+    types, inner nodes' (id, type) and widget values, and inner links' endpoints and type. Layout and
+    bookkeeping (size, pos, revision, state, extra), which an editor re-save changes, are left out."""
+    defs = wf.get("definitions") if isinstance(wf.get("definitions"), dict) else {}
+    out = {}
+    for sg in defs.get("subgraphs") or []:
+        if not isinstance(sg, dict):
+            return None
+        ports = [
+            sorted((str(p.get("name")), str(p.get("type"))) for p in sg.get(k) or [] if isinstance(p, dict))
+            for k in ("inputs", "outputs")
+        ]
+        nodes = sorted(
+            (str(n.get("id")), str(n.get("type")), json.dumps(canon(n.get("widgets_values", []))))
+            for n in sg.get("nodes") or [] if isinstance(n, dict)
+        )
+        links = sorted(
+            tuple(str(link.get(k)) for k in ("origin_id", "origin_slot", "target_id", "target_slot", "type"))
+            for link in sg.get("links") or [] if isinstance(link, dict)
+        )
+        out[str(sg.get("id"))] = (ports, nodes, links)
     return out
 
 
