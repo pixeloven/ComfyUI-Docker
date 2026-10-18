@@ -26,7 +26,7 @@ convert = ["playwright==1.63.0"]
 # `comfyrelay.cli.app` as a group when this package is installed.
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
