@@ -10,10 +10,40 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
-## Unreleased
+## 6.1.0 — 2026-10-18
+
+### Upgrading from 6.0.0
+
+Packs installed on 6.0.0 or earlier had their Python dependencies in the old
+container's layer, so a pack that needs a package the image doesn't ship shows
+`IMPORT FAILED` in the log after the upgrade. Run this once, as the runtime user,
+then restart ComfyUI; from then on those dependencies live in the node venv on the
+`user` volume and survive a recreate:
+
+```sh
+docker exec -u "$PUID:$PGID" comfyui cm-cli restore-dependencies --user-directory /app/user/__manager
+docker restart comfyui
+```
+
+`comfyui` is your container's name. See the runtime contract's *The Node Venv* →
+*When the Image Changes*.
 
 ### Added
 
+- **Custom-node dependencies survive a recreate (#115).** ComfyUI now runs from a
+  venv on the `user` volume, `/app/user/__node_venv`, layered over the image's, so
+  the Python packages Manager, `cm-cli` or `pip` install for custom nodes persist
+  and the image's venv is never changed. On by default; `COMFY_ENABLE_NODE_VENV=false`
+  turns it off. With it on, startup sets Manager's `use_uv` and
+  `use_unified_resolver` to `False`, since uv can't see the image's packages
+  through the layer. See the runtime contract's *The Node Venv*, including how to
+  recover after an image update.
+- **`COMFY_MANAGER_SECURITY_LEVEL` (#125)**, an opt-in that writes Manager's
+  `security_level` at start; unset, nothing changes. On these images only
+  `strong` changes anything: it closes Manager's reboot, uninstall and settings
+  routes. Installs over HTTP stay refused at every level. The runtime contract's
+  *Manager Security* now warns that Manager's reboot route is open to anyone who
+  can reach port 8188.
 - **`workflow_validate` reports what any workflow needs (#213).** Its new `requirements`
   field is the template runnability check applied to any graph, UI or API format, on the
   `mcp` and `mcp-convert` images. It lists missing node classes (with the pack a UI node
@@ -52,7 +82,7 @@ see `VERSIONING.md`.
   beside the run scorecards. Nothing published changes.
 - **The agent harness has T10, which judges the requirements report (#213), and interleaves
   the arms it compares (#212).** T10 gives the agent two workflows, one in API format and
-  one in UI format, with different needs. Between them they lack four models in two
+  one in UI format, with different needs. Between them they lack four models in three
   folders, one of them declared only by a stock template and one declared by nothing.
   They also lack three node classes from a git pack and a registry pack, one inside a
   subgraph, and have two models that are on disk only in a subfolder. Without changing
@@ -63,20 +93,6 @@ see `VERSIONING.md`.
   `up`. `external.sh up` and `check --batch` refuse a run whose relay image isn't the
   one its batch ran that task on. T10 is judged on the tokens an agent spends,
   pre-registered before its confirmatory run. Nothing published changes.
-- **Custom-node dependencies survive a recreate (#115).** ComfyUI now runs from a
-  venv on the `user` volume, `/app/user/__node_venv`, layered over the image's, so
-  the Python packages Manager, `cm-cli` or `pip` install for custom nodes persist
-  and the image's venv is never changed. On by default; `COMFY_ENABLE_NODE_VENV=false`
-  turns it off. With it on, startup sets Manager's `use_uv` and
-  `use_unified_resolver` to `False`, since uv can't see the image's packages
-  through the layer. See the runtime contract's *The Node Venv*, including how to
-  recover after an image update.
-- **`COMFY_MANAGER_SECURITY_LEVEL` (#125)**, an opt-in that writes Manager's
-  `security_level` at start; unset, nothing changes. On these images only
-  `strong` changes anything: it closes Manager's reboot, uninstall and settings
-  routes. Installs over HTTP stay refused at every level. The runtime contract's
-  *Manager Security* now warns that Manager's reboot route is open to anyone who
-  can reach port 8188.
 
 ### Changed
 
@@ -97,10 +113,6 @@ see `VERSIONING.md`.
   sit, because uv can't see the image's packages through the node venv. Every
   other `uv` command, Manager's `uv pip freeze` included, passes through
   (#223, #226).
-- **Upgrading from 6.0.0:** packs installed on 6.0.0 show `IMPORT FAILED` after
-  the upgrade, because their dependencies were in the old container. Run
-  `cm-cli restore-dependencies --user-directory /app/user/__manager` once in a
-  `docker exec` session as the runtime user, then restart.
 
 ## 6.0.0 — 2026-10-11
 
