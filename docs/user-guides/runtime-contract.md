@@ -377,9 +377,11 @@ docker exec -u "$PUID:$PGID" comfyui pip install <package>
 - **Don't use uv.** uv doesn't follow the `.pth` file, so `uv pip install` would
   reinstall the image's packages, torch included, into the node venv, or into
   `/app/.venv` in a session. The node venv's `uv` wrapper refuses, with exit code 2
-  and a message, the `uv pip` commands that change packages: `install`, `sync` and
-  `uninstall`, wherever options sit, so `uv -q pip install` is refused too. Every
-  other command, `uv pip freeze` and `uv pip list` included, passes through.
+  and a message, the `uv pip` commands that change packages. It fails closed: any
+  `install`, `sync` or `uninstall` argument after a `pip` argument is refused,
+  wherever options and their values sit, so `uv -q pip install` and
+  `uv --python-fetch automatic pip install` are refused too. Every other command,
+  `uv pip freeze` and `uv pip list` included, passes through.
   `python -m uv` from the node venv reaches the same wrapper, because uv's
   launcher looks in the venv's `bin/` first.
 - `/app/.venv/bin/pip` and `/app/.venv/bin/cm-cli` still install into the image's
@@ -394,9 +396,17 @@ those two keys and `file_logging = True`, Manager's default, because Manager rea
 missing boolean as false; Manager then uses that file instead of writing its own
 defaults. Setting `use_uv = True` again has no lasting effect while the node venv is
 on. If the file can't be parsed or written, startup logs a `WARNING` and leaves it as
-it is. It then reads `use_uv` back, and runs ComfyUI from the node venv only if it is
-`False`. Anything else, including a file that is missing or can't be parsed, which
-Manager treats as uv, makes ComfyUI run from the image's venv for that start, with a
+it is. It then checks what Manager will actually use, and runs ComfyUI from the node
+venv only if:
+
+- `/app/user/__manager` is writable by the runtime UID, or already holds Manager's
+  subdirectories (`snapshots`, `startup-scripts`, `cache`, `batch_history`).
+  Otherwise Manager 4.2.2 can't set up its directory there, reads its config from
+  its package directory instead, and that defaults to uv; and
+- `use_uv` and `use_unified_resolver` both read back as `False` there.
+
+Anything else, including a file that is missing or can't be parsed, which Manager
+treats as uv, makes ComfyUI run from the image's venv for that start, with a
 `WARNING`, as described above.
 
 **Identity.** Both startup paths make the node venv as the runtime UID: under a root

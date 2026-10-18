@@ -1,6 +1,7 @@
 """The workflow tools (#132), all in the `run` profile.
 
-    workflow_validate      check a graph's structure, classes and partner-API nodes against /object_info
+    workflow_validate      check a graph's structure, classes and partner-API nodes against /object_info, and
+                           report what the instance lacks to run it (requirements.py, #213)
     workflow_run           submit it; returns a job id at once (follow it with job_status)
     workflow_outputs       a finished run's files, and one file's bytes on request
     workflow_upload_input  put a file into ComfyUI's input directory
@@ -54,8 +55,9 @@ from .comfyui import ComfyUIClient, ComfyUIError
 from .convert import is_ui_format
 from .errors import RelayError
 from .jobs import MAX_WAIT_SECONDS, AlreadyFinished, current_job, unknown_job
+from .requirements import WorkflowRequirements, workflow_requirements
 from .tools_introspection import FRONTEND_ONLY, INACTIVE_MODES, WORKFLOW_MAX_CHARS, workflow_chars
-from .workflow import Problem, Report, partner_signals, validate
+from .workflow import Problem, Report, _suggest, partner_signals, shape_problems, validate
 
 if TYPE_CHECKING:
     from .tools import Relay
@@ -156,6 +158,14 @@ class ValidationResult(BaseModel):
         "Left out when over 80,000 characters as JSON (workflow_omitted says so)",
     )
     workflow_omitted: str | None = None
+    requirements: WorkflowRequirements | None = Field(
+        default=None,
+        description="What this instance lacks to run the graph: node classes, models, models under another path, "
+        "input files, with proposals for a human to apply. It doesn't change valid or runnable",
+    )
+    requirements_unchecked: str | None = Field(
+        default=None, description="Why requirements is absent: timeout, an error code, check_failed, invalid_workflow"
+    )
 
 
 WorkflowArg = Annotated[
@@ -269,6 +279,49 @@ def ui_partner_nodes(workflow: dict[str, Any], info: dict[str, Any]) -> list[dic
     return found
 
 
+def ui_node_types(workflow: dict[str, Any]) -> dict[str, str]:
+    """Every UI node's type, by the id the API graph gives it: `<id>` at the top level, `<instance id>:<inner id>`
+    inside a subgraph (as ui_partner_nodes names them), nested subgraphs followed."""
+    definitions = workflow.get("definitions") if isinstance(workflow.get("definitions"), dict) else {}
+    subgraphs = {
+        s["id"]: s["nodes"]
+        for s in definitions.get("subgraphs") or []
+        if isinstance(s, dict) and isinstance(s.get("id"), str) and isinstance(s.get("nodes"), list)
+    }
+    types: dict[str, str] = {}
+
+    def walk(nodes: list[Any], prefix: str, inside: frozenset[str]) -> None:
+        for node in nodes:
+            if not isinstance(node, dict) or not isinstance(node.get("type"), str):
+                continue
+            kind, node_id = node["type"], f"{prefix}{node.get('id')}"
+            if kind in subgraphs:
+                if kind not in inside:
+                    walk(subgraphs[kind], f"{node_id}:", inside | {kind})
+            else:
+                types[node_id] = kind
+
+    walk(workflow["nodes"], "", frozenset())
+    return types
+
+
+def _name_unconverted_classes(errors: list[WorkflowProblem], ui: dict[str, Any], info: dict[str, Any]) -> None:
+    """#231: the frontend converts a node whose class isn't installed with no class_type, so its missing_node_type
+    can't name the class. The UI graph it came from does: fill class_type, close names (as an API graph's error
+    gets) and a detail saying where the name came from. The message is left as ComfyUI would word it."""
+    unnamed = [e for e in errors if e.type == "missing_node_type" and e.class_type is None and e.node_id]
+    if not unnamed:
+        return
+    types = ui_node_types(ui)
+    for error in unnamed:
+        kind = types.get(error.node_id)
+        if kind is None or kind in info:
+            continue
+        error.class_type = kind
+        error.details = f"the UI graph's node {error.node_id} is a {kind!r}, which this ComfyUI hasn't got"
+        error.expected = _suggest(kind, info) or None
+
+
 async def _as_api(
     relay: Relay, workflow: dict[str, Any], *, refuse_partner: bool = False
 ) -> tuple[dict[str, Any], bool]:
@@ -295,16 +348,34 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
         a UI-format graph is converted first and the API graph it checked is returned, with converted_from_ui; a
         conversion that can't run fails with conversion_unavailable, one the frontend rejects with
         conversion_failed. There is no fallback converter.
+
+        requirements lists what this instance lacks to run it, UI or API format: node classes (with close names; in
+        UI format the node's pack), models (folder, close names among the loader's files, and a source: the
+        workflow's declaration, else a stock template's; null when neither, notes say how far it looked), models
+        only under another path (found_at: the value to use), and input files; with comfy.yaml and custom_nodes
+        proposals for a human to apply. Nothing is installed. It doesn't change valid. A UI graph this server
+        doesn't convert is read from its node properties only (satisfied is then never true; notes say so).
         """
+        given = workflow
         workflow, converted = await _as_api(relay, workflow)
-        result = _result(await _validate(relay, workflow))
+        info = await _object_info_shared(relay)
+        result = _result(validate(workflow, info))
         if converted:
             result.converted_from_ui = True
+            _name_unconverted_classes(result.errors, given, info)
             size = workflow_chars(workflow)
             if size <= WORKFLOW_MAX_CHARS:
                 result.workflow = workflow
             else:
                 result.workflow_omitted = f"the converted graph is {size} characters as JSON, over {WORKFLOW_MAX_CHARS}"
+        ui = is_ui_format(given)
+        api_graph = workflow if converted or not (ui or shape_problems(given)) else None
+        if ui or api_graph is not None:
+            result.requirements, result.requirements_unchecked = await workflow_requirements(
+                relay.comfyui, given, api_graph, info, ui, relay.template_requirements
+            )
+        else:
+            result.requirements_unchecked = "invalid_workflow"
         return result
 
     return workflow_validate

@@ -29,18 +29,22 @@
 #      piexif comes from the node venv, ComfyUI runs from it, neither
 #      container changed /app/.venv (`docker diff`), config.ini says use_uv = False and security_level = strong
 #      and kept share_option, and Manager's reboot route answers 403.
-#   4. A fresh user volume, owned by 1001, with a config.ini that isn't INI.
+#   4. Fresh user volumes whose __manager directory is root-owned 0755 (#223,
+#      #226). With use_uv = True, startup can't change it, so ComfyUI must
+#      still boot, from the image's venv, with a WARNING; before #223 it
+#      crash-looped. With use_uv = False but none of Manager's subdirectories,
+#      Manager would read its config from its package directory instead, so
+#      startup must fall back the same way.
+#   5. A fresh user volume, owned by 1001, with a config.ini that isn't INI.
 #      Start as non-root 1001:1001: startup makes the node venv, only warns
 #      about the file, and, since use_uv can't be read as False, runs ComfyUI
 #      from the image's venv. Then make the file valid with use_uv = True,
 #      break the venv as a killed first start leaves it (no .pth, no
 #      wrappers), and restart: startup sets use_uv = False, repairs the venv,
 #      runs from it, and doesn't call it "made for another Python". Its uv
-#      wrapper refuses `uv -q pip install` and lets `python -m uv pip freeze`
-#      through.
-#   5. A fresh user volume whose __manager directory is root-owned 0755, with
-#      use_uv = True (#223): startup can't change it, so ComfyUI must still
-#      boot, from the image's venv, with a WARNING.
+#      wrapper refuses `uv -q pip install`, `uv --preview-features X pip
+#      install` and `uv --python-fetch automatic pip install`, and lets
+#      `python -m uv pip freeze` through.
 #   On any failure, print the container logs and exit 1.
 set -euo pipefail
 
@@ -240,8 +244,34 @@ code="$(docker exec "$name" curl -s -o /dev/null -w '%{http_code}' -X POST \
 echo "node-deps: piexif from $where; use_uv = False, share_option kept, security_level = strong, reboot route 403"
 retire "$name" "$out/node-deps-2.log"
 
-# 4. A fresh user volume and a config.ini that isn't INI, as non-root.
+# 4. __manager not writable by the runtime UID (#223, #226), first with
+# use_uv = True: before #223 this crash-looped. Then with use_uv = False but
+# none of Manager's subdirectories, where Manager reads another config.
 stage=3
+as_root "cd /vol && for u in user3 user4; do mkdir \$u \$u/__manager && chown 1001:1001 \$u \
+    && chmod 0755 \$u/__manager; done \
+  && printf '[default]\nuse_uv = True\n' > user3/__manager/config.ini \
+  && printf '[default]\nuse_uv = False\nuse_unified_resolver = False\n' > user4/__manager/config.ini \
+  && chmod 0644 user3/__manager/config.ini user4/__manager/config.ini"
+echo "node-deps: starting as non-root 1001:1001 with a root-owned __manager holding use_uv = True"
+docker run -d --name "$name" "${run_args[@]}" --user 1001:1001 \
+  -v "$work/vol/custom_nodes:/app/custom_nodes" -v "$work/vol/user3:/app/user" "$image" >/dev/null
+ready
+check_runs_from_image "unwritable __manager, use_uv = True"
+grep -q "WARNING: $node_venv can't be used" "$(logs)" || fail "startup did not warn that it fell back to the image's venv"
+retire "$name" "$out/node-deps-3.log"
+stage=4
+echo "node-deps: starting as non-root 1001:1001 with a root-owned __manager, use_uv = False, no subdirectories"
+docker run -d --name "$name" "${run_args[@]}" --user 1001:1001 \
+  -v "$work/vol/custom_nodes:/app/custom_nodes" -v "$work/vol/user4:/app/user" "$image" >/dev/null
+ready
+check_runs_from_image "unwritable __manager without Manager's subdirectories"
+grep -q "WARNING: $node_venv can't be used" "$(logs)" || fail "startup did not warn that it fell back to the image's venv"
+echo "node-deps: with __manager unwritable, ComfyUI booted from the image's venv both times"
+retire "$name" "$out/node-deps-4.log"
+
+# 5. A fresh user volume and a config.ini that isn't INI, as non-root.
+stage=5
 as_root "cd /vol && mkdir user2 && mkdir user2/__manager \
   && echo 'not an ini file' > user2/__manager/config.ini && chown -R 1001:1001 user2"
 echo "node-deps: starting as non-root 1001:1001 on a fresh user volume, config.ini malformed"
@@ -267,22 +297,14 @@ if as_user uv -q pip install piexif > "$work/uv.out" 2>&1; then
   cat "$work/uv.out" >&2; fail "the node venv's uv wrapper let \`uv -q pip install\` through"
 fi
 grep -q "uv pip install is refused" "$work/uv.out" || { cat "$work/uv.out" >&2; fail "uv -q pip install failed, but not with the wrapper's refusal"; }
+for cmd in "--preview-features X pip install piexif" "--python-fetch automatic pip install piexif"; do
+  # shellcheck disable=SC2086  # split on purpose
+  if as_user uv $cmd > "$work/uv.out" 2>&1 || ! grep -q "is refused" "$work/uv.out"; then
+    cat "$work/uv.out" >&2; fail "the node venv's uv wrapper let \`uv $cmd\` through"
+  fi
+done
 as_user python -m uv pip freeze > /dev/null || fail "the uv wrapper refused \`python -m uv pip freeze\`, which Manager runs at start"
 echo "node-deps: malformed config.ini fell back with a WARNING; the half-made venv was repaired; uv -q pip install refused, uv pip freeze allowed"
-retire "$name" "$out/node-deps-3.log"
-
-# 5. __manager not writable by the runtime UID, with use_uv = True (#223).
-stage=4
-as_root "cd /vol && mkdir user3 && mkdir user3/__manager \
-  && printf '[default]\nuse_uv = True\n' > user3/__manager/config.ini \
-  && chmod 0755 user3/__manager && chmod 0644 user3/__manager/config.ini && chown 1001:1001 user3"
-echo "node-deps: starting as non-root 1001:1001 with a root-owned __manager holding use_uv = True"
-docker run -d --name "$name" "${run_args[@]}" --user 1001:1001 \
-  -v "$work/vol/custom_nodes:/app/custom_nodes" -v "$work/vol/user3:/app/user" "$image" >/dev/null
-ready
-check_runs_from_image "unwritable __manager"
-grep -q "WARNING: $node_venv can't be used" "$(logs)" || fail "startup did not warn that it fell back to the image's venv"
-echo "node-deps: with __manager unwritable and use_uv = True, ComfyUI booted from the image's venv"
-retire "$name" "$out/node-deps-4.log"
+retire "$name" "$out/node-deps-5.log"
 
 echo "node-deps: PASS"
