@@ -3,7 +3,7 @@
 # subagent of the lead session. Three commands, so the lead can dispatch the
 # agent between them:
 #
-#   ./external.sh up <task> [--server comfyrelay|artokun|comfy-mcp]
+#   ./external.sh up <task> [--server comfyrelay|artokun|comfy-mcp] [--batch LABEL]
 #                                 boot core-cpu if it isn't running (up.sh, then
 #                                 groundtruth.sh), reset the task (its setup.sh),
 #                                 stop every other server, start this one (default
@@ -11,7 +11,8 @@
 #                                 the same preamble for every server (the rules, and the
 #                                 harness's MCP client to use), then the task's prompt.
 #                                 Also written to <workspace>/TASK.md and
-#                                 results/<server>-<task>.handoff.json
+#                                 results/<server>-<task>.handoff.json. --batch refuses (exit 2),
+#                                 before an agent is dispatched, a relay that check --batch would.
 #   (the agent does the task, and writes its results under the workspace)
 #   ./external.sh check <task> [--server ...] [--tokens N] [--tool-calls N] [--batch LABEL]
 #                                 run the task's check.sh, append a scorecard row with
@@ -23,7 +24,10 @@
 #                                 --tool-calls record what the lead's harness reported.
 #                                 --batch labels the row as one run of a set of
 #                                 repeats (letters, digits, . _ -), for summary and compare;
-#                                 a committed baseline's label (baselines/LABEL.csv) is refused.
+#                                 a committed baseline's label (baselines/LABEL.csv) is refused,
+#                                 and so is a comfyrelay run whose relay image (the one `up`
+#                                 started) isn't the image of the batch's earlier runs of the task
+#                                 (results/batches/LABEL.TASK.relay-image).
 #   ./external.sh summary <task> [--batch LABEL] [--server NAME] [--scorecard PATH]...
 #                                 k/N passes, and over passing runs the median, min and
 #                                 max of the MCP calls without polling, the workflow_run
@@ -35,7 +39,7 @@
 #                                 every --scorecard
 #   ./external.sh down [--purge]  stop ComfyUI and every server (down.sh)
 #
-# Tasks: T1, T3, T4, T5, T6-neutral and the tier-2 T7, T8 and T9 on every server;
+# Tasks: T1, T3, T4, T5, T6-neutral and the tier-2 T7, T8, T9 and T10 on every server;
 # T2-refuse and the full
 # T6 (with citations) on comfyrelay, T2 on the others. `up` can be repeated for
 # the next task on the same instance. Each one restarts the server, empties the
@@ -50,7 +54,8 @@
 #
 # The images: HARNESS_IMAGE (core-cpu, default the local build from build.sh;
 # e.g. ghcr.io/pixeloven/comfyui/core:cpu-latest) and COMFYRELAY_IMAGE (default
-# ghcr.io/pixeloven/comfyui/mcp:local, built locally). T5's, T6's and
+# ghcr.io/pixeloven/comfyui/mcp:local, built locally), read by each `up`: set it per `up`
+# to interleave two relays' runs on one instance. T5's, T6's and
 # T6-neutral's checks use the relay image whatever the server. The containers use --network host
 # and bind loopback. For several runs on one host, give each its own
 # HARNESS_CONTAINER (the prefix of the container names), COMFY_PORT,
@@ -61,7 +66,7 @@ set -euo pipefail
 case "${1:-}" in summary|compare) exec python3 "$(dirname "$0")/harness.py" "$@" ;; esac
 . "$(dirname "$0")/lib.sh"
 
-usage() { sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,62p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 cmd="${1:-}"
 case "$cmd" in
@@ -77,7 +82,7 @@ case "$cmd" in
           if [ "$1" = --tokens ]; then tokens="$2"; else tool_calls="$2"; fi
           shift 2 ;;
         --batch)
-          [ "$cmd" = check ] && [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9._-]+$ ]] || usage
+          [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9._-]+$ ]] || usage
           # A committed baseline's label is reserved: a control run must not join it.
           [ ! -e "$HARNESS_DIR/baselines/$2.csv" ] || {
             echo "--batch $2 is a committed baseline (baselines/$2.csv); label this run otherwise, e.g. control-<n>" >&2
@@ -91,10 +96,21 @@ case "$cmd" in
     [ -n "$task" ] || usage
     [ -f "$HARNESS_DIR/tasks/$task/prompt.md" ] || { echo "no task $task" >&2; exit 2; }
     handoff="$RESULTS/$server-$task.handoff.json"
+    # A batch is one relay image per task: the image ID of the batch's first comfyrelay run of it.
+    pin="$RESULTS/batches/$batch.$task.relay-image"
     ;;
   down) shift; exec "$HARNESS_DIR/down.sh" "$@" ;;
   *) usage ;;
 esac
+
+# Refuse (exit 2) a run of --batch whose relay image ($relay) isn't the one pinned for the batch and task.
+refuse_mixed_batch() {
+  if [ -n "$batch" ] && [ -n "$relay" ] && [ -s "$pin" ] && [ "$(cat "$pin")" != "$relay" ]; then
+    echo "batch $batch ran $task on relay image $(cat "$pin"), and this run's relay is $relay." >&2
+    echo "Check the --batch label and COMFYRELAY_IMAGE, or remove $pin to reuse the label for this image." >&2
+    exit 2
+  fi
+}
 
 if [ "$cmd" = up ]; then
   # comfyrelay must refuse the install, so it gets the inverted T2; the others
@@ -157,10 +173,14 @@ if [ "$cmd" = up ]; then
   rm -f "$MCP_CLIENT"
   install -m 0444 "$HARNESS_DIR/servers/mcp_client.py" "$MCP_CLIENT"
   token_file=""
+  unset HARNESS_RELAY_IMAGE
   case "$server" in
     comfyrelay)
       "$HARNESS_DIR/servers/comfyrelay.sh" up
       token_file="$COMFYRELAY_TOKEN_FILE" token="$COMFYRELAY_MCP_TOKEN"
+      # The image the relay runs, by ID, for the handoff: `check --batch` holds a batch to one.
+      HARNESS_RELAY_IMAGE="$(docker inspect -f '{{.Image}}' "$HARNESS_CONTAINER-mcp-comfyrelay")"
+      export HARNESS_RELAY_IMAGE
       ;;
     artokun)
       "$HARNESS_DIR/servers/artokun.sh" up
@@ -174,6 +194,9 @@ if [ "$cmd" = up ]; then
       || (umask 077; printf '%s\n' "$token" > "$token_file")
     chmod 600 "$token_file"
   fi
+  # --batch: refuse a relay that `check --batch` would, before an agent is dispatched.
+  relay="${HARNESS_RELAY_IMAGE:-}"
+  refuse_mixed_batch
   # The tool list, for the handoff. For comfy-mcp this also fills uv's cache,
   # so the client's launch (UV_OFFLINE=1) needs no package index.
   tools="$(python3 "$HARNESS_DIR/servers/probe.py" "$HARNESS_DIR/servers/$server.json")"
@@ -188,6 +211,10 @@ set_up_for="$(cat "$HARNESS_DATA/workspace/.harness-server" 2>/dev/null || true)
   echo "the workspace was set up for ${set_up_for:-no server}, not $server; run ./external.sh up $task --server $server first" >&2
   exit 2
 }
+# A run whose relay isn't the image of the batch's earlier runs of this task (the image was switched
+# for the other arm and the label wasn't, or the reverse) is refused unrecorded.
+relay="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("relay_image") or "")' "$handoff")"
+refuse_mixed_batch
 started="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["started"])' "$handoff")"
 elapsed=$(( $(date +%s) - started ))
 # T5's check ends with a self-test of comfyrelay's runnability verdicts,
@@ -214,4 +241,8 @@ echo "mcp: ${mcp_calls:-?} tool calls, ${mcp_work:-?} without polling, ${mcp_run
   "${mcp_errors:-?} failed${mcp_by_tool:+ ($mcp_by_tool)}"
 append_score "$server" "$task" "$verdict" "$detail" "$elapsed" "external (not sandboxed)" "" \
   "$tokens" "$tool_calls" "$mcp_calls" "$mcp_work" "$mcp_runs" "$mcp_errors" "$mcp_by_tool" "$batch"
+if [ -n "$batch" ] && [ -n "$relay" ] && [ ! -s "$pin" ]; then
+  mkdir -p "$RESULTS/batches"
+  echo "$relay" > "$pin"
+fi
 exit "$rc"

@@ -50,6 +50,19 @@ see `VERSIONING.md`.
   advance, and counts it over passing runs only. Both commands read the committed
   baseline, `tests/agent-tasks/baselines/baseline-6.0.0.csv` (5 runs each of T7–T9),
   beside the run scorecards. Nothing published changes.
+- **The agent harness has T10, which judges the requirements report (#213), and interleaves
+  the arms it compares (#212).** T10 gives the agent two workflows, one in API format and
+  one in UI format, with different needs. Between them they lack four models in two
+  folders, one of them declared only by a stock template and one declared by nothing.
+  They also lack three node classes from a git pack and a registry pack, one inside a
+  subgraph, and have two models that are on disk only in a subfolder. Without changing
+  the instance, the agent reports each workflow's needs, fixes the two model values, and
+  drafts `comfy.yaml` entries and a `custom_nodes` entry. The check grades those files,
+  and validates the entries with comfyctl. The README's *Repeating runs* now requires the
+  two arms to run interleaved in one session, with `COMFYRELAY_IMAGE` switched for each
+  `up`. `external.sh up` and `check --batch` refuse a run whose relay image isn't the
+  one its batch ran that task on. T10 is judged on the tokens an agent spends,
+  pre-registered before its confirmatory run. Nothing published changes.
 - **Custom-node dependencies survive a recreate (#115).** ComfyUI now runs from a
   venv on the `user` volume, `/app/user/__node_venv`, layered over the image's, so
   the Python packages Manager, `cm-cli` or `pip` install for custom nodes persist
