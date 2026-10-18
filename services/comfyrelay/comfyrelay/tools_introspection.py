@@ -1092,7 +1092,7 @@ class Requirements:
 
     uses: dict[str, int]  # active node class -> how many nodes of it
     packs: dict[str, str]  # node class -> the pack (cnr_id) the template names for it
-    models: tuple[dict[str, Any], ...]  # declared models: name, directory and url
+    models: tuple[dict[str, Any], ...]  # declared models: name, directory, url and the class declaring it
     inputs: tuple[tuple[str, str, str], ...]  # (loader class, input, file) for each loader value not fed by a link
 
 
@@ -1120,12 +1120,21 @@ def _loader_inputs(nodes: list[dict[str, Any]]) -> tuple[tuple[str, str, str], .
 def _requirements(workflow: dict[str, Any]) -> Requirements:
     nodes = _active_nodes(workflow)
     packs: dict[str, str] = {}
+    loaders: dict[tuple[Any, Any], str] = {}  # each declared model's first declaring node class (requirements.py)
     for node in nodes:
         props = node.get("properties") if isinstance(node.get("properties"), dict) else {}
         if isinstance(props.get("cnr_id"), str):
             packs.setdefault(node["type"], props["cnr_id"])
+        for m in props.get("models") or []:
+            if isinstance(m, dict) and isinstance(m.get("name"), str) and isinstance(m.get("directory"), str):
+                loaders.setdefault((m["directory"], m["name"]), node["type"])
     models = tuple(
-        {"name": m["name"], "directory": m["directory"], "url": m.get("url") if isinstance(m.get("url"), str) else None}
+        {
+            "name": m["name"],
+            "directory": m["directory"],
+            "url": m.get("url") if isinstance(m.get("url"), str) else None,
+            "class_type": loaders.get((m["directory"], m["name"])),
+        }
         for m in _declared_models(nodes)
     )
     return Requirements(dict(Counter(n["type"] for n in nodes)), packs, models, _loader_inputs(nodes))

@@ -14,6 +14,25 @@ see `VERSIONING.md`.
 
 ### Added
 
+- **`workflow_validate` reports what any workflow needs (#213).** Its new `requirements`
+  field is the template runnability check applied to any graph, UI or API format, on the
+  `mcp` and `mcp-convert` images. It lists missing node classes (with the pack a UI node
+  names, or close names), missing models (folder, a UI node's source URL, or close names
+  among the loader's files), models present only under another path (`found_at`), and
+  missing input files. Every missing model has a `source`: the workflow's declaration,
+  else a stock template on the instance that declares that file (matched by file name;
+  its folder is proposed only when the graph's loader agrees with it), else `null`, with
+  a note on how far the templates were checked. It adds `comfy.yaml` and `custom_nodes`
+  proposals for a human to apply. Whenever something couldn't be checked, `satisfied` is
+  `null` rather than `true`, and `notes` says what. One example is a UI graph's widget
+  values on `mcp`, which doesn't convert. It is additive: `valid`, `runnable` and every
+  argument are unchanged, and a report that can't be made is left out
+  (`requirements_unchecked`), never failing the call. The `comfyui-workflows` guides say
+  how to use it.
+- **`workflow_validate` names a converted UI graph's uninstalled classes (#231).** The
+  `missing_node_type` error for a node `mcp-convert` converted with no `class_type` now
+  carries the class from the UI graph, subgraphs included, with close names.
+
 - **The agent harness has a second tier, which measures workflow development (#212).**
   T7 (author a txt2img workflow from a template, then change it), T8 (fix a graph
   with four faults) and T9 (edit a saved workflow in ComfyUI's user data) run Stable
