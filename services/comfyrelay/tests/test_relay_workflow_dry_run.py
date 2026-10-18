@@ -255,3 +255,30 @@ async def test_comfyuis_data_is_capped():
     first = got["errors"][0]
     assert first["expected"] == options[: tw.DRY_RUN_MAX_OPTIONS] and first["expected_count"] == 1000
     assert len(first["details"]) == len(first["got"]) == len(got["error"]["message"]) == tw.DRY_RUN_TEXT_MAX_CHARS
+
+
+async def test_a_route_that_refuses_as_unsafe_is_a_reason_and_stays_detected():
+    """The module answers 503 validate_only_unsafe when another custom node replaced PromptQueue.put: the dry run
+    is refused, not run, and the route is still there, so the probe isn't asked again."""
+    fake = Fake()
+    fake.answer = (503, {"error": {"type": "validate_only_unsafe", "message": "refused"}, "node_errors": {}})
+    server, _ = build_server(settings(), comfyui=fake.client())
+    for _ in range(2):
+        got = await call(fake, server=server)
+        assert got["dry_run"] == {"ran": False, "reason": "unsafe", "detail": tw.NOT_RUN["unsafe"]}
+    assert fake.count("GET", ROUTE) == 1 and fake.count("POST", "/prompt") == 0
+
+
+async def test_a_503_that_is_not_the_modules_is_a_comfyui_error():
+    fake = Fake()
+    fake.answer = (503, {"error": "busy"})
+    got = await call(fake)
+    assert got["dry_run"]["reason"] == "comfyui_http_error"
+
+
+def test_the_dry_run_is_typed_in_the_output_schema():
+    schema = tw.ValidationResult.model_json_schema(mode="serialization")
+    assert {"ran", "accepted", "error", "errors", "errors_omitted", "reason", "detail"} <= set(
+        schema["$defs"]["DryRun"]["properties"]
+    )
+    assert "expected_count" in schema["$defs"]["DryRunProblem"]["properties"]

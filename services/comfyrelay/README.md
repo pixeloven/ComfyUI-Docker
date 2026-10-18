@@ -417,8 +417,10 @@ converts it first (see *UI-to-API conversion*). The code is
     per-node errors in `workflow_rejected`'s shape (`type`, `node_id`, `class_type`, `input`,
     `details`, `expected`, `got`).
   - `{"ran": false, "reason", "detail"}`: why not. `unavailable` is an instance without the
-    opt-in; `invalid_workflow` and `partner_api_nodes` were never sent; `timeout`, a
-    `comfyui_*` code or `check_failed` is a dry run that failed.
+    opt-in; `unsafe` is the route's `503 validate_only_unsafe` (another custom node replaced
+    `PromptQueue.put`, so the module refuses rather than risk queueing); `invalid_workflow`
+    and `partner_api_nodes` were never sent; `timeout`, a `comfyui_*` code or `check_failed`
+    is a dry run that failed.
 
   **Detection.** One `GET /comfyrelay/validate_only` per instance, its answer (yes or no) shared
   for 60 seconds. A stale yes can't queue anything: an instance without the module has no such

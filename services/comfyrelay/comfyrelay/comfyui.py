@@ -247,11 +247,18 @@ class ComfyUIClient:
     async def validate_only(self, graph: dict[str, Any], timeout: httpx2.Timeout) -> dict[str, Any] | None:
         """POST /comfyrelay/validate_only with exactly {"prompt": graph}: ComfyUI's /prompt checks, and nothing is
         queued. Returns {"accepted": True, "node_errors"} (the errors of outputs ComfyUI would drop) or
-        {"accepted": False, "error", "node_errors"} (/prompt's 400); None when this ComfyUI has no such route."""
+        {"accepted": False, "error", "node_errors"} (/prompt's 400); {"accepted": False, "unsafe": True} when the
+        route refused because another custom node replaced the queue's put (503); None when this ComfyUI has no such
+        route."""
         path = self.VALIDATE_ONLY_PATH
         response = await self._send("POST", path, json={"prompt": graph}, timeout=timeout)
         if response.status_code in (404, 405):
             return None
+        if response.status_code == 503:
+            body = self._json_or_none(response)
+            error = body.get("error") if isinstance(body, dict) else None
+            if isinstance(error, dict) and error.get("type") == "validate_only_unsafe":
+                return {"accepted": False, "unsafe": True}
         if response.status_code == 400:
             body = self._json_object(response, path)
             error = body.get("error")

@@ -32,9 +32,12 @@ see `VERSIONING.md`.
 - **A dry run for `workflow_validate` (#215).** The core and complete images have a
   new opt-in, `COMFY_ENABLE_VALIDATE_ONLY=true` (default `false`), that adds
   `POST /comfyrelay/validate_only`: ComfyUI's own `/prompt` handler, whose valid graph is
-  never queued, so nothing runs. It comes from a small first-party module shipped
-  root-owned in `/opt/comfyui-docker/validate-only/`, outside the custom_nodes volume,
-  which loads under any UID and defines no node class. Where it is on, the `mcp` and
+  never queued, so nothing runs. It fails closed: when another custom node has replaced
+  `PromptQueue.put` (on the queue or the class), so the graph could be queued, it answers
+  `503 validate_only_unsafe` instead, and the relay reports `reason: "unsafe"`. It comes
+  from a small first-party module shipped root-owned in `/opt/comfyui-docker/validate-only/`,
+  outside the custom_nodes volume, which loads under any UID, defines no node class, and
+  installs once when a second copy is also on the volume. Where it is on, the `mcp` and
   `mcp-convert` images' `workflow_validate` sends a structurally valid graph with no
   partner-API node there, as exactly `{"prompt": graph}` (no `extra_data`), and returns
   ComfyUI's verdict as a new `dry_run` field: `accepted`, ComfyUI's top-level `error`, and
@@ -44,8 +47,10 @@ see `VERSIONING.md`.
   `runnable` and the arguments are unchanged, and a dry run that fails or times out is a
   `reason`, never the call's failure. The relay detects the route with one cached
   `GET`; an instance without it answers 404 or 405, so nothing can be queued by mistake.
-  The examples pass the variable through, and `make smoke` and CI's `smoke-cpu` job check
-  it (`tests/smoke/validate-only.sh`). The template corpus now validates through the same
+  The Compose examples pass the variable through, and the Kubernetes `with-mcp` patch turns
+  it on for its sidecar. `make smoke` and CI's `smoke-cpu` job check it
+  (`tests/smoke/validate-only.sh`), including a second copy and a custom node that hooks
+  the queue. The template corpus now validates through the same
   route; its test-only copy, `tests/relay/validate_only.py`, is gone. The agent harness
   takes `HARNESS_VALIDATE_ONLY=true` to start ComfyUI with it.
 - **`workflow_validate` names a converted UI graph's uninstalled classes (#231).** The

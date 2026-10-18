@@ -139,9 +139,56 @@ class PartnerApiNode(BaseModel):
     )
 
 
+def _unset(value: Any) -> bool:
+    return value is None
+
+
+def _optional(description: str | None = None) -> Any:
+    """An optional field left out of the output when it has no value."""
+    return Field(default=None, exclude_if=_unset, description=description)
+
+
+class DryRunProblem(BaseModel):
+    type: str = Field(description="ComfyUI's error type: return_type_mismatch, value_not_in_list, ...")
+    message: str | None = _optional()
+    node_id: str | None = _optional()
+    class_type: str | None = _optional()
+    input: str | None = _optional()
+    details: str | None = _optional()
+    expected: Any = _optional("What the input takes: a type, the options (the first 20), a min or max")
+    expected_count: int | None = _optional("How many options there were, when expected lists only the first 20")
+    got: Any = _optional("What the graph gave it")
+
+
+class DryRunError(BaseModel):
+    type: str | None = _optional()
+    message: str | None = _optional()
+    details: str | None = _optional()
+
+
+class DryRun(BaseModel):
+    ran: bool = Field(
+        description="ComfyUI's /prompt checked the graph, through the core image's validate-only route, and queued "
+        "nothing"
+    )
+    accepted: bool | None = _optional("When ran: /prompt would accept the graph, so workflow_run would queue it")
+    error: DryRunError | None = _optional("When not accepted: ComfyUI's top-level error")
+    errors: list[DryRunProblem] | None = _optional(
+        "When ran: ComfyUI's per-node errors, as workflow_run's workflow_rejected gives them. With accepted true, "
+        "the outputs ComfyUI would drop"
+    )
+    errors_omitted: int | None = _optional("Errors past the first 50")
+    reason: str | None = _optional(
+        "When not ran: unavailable (no validate-only route), unsafe (the route refused: another custom node "
+        "replaced the queue's put), invalid_workflow, partner_api_nodes, timeout, a comfyui_* code or check_failed"
+    )
+    detail: str | None = _optional("When not ran: what that means")
+
+
 class ValidationResult(BaseModel):
     valid: bool = Field(
-        description="No structural errors. Input types and values are not checked here: ComfyUI checks them when "
+        description="No structural errors. Input types and values are not checked here: dry_run has ComfyUI's own "
+        "verdict on them where this instance has the validate-only opt-in; otherwise ComfyUI checks them when "
         "workflow_run submits the graph"
     )
     runnable: bool = Field(description="Valid, and no partner-API nodes: workflow_run would submit it")
@@ -167,7 +214,7 @@ class ValidationResult(BaseModel):
     requirements_unchecked: str | None = Field(
         default=None, description="Why requirements is absent: timeout, an error code, check_failed, invalid_workflow"
     )
-    dry_run: dict[str, Any] | None = Field(
+    dry_run: DryRun | None = Field(
         default=None,
         description="ComfyUI's own /prompt check, where this instance has the validate-only opt-in (#215): "
         "{ran: true, accepted, errors, error} with nothing queued; else {ran: false, reason, detail}. It doesn't "
@@ -276,6 +323,8 @@ NOT_RUN = {
     "partner_api_nodes": "not sent: a graph with partner-API nodes is never submitted",
     "unavailable": "this ComfyUI has no validate-only route (the core image's COMFY_ENABLE_VALIDATE_ONLY), so "
     "input types and values are checked only when workflow_run submits the graph",
+    "unsafe": "this ComfyUI's validate-only route refused: another custom node replaced PromptQueue.put, so a dry "
+    "run could queue the graph. Input types and values are checked only when workflow_run submits the graph",
 }
 
 
@@ -321,6 +370,8 @@ async def _dry_run_answer(relay: Relay, workflow: dict[str, Any]) -> dict[str, A
     if answer is None:  # the probe said yes, and the instance has since restarted without the module
         _validate_only.pop(relay.comfyui, None)
         return _not_run("unavailable")
+    if answer.get("unsafe"):  # the route is there, but can't guarantee the graph stays off the queue
+        return _not_run("unsafe")
     problems = comfyui_problems(answer["node_errors"])
     out: dict[str, Any] = {"ran": True, "accepted": answer["accepted"]}
     if not answer["accepted"]:
@@ -491,7 +542,7 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
                 )
             else:
                 result.requirements_unchecked = "invalid_workflow"
-            result.dry_run = await checked
+            result.dry_run = DryRun.model_validate(await checked)
         finally:
             checked.cancel()
         return result

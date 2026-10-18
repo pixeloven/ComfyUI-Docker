@@ -50,7 +50,10 @@ and restarts nothing. Skip this section if you don't use an MCP client.
    kubectl rollout status deployment/comfyui
    ```
 
-   Re-applying `examples/kubernetes/` later keeps the sidecar. To remove it,
+   The patch also sets `COMFY_ENABLE_VALIDATE_ONLY=true` on the `comfyui`
+   container, so the sidecar's `workflow_validate` can dry-run a graph through
+   ComfyUI's own `/prompt` checks with nothing queued (runtime contract, *The
+   Validate-Only Route*). Re-applying `examples/kubernetes/` later keeps the sidecar. To remove it,
    delete the `mcp` container with `kubectl edit deployment comfyui`, or delete
    and re-apply the Deployment.
 

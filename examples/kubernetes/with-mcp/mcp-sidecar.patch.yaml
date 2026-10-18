@@ -15,6 +15,15 @@ spec:
         - name: comfyui
         - name: mcp
       containers:
+        # The core image's validate-only route (#215), so the sidecar's
+        # workflow_validate can report ComfyUI's own /prompt verdict with
+        # nothing queued (runtime-contract.md, The Validate-Only Route). An
+        # image older than the route ignores it, and the dry run says
+        # unavailable.
+        - name: comfyui
+          env:
+            - name: COMFY_ENABLE_VALIDATE_ONLY
+              value: "true"
         - name: mcp
           # A placeholder that moves. Pin a release and a digest instead:
           #   ghcr.io/pixeloven/comfyui/mcp:X.Y.Z@sha256:<digest>

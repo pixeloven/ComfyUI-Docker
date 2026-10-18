@@ -26,6 +26,13 @@
 #   3. Start as root with no opt-in (the default): the module isn't loaded, the
 #      GET answers 404 and the POST anything but 200, so nothing can be queued
 #      through it.
+#   4. The opt-in on and the image's own copy of the module also on the
+#      custom_nodes volume, as tests/relay/corpus.sh and CI mount it: ComfyUI
+#      starts, the second copy does nothing, and the route still never queues.
+#   5. The opt-in on and a pass-through custom node that replaces put on the
+#      prompt queue itself, as some packs do. That shadows the module's wrapper,
+#      so the route must refuse (503 validate_only_unsafe), and nothing may be
+#      queued, recorded or saved.
 #   On any failure, print the container logs and exit 1.
 set -euo pipefail
 
@@ -129,6 +136,23 @@ graph='{"prompt": {"1": {"class_type": "EmptyImage", "inputs": {"width": 64, "he
 broken='{"prompt": {"1": {"class_type": "EmptyImage", "inputs": {"width": "wide", "height": 64, "batch_size": 1, "color": 0}},
   "2": {"class_type": "SaveImage", "inputs": {"images": ["1", 0]}}}}'
 
+# After a POST to the route: give a queued prompt time to start and finish, then
+# ComfyUI must have no job $1 (when given), an empty queue, an empty history and
+# no file in /app/output.
+nothing_ran() {
+  local job queue
+  sleep 2
+  if [ -n "${1:-}" ]; then
+    job="$(http "/api/jobs/$1")"
+    [ "$(status_of "$job")" = 404 ] || fail "ComfyUI has job $1 from $route: $(body_of "$job")"
+  fi
+  queue="$(body_of "$(http /queue)")"
+  [ "$(jqc '(.queue_running | length) + (.queue_pending | length)' <<< "$queue")" = 0 ] \
+    || fail "the queue is not empty after $route: $queue"
+  [ "$(body_of "$(http /history)" | jqc -c .)" = '{}' ] || fail "ComfyUI's history isn't empty after $route"
+  [ -z "$(docker exec "$name" ls -A /app/output)" ] || fail "$route ran the graph: /app/output has a file"
+}
+
 # 1. Root start, PUID/PGID 1001, opt-in on.
 echo "validate-only: starting $image as root, PUID=1001, COMFY_ENABLE_VALIDATE_ONLY=true"
 boot -e PUID=1001 -e PGID=1001 -e COMFY_ENABLE_VALIDATE_ONLY=true
@@ -141,14 +165,7 @@ got="$(http "$route" "$graph")"
 [ "$(status_of "$got")" = 200 ] || fail "a valid graph got HTTP $(status_of "$got") from $route: $(body_of "$got")"
 id="$(body_of "$got" | jqc -r .prompt_id)"
 [ -n "$id" ] && [ "$id" != null ] || fail "$route answered 200 without a prompt_id: $(body_of "$got")"
-sleep 2  # a queued prompt would have started, and finished, by now
-job="$(http "/api/jobs/$id")"
-[ "$(status_of "$job")" = 404 ] || fail "ComfyUI has job $id from $route: $(body_of "$job")"
-queue="$(body_of "$(http /queue)")"
-[ "$(jqc '(.queue_running | length) + (.queue_pending | length)' <<< "$queue")" = 0 ] \
-  || fail "the queue is not empty after $route: $queue"
-[ "$(body_of "$(http "/history/$id")" | jqc -c .)" = '{}' ] || fail "ComfyUI's history has $id from $route"
-[ -z "$(docker exec "$name" ls -A /app/output)" ] || fail "$route ran the graph: /app/output has a file"
+nothing_ran "$id"
 echo "validate-only: $route accepted a valid graph, and ComfyUI queued nothing, recorded nothing and saved nothing"
 
 got="$(http "$route" "$broken")"
@@ -188,5 +205,43 @@ got="$(status_of "$(http "$route" "$graph")")"
 [ "$got" != 200 ] || fail "POST $route answered 200 without the opt-in"
 echo "validate-only: without the opt-in, GET $route is 404 and the POST $got"
 retire "$name" "$out/validate-only-3.log"
+
+# 4. Loaded twice: the opt-in, plus the image's own copy on the custom_nodes volume.
+stage=4
+echo "validate-only: starting with the opt-in on and a second copy of the module in /app/custom_nodes"
+docker run --rm --pull never --network none --entrypoint cat "$image" \
+  /opt/comfyui-docker/validate-only/custom_nodes/comfyrelay_validate_only.py > "$work/comfyrelay_validate_only.py"
+chmod 0644 "$work/comfyrelay_validate_only.py"
+boot -e PUID=1001 -e PGID=1001 -e COMFY_ENABLE_VALIDATE_ONLY=true \
+  -v "$work/comfyrelay_validate_only.py:/app/custom_nodes/comfyrelay_validate_only.py:ro"
+grep -q 'comfyrelay_validate_only: already installed' "$(logs)" || fail "the second copy did not stand down"
+[ "$(grep -c 'comfyrelay_validate_only: installed' "$(logs)")" = 1 ] || fail "the module installed more than once"
+got="$(http "$route" "$graph")"
+[ "$(status_of "$got")" = 200 ] || fail "loaded twice, $route answered HTTP $(status_of "$got"): $(body_of "$got")"
+nothing_ran "$(body_of "$got" | jqc -r .prompt_id)"
+echo "validate-only: loaded twice, ComfyUI starts, the second copy does nothing, and $route still queues nothing"
+retire "$name" "$out/validate-only-4.log"
+
+# 5. A custom node that replaces put on the queue instance shadows the module's
+# wrapper: the route must refuse rather than queue.
+stage=5
+echo "validate-only: starting with the opt-in on and a custom node that hooks prompt_queue.put"
+cat > "$work/zz_hook_put.py" <<'EOF'
+from server import PromptServer
+
+_queue = PromptServer.instance.prompt_queue
+_put = _queue.put
+_queue.put = lambda item: _put(item)
+NODE_CLASS_MAPPINGS = {}
+EOF
+chmod 0644 "$work/zz_hook_put.py"
+boot -e PUID=1001 -e PGID=1001 -e COMFY_ENABLE_VALIDATE_ONLY=true \
+  -v "$work/zz_hook_put.py:/app/custom_nodes/zz_hook_put.py:ro"
+got="$(http "$route" "$graph")"
+[ "$(status_of "$got")" = 503 ] || fail "with put hooked, $route answered HTTP $(status_of "$got"), not 503: $(body_of "$got")"
+[ "$(body_of "$got" | jqc -r .error.type)" = validate_only_unsafe ] || fail "$route's 503 is $(body_of "$got")"
+nothing_ran
+echo "validate-only: with prompt_queue.put hooked, $route refuses (503) and nothing is queued"
+retire "$name" "$out/validate-only-5.log"
 
 echo "validate-only: PASS"

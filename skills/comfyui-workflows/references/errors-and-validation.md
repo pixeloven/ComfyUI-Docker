@@ -25,7 +25,9 @@ would say is in `dry_run`:
   again; no run is spent. `accepted: true` means `/prompt` would take it, and
   any `errors` are outputs it would drop.
 - **`dry_run.ran: false`**, with a `reason`: no dry run. `unavailable` is an
-  instance without the opt-in. Then only submitting with `workflow_run` tells
+  instance without the opt-in; `unsafe` is one where another custom node
+  replaced ComfyUI's queue function, so the route refused rather than risk
+  queueing the graph. Then only submitting with `workflow_run` tells
   you whether ComfyUI accepts the graph, and that also runs it. A graph with
   structural errors or partner-API nodes is never sent (`invalid_workflow`,
   `partner_api_nodes`).

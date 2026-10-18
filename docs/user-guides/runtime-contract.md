@@ -525,13 +525,25 @@ it, from a small first-party module, `comfyrelay_validate_only.py`:
 | Request | Answer |
 |---------|--------|
 | `GET /comfyrelay/validate_only` | `{"validate_only": true, "version": 1}`, so a client can detect it |
-| `POST /comfyrelay/validate_only` | Takes `/prompt`'s body and answers as `/prompt` does: `200` with `prompt_id`, `number` and `node_errors`, or `400` with `error` and `node_errors`. A graph that passes is **never queued**, so nothing runs |
+| `POST /comfyrelay/validate_only` | Takes `/prompt`'s body and answers as `/prompt` does: `200` with `prompt_id`, `number` and `node_errors`, or `400` with `error` and `node_errors`. A graph that passes is **never queued**, so nothing runs. `503` with `{"error": {"type": "validate_only_unsafe", "message"}, "node_errors": {}}` when that can't be guaranteed (below), and then nothing is checked or queued |
+
+Both are also served at `/api/comfyrelay/validate_only`, as ComfyUI serves every route.
 
 The POST runs ComfyUI's own `/prompt` handler, so the checks are ComfyUI's: types,
 required inputs, COMBO values, ranges and a node's own validation. Every other prompt
 is queued as before. Without the opt-in the route doesn't exist (`404`, or `405` for a
 POST), so a client can never queue a graph by sending it there.
 
+**It fails closed.** The module keeps a graph off the queue by wrapping
+`PromptQueue.put` on the class. A custom node that replaces `put` on the queue itself
+(`prompt_queue.put = ...`, which some packs do) shadows that wrapper, and one that wraps
+the class's `put` again may not call it. So each POST first checks that the queue has no
+`put` of its own and that the class's is still the module's wrapper, and answers `503`
+otherwise. Such an instance has no dry run until that pack is removed; `/prompt` is
+unaffected.
+
+- **Loaded twice** (the opt-in, plus a copy of the module on the custom_nodes volume):
+  it installs once, and the second copy logs `already installed` and does nothing.
 - **Where it lives.** `/opt/comfyui-docker/validate-only/`, root-owned and read-only,
   outside `/app` and the volumes. `startup.sh` adds that directory's
   `extra_model_paths.yaml` as a second `--extra-model-paths-config`, whose only entry is
@@ -546,6 +558,17 @@ POST), so a client can never queue a graph by sending it there.
   registered for `POST /prompt`. If a ComfyUI release moves that handler, the module
   logs an error and serves no route, so the dry run is reported as unavailable. CI's
   `smoke-cpu` job and the template corpus exercise it on every pin bump.
+
+**Security.**
+- **Who can reach it:** anyone who can reach port 8188, exactly as for `/prompt`, which
+  has no authentication either. It is strictly less than `/prompt` gives them, since
+  nothing it is sent is ever queued or run.
+- **What it discloses:** the same as `/prompt`: ComfyUI's `error` and `node_errors`,
+  which name node classes, inputs, and the values a COMBO allows (model and input file
+  names, say).
+- **What still runs:** it is `/prompt`'s handler, so custom nodes' `on_prompt` handlers
+  and their `VALIDATE_INPUTS` run for a validate-only request too. Only queueing is
+  skipped.
 
 ## The `mcp` Image
 

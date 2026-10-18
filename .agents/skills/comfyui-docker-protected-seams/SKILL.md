@@ -62,7 +62,12 @@ registry is what they check against.
   `template_get`, `workflow_validate` and `workflow_run` take; *The `mcp-convert` Image*),
   the `comfyctl` image's `ENTRYPOINT` in `dockerfile.comfy.ctl` (`comfyctl`: Jobs
   and Compose append `fetch fetch /lock.yaml /app --apply` to it; it replaced the
-  `fetch` image, whose entrypoint was `comfyctl fetch fetch`, in 6.0.0), its labels
+  `fetch` image, whose entrypoint was `comfyctl fetch fetch`, in 6.0.0), the core image's
+  validate-only route behind `COMFY_ENABLE_VALIDATE_ONLY` (#215: `/comfyrelay/validate_only`
+  and its `/api/` alias; `GET` answers `{"validate_only": true, "version": 1}`; `POST` takes
+  `/prompt`'s body and answers `/prompt`'s `200 {prompt_id, number, node_errors}` or
+  `400 {error, node_errors}`, never queueing, or `503` with error type
+  `validate_only_unsafe`; a breaking change bumps `version`; *The Validate-Only Route*), its labels
   (`org.opencontainers.image.source`, `.description` and `.licenses`, and no
   `.version`, because no ComfyUI is inside; *The `comfyctl` Image*), the permission steps in `dockerfile.comfy.core`, the volume mounts in
   `examples/*/docker-compose.yml`, and removing a bake target, image, or example.
