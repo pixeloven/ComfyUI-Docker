@@ -29,6 +29,25 @@ see `VERSIONING.md`.
   argument are unchanged, and a report that can't be made is left out
   (`requirements_unchecked`), never failing the call. The `comfyui-workflows` guides say
   how to use it.
+- **A dry run for `workflow_validate` (#215).** The core and complete images have a
+  new opt-in, `COMFY_ENABLE_VALIDATE_ONLY=true` (default `false`), that adds
+  `POST /comfyrelay/validate_only`: ComfyUI's own `/prompt` handler, whose valid graph is
+  never queued, so nothing runs. It comes from a small first-party module shipped
+  root-owned in `/opt/comfyui-docker/validate-only/`, outside the custom_nodes volume,
+  which loads under any UID and defines no node class. Where it is on, the `mcp` and
+  `mcp-convert` images' `workflow_validate` sends a structurally valid graph with no
+  partner-API node there, as exactly `{"prompt": graph}` (no `extra_data`), and returns
+  ComfyUI's verdict as a new `dry_run` field: `accepted`, ComfyUI's top-level `error`, and
+  its per-node `errors` (type mismatches, missing required inputs, COMBO values, bounds)
+  in `workflow_rejected`'s shape. Elsewhere `dry_run` is `{"ran": false, "reason":
+  "unavailable", ...}` and every other field is as before. It is additive: `valid`,
+  `runnable` and the arguments are unchanged, and a dry run that fails or times out is a
+  `reason`, never the call's failure. The relay detects the route with one cached
+  `GET`; an instance without it answers 404 or 405, so nothing can be queued by mistake.
+  The examples pass the variable through, and `make smoke` and CI's `smoke-cpu` job check
+  it (`tests/smoke/validate-only.sh`). The template corpus now validates through the same
+  route; its test-only copy, `tests/relay/validate_only.py`, is gone. The agent harness
+  takes `HARNESS_VALIDATE_ONLY=true` to start ComfyUI with it.
 - **`workflow_validate` names a converted UI graph's uninstalled classes (#231).** The
   `missing_node_type` error for a node `mcp-convert` converted with no `class_type` now
   carries the class from the UI graph, subgraphs included, with close names.

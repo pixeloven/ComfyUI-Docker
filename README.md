@@ -187,6 +187,7 @@ CLI_ARGS="--lowvram"                # ComfyUI launch arguments
 # Custom Nodes and Manager
 COMFY_ENABLE_NODE_VENV=true         # Node dependencies on the user volume (default)
 COMFY_MANAGER_SECURITY_LEVEL=strong # Opt-in Manager security_level; unset by default
+COMFY_ENABLE_VALIDATE_ONLY=true     # Opt-in validate-only /prompt route, for the mcp dry run
 
 # Custom Paths
 COMFY_MODEL_PATH=./data/models      # Override model directory

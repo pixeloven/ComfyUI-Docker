@@ -1021,6 +1021,15 @@ jobs:
         IMAGE: ${{ needs.context.outputs.registry_url }}core:cpu-smoke
       run: tests/smoke/node-deps.sh "$IMAGE"
 
+    # #215: COMFY_ENABLE_VALIDATE_ONLY=true loads the image's validate-only
+    # module as 1001 and as non-root 12345; its route checks a graph as /prompt
+    # does and never queues it, /prompt still runs one, and without the opt-in
+    # the route is absent. `make smoke` runs it too.
+    - name: Check the validate-only opt-in
+      env:
+        IMAGE: ${{ needs.context.outputs.registry_url }}core:cpu-smoke
+      run: tests/smoke/validate-only.sh "$IMAGE"
+
     - name: Record the startup time and node diff
       if: always()
       run: |
@@ -1146,7 +1155,10 @@ jobs:
     # write into, on the host network and bound to loopback, as
     # `run.sh --network host` boots it. No model or input file is needed: the
     # tests upload their own images. A skipped test fails the step, because
-    # every test skipping (a lost URL) would otherwise pass green.
+    # every test skipping (a lost URL) would otherwise pass green. The core
+    # image's validate-only module (#215) is mounted from this commit, as the
+    # template corpus mounts it, because cpu-latest may predate it: the dry-run
+    # tests need its route, and the other live tests run with it loaded.
     - name: Run the live tests against a booted core-cpu
       timeout-minutes: 10
       working-directory: services
@@ -1160,6 +1172,7 @@ jobs:
         mkdir -p "${LIVE_OUT}"
         docker run -d --name "${LIVE_CONTAINER}" --network host --security-opt no-new-privileges:true \
           -e COMFY_PORT="${LIVE_PORT}" -e COMFY_ENABLE_MANAGER=false -e "CLI_ARGS=--listen 127.0.0.1" \
+          -v "${GITHUB_WORKSPACE}/services/comfy/core/validate-only/custom_nodes/comfyrelay_validate_only.py:/app/custom_nodes/comfyrelay_validate_only.py:ro" \
           "${COMFYUI_IMAGE}" >/dev/null
         url="http://127.0.0.1:${LIVE_PORT}"
         start="$(date +%s)"

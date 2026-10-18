@@ -199,7 +199,8 @@ async def test_a_graph_with_everything_present_is_satisfied_and_lists_no_folders
         "models_need_value_change": [],
         "missing_inputs": [],
     }
-    assert fake.calls == ["/object_info"]  # nothing missing, so no folder is listed
+    # Nothing missing, so no folder is listed. The dry run (#215) probes for its route beside it.
+    assert fake.calls == ["/object_info", "/comfyrelay/validate_only"]
 
 
 async def test_proposals_need_a_source_so_an_api_graph_gets_none():

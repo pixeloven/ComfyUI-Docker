@@ -27,6 +27,9 @@ done
 # would expose an unauthenticated ComfyUI on every host interface, and Manager
 # refuses installs over HTTP on a non-loopback listener unless its config says
 # network_mode=personal_cloud. T2 needs those installs; see README "Findings".
+#
+# HARNESS_VALIDATE_ONLY=true turns on the image's validate-only route (#215),
+# which comfyrelay's workflow_validate uses for a dry run. Off by default.
 docker run -d --name "$HARNESS_CONTAINER" \
   --network host \
   --security-opt no-new-privileges:true \
@@ -34,6 +37,7 @@ docker run -d --name "$HARNESS_CONTAINER" \
   -e COMFY_PORT="$COMFY_PORT" \
   -e COMFY_ENABLE_MANAGER=true \
   -e COMFY_ENABLE_ASSETS=true \
+  -e COMFY_ENABLE_VALIDATE_ONLY="${HARNESS_VALIDATE_ONLY:-false}" \
   -e CLI_ARGS="--listen 127.0.0.1" \
   -v "$HARNESS_DATA/custom_nodes:/app/custom_nodes" \
   -v "$HARNESS_DATA/datasets:/app/datasets" \

@@ -29,7 +29,8 @@ ComfyUI, through its HTTP API and editor.
 - [errors-and-validation](references/errors-and-validation.md): which check
   catches what, and how to read ComfyUI's per-node errors. ComfyUI checks
   input and link types when the graph is submitted. The relay's
-  `workflow_validate` doesn't. *(needs the comfyrelay sidecar)*
+  `workflow_validate` reports that check only as a dry run, where the
+  instance has the validate-only opt-in. *(needs the comfyrelay sidecar)*
 - [relay-limits](references/relay-limits.md): the comfyrelay sidecar's
   profiles, refusals, jobs and re-attaching. The whole topic needs the sidecar.
 - [comfy-manifest](../comfy-manifest/SKILL.md): authoring `comfy.yaml` and

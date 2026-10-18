@@ -117,6 +117,12 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 # Make scripts executable (fast/cheap operation on single files)
 RUN chmod +x /app/startup.sh && chmod 0755 /usr/local/bin/entrypoint.sh
 
+# The validate-only route (#215), loaded only when COMFY_ENABLE_VALIDATE_ONLY=true
+# (startup.sh). Root-owned and read-only, outside /app and the custom_nodes volume,
+# so any UID can load it and none can change it.
+COPY validate-only /opt/comfyui-docker/validate-only
+RUN chmod -R u=rwX,go=rX /opt/comfyui-docker
+
 # Make directories writable by any user for arbitrary UID support
 # (Docker Compose PUID/PGID, K8s securityContext.runAsUser, OpenShift, etc.)
 #

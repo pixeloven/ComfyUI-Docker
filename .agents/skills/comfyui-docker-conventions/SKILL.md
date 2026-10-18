@@ -92,7 +92,8 @@ There is no date tag.
   because uv ignores the `.pth` and would reinstall the image's packages into it.
   `COMFY_MANAGER_SECURITY_LEVEL` (#125) writes Manager's `security_level` when set.
 - `startup.sh` flags: `--base-directory /app`, `COMFY_PORT` (8188),
-  `COMFY_ENABLE_MANAGER` (true), `COMFY_ENABLE_ASSETS` (true), `--cpu` when
+  `COMFY_ENABLE_MANAGER` (true), `COMFY_ENABLE_ASSETS` (true), `COMFY_ENABLE_VALIDATE_ONLY`
+  (false; `true` adds `/opt/comfyui-docker/validate-only/extra_model_paths.yaml`, #215), `--cpu` when
   `COMFY_RUNTIME=cpu`, and `CLI_ARGS` as the whitespace-split escape hatch.
 - Credentials: never in an image or a lock. `comfy.yaml`'s `auth:` maps a host to a
   `${ENV_VAR}` reference, and the schema rejects a literal. The examples pass
@@ -166,6 +167,10 @@ There is no date tag.
 - **Custom nodes are not baked into images.** They are installed at runtime onto the
   `/app/custom_nodes` volume (through Manager or a mount). `complete` pre-installs the
   Python *dependencies* common nodes need, because a missing import crash-loops ComfyUI.
+  The one exception is the validate-only module (#215): first-party, no node class, shipped
+  root-owned in `/opt/comfyui-docker/validate-only/`, outside the volume, and loaded only with
+  `COMFY_ENABLE_VALIDATE_ONLY=true`. It goes when ComfyUI's `/prompt` gets its own flag; don't
+  add another without the owner.
   `comfy.yaml` covers **models only** today. `comfy-lock.yaml` has a hand-written
   `custom_nodes` section in ComfyUI-Manager's snapshot shape, and nothing here applies it.
   Manager's `cm-cli restore-snapshot` 4.2.2 can't apply it unattended: it skips registry

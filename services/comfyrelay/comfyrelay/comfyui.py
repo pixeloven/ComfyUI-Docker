@@ -229,6 +229,40 @@ class ComfyUIClient:
             raise self._bad_shape("/prompt", 'an object with a "prompt_id" string')
         return data
 
+    # The core image's opt-in validate-only route (#215, COMFY_ENABLE_VALIDATE_ONLY): /prompt's own checks,
+    # never queued. Only an instance that loaded it has the path, so a validate request can't queue a graph.
+    VALIDATE_ONLY_PATH = "/comfyrelay/validate_only"
+
+    async def has_validate_only(self, timeout: httpx2.Timeout) -> bool:
+        """GET /comfyrelay/validate_only: whether this ComfyUI serves the validate-only route. Any 4xx, or an
+        answer that isn't the route's own, is no; a 5xx or a transport failure is a ComfyUIError."""
+        path = self.VALIDATE_ONLY_PATH
+        response = await self._send("GET", path, timeout=timeout)
+        if 400 <= response.status_code < 500:
+            return False
+        self._raise_for_status(response, path)
+        data = self._json_or_none(response)
+        return isinstance(data, dict) and data.get("validate_only") is True
+
+    async def validate_only(self, graph: dict[str, Any], timeout: httpx2.Timeout) -> dict[str, Any] | None:
+        """POST /comfyrelay/validate_only with exactly {"prompt": graph}: ComfyUI's /prompt checks, and nothing is
+        queued. Returns {"accepted": True, "node_errors"} (the errors of outputs ComfyUI would drop) or
+        {"accepted": False, "error", "node_errors"} (/prompt's 400); None when this ComfyUI has no such route."""
+        path = self.VALIDATE_ONLY_PATH
+        response = await self._send("POST", path, json={"prompt": graph}, timeout=timeout)
+        if response.status_code in (404, 405):
+            return None
+        if response.status_code == 400:
+            body = self._json_object(response, path)
+            error = body.get("error")
+            error = error if isinstance(error, dict) else {"message": str(error)}
+            return {"accepted": False, "error": error, "node_errors": body.get("node_errors") or {}}
+        self._raise_for_status(response, path)
+        data = self._json_object(response, path)
+        if not isinstance(data.get("prompt_id"), str):
+            raise self._bad_shape(path, 'an object with a "prompt_id" string')
+        return {"accepted": True, "node_errors": data.get("node_errors") or {}}
+
     async def queue(self, *, cancelling: bool = False) -> dict[str, Any]:
         """GET /queue: {"queue_running": [...], "queue_pending": [...]}; each item starts [number, prompt_id].
 

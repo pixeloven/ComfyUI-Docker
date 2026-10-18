@@ -126,15 +126,19 @@ if [ "$cmd" = up ]; then
   if [ "$(docker inspect -f '{{.State.Running}}' "$HARNESS_CONTAINER" 2>/dev/null)" = true ]; then
     # Reuse it only if it is the instance this run describes: the same image
     # (by ID, so a re-pointed tag doesn't match and a digest reference does),
-    # the same data directory, and the same port.
+    # the same data directory, the same port, and the same validate-only
+    # setting (HARNESS_VALIDATE_ONLY, #215).
     image="$(docker inspect -f '{{.Image}}' "$HARNESS_CONTAINER")"
     want_image="$(docker image inspect -f '{{.Id}}' "$HARNESS_IMAGE" 2>/dev/null || echo "missing")"
     data="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/user"}}{{.Source}}{{end}}{{end}}' "$HARNESS_CONTAINER")"
     want_data="$(realpath -m "$HARNESS_DATA/user")"
-    port="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$HARNESS_CONTAINER" | sed -n 's/^COMFY_PORT=//p')"
-    if [ "$image" != "$want_image" ] || [ "$(realpath -m "$data")" != "$want_data" ] || [ "$port" != "$COMFY_PORT" ]; then
-      echo "$HARNESS_CONTAINER runs image $image on $data, port $port;" >&2
-      echo "this run wants $HARNESS_IMAGE ($want_image) on $want_data, port $COMFY_PORT." >&2
+    env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$HARNESS_CONTAINER")"
+    port="$(sed -n 's/^COMFY_PORT=//p' <<< "$env")"
+    validate_only="$(sed -n 's/^COMFY_ENABLE_VALIDATE_ONLY=//p' <<< "$env")"
+    if [ "$image" != "$want_image" ] || [ "$(realpath -m "$data")" != "$want_data" ] || [ "$port" != "$COMFY_PORT" ] \
+      || [ "${validate_only:-false}" != "${HARNESS_VALIDATE_ONLY:-false}" ]; then
+      echo "$HARNESS_CONTAINER runs image $image on $data, port $port, validate-only ${validate_only:-false};" >&2
+      echo "this run wants $HARNESS_IMAGE ($want_image) on $want_data, port $COMFY_PORT, validate-only ${HARNESS_VALIDATE_ONLY:-false}." >&2
       echo "Run ./external.sh down first, or set HARNESS_CONTAINER for a separate run." >&2
       exit 1
     fi

@@ -1,7 +1,7 @@
 """D8's test bar for the mcp-convert image (#167), over every open template the pinned ComfyUI serves.
 
 tests/relay/corpus.sh runs it: it boots a core-cpu with empty model and input folders mounted from the host and
-tests/relay/validate_only.py loaded, starts the mcp-convert image beside it, and sets the environment below.
+the core image's validate-only module (#215) loaded, starts the mcp-convert image beside it, and sets the environment below.
 Skipped without COMFYRELAY_CORPUS_RELAY_URL.
 
 The templates are every one the index doesn't mark as a partner template (openSource false), and each must be in
@@ -18,8 +18,9 @@ UI format by the relay's own test, so that test can't quietly drop one.
    network-quiet wait). The relay's graph must be the same, but for floats that differ only in rounding (the
    frontend's own run-to-run noise in a 3D camera position); the report lists those. Every LoadVideo in it must
    carry `video-preview`, so a preview the oracle gave up on fails rather than matching a relay that didn't wait.
-4. ComfyUI accepts the converted graph: /prompt answers 200 with no node errors. The prompt is marked
-   validate-only, so validate_only.py keeps it off the queue and nothing runs.
+4. ComfyUI accepts the converted graph: /prompt's checks answer 200 with no node errors. It goes to the
+   validate-only route, POST /comfyrelay/validate_only, which runs ComfyUI's own /prompt handler and never
+   queues the graph, so nothing runs.
 
 Every template must pass all four, but those named in one of three lists, each of which must hold exactly: a
 template that does something else fails, and so does a listed one that no longer does what its list says.
@@ -85,7 +86,7 @@ REFUSED_UPSTREAM = {
 # Converted graphs over workflow_validate's 80,000 characters: none.
 TOO_LARGE: set[str] = set()
 
-VALIDATE_ONLY = "comfyrelay_validate_only"  # tests/relay/validate_only.py's MARK
+VALIDATE_ONLY = "/comfyrelay/validate_only"  # services/comfy/core/validate-only (#215)
 VIDEO = {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
 AUDIO = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".opus"}
 ANNOTATION = re.compile(r" \[(input|output|temp)\]$")
@@ -282,7 +283,7 @@ async def test_every_open_template_converts_as_the_editor_exports_it_and_comfyui
             return "fail", f"LoadVideo {unpreviewed} lacks video-preview in both: its preview never loaded"
         if not relay["valid"]:
             return "fail", f"the relay's workflow_validate refused it: {relay['errors']}"
-        answer = await comfyui.post("/prompt", json={"prompt": got, "extra_data": {VALIDATE_ONLY: True}})
+        answer = await comfyui.post(VALIDATE_ONLY, json={"prompt": got})
         body = answer.json()
         if answer.status_code == 200 and not body.get("node_errors"):
             return "pass", ""

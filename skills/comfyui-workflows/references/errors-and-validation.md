@@ -9,16 +9,28 @@ spoke tells you where to look. The relay adds a check before submitting
 
 *Needs the comfyrelay sidecar.*
 
-**`valid: true` doesn't mean ComfyUI will accept the graph.** `workflow_validate`
-doesn't check input types or values. A link that carries the wrong type, such
-as a `LoadImage` mask (output 1) wired into `SaveImage`'s `images`, passes it
-with `valid` and `runnable` both true. (`runnable` means only that
-`workflow_run` will submit it.) That graph then fails at `workflow_run` with
-`workflow_rejected`, and ComfyUI's `return_type_mismatch` names the node and
-input (section 2). Only submitting a graph with `workflow_run` tells you
-whether ComfyUI accepts it, and that also runs it: there is no dry run.
+**`valid: true` doesn't mean ComfyUI will accept the graph. Read `dry_run`.**
+`workflow_validate`'s own check doesn't look at input types or values. A link
+that carries the wrong type, such as a `LoadImage` mask (output 1) wired into
+`SaveImage`'s `images`, passes it with `valid` and `runnable` both true.
+(`runnable` means only that `workflow_run` will submit it.) What ComfyUI
+would say is in `dry_run`:
 
-ComfyUI has no dry run, so the relay checks only what can be known without
+- **`dry_run.ran: true`**: this instance has the validate-only opt-in (the
+  core image's `COMFY_ENABLE_VALIDATE_ONLY=true`), so ComfyUI's own `/prompt`
+  checked the graph and **queued nothing**. `accepted: false` means
+  `workflow_run` would get `workflow_rejected`: `error` is ComfyUI's summary
+  and `errors` its per-node errors, in the same shape (section 2), such as
+  `return_type_mismatch` on the mask above. Fix what they name and validate
+  again; no run is spent. `accepted: true` means `/prompt` would take it, and
+  any `errors` are outputs it would drop.
+- **`dry_run.ran: false`**, with a `reason`: no dry run. `unavailable` is an
+  instance without the opt-in. Then only submitting with `workflow_run` tells
+  you whether ComfyUI accepts the graph, and that also runs it. A graph with
+  structural errors or partner-API nodes is never sent (`invalid_workflow`,
+  `partner_api_nodes`).
+
+Without a dry run, the relay checks only what can be known without
 submitting the graph, against the live `/object_info`:
 
 - the graph is in API format (a UI save file, or a whole `/prompt` body, is
@@ -32,10 +44,10 @@ submitting the graph, against the live `/object_info`:
 - a node that no output depends on gets the warning `not_connected_to_output`,
   since ComfyUI won't run it.
 
-It does **not** check input types, link types, values, required inputs or
-COMBO choices. Those are ComfyUI's checks, and they run only when the graph is
-submitted. The relay doesn't copy them, because a copy refused graphs ComfyUI
-accepts.
+Its own check does **not** look at input types, link types, values, required
+inputs or COMBO choices. Those are ComfyUI's checks, which run in `dry_run`
+where it is available and otherwise only when the graph is submitted. The
+relay doesn't copy them, because a copy refused graphs ComfyUI accepts.
 
 Beside that check it reports `requirements`: what this instance lacks to run
 the graph, in UI or API format. It lists node classes, models, models present

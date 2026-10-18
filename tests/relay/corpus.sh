@@ -21,9 +21,11 @@
 # (`uv run --locked --extra convert playwright install --only-shell chromium`).
 #
 #   1. Boot ComfyUI (Manager off) as this user, with empty model and input
-#      folders bind-mounted for the test's placeholders, and
-#      tests/relay/validate_only.py as a custom node, so /prompt validates a
-#      marked graph without queueing it. Check that the custom node loaded.
+#      folders bind-mounted for the test's placeholders, and the core image's
+#      validate-only module (#215) mounted as a custom node, so its route runs
+#      /prompt's checks without queueing the graph. The module is mounted, not
+#      enabled with COMFY_ENABLE_VALIDATE_ONLY, because a published core-cpu
+#      may predate it. Check that it loaded.
 #   2. Start the relay as UID 12345, read-only with a tmpfs /tmp, with
 #      CORPUS_PAGES tabs and as many large requests at once (a UI template can
 #      be over 1 MiB), and wait for `comfyctl relay probe`.
@@ -35,6 +37,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
+validate_only="$repo/services/comfy/core/validate-only/custom_nodes/comfyrelay_validate_only.py"
 
 usage() { sed -n '7,17p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -109,7 +112,7 @@ docker run -d --name "$comfy" --network host --security-opt no-new-privileges:tr
   -e COMFY_PORT="$comfy_port" -e COMFY_ENABLE_MANAGER=false -e "CLI_ARGS=--listen 127.0.0.1" \
   -e PUID="$(id -u)" -e PGID="$(id -g)" \
   -v "$work/models:/app/models" -v "$work/input:/app/input" \
-  -v "$here/validate_only.py:/app/custom_nodes/comfyrelay_validate_only.py:ro" \
+  -v "$validate_only:/app/custom_nodes/comfyrelay_validate_only.py:ro" \
   "$comfyui" >/dev/null
 until curl -fsS --max-time 10 "$url/system_stats" >/dev/null 2>&1; do
   [ "$(docker inspect -f '{{.State.Running}}' "$comfy")" = true ] || fail "ComfyUI exited before /system_stats answered"
@@ -122,7 +125,7 @@ echo "corpus: ComfyUI ($comfyui) answered after $(( $(date +%s) - start ))s"
 log="$(docker logs "$comfy" 2>&1)"
 case "$log" in
   *'comfyrelay_validate_only: installed'*) ;;
-  *) fail "ComfyUI did not load tests/relay/validate_only.py, so /prompt would queue what it validates" ;;
+  *) fail "ComfyUI did not load $validate_only, so the corpus could not validate without queueing" ;;
 esac
 
 # 2. The relay.

@@ -137,6 +137,7 @@ COMFY_ENABLE_MANAGER=true     # Registry-backed Manager UI and endpoints
 COMFY_ENABLE_ASSETS=true      # Assets API/sidebar and persistent index
 COMFY_ENABLE_NODE_VENV=true   # Custom-node dependencies on the user volume
 COMFY_MANAGER_SECURITY_LEVEL= # Opt-in Manager security_level (e.g. strong)
+COMFY_ENABLE_VALIDATE_ONLY=false # Opt-in validate-only /prompt route (mcp dry run)
 CLI_ARGS="--vram-headroom 1" # Additional ComfyUI launch arguments
 COMFY_IMAGE=custom:latest    # Override Docker image
 ```

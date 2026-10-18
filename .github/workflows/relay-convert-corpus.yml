@@ -60,7 +60,7 @@ jobs:
             - 'services/comfyrelay/tests/test_relay_convert_live.py'
             - 'services/comfyrelay/tests/data/convert-preview.mp4'
             - 'tests/relay/corpus.sh'
-            - 'tests/relay/validate_only.py'
+            - 'services/comfy/core/validate-only/**'
             - '.github/workflows/relay-convert-corpus.yml'
 
     # APT_REFRESH is left out: it is a stamp of the current week, not the PR's.

@@ -1,0 +1,5 @@
+# Loaded by startup.sh only when COMFY_ENABLE_VALIDATE_ONLY=true (#215): adds the
+# directory holding comfyrelay_validate_only.py as a custom_nodes path. Nothing
+# else is in it, and it is root-owned and read-only.
+comfyui_docker_validate_only:
+  custom_nodes: /opt/comfyui-docker/validate-only/custom_nodes

@@ -28,6 +28,13 @@ if [ -f /app/extra_model_paths.yaml ]; then
     args+=(--extra-model-paths-config /app/extra_model_paths.yaml)
 fi
 
+# Opt-in (#215): POST /comfyrelay/validate_only, which runs /prompt's checks and
+# never queues the graph. The module ships in the image, outside the custom_nodes
+# volume, and this second config adds its directory as a custom_nodes path.
+if [ "${COMFY_ENABLE_VALIDATE_ONLY:-false}" = "true" ]; then
+    args+=(--extra-model-paths-config /opt/comfyui-docker/validate-only/extra_model_paths.yaml)
+fi
+
 # CLI_ARGS is intentionally a whitespace-delimited escape hatch. Prefer the
 # dedicated environment variables above for built-in container behavior.
 if [ -n "${CLI_ARGS:-}" ]; then

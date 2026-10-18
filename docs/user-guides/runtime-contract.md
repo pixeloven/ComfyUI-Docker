@@ -44,6 +44,7 @@ The variables fall into three groups. Only the first is read by the image's scri
 | `COMFY_ENABLE_MANAGER` | `true` | Only the exact string `true` adds `--enable-manager`. Any other value, including `True` or `1`, disables the Manager | `startup.sh` |
 | `COMFY_ENABLE_ASSETS` | `true` | Only the exact string `true` adds `--enable-assets` (the Assets API, sidebar and index) | `startup.sh` |
 | `COMFY_ENABLE_NODE_VENV` | `true` | Only the exact string `true` runs ComfyUI from the [node venv](#the-node-venv), so the Python packages custom nodes install survive a recreate, and sets Manager's `use_uv` and `use_unified_resolver` to `False`. If the node venv can't be used, startup warns and falls back to the image's venv; it never exits over it. Any other value runs ComfyUI from the image's venv, as earlier releases did | `startup.sh` |
+| `COMFY_ENABLE_VALIDATE_ONLY` | `false` | Opt-in. Only the exact string `true` loads the image's validate-only module, which adds `POST /comfyrelay/validate_only`: `/prompt`'s own checks, with nothing queued. The `mcp` image's `workflow_validate` uses it for a dry run. See [The Validate-Only Route](#the-validate-only-route) | `startup.sh` |
 | `COMFY_MANAGER_SECURITY_LEVEL` | *(empty)* | Opt-in. `strong`, `normal`, `normal-` or `weak` is written to `security_level` in Manager's `config.ini` at every start. Empty leaves the file's own value, which is `normal` unless someone changed it. Any other value makes the container exit 1. See [Manager Security](#manager-security) | `startup.sh` |
 | `CLI_ARGS` | *(empty)* | Extra ComfyUI arguments, split on whitespace and appended **last**. Quoting inside the value is not honoured, so an argument can't contain a space | `startup.sh` |
 | `COMFY_RUNTIME` | set by the image: `cuda`, `cpu`, `rocm` or `xpu` | `cpu` adds `--cpu`. Every other value adds nothing. You don't normally set this, because each image already carries the right value | `startup.sh` |
@@ -105,7 +106,7 @@ and `NVIDIA_DRIVER_CAPABILITIES=compute,utility` inside the compose file. Those 
 are hard-coded, not interpolated.
 
 `PUID`, `PGID`, `COMFY_PORT`, `COMFY_ENABLE_MANAGER`, `COMFY_ENABLE_ASSETS`,
-`COMFY_ENABLE_NODE_VENV`, `COMFY_MANAGER_SECURITY_LEVEL` and `CLI_ARGS` go through
+`COMFY_ENABLE_NODE_VENV`, `COMFY_ENABLE_VALIDATE_ONLY`, `COMFY_MANAGER_SECURITY_LEVEL` and `CLI_ARGS` go through
 Compose too: each example passes them into the container, with
 the defaults from the first table. The `fetch` service runs as `${PUID}:${PGID}`.
 
@@ -113,7 +114,7 @@ the defaults from the first table. The `fetch` service runs as `${PUID}:${PGID}`
 
 | Variable | core-gpu | complete-gpu | core-cpu | core-amd | core-intel |
 |----------|:--:|:--:|:--:|:--:|:--:|
-| `PUID`, `PGID`, `COMFY_PORT`, `COMFY_ENABLE_MANAGER`, `COMFY_ENABLE_ASSETS`, `COMFY_ENABLE_NODE_VENV`, `COMFY_MANAGER_SECURITY_LEVEL`, `CLI_ARGS` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `PUID`, `PGID`, `COMFY_PORT`, `COMFY_ENABLE_MANAGER`, `COMFY_ENABLE_ASSETS`, `COMFY_ENABLE_NODE_VENV`, `COMFY_ENABLE_VALIDATE_ONLY`, `COMFY_MANAGER_SECURITY_LEVEL`, `CLI_ARGS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | The seven `COMFY_*_PATH` variables | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `COMFY_LOCK`, `HF_TOKEN`, `CIVITAI_TOKEN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `VIDEO_GID`, `RENDER_GID` | – | – | – | ✓ | ✓ |
@@ -514,6 +515,37 @@ installs have their own gate, Manager's `allow_git_url_install` and
 listener or `personal_cloud`. Installing over the network is tracked in
 [#125](https://github.com/pixeloven/ComfyUI-Docker/issues/125). `cm-cli` in a
 `docker exec` session is gated by none of this.
+
+## The Validate-Only Route
+
+ComfyUI has no dry run: `POST /prompt` checks a graph and queues it at once if it
+passes. With `COMFY_ENABLE_VALIDATE_ONLY=true` (#215), the image adds one route beside
+it, from a small first-party module, `comfyrelay_validate_only.py`:
+
+| Request | Answer |
+|---------|--------|
+| `GET /comfyrelay/validate_only` | `{"validate_only": true, "version": 1}`, so a client can detect it |
+| `POST /comfyrelay/validate_only` | Takes `/prompt`'s body and answers as `/prompt` does: `200` with `prompt_id`, `number` and `node_errors`, or `400` with `error` and `node_errors`. A graph that passes is **never queued**, so nothing runs |
+
+The POST runs ComfyUI's own `/prompt` handler, so the checks are ComfyUI's: types,
+required inputs, COMBO values, ranges and a node's own validation. Every other prompt
+is queued as before. Without the opt-in the route doesn't exist (`404`, or `405` for a
+POST), so a client can never queue a graph by sending it there.
+
+- **Where it lives.** `/opt/comfyui-docker/validate-only/`, root-owned and read-only,
+  outside `/app` and the volumes. `startup.sh` adds that directory's
+  `extra_model_paths.yaml` as a second `--extra-model-paths-config`, whose only entry is
+  a `custom_nodes` path to the module. It loads under any UID, and defines no node
+  class, so `/object_info` is unchanged.
+- **Not a custom node you install.** Custom nodes still come only from the
+  `/app/custom_nodes` volume. This module is part of the image, as `startup.sh` is, and
+  it goes when ComfyUI's `/prompt` gets a validate-only flag of its own.
+- **`--disable-all-custom-nodes`** in `CLI_ARGS` skips it too, unless
+  `--whitelist-custom-nodes comfyrelay_validate_only.py` names it.
+- **What depends on ComfyUI.** It wraps `PromptQueue.put` and calls the handler
+  registered for `POST /prompt`. If a ComfyUI release moves that handler, the module
+  logs an error and serves no route, so the dry run is reported as unavailable. CI's
+  `smoke-cpu` job and the template corpus exercise it on every pin bump.
 
 ## The `mcp` Image
 

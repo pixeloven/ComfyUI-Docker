@@ -48,6 +48,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 from urllib.parse import urlencode
 
+import httpx2
 from mcp_types import AudioContent, CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
@@ -166,6 +167,12 @@ class ValidationResult(BaseModel):
     requirements_unchecked: str | None = Field(
         default=None, description="Why requirements is absent: timeout, an error code, check_failed, invalid_workflow"
     )
+    dry_run: dict[str, Any] | None = Field(
+        default=None,
+        description="ComfyUI's own /prompt check, where this instance has the validate-only opt-in (#215): "
+        "{ran: true, accepted, errors, error} with nothing queued; else {ran: false, reason, detail}. It doesn't "
+        "change valid or runnable",
+    )
 
 
 WorkflowArg = Annotated[
@@ -241,6 +248,108 @@ async def _object_info_shared(relay: Relay) -> Any:
 
 async def _validate(relay: Relay, workflow: dict[str, Any]) -> Report:
     return validate(workflow, await _object_info_shared(relay))
+
+
+# -- the dry run (#215) ---------------------------------------------------------
+#
+# Where the core image runs with COMFY_ENABLE_VALIDATE_ONLY=true, ComfyUI serves POST /comfyrelay/validate_only:
+# its own /prompt handler, whose valid graph is never queued. workflow_validate sends a structurally valid graph
+# with no partner-API node there and reports ComfyUI's answer as `dry_run`. The body is exactly {"prompt": graph}:
+# no prompt_id, no client_id and no extra_data, so nothing that could carry a credential. Only an instance with
+# the module loaded has the route, and any other answers 404 or 405, so a stale probe can't queue a graph.
+
+_validate_only: weakref.WeakKeyDictionary[ComfyUIClient, _Read] = weakref.WeakKeyDictionary()
+# How long the probe's answer, yes or no, is shared. A stale yes is safe (above); a stale no misses an instance
+# restarted with the opt-in for this long.
+DRY_RUN_PROBE_TTL_SECONDS = 60.0
+DRY_RUN_PROBE_TIMEOUT = httpx2.Timeout(5.0)
+# The whole dry run, probe included. It is optional detail: past this, or on any failure, workflow_validate
+# answers without it, and `dry_run.reason` says why.
+DRY_RUN_SECONDS = 10.0
+# Caps on what ComfyUI's node_errors bring into the answer: it is ComfyUI's data, and a COMBO's options can run
+# to thousands of names.
+DRY_RUN_MAX_ERRORS = 50
+DRY_RUN_TEXT_MAX_CHARS = 500
+DRY_RUN_MAX_OPTIONS = 20
+NOT_RUN = {
+    "invalid_workflow": "not sent: fix the errors above first",
+    "partner_api_nodes": "not sent: a graph with partner-API nodes is never submitted",
+    "unavailable": "this ComfyUI has no validate-only route (the core image's COMFY_ENABLE_VALIDATE_ONLY), so "
+    "input types and values are checked only when workflow_run submits the graph",
+}
+
+
+def _capped(value: Any) -> Any:
+    if isinstance(value, str) and len(value) > DRY_RUN_TEXT_MAX_CHARS:
+        return value[: DRY_RUN_TEXT_MAX_CHARS - 1] + "…"
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, default=str)
+        if len(text) > DRY_RUN_TEXT_MAX_CHARS:
+            return text[: DRY_RUN_TEXT_MAX_CHARS - 1] + "…"
+    return value
+
+
+def _capped_problem(problem: dict[str, Any]) -> dict[str, Any]:
+    """One of comfyui_problems' entries, its strings and values capped. A list of options keeps its first
+    DRY_RUN_MAX_OPTIONS, and expected_count says how many there were."""
+    out = {k: _capped(v) for k, v in problem.items() if k != "expected"}
+    expected = problem.get("expected")
+    if isinstance(expected, list) and all(not isinstance(v, (dict, list)) for v in expected):
+        out["expected"] = [_capped(v) for v in expected[:DRY_RUN_MAX_OPTIONS]]
+        if len(expected) > DRY_RUN_MAX_OPTIONS:
+            out["expected_count"] = len(expected)
+    elif expected is not None:
+        out["expected"] = _capped(expected)
+    return out
+
+
+def _not_run(reason: str, detail: str | None = None) -> dict[str, Any]:
+    return {"ran": False, "reason": reason, "detail": detail or NOT_RUN[reason]}
+
+
+async def _has_validate_only(relay: Relay) -> bool:
+    comfyui = relay.comfyui
+    return await _shared(
+        _validate_only, comfyui, DRY_RUN_PROBE_TTL_SECONDS, lambda: comfyui.has_validate_only(DRY_RUN_PROBE_TIMEOUT)
+    )
+
+
+async def _dry_run_answer(relay: Relay, workflow: dict[str, Any]) -> dict[str, Any]:
+    if not await _has_validate_only(relay):
+        return _not_run("unavailable")
+    answer = await relay.comfyui.validate_only(workflow, httpx2.Timeout(DRY_RUN_SECONDS))
+    if answer is None:  # the probe said yes, and the instance has since restarted without the module
+        _validate_only.pop(relay.comfyui, None)
+        return _not_run("unavailable")
+    problems = comfyui_problems(answer["node_errors"])
+    out: dict[str, Any] = {"ran": True, "accepted": answer["accepted"]}
+    if not answer["accepted"]:
+        error = answer["error"]
+        out["error"] = {k: _capped(error.get(k)) for k in ("type", "message", "details") if error.get(k) is not None}
+    if problems:
+        out["errors"] = [_capped_problem(p) for p in problems[:DRY_RUN_MAX_ERRORS]]
+        if len(problems) > DRY_RUN_MAX_ERRORS:
+            out["errors_omitted"] = len(problems) - DRY_RUN_MAX_ERRORS
+    return out
+
+
+async def dry_run(relay: Relay, workflow: dict[str, Any], report: Report) -> dict[str, Any]:
+    """ComfyUI's /prompt check of an API graph, nothing queued, as `dry_run`; or why it didn't run. Never raises:
+    a graph with structural errors or partner-API nodes isn't sent, and a failure or timeout is the reason."""
+    if not report.valid:
+        return _not_run("invalid_workflow")
+    if report.partner_api_nodes:
+        return _not_run("partner_api_nodes")
+    fallback = "input types and values are checked when workflow_run submits the graph"
+    try:
+        return await asyncio.wait_for(_dry_run_answer(relay, workflow), DRY_RUN_SECONDS)
+    except TimeoutError:
+        return _not_run("timeout", f"ComfyUI didn't answer within {DRY_RUN_SECONDS:g}s; {fallback}")
+    except RelayError as exc:
+        return _not_run(exc.code, f"{exc.message}; {fallback}")
+    except Exception:  # optional detail: never the call's failure
+        log.exception("workflow_validate: the dry run failed")
+        return _not_run("check_failed", f"the dry run failed; {fallback}")
 
 
 def ui_partner_nodes(workflow: dict[str, Any], info: dict[str, Any]) -> list[dict[str, Any]]:
@@ -343,8 +452,10 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
 
         Finds a graph not in API format, node classes this instance lacks (with near names), links to missing
         nodes or outputs, and no output node, each naming the node id and input; lists partner-API nodes, which
-        workflow_run refuses. It does not check input types or values (required inputs, COMBO choices, ranges):
-        ComfyUI has no dry run, so it checks those when workflow_run submits the graph. Where this server converts,
+        workflow_run refuses. Input types and values (required inputs, COMBO choices, ranges, link types) are
+        ComfyUI's to check: dry_run has its /prompt verdict and per-node errors, with nothing queued, where this
+        ComfyUI has the validate-only opt-in; elsewhere dry_run.ran is false, and ComfyUI checks them when
+        workflow_run submits the graph. Where this server converts,
         a UI-format graph is converted first and the API graph it checked is returned, with converted_from_ui; a
         conversion that can't run fails with conversion_unavailable, one the frontend rejects with
         conversion_failed. There is no fallback converter.
@@ -359,7 +470,8 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
         given = workflow
         workflow, converted = await _as_api(relay, workflow)
         info = await _object_info_shared(relay)
-        result = _result(validate(workflow, info))
+        report = validate(workflow, info)
+        result = _result(report)
         if converted:
             result.converted_from_ui = True
             _name_unconverted_classes(result.errors, given, info)
@@ -370,12 +482,18 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
                 result.workflow_omitted = f"the converted graph is {size} characters as JSON, over {WORKFLOW_MAX_CHARS}"
         ui = is_ui_format(given)
         api_graph = workflow if converted or not (ui or shape_problems(given)) else None
-        if ui or api_graph is not None:
-            result.requirements, result.requirements_unchecked = await workflow_requirements(
-                relay.comfyui, given, api_graph, info, ui, relay.template_requirements
-            )
-        else:
-            result.requirements_unchecked = "invalid_workflow"
+        # A UI graph this server doesn't convert fails the structural check, so it is never sent.
+        checked = asyncio.ensure_future(dry_run(relay, workflow, report))
+        try:
+            if ui or api_graph is not None:
+                result.requirements, result.requirements_unchecked = await workflow_requirements(
+                    relay.comfyui, given, api_graph, info, ui, relay.template_requirements
+                )
+            else:
+                result.requirements_unchecked = "invalid_workflow"
+            result.dry_run = await checked
+        finally:
+            checked.cancel()
         return result
 
     return workflow_validate

@@ -300,9 +300,10 @@ converts it first (see *UI-to-API conversion*). The code is
 - **`workflow_validate`** checks what can be known about a graph without submitting it, against
   the live `/object_info`. ComfyUI (v0.37.0) has no dry run: `/prompt` is its only complete check,
   and it queues the graph when it passes. `/object_info` can't show a node's own
-  `validate_inputs` either. So **input types and values are ComfyUI's to check**, when
-  `workflow_run` submits the graph: required inputs, what a link carries, COMBO choices, and
-  number conversions and bounds. An earlier copy of those checks refused graphs ComfyUI
+  `validate_inputs` either. So **input types and values are ComfyUI's to check**: required
+  inputs, what a link carries, COMBO choices, and number conversions and bounds. ComfyUI checks
+  them in `dry_run` (below) where the core image has the validate-only opt-in, and otherwise
+  when `workflow_run` submits the graph. An earlier copy of those checks refused graphs ComfyUI
   accepts. A `CustomCombo` takes any value, though its options list is empty. A copy would
   also drift with every ComfyUI pin.
 
@@ -402,6 +403,34 @@ converts it first (see *UI-to-API conversion*). The code is
   500) is left out, never cut. It reads the `/object_info` the validation read, and an entry no
   check can read costs only that class's detail. A failure leaves the report out, with
   `requirements_unchecked` saying why, and never fails the call.
+
+  **`dry_run`** (#215) is ComfyUI's own `/prompt` check, with nothing queued. It runs where the
+  core image was started with `COMFY_ENABLE_VALIDATE_ONLY=true`, which adds
+  `POST /comfyrelay/validate_only`: ComfyUI's `/prompt` handler, whose valid graph is never put on
+  the queue (runtime contract, *The Validate-Only Route*). A graph that passes the structural
+  check and has no partner-API node is sent there, and the answer is reported, never changing
+  `valid` or `runnable`:
+  - `{"ran": true, "accepted": true}`: `/prompt` would accept it. `errors`, when present, are
+    outputs ComfyUI would drop, as `workflow_run` warns.
+  - `{"ran": true, "accepted": false, "error": {...}, "errors": [...]}`: what `/prompt` would
+    refuse. `error` is ComfyUI's top-level `type`, `message` and `details`; `errors` are its
+    per-node errors in `workflow_rejected`'s shape (`type`, `node_id`, `class_type`, `input`,
+    `details`, `expected`, `got`).
+  - `{"ran": false, "reason", "detail"}`: why not. `unavailable` is an instance without the
+    opt-in; `invalid_workflow` and `partner_api_nodes` were never sent; `timeout`, a
+    `comfyui_*` code or `check_failed` is a dry run that failed.
+
+  **Detection.** One `GET /comfyrelay/validate_only` per instance, its answer (yes or no) shared
+  for 60 seconds. A stale yes can't queue anything: an instance without the module has no such
+  route and answers 404 or 405, which the relay reports as `unavailable` and probes again next
+  time. So detection is a route, not a node class in `/object_info`, which would show up in
+  `node_search` and the editor.
+
+  **What is sent.** The body is exactly `{"prompt": <graph>}`: no `prompt_id`, no `client_id`
+  and no `extra_data`, so nothing that could carry a credential, and a test holds it to that.
+  It is optional detail: 10 seconds in all, at most 50 errors (`errors_omitted` counts the
+  rest), strings cut at 500 characters, and a COMBO's options at their first 20
+  (`expected_count` gives the total). A failure is the `reason`, never the call's failure.
 
   The V3 dynamic-input naming (`images.image0` for an Autogrow, `resize_type.width` for a
   DynamicCombo's chosen option) lives in `workflow.py`, and `node_describe` renders it with the
@@ -510,7 +539,8 @@ refusal names each node and its signals:
 Template runnability and node search use the same function. **The backstop:** at v0.37.0 a
 partner-API node gets the user's Comfy.org credentials only from `/prompt`'s `extra_data`
 (`execution.py`: `extra_data.get("auth_token_comfy_org")`), and this server never sends
-`extra_data`. Its `/prompt` body is exactly `{prompt, prompt_id}`, and a test holds it to that.
+`extra_data`. Its `/prompt` body is exactly `{prompt, prompt_id}`, and its dry run's body
+exactly `{prompt}`, and tests hold both to that.
 So even a partner node that escaped detection would run without the credentials that pay. A
 custom node that spends money by some other route shows no signal and can't be detected.
 
