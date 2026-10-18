@@ -1,6 +1,6 @@
 [project]
 name = "comfyctl"
-version = "6.0.0"
+version = "6.1.0"
 description = "One command for ComfyUI-Docker's tooling: comfyctl fetch, and more groups to come"
 readme = "README.md"
 requires-python = ">=3.11"
