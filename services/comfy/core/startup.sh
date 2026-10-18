@@ -100,32 +100,25 @@ if [ "${COMFY_ENABLE_NODE_VENV:-true}" = "true" ]; then
             || warn "could not write $node_venv/bin/cm-cli"
         # uv finds this wrapper even through `python -m uv` (its launcher looks
         # in the venv's bin/ first), and Manager runs `uv pip freeze` and `list`,
-        # so only the subcommands that change packages are refused. The
-        # subcommand is the first argument that isn't an option, after `pip`.
+        # so only the subcommands that change packages are refused. Fail
+        # closed: any `install`, `sync` or `uninstall` after a `pip` argument,
+        # wherever options and their values sit.
         put "$node_venv/bin/uv" "$(cat <<'EOF'
 #!/bin/sh
 # uv can't see the image's packages through the node venv, so `uv pip install`
 # would reinstall them, torch included, into it. Refuse what changes packages.
-want=pip
-skip=
+after_pip=
 for arg in "$@"; do
-    if [ -n "$skip" ]; then skip=; continue; fi
-    case "$arg" in
-        --cache-dir|--directory|--project|--config-file|--color|--python-preference|--allow-insecure-host) skip=1; continue ;;
-        -*) continue ;;
-    esac
-    if [ "$want" = pip ]; then
-        [ "$arg" = pip ] || break
-        want=command
-        continue
+    if [ "$arg" = pip ]; then
+        after_pip=1
+    elif [ -n "$after_pip" ]; then
+        case "$arg" in
+            install|sync|uninstall)
+                echo "uv pip $arg is refused here: uv can't see the image's packages through /app/user/__node_venv, so it would reinstall or remove the wrong ones. Use pip (python -m pip) instead." >&2
+                exit 2
+                ;;
+        esac
     fi
-    case "$arg" in
-        install|sync|uninstall)
-            echo "uv pip $arg is refused here: uv can't see the image's packages through /app/user/__node_venv, so it would reinstall or remove the wrong ones. Use pip (python -m pip) instead." >&2
-            exit 2
-            ;;
-    esac
-    break
 done
 exec /app/.venv/bin/uv "$@"
 EOF
@@ -230,26 +223,37 @@ except Exception as e:
 EOF
 fi
 
-# Run from the node venv only if Manager will use pip there: read use_uv back.
-# A missing or unparseable file counts as uv, since Manager then falls back to
-# its own default, which is uv. Otherwise Manager would run uv inside the node
-# venv, where the wrapper and uv's blindness to the image's packages bite.
-if [ "$node_venv_used" = true ] && ! python - /app/user/__manager/config.ini <<'EOF'
+# Run from the node venv only if Manager will use pip there. Manager reads its
+# config from /app/user/__manager only when it can make its subdirectories
+# there (or they exist); otherwise it moves to its package directory, whose
+# default is uv. Then read use_uv and use_unified_resolver back: a missing or
+# unparseable file counts as uv, since Manager then falls back to its default,
+# which is uv. Otherwise Manager would run uv inside the node venv, where the
+# wrapper and uv's blindness to the image's packages bite.
+manager_dir=/app/user/__manager
+manager_dir_usable=false
+if [ -d "$manager_dir" ] && { [ -w "$manager_dir" ] || {
+        [ -d "$manager_dir/snapshots" ] && [ -d "$manager_dir/startup-scripts" ] \
+            && [ -d "$manager_dir/cache" ] && [ -d "$manager_dir/batch_history" ]; }; }; then
+    manager_dir_usable=true
+fi
+if [ "$node_venv_used" = true ] && { [ "$manager_dir_usable" != true ] || ! python - "$manager_dir/config.ini" <<'EOF'
 import configparser, sys
 
 config = configparser.ConfigParser(strict=False)
 try:
-    ok = bool(config.read(sys.argv[1])) and config.has_section("default") \
-        and config["default"].get("use_uv", "False").strip().lower() == "false"
+    section = config["default"] if config.read(sys.argv[1]) and config.has_section("default") else None
+    ok = section is not None and all(
+        section.get(key, "False").strip().lower() == "false" for key in ("use_uv", "use_unified_resolver"))
 except Exception:
     ok = False
 sys.exit(0 if ok else 1)
 EOF
-then
+}; then
     PATH="${PATH#"$node_venv/bin:"}"
     export VIRTUAL_ENV="$image_virtual_env"
     node_venv_used=false
-    warn "$node_venv can't be used, so ComfyUI runs from the image's venv this time, and what custom nodes install there is lost on a recreate. use_uv isn't False in /app/user/__manager/config.ini, and startup couldn't set it: make the file and its directory writable by $(id -u):$(id -g), and restart."
+    warn "$node_venv can't be used, so ComfyUI runs from the image's venv this time, and what custom nodes install there is lost on a recreate. Manager would install with uv: use_uv and use_unified_resolver aren't both False in $manager_dir/config.ini, or Manager can't use $manager_dir, and startup couldn't fix it. Make $manager_dir and its config.ini writable by $(id -u):$(id -g), and restart."
 fi
 
 exec python "${args[@]}"

@@ -54,22 +54,21 @@ see `VERSIONING.md`.
   with a `WARNING` rather than failing.
 - **Manager's `use_uv` and `use_unified_resolver` are forced to `False`** in
   `/app/user/__manager/config.ini` while the node venv is in use. A file that
-  can't be parsed or written gets a `WARNING`, never a failed start.
+  can't be parsed or written gets a `WARNING`, never a failed start. Startup then
+  checks what Manager will really use, and runs from the node venv only when
+  `/app/user/__manager` is writable or already holds Manager's subdirectories
+  (otherwise Manager reads a config elsewhere that defaults to uv) and both keys
+  read back as `False`; anything else falls back to the image's venv with a
+  `WARNING` (#223, #226).
+- **The node venv's `uv` refuses the `uv pip` commands that change packages**:
+  any `install`, `sync` or `uninstall` after a `pip` argument, wherever options
+  sit, because uv can't see the image's packages through the node venv. Every
+  other `uv` command, Manager's `uv pip freeze` included, passes through
+  (#223, #226).
 - **Upgrading from 6.0.0:** packs installed on 6.0.0 show `IMPORT FAILED` after
   the upgrade, because their dependencies were in the old container. Run
   `cm-cli restore-dependencies --user-directory /app/user/__manager` once in a
   `docker exec` session as the runtime user, then restart.
-
-### Fixed
-
-- **A crash-loop with the node venv when Manager's directory isn't writable (#223).**
-  With `/app/user/__manager` unwritable by the runtime UID and `use_uv = True` left
-  in its `config.ini`, Manager's startup check ran `uv pip freeze` through the node
-  venv's `uv` wrapper, which refused it, and the container exited on every start.
-  Startup now reads `use_uv` back and runs from the node venv only when it is
-  `False`, falling back to the image's venv with a `WARNING`. The wrapper refuses
-  only `uv pip install`, `sync` and `uninstall`, wherever options sit. The runtime
-  contract's *Hardening* section, dropped by mistake, is back.
 
 ## 6.0.0 — 2026-10-11
 
