@@ -96,6 +96,9 @@ docker restart comfyui
 
 ### Changed
 
+- **`comfyctl` and `comfyrelay` now require `typer>=0.27.3`** (was `>=0.16.0`, #202). 0.27.3
+  escapes terminal control characters in its error messages. A wheel installed into an
+  environment with an older typer upgrades it.
 - **ComfyUI runs under the node venv's interpreter**, `/app/user/__node_venv/bin/python`,
   not `/app/.venv/bin/python`, and that venv's `bin/` is first on the image's
   `PATH`. Startup repairs it at every start, and falls back to the image's venv
