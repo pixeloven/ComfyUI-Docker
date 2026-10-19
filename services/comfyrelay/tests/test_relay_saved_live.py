@@ -6,13 +6,12 @@ COMFYRELAY_LIVE_COMFYUI_URL names one, as test_relay_workflow_live.py is:
       uv run --locked [--extra convert] pytest -q comfyrelay/tests/test_relay_saved_live.py
 
 It writes files named relay-live-*.json into that ComfyUI's user/default/workflows and deletes them afterwards, and
-runs built-in image nodes, so point it at a scratch instance. The conversion case needs the convert extra and its
-Chromium, and is skipped without them.
+runs built-in image nodes, so point it at a scratch instance. The case that runs a saved UI workflow through the
+converter is in test_relay_convert_live.py, which CI runs where the convert extra is installed.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import uuid
@@ -178,26 +177,3 @@ async def test_run_and_validate_take_a_saved_api_graph_by_name(client, names):
     assert done.structured_content["state"] == "succeeded", done.structured_content
     [file] = done.structured_content["result"]["files"]
     assert file["filename"].startswith("relay_live_saved_run_")
-
-
-@pytest.mark.skipif(importlib.util.find_spec("playwright") is None, reason="the convert extra is not installed")
-async def test_a_saved_ui_workflow_runs_by_name_where_this_server_converts(names):
-    """The round trip T9 asks for: save a UI workflow, then run it by name, converted by the instance's frontend."""
-    server, relay = build_server(settings(comfyui_url=URL, convert=True), comfyui=ComfyUIClient(URL))
-    try:
-        async with Client(server, mode="legacy") as c:
-            name = names("convert")
-            saved = await c.call_tool("workflow_save", {"name": name, "workflow": ui_graph("relay_live_saved_ui_")})
-            assert not saved.is_error, saved.content[0].text
-            started = await c.call_tool("workflow_run", {"saved": name})
-            assert not started.is_error, started.content[0].text
-            assert started.structured_content["converted_from_ui"] is True
-            done = await c.call_tool(
-                "job_status", {"job_id": started.structured_content["job_id"], "timeout_seconds": 60}
-            )
-            assert done.structured_content["state"] == "succeeded", done.structured_content
-            [file] = done.structured_content["result"]["files"]
-            assert file["filename"].startswith("relay_live_saved_ui_")
-    finally:
-        if relay.converter is not None:
-            await relay.converter.close()
