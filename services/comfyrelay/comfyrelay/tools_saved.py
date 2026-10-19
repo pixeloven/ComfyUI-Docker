@@ -176,11 +176,8 @@ class SavedList(BaseModel):
 
 def _workflow_list_saved(relay: Relay) -> Callable[..., Any]:
     async def workflow_list_saved() -> SavedList:
-        """List the user's saved workflows: the files the editor's workflows sidebar shows (ComfyUI's
-        user/default/workflows), newest first, with size and modification time. Changes nothing.
-
-        Read one with workflow_get_saved; workflow_validate and workflow_run also take one by name (saved).
-        """
+        """List the user's saved workflows, the files the editor's workflows sidebar opens, newest first. Changes
+        nothing. Read one with workflow_get_saved; workflow_run and workflow_validate take one by name (saved)."""
         files = await relay.comfyui.userdata_list(FOLDER) or []
         entries, bad = [], 0
         for f in files:
@@ -227,13 +224,10 @@ class SavedWorkflow(BaseModel):
 
 def _workflow_get_saved(relay: Relay) -> Callable[..., Any]:
     async def workflow_get_saved(name: SavedName) -> SavedWorkflow:
-        """Read one of the user's saved workflows, as the editor stores it. Changes nothing.
-
-        The editor saves UI format: nodes with widgets_values (in widget order), links, subgraph definitions. To
-        change it, edit values in place, keep the rest, and save it back with workflow_save(overwrite=true); to run
-        it, workflow_run(saved=name). Over 80,000 characters as JSON fails with workflow_too_large; an unknown name
-        with unknown_saved_workflow and close names.
-        """
+        """Read one of the user's saved workflows as the editor stores it (UI format: nodes with widgets_values in
+        widget order, links). Changes nothing. To change it, edit values in place, keep the rest, and save it with
+        workflow_save(overwrite=true); to run it, workflow_run(saved=name). Over 80,000 characters as JSON:
+        workflow_too_large."""
         checked, workflow, size = await read_saved(relay, name)
         chars = workflow_chars(workflow)
         if chars > WORKFLOW_MAX_CHARS:
@@ -264,19 +258,14 @@ def _workflow_save(relay: Relay) -> Callable[..., Any]:
         name: SavedName,
         workflow: Annotated[
             dict[str, Any],
-            Field(description="UI format (nodes, links), as workflow_get_saved or template_get returns it"),
+            Field(description="UI format, as workflow_get_saved or template_get returns it"),
         ],
-        overwrite: bool = Field(
-            default=False, description="true replaces a saved workflow of this name; otherwise that is refused"
-        ),
+        overwrite: bool = Field(default=False, description="true replaces an existing file; otherwise that is refused"),
     ) -> SavedResult:
-        """Save a workflow to the user's workflows, where the editor's sidebar lists and opens it.
-
-        UI format only: the editor opens an API-format file as an empty canvas, so that is refused
-        (api_format_not_saved). Written as the editor writes it: read and saved unchanged, it is the same bytes. An
-        existing name is refused with workflow_exists unless overwrite is true. Not validated: use
-        workflow_validate(saved=name). An editor tab already open keeps its copy until reopened.
-        """
+        """Save a workflow to the user's workflows, where the editor's sidebar opens it. UI format only: the editor
+        opens API format as an empty canvas (api_format_not_saved). An existing name needs overwrite=true, else
+        workflow_exists. Written as the editor writes it, so an unedited round trip keeps the bytes. Not validated
+        (workflow_validate(saved=name) is). An editor tab already open keeps its copy until reopened."""
         name = saved_name(name)
         kind = workflow_format(workflow)
         if kind == "api":
