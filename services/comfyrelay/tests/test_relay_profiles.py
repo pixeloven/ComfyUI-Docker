@@ -69,6 +69,8 @@ READ_TOOLS = {
     "template_get",
     "docs_search",
     "docs_guide",
+    "workflow_list_saved",
+    "workflow_get_saved",
 }
 RUN_TOOLS = {
     "job_status",
@@ -77,6 +79,7 @@ RUN_TOOLS = {
     "workflow_run",
     "workflow_outputs",
     "workflow_upload_input",
+    "workflow_save",
 }
 
 

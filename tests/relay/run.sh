@@ -30,7 +30,7 @@
 #      The tools listed are exactly the default profiles' (read,run):
 #      docs_guide, docs_search, job_cancel, job_status, model_list,
 #      node_describe, node_search, server_info, template_get, template_search
-#      and the four workflow_* tools.
+#      and the seven workflow_* tools.
 #   4b. mcp-convert only: tests/relay/convert_smoke.py, run inside the relay
 #      container, converts a template through the relay (template_get with
 #      format="api", and workflow_validate given the UI graph) and checks both
@@ -164,7 +164,7 @@ pinned="$(docker exec -i "$comfy" jq -r '.server_info.comfyui.pinned_version' < 
 matches="$(docker exec -i "$comfy" jq -r '.server_info.comfyui.matches_pin' < "$out/probe.json")"
 echo "relay: probe passed; ComfyUI live $live, image pinned $pinned, matches: $matches"
 tools="$(docker exec -i "$comfy" jq -r '.tools | join(",")' < "$out/probe.json")"
-want_tools="docs_guide,docs_search,job_cancel,job_status,model_list,node_describe,node_search,server_info,template_get,template_search,workflow_outputs,workflow_run,workflow_upload_input,workflow_validate"
+want_tools="docs_guide,docs_search,job_cancel,job_status,model_list,node_describe,node_search,server_info,template_get,template_search,workflow_get_saved,workflow_list_saved,workflow_outputs,workflow_run,workflow_save,workflow_upload_input,workflow_validate"
 [ "$tools" = "$want_tools" ] || fail "the default profiles list tools $tools, not $want_tools"
 echo "relay: tools $tools"
 conversion="$(docker exec -i "$comfy" jq -r '.server_info.capabilities.conversion.state' < "$out/probe.json")"

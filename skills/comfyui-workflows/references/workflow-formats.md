@@ -16,6 +16,9 @@ common reason a workflow "doesn't load" or is rejected before it runs.
 | Editor-only nodes | present: `Note`, `MarkdownNote`, `Reroute`, `PrimitiveNode` | absent: the editor drops or resolves them on export |
 | Muted and bypassed nodes | present, with `mode` 2 (muted) or 4 (bypassed) | absent: a muted node is left out, and a bypassed one is wired through |
 
+The editor's workflows sidebar opens only the UI format: a saved API-format
+file opens as an empty canvas (the `saved-workflows` topic).
+
 A quick test: a top-level `nodes` list means UI format. Values that are all
 objects with a `class_type` mean API format. The formal schema of the UI format
 is on docs.comfy.org under *Specifications → Workflow JSON*
@@ -119,6 +122,10 @@ each definition with its inputs named as a graph must name them. *(needs the com
     file, `workflow_validate` reports an `invalid_workflow` problem that says to
     export the API format, and `workflow_run` refuses it (`workflow_invalid`).
     `template_get` with `format: "api"` fails with `conversion_unavailable`.
+- `workflow_validate` and `workflow_run` also take one of the user's saved
+  workflows by name (`saved`), converting a UI-format one where they convert,
+  and `workflow_save` keeps the library in the UI format (the
+  `saved-workflows` topic).
 - Either way, `workflow_run` refuses a graph with a partner-API node, UI format
   included, before converting it.
 - `workflow_run` takes the graph alone, not a whole `/prompt` body. It chooses

@@ -23,6 +23,9 @@ ComfyUI, through its HTTP API and editor.
 
 - [workflow-formats](references/workflow-formats.md): the editor's UI JSON
   against the API JSON that `/prompt` takes, and converting between them.
+- [saved-workflows](references/saved-workflows.md): editing a workflow the
+  user saved in the editor, in place, so they can open it again: where the
+  files are, the format the sidebar opens, and replacing one.
 - [models-and-nodes](references/models-and-nodes.md): what to do when a
   workflow needs a model or node pack the instance lacks. Propose a manifest
   change; never install.

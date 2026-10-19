@@ -16,8 +16,8 @@ fails as an unknown tool, so check `server_info` rather than assuming.
 
 | Profile | Tools |
 |---|---|
-| `read` | `node_search`, `node_describe`, `model_list`, `template_search`, `template_get`, `docs_search`, `docs_guide` |
-| `run` | `workflow_validate`, `workflow_run`, `workflow_outputs`, `workflow_upload_input`, `job_status`, `job_cancel` |
+| `read` | `node_search`, `node_describe`, `model_list`, `template_search`, `template_get`, `docs_search`, `docs_guide`, `workflow_list_saved`, `workflow_get_saved` |
+| `run` | `workflow_validate`, `workflow_run`, `workflow_outputs`, `workflow_upload_input`, `workflow_save`, `job_status`, `job_cancel` |
 | `manage` | nothing yet |
 
 `server_info` is in every profile.
@@ -37,6 +37,9 @@ fails as an unknown tool, so check `server_info` rather than assuming.
   API-format graphs only. The `mcp-convert` image converts a UI-format graph
   first, through the instance's own editor; `server_info.capabilities.conversion`
   says which you have (the `workflow-formats` topic).
+- **Replacing a saved workflow without `overwrite: true`.** `workflow_save`
+  refuses a name that exists with `workflow_exists`, and refuses API format
+  with `api_format_not_saved` (the `saved-workflows` topic).
 - **Anything but its own ComfyUI.** It makes no other outbound connection, so
   docs answers come from the docs index built into its image, not the web.
 

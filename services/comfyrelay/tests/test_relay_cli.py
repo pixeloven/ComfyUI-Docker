@@ -97,8 +97,11 @@ def test_probe_passes_against_a_running_server(live_server, monkeypatch):
         "server_info",
         "template_get",
         "template_search",
+        "workflow_get_saved",
+        "workflow_list_saved",
         "workflow_outputs",
         "workflow_run",
+        "workflow_save",
         "workflow_upload_input",
         "workflow_validate",
     ]

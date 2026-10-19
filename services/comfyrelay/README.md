@@ -118,8 +118,8 @@ as an unknown tool.
 
 | Profile | For | Tools in this version |
 |---|---|---|
-| `read` | Introspection: nodes, models, templates, docs | `server_info`, `node_search`, `node_describe`, `model_list`, `template_search`, `template_get`, `docs_search`, `docs_guide` |
-| `run` | Validating and running workflows | `server_info`, `job_status`, `job_cancel`, `workflow_validate`, `workflow_run`, `workflow_outputs`, `workflow_upload_input` |
+| `read` | Introspection: nodes, models, templates, docs, the user's saved workflows | `server_info`, `node_search`, `node_describe`, `model_list`, `template_search`, `template_get`, `docs_search`, `docs_guide`, `workflow_list_saved`, `workflow_get_saved` |
+| `run` | Validating and running workflows, and saving them | `server_info`, `job_status`, `job_cancel`, `workflow_validate`, `workflow_run`, `workflow_outputs`, `workflow_upload_input`, `workflow_save` |
 | `manage` | Changing what's installed, through the manifest and lock (v2) | `server_info` |
 
 `server_info` is in every profile. An enabled profile with nothing else logs a warning at
@@ -599,6 +599,70 @@ per token*), so this adds no reader who couldn't already follow the relay's own 
 comes back is mapped: the graph and its `extra_data` aren't returned. A deployment that must
 keep other clients' runs from the relay's agents entirely should give the relay its own
 ComfyUI.
+
+## Saved workflows
+
+The user's workflow library (#216; `comfyrelay/tools_saved.py`): the files the editor's
+workflows sidebar lists and opens, in ComfyUI's `user/default/workflows`. Every read and write
+goes through ComfyUI's own userdata routes, as the editor's do, and the relay touches no
+filesystem. Reading is the `read` profile's, and saving the `run` profile's (owner decision on
+#216).
+
+- **`workflow_list_saved`** (`read`) lists them from `GET /api/userdata?dir=workflows&recurse=true&full_info=true`:
+  each `.json` file's name, size and modification time, newest first, at most **200**
+  (`omitted` counts the rest). A file whose name the tools refuse is counted in
+  `unaddressable`, not listed. No `workflows` folder yet is an empty list.
+- **`workflow_get_saved`** (`read`) returns one, from `GET /api/userdata/workflows%2F<name>`,
+  with its `format`: `ui`, `api` or `unknown`. An unknown name is `unknown_saved_workflow`, with
+  close names (optional detail: a listing that fails or takes over 3 seconds leaves them out).
+  A file that isn't a JSON object is `invalid_saved_workflow`.
+- **`workflow_save`** (`run`) writes one, through `POST /api/userdata/workflows%2F<name>`,
+  which ComfyUI writes atomically (a temporary file, then a rename).
+  - **Replacing needs `overwrite: true`.** Without it the request says `overwrite=false`, and
+    ComfyUI refuses an existing file with HTTP 409, which is `workflow_exists`: its message
+    names the flag, and nothing is written. The check is ComfyUI's, made as it writes.
+  - **UI format only.** The editor's sidebar opens a file through `app.loadGraphData`, which
+    reads `nodes` and `links`. On frontend 1.53.6 an API-format file opened from the sidebar
+    showed an empty canvas, with only a console warning, and saving that tab would write the
+    empty graph back. So an API graph is refused with `api_format_not_saved`, and anything
+    that is neither format with `invalid_workflow`. The relay doesn't convert API to UI: the
+    editor's API import lays nodes out afresh and keeps no groups or notes, which isn't a
+    faithful round trip.
+  - **Written as the editor writes it**, `JSON.stringify`'s compact form, so a workflow read
+    and saved unchanged is the same bytes. With `overwrite: true` the relay reads the file
+    first, and a save whose content it already holds isn't written (`written: false`), which
+    also keeps a file another tool formatted byte for byte.
+  - It doesn't validate the graph: `workflow_validate(saved=name)` does.
+  - **Annotations:** not read-only, destructive (with `overwrite` it replaces a file), and
+    idempotent (the same workflow under the same name leaves the same file).
+- **`workflow_validate` and `workflow_run` take `saved`**, a saved workflow's name, instead of
+  `workflow`: exactly one of the two, or `invalid_arguments`. The file is read through ComfyUI
+  and handled as if it had been passed inline, converted first where this server converts. A
+  run by name keeps the graph out of the agent's context.
+
+**Names** are paths relative to the workflows folder, as `workflow_list_saved` gives them,
+ending in `.json`. A leading `workflows/` is dropped. Each is checked before any request, and
+refused with `invalid_workflow_name` if it is empty or over 255 characters, or holds a control
+character, a backslash, a `%` (ComfyUI decodes a name with one a second time), a leading `/`, an
+empty, `.` or `..` part, or a part that starts with a dot (ComfyUI's listing skips those, so the
+sidebar would never show it). The name goes to ComfyUI as one encoded path segment, under
+`workflows/`, and ComfyUI keeps it inside the user's directory too (HTTP 403, also
+`invalid_workflow_name`). So no other user data, such as `comfy.settings.json`, is reachable.
+
+**Caps.** **2 MiB** read or written (`saved_workflow_too_large`); `workflow_get_saved` returns at
+most **80,000** characters of JSON (`workflow_too_large`, as `template_get`), while
+`workflow_run(saved=)` runs a larger one.
+
+**Errors from ComfyUI's userdata routes:** 404 is `unknown_saved_workflow` (or an empty list),
+409 `workflow_exists`, 403 `invalid_workflow_name`, 400 `save_failed` (ComfyUI couldn't write
+the file; its reason is included), and anything else `comfyui_http_error`. `--multi-user`
+ComfyUIs aren't handled: the relay sends no `comfy-user` header, so it reads and writes the
+`default` user's files.
+
+**An open editor tab keeps its own copy.** On frontend 1.53.6, a tab already showing the file
+didn't change when the relay saved it; closing the tab and opening the file from the sidebar
+again, or reloading the page, showed the saved file. Saving the stale tab writes it back over
+the relay's save. The `saved-workflows` guide tells agents to say so.
 
 ## UI-to-API conversion
 

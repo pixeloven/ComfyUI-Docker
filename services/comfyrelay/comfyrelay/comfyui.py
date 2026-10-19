@@ -330,6 +330,97 @@ class ComfyUIClient:
             raise self._bad_shape("/upload/image", 'an object with a "name" string')
         return data
 
+    # -- the user's saved workflows (#216) ----------------------------------------
+    #
+    # ComfyUI's userdata API, as the editor uses it: the default user's files under user/default/, addressed by a
+    # path relative to it with its slashes percent-encoded into one path segment. ComfyUI keeps every path inside
+    # that directory itself; the tools also check names before they get here (tools_saved.py).
+
+    @staticmethod
+    def _userdata_path(path: str) -> str:
+        return f"/api/userdata/{quote(path, safe='')}"
+
+    async def userdata_list(self, directory: str) -> list[dict[str, Any]] | None:
+        """GET /api/userdata?dir=<directory>&recurse=true&full_info=true: each file under it, with `path`
+        (relative to it), `size` and `modified` (Unix milliseconds). None when the directory doesn't exist."""
+        path = "/api/userdata"
+        response = await self._send(
+            "GET", path, params={"dir": directory, "recurse": "true", "full_info": "true", "split": "false"}
+        )
+        if response.status_code == 404:
+            return None
+        self._raise_for_status(response, path)
+        data = self._json_object(response, path, expect=list)
+        if not all(isinstance(f, dict) and isinstance(f.get("path"), str) for f in data):
+            raise self._bad_shape(path, 'an array of objects with a "path" string')
+        return data
+
+    async def userdata_read(self, path: str, limit: int) -> bytes | None:
+        """GET /api/userdata/<path>: the file's bytes, reading at most `limit` of them (more is
+        `saved_workflow_too_large`). None when there is no such file."""
+        url = self._userdata_path(path)
+        try:
+            async with self._http.stream("GET", url, headers={"Accept": "application/json, */*"}) as response:
+                if response.status_code == 404:
+                    return None
+                self._raise_userdata_status(response, url)
+                chunks, size = [], 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > limit:
+                        raise ComfyUIError(
+                            "saved_workflow_too_large",
+                            f"{path} is larger than {limit} bytes, the most this server reads",
+                            limit=limit,
+                        )
+                    chunks.append(chunk)
+        except httpx2.RequestError as exc:
+            raise self._transport_error(exc, url) from exc
+        return b"".join(chunks)
+
+    async def userdata_write(self, path: str, body: bytes, *, overwrite: bool) -> dict[str, Any]:
+        """POST /api/userdata/<path>?overwrite=...&full_info=true: write the file, which ComfyUI does atomically
+        (a temporary file, then a rename). Without `overwrite`, ComfyUI refuses an existing file with HTTP 409:
+        `workflow_exists`. Returns ComfyUI's {path, size, modified}."""
+        url = self._userdata_path(path)
+        response = await self._send(
+            "POST",
+            url,
+            params={"overwrite": "true" if overwrite else "false", "full_info": "true"},
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        if response.status_code == 409:
+            raise ComfyUIError(
+                "workflow_exists",
+                f"{path} already exists, and nothing was written. To replace it, call again with overwrite: true; "
+                "to keep it, save under another name",
+                path=path,
+            )
+        self._raise_userdata_status(response, url)
+        data = self._json_object(response, url)
+        if not isinstance(data.get("path"), str):
+            raise self._bad_shape(url, 'an object with a "path" string')
+        return data
+
+    def _raise_userdata_status(self, response: httpx2.Response, url: str) -> None:
+        """ComfyUI's userdata refusals, as codes: 403 a path it won't serve, 400 a file it couldn't write (its
+        reason names the characters it suspects)."""
+        if response.status_code == 403:
+            raise ComfyUIError(
+                "invalid_workflow_name",
+                f"ComfyUI refused the path {self._shown_url}{url} (HTTP 403): it isn't inside the user's directory",
+                status=403,
+            )
+        if response.status_code == 400:
+            reason = (response.reason_phrase or "")[:200]
+            raise ComfyUIError(
+                "save_failed",
+                f"ComfyUI could not write {self._shown_url}{url} (HTTP 400): {reason or 'no reason given'}",
+                status=400,
+            )
+        self._raise_for_status(response, url)
+
     async def view_size(self, ref: dict[str, str]) -> int | None:
         """HEAD /view for one file: its size in bytes, or None if ComfyUI does not say."""
         response = await self._send("HEAD", "/view", params=ref)
