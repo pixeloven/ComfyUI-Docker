@@ -28,6 +28,27 @@ see `VERSIONING.md`.
   backslashes, `%` or control characters; a `.json` suffix), and reads and
   writes are capped at 2 MiB, listings at 200. The relay's README has the
   details, and the workflows skill has a new `saved-workflows` guide.
+- **Optional output links in comfyrelay** (#233). Set `COMFYUI_PUBLIC_URL` to
+  a client-accessible ComfyUI base, including a proxy path prefix, to receive
+  an absolute `view_url` per file from `workflow_outputs`. Unset, it is null;
+  existing `view_path` and the 5,000,000-byte inline limit remain. Both
+  known-size and streamed `output_too_large` errors include the delivery
+  fields. This does not publish files or grant access: operators supply the
+  route and authentication. The relay never fetches the public URL or
+  derives it from the internal URL, and refuses ambiguous or credential-bearing
+  public bases without printing their values.
+
+### Fixed
+
+- **`check` refuses a direct-URL source with no `sha256:`** (#230). The
+  manifest schema only described the requirement, so `check` passed such a
+  manifest and `resolve` then failed with ``a direct URL needs `sha256` in the
+  manifest``. The schema now requires it, so `check` and `resolve` both exit 1
+  on it, offline and before any network call, saying the source needs
+  `sha256`. No `resolve` has ever locked such an entry. A manifest that carried
+  one outside every profile it resolved did pass, and now fails as a whole.
+  *Migration:* add `sha256: <hash>` to each `https://` entry that has none, or
+  remove the entry.
 
 ## 6.1.0 — 2026-10-18
 

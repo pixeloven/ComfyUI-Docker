@@ -93,6 +93,7 @@ image read before 5.0.0, so a deployment keeps them.
 |---|---|---|
 | `COMFYUI_MCP_HTTP_TOKEN` | *(unset, required)* | The token clients send, as `Authorization: Bearer <token>` or `X-API-Key: <token>`. A request passes if either header carries it, so a gateway can send its own Bearer and this token as `X-API-Key`. Without it the server logs `Refusing to start` and exits 2. It must be **at least 32 characters** (generate one with `openssl rand -hex 32`), or it exits 2 with the length and that command. It must be visible ASCII (no spaces, line breaks or other characters a header can't carry); anything else also exits 2, and the value is never printed. |
 | `COMFYUI_URL` | `http://localhost:8188` | Where ComfyUI answers, from this container. It must be an `http://` or `https://` URL with a host, or the server exits 2 at startup. A `user:password@` in it is sent to ComfyUI but never shown: logs and errors print `***@`. Percent-encode any `/`, `?`, `#` or `@` in the credentials (`/` is `%2F`): unencoded, they end the host part early, and the server refuses the URL. |
+| `COMFYUI_PUBLIC_URL` | unset | Optional ComfyUI base URL reachable by output consumers, including a reverse-proxy prefix, e.g. `https://comfy.example/team/comfy/`. Adds absolute `view_url` links; never changes where the relay sends requests. Unset or blank disables them. Must be HTTP(S) with a valid host and port, without credentials, query, fragment, literal `@`, whitespace, controls or backslashes; invalid values exit 2 without echoing the value. |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `9000` | The listen address. The path is always `/mcp`. |
 | `COMFYUI_MCP_PROFILES` | `read,run` | The capability profiles to enable (below) |
 | `COMFYUI_MCP_INSTANCE_ID` | the hostname | How `server_info` names this sidecar. In a container the hostname is the container ID or pod name, which can change when it's recreated, so set this when a gateway federates sidecars. `server_info` reports where the ID came from (`instance_id_source`: `env` or `hostname`), and startup logs a warning when it's the hostname. |
@@ -448,10 +449,23 @@ converts it first (see *UI-to-API conversion*). The code is
   runs are listed too, since they may have saved something. **It streams nothing unless
   asked.** `fetch=<filename>` returns that one file inline, up to **5,000,000 bytes**, and
   sizes only that file: an image as MCP image content the model can see, audio as audio
-  content, anything else as an embedded resource. A larger file is refused
-  (`output_too_large`) with its `/view` path, which a person or tool with direct access to
-  ComfyUI can use. After a restart it finds the run on ComfyUI by its ID
+  content, anything else as an embedded resource. Each file includes its relative
+  `view_path` and a nullable `view_url`: when `COMFYUI_PUBLIC_URL` is configured, that URL
+  preserves its path prefix and encodes the file's filename, subfolder and type. A larger
+  file is refused (`output_too_large`) with structured `view_path` and `view_url` fields,
+  even if its size was unknown until streaming. After a restart it finds the run on ComfyUI by its ID
   (`source: "comfyui"`). Read-only.
+
+  **Link delivery.** Omit `fetch` to get links without putting base64 in the agent's context.
+  For example, `COMFYUI_PUBLIC_URL=https://comfy.example/team/comfy` yields
+  `https://comfy.example/team/comfy/view?filename=render.png&subfolder=&type=output`.
+  This is an ordinary ComfyUI URL, not a signed link, upload or hosting service. The
+  operator must route that base to the same ComfyUI and make it reachable by the intended
+  recipients. Existing proxy authentication still applies; MCP tokens and internal
+  `COMFYUI_URL` credentials are not added to links or forwarded for recipients. A chat
+  service can fetch a link only if its own network and authentication allow it. The relay
+  neither requests nor checks the public URL, and an unset public base never falls back
+  to the internal URL. Links last only while the files and route remain available.
 - **`workflow_upload_input`** puts a file into ComfyUI's input directory through
   `POST /upload/image` (`type=input`) and returns the name ComfyUI stored it under, to put in
   LoadImage's `image` input.

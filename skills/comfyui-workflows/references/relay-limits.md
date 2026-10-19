@@ -52,7 +52,16 @@ fails as an unknown tool, so check `server_info` rather than assuming.
   tool-call timeout, which is often about 60 seconds. A wait that times out
   leaves the job running; call again.
 - **Collect files** with `workflow_outputs`. It lists them and returns one
-  inline when you name it in `fetch`, up to 5,000,000 bytes.
+  inline when you name it in `fetch`, up to 5,000,000 bytes. Omit `fetch` for
+  links without base64: every file has a relative `view_path` and a `view_url`
+  that is absolute when the operator sets `COMFYUI_PUBLIC_URL`, otherwise
+  null. Use that URL for delivery when the recipient can reach and access
+  it; it is an ordinary ComfyUI link, not an upload or access grant. The
+  relay does not check it, add tokens or expose its internal URL. An
+  `output_too_large` error also includes `view_path` and nullable `view_url`,
+  whether the size was known before fetching or discovered while streaming.
+  Ask the operator about routing/access when a URL is absent or unreachable;
+  do not reconstruct one from the relay's internal ComfyUI address.
 - **Stop it** with `job_cancel`, which uses ComfyUI's per-prompt cancel and
   never interrupts someone else's run.
 - A run's `job_id` is its ComfyUI `prompt_id`.

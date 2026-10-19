@@ -37,16 +37,18 @@ def load(name: str) -> dict[str, Any]:
 def _explain(error: jsonschema.ValidationError) -> str:
     """jsonschema's message, or why a conditional rule exists.
 
-    The direct-URL rule fails as "'as' is a required property", which reads
-    as though `as` were always needed. The hint lives here, not in the schema,
-    so the schema stays plain JSON Schema (Ajv's strict mode refuses unknown
-    keywords).
+    The direct-URL rules fail as "'as' is a required property" and "'sha256'
+    is a required property", which read as though either were always needed.
+    The hint lives here, not in the schema, so the schema stays plain JSON
+    Schema (Ajv's strict mode refuses unknown keywords).
     """
     entry = error.instance
-    if (error.validator == "required" and error.validator_value == ["as"]
-            and isinstance(entry, dict)
+    if (error.validator == "required" and isinstance(entry, dict)
             and str(entry.get("source", "")).startswith(("http://", "https://"))):
-        return "a direct-URL source needs `as` (or `file`) to name the installed file"
+        if error.validator_value == ["as"]:
+            return "a direct-URL source needs `as` (or `file`) to name the installed file"
+        if error.validator_value == ["sha256"]:
+            return "a direct-URL source needs `sha256`: nothing resolves a hash from a bare URL"
     return error.message
 
 

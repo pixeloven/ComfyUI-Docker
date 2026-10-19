@@ -6,6 +6,8 @@
                             or with a shorter one.
     COMFYUI_URL             where ComfyUI answers, from this container
                             (default http://localhost:8188)
+    COMFYUI_PUBLIC_URL      optional client-accessible ComfyUI base URL for
+                            output links; never used for server requests
     MCP_HOST, MCP_PORT      the listen address (default 0.0.0.0:9000); the
                             endpoint is always /mcp
     COMFYUI_MCP_PROFILES    comma-separated capability profiles (default
@@ -45,10 +47,12 @@ import re
 import socket
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from typing import Literal
 from urllib.parse import urlsplit
 
 TOKEN_ENV = "COMFYUI_MCP_HTTP_TOKEN"
+PUBLIC_URL_ENV = "COMFYUI_PUBLIC_URL"
 PROFILES_ENV = "COMFYUI_MCP_PROFILES"
 INSTANCE_ID_ENV = "COMFYUI_MCP_INSTANCE_ID"
 MAX_JOBS_ENV = "COMFYUI_MCP_MAX_JOBS"
@@ -133,6 +137,47 @@ def check_comfyui_url(url: str) -> str:
     return url
 
 
+def check_public_url(url: str) -> str | None:
+    """A client-facing base URL, never inferred from the possibly private COMFYUI_URL.
+
+    Refusals omit the value and parser errors: a mistaken URL may contain secrets.
+    """
+    import httpx2
+
+    if not url.strip():
+        return None
+    message = (
+        f"{PUBLIC_URL_ENV} must be an http:// or https:// URL with a valid host and port, optionally a path "
+        "prefix, without credentials, query, fragment, literal @, whitespace, controls or backslashes"
+    )
+    try:
+        if any(c.isspace() or ord(c) < 32 or ord(c) == 127 or c == "\\" for c in url):
+            raise ValueError
+        parts = urlsplit(url)
+        if (
+            parts.scheme not in ("http", "https")
+            or not parts.hostname
+            or "@" in url
+            or "?" in url
+            or "#" in url
+            or parts.netloc.endswith(":")
+            or (parts.port is not None and not 0 < parts.port < 65536)
+        ):
+            raise ValueError
+        parsed = httpx2.URL(url)
+        host = parsed.raw_host.decode("ascii")
+        if ":" in host or all(c in "0123456789." for c in host):
+            ip_address(host)
+        elif len(host) > 253 or not all(
+            re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", p)
+            for p in host.removesuffix(".").split(".")
+        ):
+            raise ValueError
+    except (ValueError, httpx2.InvalidURL):
+        raise ConfigError(message) from None
+    return str(parsed).rstrip("/")
+
+
 def check_token(token: str) -> str:
     """The token, if it can be sent in an HTTP header: visible ASCII only.
 
@@ -185,6 +230,7 @@ class Settings:
     docs_path: str = DEFAULT_DOCS
     convert: bool = False
     convert_pages: int = DEFAULT_CONVERT_PAGES
+    comfyui_public_url: str | None = field(default=None, repr=False)
 
     @classmethod
     def load(
@@ -220,6 +266,7 @@ class Settings:
         return cls(
             token=token,
             comfyui_url=check_comfyui_url(comfyui_url),
+            comfyui_public_url=check_public_url(env.get(PUBLIC_URL_ENV, "")),
             host=host,
             port=port,
             profiles=parse_profiles(profiles),

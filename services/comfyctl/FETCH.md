@@ -488,6 +488,11 @@ reason: without either, the lock's path was the `install` directory itself, and
 `fetch` wrote the file over it. The manifest schema refuses that entry, and the
 lock schema refuses a `paths[].path` that ends in `/`.
 
+A direct URL's `sha256:` is required by the manifest schema too, so `check`
+refuses an entry without it, offline, as `resolve` does. Up to 6.1.0 the schema
+only described the requirement: `check` passed such a manifest and `resolve`
+then failed with ``a direct URL needs `sha256` in the manifest``.
+
 `as:` names the file under `install` and may include a subdirectory
 (`as: sub/x.safetensors`), but never ends in `/`. No `install`, `as`, `file` or
 lock path may hold an empty, `.` or `..` segment or a `\` (a separator on

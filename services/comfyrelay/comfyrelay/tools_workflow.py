@@ -1047,6 +1047,11 @@ class OutputFile(BaseModel):
         description="The file on ComfyUI's own HTTP API, for a person or tool that can reach ComfyUI directly. "
         "Through this server, fetch it with workflow_outputs(fetch=<filename>)"
     )
+    view_url: str | None = Field(
+        default=None,
+        description="Absolute output link using COMFYUI_PUBLIC_URL; null when unset. Reachability and access "
+        "are configured by the operator, not granted by this link"
+    )
 
 
 class OutputsView(BaseModel):
@@ -1108,7 +1113,7 @@ def _workflow_outputs(relay: Relay) -> Callable[..., Any]:
         Lists each file (node, filename, subfolder, type, size) and non-file outputs such as text, for failed or
         cancelled runs too, and after this server restarts (looked up on ComfyUI, source "comfyui"). size_bytes
         is null past the first 32 files (when fetching, for all but that file). Nothing is sent unless fetch names
-        a file: view_path works only for a client that reaches ComfyUI directly, so through this server use fetch.
+        a file. view_path is relative to ComfyUI; view_url is an absolute link when configured by the operator.
         """
         job = relay.jobs.find(job_id)
         if job is None:  # not held here: look the run up on ComfyUI (#146); how it ended comes from /history below
@@ -1158,6 +1163,10 @@ def _workflow_outputs(relay: Relay) -> Callable[..., Any]:
                 size_bytes=sizes.get(i),
                 mime_type=mimetypes.guess_type(f["filename"])[0],
                 view_path="/view?" + urlencode(_ref(f)),
+                view_url=(
+                    relay.settings.comfyui_public_url.rstrip("/") + "/view?" + urlencode(_ref(f))
+                    if relay.settings.comfyui_public_url else None
+                ),
             )
             for i, f in enumerate(files)
         ]
@@ -1189,10 +1198,22 @@ def _workflow_outputs(relay: Relay) -> Callable[..., Any]:
                     f"It stays on ComfyUI at {wanted.view_path}",
                     limit=MAX_INLINE_BYTES,
                     size_bytes=wanted.size_bytes,
+                    view_path=wanted.view_path,
+                    view_url=wanted.view_url,
                 )
-            data, served_type = await relay.comfyui.view_bytes(
-                {"filename": wanted.filename, "subfolder": wanted.subfolder, "type": wanted.type}, MAX_INLINE_BYTES
-            )
+            try:
+                data, served_type = await relay.comfyui.view_bytes(
+                    {"filename": wanted.filename, "subfolder": wanted.subfolder, "type": wanted.type}, MAX_INLINE_BYTES
+                )
+            except ComfyUIError as exc:
+                if exc.code != "output_too_large":
+                    raise
+                raise RelayError(
+                    exc.code,
+                    exc.message,
+                    retryable=exc.retryable,
+                    **{**exc.detail, "view_path": wanted.view_path, "view_url": wanted.view_url},
+                ) from None
             content.append(_inline(wanted, data, served_type))
             view.fetched = wanted.filename
         structured = view.model_dump(mode="json")

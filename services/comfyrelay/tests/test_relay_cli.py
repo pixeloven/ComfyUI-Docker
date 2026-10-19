@@ -47,6 +47,19 @@ def test_serve_refuses_an_unknown_profile(monkeypatch):
     assert "unknown profile admin" in r.output
 
 
+@pytest.mark.parametrize("output", [[], ["-o", "json"]])
+@pytest.mark.parametrize("url", ["https://private-user:private-secret@comfy.example", "http://admin:12/ss@comfyui:8188"])
+def test_serve_refuses_an_invalid_public_url_with_exit_2_and_no_secret(monkeypatch, output, url):
+    monkeypatch.setenv("COMFYUI_MCP_HTTP_TOKEN", TOKEN)
+    monkeypatch.setenv("COMFYUI_PUBLIC_URL", url)
+    r = runner.invoke(app, ["relay", "serve", *output])
+    assert r.exit_code == 2
+    assert "COMFYUI_PUBLIC_URL" in r.output
+    assert "private-secret" not in r.output and "private-user" not in r.output
+    assert "12/ss" not in r.output and "admin" not in r.output
+    assert "Traceback" not in r.output
+
+
 def test_serve_refuses_the_declined_develop_profile(monkeypatch):
     monkeypatch.setenv("COMFYUI_MCP_HTTP_TOKEN", TOKEN)
     monkeypatch.setenv("COMFYUI_MCP_PROFILES", "read,develop")
