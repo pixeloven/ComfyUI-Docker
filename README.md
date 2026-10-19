@@ -215,6 +215,13 @@ Custom-node Python dependencies go into a venv on the `user` volume, which start
 
 The separate `ghcr.io/pixeloven/comfyui/mcp` image is [comfyrelay](services/comfyrelay/README.md), this repository's MCP server, run as a sidecar beside each ComfyUI. It serves agents at `http://<host>:9000/mcp`. It **requires a token of at least 32 characters**: set `COMFYUI_MCP_HTTP_TOKEN` (for example `openssl rand -hex 32`), or the container refuses to start. Point `COMFYUI_URL` at ComfyUI. Its tools introspect nodes, models, templates and docs (profile `read`) and validate and run workflows (profile `run`); it installs and restarts nothing. See [its README](services/comfyrelay/README.md) for the settings and how to run it next to an example, and the [runtime contract](docs/user-guides/runtime-contract.md#the-mcp-image) for what it promises. 5.0.0 replaced the artokun/comfyui-mcp server this image used to package: see [`CHANGELOG.md`](CHANGELOG.md) for the migration.
 
+For output links that clients can open, optionally set `COMFYUI_PUBLIC_URL` on the MCP
+container to their ComfyUI base URL, such as `https://comfy.example/team/comfy`.
+`workflow_outputs` then includes an absolute `view_url` for each file, without returning
+its bytes. The operator supplies the route and access policy; the relay does not host,
+publish or authenticate downloads. Unset, `view_url` is null. Inline retrieval still has
+the **5,000,000-byte** limit.
+
 **For complete configuration options, see:**
 - [Running Containers Guide](docs/user-guides/running.md) - Environment variables, Docker Compose, and Kubernetes
 - [Performance Tuning Guide](docs/user-guides/performance.md) - CLI arguments and optimization
