@@ -15,14 +15,16 @@ from relay_helpers import comfyui_answering, settings
 pytestmark = pytest.mark.anyio
 
 
-# Bytes of the compact tools/list result. Each ceiling is about a third over its size when it was set (read 9.0 KB,
-# read,run 15.3 KB), so a new tool or argument fits, but schema bloat or a run of long descriptions does not.
+# Bytes of the compact tools/list result. Each ceiling was about a third over its size when it was set (read 9.0 KB,
+# read,run 15.3 KB), so a new tool or argument fits, but schema bloat or a run of long descriptions does not. #216's
+# three saved-workflow tools brought them to read 11.2 KB and read,run 19.9 KB, measured on Python 3.12 as CI runs it
+# (3.13 strips docstrings' indentation, and measures about 5% less), so the ceilings rose to about 20% over that.
 @pytest.mark.parametrize(
     ("overrides", "ceiling"),
     [
-        ({"profiles": ("read",)}, 12_000),
-        ({"profiles": ("read", "run")}, 20_000),
-        ({"profiles": ("read", "run"), "convert": True}, 20_000),  # as the mcp-convert image serves it
+        ({"profiles": ("read",)}, 13_500),
+        ({"profiles": ("read", "run")}, 24_000),
+        ({"profiles": ("read", "run"), "convert": True}, 24_000),  # as the mcp-convert image serves it
     ],
 )
 async def test_tools_list_stays_under_its_ceiling(overrides, ceiling):

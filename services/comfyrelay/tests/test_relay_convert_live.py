@@ -9,7 +9,8 @@ names a ComfyUI and Playwright (the `convert` extra) and its Chromium are instal
 
 The lockdown tests point the converter, and a plain browser for the negative control, at a stand-in ComfyUI this
 test runs in front of the real one. It records every request it receives, forwards plain GETs to the real ComfyUI,
-and answers everything else itself, so nothing here ever writes to ComfyUI. A page script then tries every way out
+and answers everything else itself, so nothing here ever writes to ComfyUI, but for the last case (#216), which saves
+one workflow through the relay itself, runs it by name, and deletes it. A page script then tries every way out
 it can find: POST, PUT and DELETE to ComfyUI and a GET it serves but the frontend doesn't need; GET to another
 origin (a canary this test runs) and to api.comfy.org; websockets from the page and from a dedicated worker; a
 worker's fetch, and a fetch from a worker a worker started; a SharedWorker, including one taken from a fresh
@@ -29,14 +30,19 @@ import os
 import re
 import socket
 import threading
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import httpx2
 import pytest
 from comfyrelay import convert as conv
+from comfyrelay.comfyui import ComfyUIClient
 from comfyrelay.errors import RelayError
-from relay_helpers import free_port
+from comfyrelay.server import build_server
+from mcp import Client
+from relay_helpers import free_port, settings
+from test_relay_saved_live import ui_graph
 
 URL = os.environ.get("COMFYRELAY_LIVE_COMFYUI_URL", "").rstrip("/")
 pytestmark = [
@@ -690,3 +696,28 @@ async def test_a_graph_whose_video_preview_loads_converts_as_the_editor_exports_
     videos = [n for n in want.values() if n["class_type"] == "LoadVideo"]
     assert videos and all("video-preview" in n["inputs"] for n in videos), videos  # the oracle saw the preview load
     assert got == want
+
+
+async def test_a_saved_ui_workflow_runs_by_name_through_the_converter():
+    """#216's round trip, as T9 asks for it: save a UI workflow, then run it by name, converted by the instance's
+    frontend. It writes one relay-live-*.json to the user's workflows, deleted afterwards."""
+    name = f"relay-live-convert-{uuid.uuid4().hex[:8]}.json"
+    server, relay = build_server(settings(comfyui_url=URL, convert=True), comfyui=ComfyUIClient(URL))
+    try:
+        async with Client(server, mode="legacy") as c:
+            saved = await c.call_tool("workflow_save", {"name": name, "workflow": ui_graph("relay_live_saved_ui_")})
+            assert not saved.is_error, saved.content[0].text
+            started = await c.call_tool("workflow_run", {"saved": name})
+            assert not started.is_error, started.content[0].text
+            assert started.structured_content["converted_from_ui"] is True
+            done = await c.call_tool(
+                "job_status", {"job_id": started.structured_content["job_id"], "timeout_seconds": 60}
+            )
+            assert done.structured_content["state"] == "succeeded", done.structured_content
+            [file] = done.structured_content["result"]["files"]
+            assert file["filename"].startswith("relay_live_saved_ui_")
+    finally:
+        if relay.converter is not None:
+            await relay.converter.close()
+        async with httpx2.AsyncClient(base_url=URL, timeout=10) as http:
+            await http.delete("/api/userdata/" + quote(f"workflows/{name}", safe=""))

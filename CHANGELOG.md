@@ -14,6 +14,20 @@ see `VERSIONING.md`.
 
 ### Added
 
+- **comfyrelay reads and saves the user's workflows (#216).** Three tools reach
+  the files the editor's workflows sidebar opens (`user/default/workflows`),
+  through ComfyUI's own `/api/userdata` routes: `workflow_list_saved` and
+  `workflow_get_saved` in the `read` profile, and `workflow_save` in `run`.
+  `workflow_validate` and `workflow_run` also take a saved workflow by name
+  (`saved`), so a run needn't carry the graph. Saving onto an existing name
+  needs `overwrite: true`; without it the save is refused with
+  `workflow_exists`. `workflow_save` takes the UI format only, because the
+  sidebar opens an API-format file as an empty canvas (frontend 1.53.6), and
+  writes JSON as the editor does, so a workflow read and saved unchanged keeps
+  its bytes. Names are checked before any request (no `..`, absolute paths,
+  backslashes, `%` or control characters; a `.json` suffix), and reads and
+  writes are capped at 2 MiB, listings at 200. The relay's README has the
+  details, and the workflows skill has a new `saved-workflows` guide.
 - **Optional output links in comfyrelay** (#233). Set `COMFYUI_PUBLIC_URL` to
   a client-accessible ComfyUI base, including a proxy path prefix, to receive
   an absolute `view_url` per file from `workflow_outputs`. Unset, it is null;

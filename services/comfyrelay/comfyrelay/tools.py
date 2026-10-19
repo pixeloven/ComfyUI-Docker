@@ -38,6 +38,7 @@ from .jobs import MAX_WAIT_SECONDS, JobStore
 from .settings import PROFILES, Settings
 from .tools_docs import DOCS_TOOLS
 from .tools_introspection import INTROSPECTION_TOOLS, TemplateCache
+from .tools_saved import SAVED_TOOLS
 from .tools_workflow import WORKFLOW_TOOLS, reattach_refuse_cancel, reattach_status
 
 log = logging.getLogger("comfyrelay")
@@ -253,8 +254,8 @@ TOOLS: tuple[ToolSpec, ...] = (
 )
 # The read profile's introspection tools (#133) and docs tools (#134), and the
 # run profile's workflow tools (#132), live in their own modules, each as
-# (name, profiles, make, annotations) entries.
-TOOLS += tuple(ToolSpec(*spec) for spec in (*INTROSPECTION_TOOLS, *DOCS_TOOLS, *WORKFLOW_TOOLS))
+# (name, profiles, make, annotations) entries, as do the saved-workflow tools (#216), split between read and run.
+TOOLS += tuple(ToolSpec(*spec) for spec in (*INTROSPECTION_TOOLS, *DOCS_TOOLS, *WORKFLOW_TOOLS, *SAVED_TOOLS))
 
 
 def profiles_without_tools(active: tuple[str, ...], specs: tuple[ToolSpec, ...] = TOOLS) -> list[str]:

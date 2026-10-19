@@ -57,6 +57,7 @@ from .errors import RelayError
 from .jobs import MAX_WAIT_SECONDS, AlreadyFinished, current_job, unknown_job
 from .requirements import WorkflowRequirements, workflow_requirements
 from .tools_introspection import FRONTEND_ONLY, INACTIVE_MODES, WORKFLOW_MAX_CHARS, workflow_chars
+from .tools_saved import read_saved
 from .workflow import Problem, Report, _suggest, partner_signals, shape_problems, validate
 
 if TYPE_CHECKING:
@@ -169,13 +170,27 @@ class ValidationResult(BaseModel):
 
 
 WorkflowArg = Annotated[
-    dict[str, Any],
+    dict[str, Any] | None,
     Field(
         description='API format: {"<node id>": {"class_type": "<node class>", "inputs": {"<name>": <value> or '
         '["<source node id>", <output index>]}}}. UI format is converted where this server converts '
-        "(server_info.capabilities.conversion), refused elsewhere."
+        "(server_info.capabilities.conversion), refused elsewhere. Or give saved."
     ),
 ]
+SavedArg = Annotated[
+    str | None, Field(description="Instead of workflow: a saved workflow's name (workflow_list_saved)")
+]
+
+
+async def _given(relay: Relay, workflow: dict[str, Any] | None, saved: str | None) -> dict[str, Any]:
+    """The workflow a call names: given inline, or saved (#216), read through ComfyUI. Exactly one of them."""
+    if (workflow is None) == (saved is None):
+        raise RelayError(
+            "invalid_arguments", "give either workflow or saved (a saved workflow's name), not both or neither"
+        )
+    if saved is not None:
+        return (await read_saved(relay, saved))[1]
+    return workflow
 
 
 def _problems(items: list[Problem]) -> list[dict[str, Any]]:
@@ -337,7 +352,7 @@ async def _as_api(
 
 
 def _workflow_validate(relay: Relay) -> Callable[..., Any]:
-    async def workflow_validate(workflow: WorkflowArg) -> ValidationResult:
+    async def workflow_validate(workflow: WorkflowArg = None, saved: SavedArg = None) -> ValidationResult:
         """Check a workflow (API format) for what can be known without submitting it. Runs and changes nothing;
         workflow_run runs the same check first.
 
@@ -356,7 +371,7 @@ def _workflow_validate(relay: Relay) -> Callable[..., Any]:
         proposals for a human to apply. Nothing is installed. It doesn't change valid. A UI graph this server
         doesn't convert is read from its node properties only (satisfied is then never true; notes say so).
         """
-        given = workflow
+        given = workflow = await _given(relay, workflow, saved)
         workflow, converted = await _as_api(relay, workflow)
         info = await _object_info_shared(relay)
         result = _result(validate(workflow, info))
@@ -451,7 +466,7 @@ def comfyui_problems(node_errors: Any, note: str = "") -> list[dict[str, Any]]:
 
 
 def _workflow_run(relay: Relay) -> Callable[..., Any]:
-    async def workflow_run(workflow: WorkflowArg) -> RunStarted:
+    async def workflow_run(workflow: WorkflowArg = None, saved: SavedArg = None) -> RunStarted:
         """Run a workflow (API format): returns a job_id at once, and the run continues in ComfyUI.
 
         It runs workflow_validate's check first, and refuses a graph that fails it or has any partner-API node (a
@@ -465,6 +480,7 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
         a conversion that can't run fails with conversion_unavailable, one the frontend rejects with
         conversion_failed, and nothing is submitted.
         """
+        workflow = await _given(relay, workflow, saved)
         workflow, converted = await _as_api(relay, workflow, refuse_partner=True)
         report = await _validate(relay, workflow)
         if report.partner_api_nodes:

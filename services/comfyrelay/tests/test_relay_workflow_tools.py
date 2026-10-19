@@ -325,10 +325,11 @@ async def test_workflow_tools_are_annotated_honestly():
 
 
 async def test_the_workflow_tools_are_in_the_run_profile_only():
+    """All but the saved-workflow readers, which are read's (owner decision on #216)."""
     server, _ = build_server(settings(profiles=("read",)), comfyui=FakeComfyUI().client())
     async with Client(server, mode="legacy") as client:
         names = {t.name for t in (await client.list_tools()).tools}
-    assert not any(n.startswith("workflow_") for n in names)
+    assert {n for n in names if n.startswith("workflow_")} == {"workflow_list_saved", "workflow_get_saved"}
 
 
 # -- workflow_validate ----------------------------------------------------------------
