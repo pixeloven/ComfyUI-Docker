@@ -126,7 +126,10 @@ Anything that breaks a consumer who changes nothing but the version they pull:
   another tool of the same server, under the same capability profile**
   (`COMFYUI_MCP_PROFILES`). `template_search` hits summarising their
   runnability while `template_get`, also in `read`, keeps the full lists (#167)
-  is the example. The JSON shape of a tool's output is deliberately not a
+  is the example. A cap on data ComfyUI supplies, which reports how much it left
+  out as a count, isn't a narrowing: `node_search` skipping any `class_type`
+  over 120 characters and counting them in `skipped_long_names` (#206) is the
+  example. The JSON shape of a tool's output is deliberately not a
   contract, which makes it the one exception to the definition above: an agent
   reads the output, and a reshape that keeps the information is minor. A script that
   parses a tool's output should pin an image version.

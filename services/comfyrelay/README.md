@@ -424,7 +424,10 @@ converts it first (see *UI-to-API conversion*). The code is
   When ComfyUI refuses the graph, `workflow_run` fails at once with `workflow_rejected`, and
   nothing is queued: the error says `queued: false`, and its message says there is no run to
   follow. Its `job_id` only records the refusal, and stays for clients that read it:
-  `job_status` reports it `failed`, with `comfyui_state` `rejected`. The
+  `job_status` reports it `failed`, with `comfyui_state` `rejected`. `queued: false` is only on
+  that error, when the refusal comes within the 30 seconds `workflow_run` waits for ComfyUI to
+  answer (`SUBMIT_WAIT_SECONDS`). A refusal after that, once `workflow_run` has returned the
+  `job_id`, shows only through `job_status`: `failed`, with `comfyui_state` `rejected`. The
   error carries ComfyUI's own error and its per-node errors, also flattened into the same shape
   as `workflow_validate`'s problems (`type`, `node_id`, `class_type`, `input`, `details`,
   `expected`, `got`). So a MASK wired into SaveImage's IMAGE input comes back as
@@ -887,12 +890,13 @@ merge results with the live node and template tools.
   doesn't hold up the other tools.
 
   The index matches stems and ignores case, so its best 200 sections by bm25 are ranked
-  again (#217) on the words typed like names, with a capital, `_` or `.` (`lastGroupId`,
-  `KSampler`, `workflow_templates`, `sd1.5`): sections that have more of them exactly as
-  typed come first, case included, then those with them in the page title, heading or file
-  path, then the rest in bm25 order. A plain lowercase word still matches any form and case,
+  again (#217) on the words typed like names: a capital after the first letter (`KSampler`,
+  `lastGroupId`), all capitals (`VAE`), or a `_` or `.` (`workflow_templates`, `sd1.5`).
+  Sections that have more of them exactly as typed come first, case included, then those with
+  them in the page title, heading or file path, then the rest in bm25 order. A lowercase or
+  sentence-case word (`lora`, `Upscale`, `Load Checkpoint`) still matches any form and case,
   and doesn't change the order. Each result's `exact` says whether the section has every
-  query word as typed (letter case too, for a word with a capital), so `lastGroupId` finds
+  query word as typed (letter case too, for a word typed like a name), so `lastGroupId` finds
   the spec's `lastGroupid` with `exact: false`.
 - **`docs_guide`** lists the guide topics with a summary each, or returns one topic's markdown.
   The topics are the files the skill's `SKILL.md` links to, including the separate

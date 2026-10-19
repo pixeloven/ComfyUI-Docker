@@ -701,16 +701,19 @@ class DocsIndex:
 
 
 def _exact(word: str) -> re.Pattern[str]:
-    """`word` as a whole word, as typed: case counts when it has a capital (lastGroupId is not lastGroupid), and
-    `_` and `.` are part of it (workflow_templates is not "workflow templates"). No stems: lora is not loras."""
-    flags = 0 if any(c.isupper() for c in word) else re.IGNORECASE
+    """`word` as a whole word, as typed: case counts when it has a capital past its first letter (lastGroupId is not
+    lastGroupid; "Lora", capitalised to start a sentence, is lora), and `_` and `.` are part of it
+    (workflow_templates is not "workflow templates"). No stems: lora is not loras."""
+    flags = 0 if any(c.isupper() for c in word[1:]) else re.IGNORECASE
     return re.compile(rf"(?<![A-Za-z0-9_]){re.escape(word)}(?![A-Za-z0-9_])", flags)
 
 
 def _distinctive(word: str) -> bool:
-    """Typed like a name (lastGroupId, VAE, workflow_templates, sd1.5), so its exact form is what was meant. A plain
-    lowercase word isn't: stems and case are how it should match (inpainting finds an "Inpaint" heading)."""
-    return any(c.isupper() or c in "_." for c in word)
+    """Typed like a name, so its exact form is what was meant: a capital after the first letter (KSampler,
+    lastGroupId), all capitals (VAE), or a `_` or `.` (workflow_templates, sd1.5). A lowercase or sentence-case
+    word isn't: stems and case are how it should match ("Lora" finds LoRA, inpainting finds an "Inpaint" heading)."""
+    # A capital past the first character covers all capitals of two letters or more (VAE) too.
+    return any(c.isupper() for c in word[1:]) or any(c in "_." for c in word)
 
 
 def excerpt(text: str, words: list[str], limit: int) -> str:

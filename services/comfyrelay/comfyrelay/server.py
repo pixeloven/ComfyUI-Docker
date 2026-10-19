@@ -105,6 +105,8 @@ class RelayMCPServer(MCPServer):
             return await super().call_tool(name, arguments, context)
         except ToolError as exc:
             if isinstance(exc, UnexpectedToolError):
+                # A crash, even one whose cause is a pydantic ValidationError the tool's own body raised: its text
+                # stays on the server, and the client gets the SDK's generic answer.
                 raise
             if isinstance(exc.__cause__, RelayError):
                 error = exc.__cause__

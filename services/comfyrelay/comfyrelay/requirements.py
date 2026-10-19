@@ -595,14 +595,14 @@ def _scan(
 ) -> tuple[list[list[str] | None], list[list[str] | None]]:
     """Suggestions for the first MAX_SUGGESTED of each, in order, as far as it gets before `stopped`. Classes are
     matched as node_describe matches them (_closest, over class and display names); class names too long to use
-    whole are never suggested."""
+    whole are never suggested (_names leaves out any over CLASS_TYPE_MAX_CHARS)."""
     for_nodes: list[list[str] | None] = []
     index = None
     for node in nodes[:MAX_SUGGESTED]:
         if stopped():
             break
         if index is None:
-            index = _name_index((k, d) for k, d in _names(info) if len(k) <= DISPLAY_NAME_MAX_CHARS)
+            index = _name_index(_names(info))
         for_nodes.append([s["id"] for s in _closest(node.class_type, index, MAX_SUGGESTIONS)] or None)
     for_models: list[list[str] | None] = []
     indexes: dict[Any, dict[str, list[str]]] = {}  # one per loader input, however many of its values are missing

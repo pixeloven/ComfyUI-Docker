@@ -87,7 +87,7 @@ FETCH_CONCURRENCY = 8
 # A node's or template's display name, as ComfyUI gives it, is cut to this width wherever the relay passes it on.
 DISPLAY_NAME_MAX_CHARS = 120
 # A class_type can't be cut and still name its class, so a longer one is never offered as a node_search hit or a
-# suggestion (#206): it is skipped, and counted. requirements.py's suggestions skip at the same width.
+# suggestion (#206): it is skipped, and counted. _names applies it, for requirements.py's suggestions too.
 CLASS_TYPE_MAX_CHARS = 120
 # A node's help page is read up to this many bytes. The longest in comfyui-embedded-docs 0.5.12 is about 11 KB.
 HELP_MAX_BYTES = 64 * 1024

@@ -311,6 +311,8 @@ def _ranking_index(root: Path) -> str:
         "nodes/templates": ("Templates for nodes", "A pack puts its files in its workflow_templates folder for you."),
         "nodes/samplers": ("Samplers", "KSampler and more: KSampler, KSampler, KSampler."),
         "nodes/KSampler": ("Sampling", "KSampler denoises a latent image over a number of steps, with a seed."),
+        "tutorials/inpaint": ("Inpaint", "Inpaint the masked area: inpaint, then inpaint again."),
+        "tutorials/masks": ("Masks", "Masks select an area. Among the uses of a mask is inpainting, and others."),
     }
     nav = {"navigation": {"languages": [{"language": "en", "tabs": [{"tab": "Docs", "pages": list(pages)}]}]}}
     files = {"docs.json": json.dumps(nav), "LICENSE": "GPL-3.0\n"}
@@ -344,6 +346,21 @@ async def test_a_plain_lowercase_query_keeps_the_index_order(tmp_path):
     ok, got = await call("docs_search", {"query": "lastgroupid"}, _ranking_index(tmp_path))
     assert ok and [h["path"] for h in got["results"]] == ["specs/lower.mdx", "specs/exact.mdx"]
     assert all(h["exact"] for h in got["results"])  # the same word, whatever its case
+
+
+@pytest.mark.parametrize("query", ["inpainting", "Inpainting"])
+async def test_a_plain_or_sentence_case_word_keeps_its_stems(tmp_path, query):
+    """Not typed like a name, so the exact form doesn't rank: the "Inpaint" page, which bm25 ranks first on the stem,
+    stays ahead of the one that has "inpainting" itself. A capital on the first letter only is sentence case."""
+    ok, got = await call("docs_search", {"query": query}, _ranking_index(tmp_path))
+    assert ok and [h["path"] for h in got["results"]] == ["tutorials/inpaint.mdx", "tutorials/masks.mdx"]
+    assert [h["exact"] for h in got["results"]] == [False, True]
+
+
+async def test_the_re_rank_reaches_past_the_limit(tmp_path):
+    """The exact page bm25 ranks below `limit` is still found: the re-rank reads more candidates than it returns."""
+    ok, got = await call("docs_search", {"query": "KSampler", "limit": 1}, _ranking_index(tmp_path))
+    assert ok and [h["path"] for h in got["results"]] == ["nodes/KSampler.mdx"]
 
 
 async def test_docs_search_refuses_a_query_with_nothing_to_search(docs_path):

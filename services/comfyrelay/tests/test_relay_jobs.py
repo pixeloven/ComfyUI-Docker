@@ -457,6 +457,27 @@ async def test_an_unknown_tool_and_a_crash_keep_the_sdks_answer():
     assert unknown.is_error and "no_such_tool" in unknown.content[0].text
 
 
+async def test_a_validation_error_inside_a_tool_is_a_crash_not_invalid_arguments():
+    """A pydantic ValidationError raised by a tool's own body is a bug in the tool, not the caller's arguments: it
+    must stay the SDK's generic crash, never `invalid_arguments` carrying pydantic's message and internal values."""
+    from pydantic import BaseModel
+
+    class Internal(BaseModel):
+        n: int
+
+    async def builds_a_bad_model(x: int) -> str:
+        Internal(n="INTERNAL-SECRET-0123456789")
+        return "unreachable"
+
+    server, _ = build_server(settings(), comfyui=comfyui_answering())
+    server.add_tool(builds_a_bad_model, name="builds_a_bad_model")
+    async with Client(server, mode="legacy") as client:
+        crashed = await client.call_tool("builds_a_bad_model", {"x": 1})
+    assert crashed.is_error and crashed.content[0].text == "Error executing tool builds_a_bad_model"
+    assert "INTERNAL-SECRET" not in json.dumps(crashed.model_dump(mode="json"))
+    assert crashed.structured_content is None
+
+
 # -- a cancel is delivered once, and says why --------------------------------
 
 

@@ -72,7 +72,8 @@ class DocHit(_Compact):
     text: str = Field(description="The section's markdown, or an excerpt around the match when it is long")
     topic: str | None = Field(default=None, description="A guide's topic: docs_guide(topic) returns all of it")
     exact: bool = Field(
-        description="Every query word is in this section as typed (letter case too, when the word has a capital); "
+        description="Every query word is in this section as typed (letter case too, for a capital past its first "
+        "letter); "
         "false: some only matched in another form or case"
     )
 
@@ -110,7 +111,8 @@ def _docs_search(relay: Relay) -> Callable[..., Any]:
         Results are page sections, best first, with source, path, license and url, and a guide's docs_guide topic.
         docs.comfy.org describes the latest ComfyUI, not necessarily this one: for a node's inputs and defaults
         use node_describe. Words match across forms and case (run, running); every word must match unless none do
-        (match says which). Sections with the words as typed rank first (exact; a capital makes case count).
+        (match says which). Words typed like names (KSampler, VAE, workflow_templates) rank sections with them
+        exactly as typed first (exact).
         """
         words = _query_words(query)
         if not words:

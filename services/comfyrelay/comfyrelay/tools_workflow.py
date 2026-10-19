@@ -510,9 +510,10 @@ def _workflow_run(relay: Relay) -> Callable[..., Any]:
                     # Never queued, so its job_id is no run to follow (#217); it stays, for consumers that read it.
                     detail["errors"] = comfyui_problems(detail.get("node_errors"))
                     detail["queued"] = False
+                    message = message.rstrip() + ("" if message.rstrip().endswith((".", "!", "?")) else ".")
                     message += (
-                        ". Nothing was queued, so there is no run to follow or collect: job_id only records this "
-                        "refusal. Fix the errors and call workflow_run again"
+                        " Nothing was queued, so there is no run to follow or collect: job_id only records this "
+                        "refusal. Fix the errors and call workflow_run again."
                     )
                 raise RelayError(exc.code, message, retryable=exc.retryable, **detail, job_id=job.id)
             raise RelayError("job_failed", f"{type(exc).__name__}: {exc}", job_id=job.id)
