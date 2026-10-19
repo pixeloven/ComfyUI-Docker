@@ -12,8 +12,13 @@ Names. A name is a path relative to the workflows folder, as workflow_list_saved
 checked here before any request (saved_name): no absolute path, no `..` or `.` segment, no empty segment, no
 backslash, no control character, no `%` (ComfyUI decodes a name that holds one a second time), no segment starting
 with a dot (ComfyUI's listing skips those, so the sidebar would never show the file), at most MAX_NAME_CHARS. A
-leading `workflows/` is dropped, since agents name the folder too. ComfyUI also keeps every path inside the user's
-directory itself (403 otherwise).
+leading `workflows/` is dropped, since agents name the folder too; so a file in a subfolder named `workflows` can't
+be addressed, and the listing counts it as unaddressable rather than show a name that reads another file
+(addressable). ComfyUI also keeps every path inside the user's directory itself (403 otherwise).
+
+Reads aren't quite read-only: ComfyUI's GET /userdata/<file> creates the file's missing parent folders
+(get_user_data_path passes create_dir=True), so a get or `saved=` of a missing nested name leaves empty folders in
+user/default/workflows. That is ComfyUI's behaviour, and the relay doesn't work around it.
 
 Format (the owner's question on #216, measured on frontend 1.53.6). The sidebar opens a file through
 app.loadGraphData, which reads `nodes` and `links`: an API-format file opens as an empty canvas, with only a
@@ -23,7 +28,9 @@ form, so a workflow read and saved unchanged is the same bytes; with overwrite, 
 already holds isn't written at all, which keeps a file another tool formatted byte for byte.
 
 Overwrite (owner decision on #216). A save onto an existing name is refused unless `overwrite: true`; ComfyUI makes
-that check itself (overwrite=false, HTTP 409), so there is no window between a check and the write.
+that check itself (overwrite=false, HTTP 409). That stops a save from replacing a file that already exists, but not
+two saves racing to create the same new name: v0.38.0 checks that the file exists, then reads the request body, then
+renames, so both can pass the check and the later write wins.
 
 Caps: MAX_SAVED_BYTES on what is read or written, MAX_LISTED names in a listing, and WORKFLOW_MAX_CHARS on the
 workflow workflow_get_saved returns (as template_get). Everything ComfyUI returns is untrusted: listed names that
@@ -99,6 +106,15 @@ def saved_name(name: str) -> str:
     return name
 
 
+def addressable(path: str) -> bool:
+    """A path ComfyUI listed is one these tools reach as itself: saved_name accepts it unchanged. A path under a
+    subfolder named `workflows` isn't, since saved_name drops that prefix and would reach another file."""
+    try:
+        return saved_name(path) == path
+    except RelayError:
+        return False
+
+
 def userdata_path(name: str) -> str:
     return f"{FOLDER}/{name}"
 
@@ -121,7 +137,7 @@ async def _suggestions(relay: Relay, name: str) -> list[str]:
         listed = await asyncio.wait_for(relay.comfyui.userdata_list(FOLDER), SUGGEST_SECONDS)
     except Exception:  # noqa: BLE001 -- detail for an error already being raised; never its own failure
         return []
-    names = [f["path"] for f in listed or [] if str(f["path"]).endswith(".json")][: MAX_LISTED * 5]
+    names = [f["path"] for f in listed or [] if addressable(f["path"])][: MAX_LISTED * 5]
     return difflib.get_close_matches(name, names, n=5, cutoff=0.5)
 
 
@@ -184,9 +200,7 @@ def _workflow_list_saved(relay: Relay) -> Callable[..., Any]:
             path = f["path"]
             if not path.endswith(".json"):
                 continue
-            try:
-                saved_name(path)
-            except RelayError:
+            if not addressable(path):
                 bad += 1
                 continue
             size, modified = f.get("size"), f.get("modified")
@@ -225,9 +239,9 @@ class SavedWorkflow(BaseModel):
 def _workflow_get_saved(relay: Relay) -> Callable[..., Any]:
     async def workflow_get_saved(name: SavedName) -> SavedWorkflow:
         """Read one of the user's saved workflows as the editor stores it (UI format: nodes with widgets_values in
-        widget order, links). Changes nothing. To change it, edit values in place, keep the rest, and save it with
-        workflow_save(overwrite=true); to run it, workflow_run(saved=name). Over 80,000 characters as JSON:
-        workflow_too_large."""
+        widget order, links). Changes no file (ComfyUI does create a missing name's parent folders). To change it,
+        edit values in place, keep the rest, and save it with workflow_save(overwrite=true); to run it,
+        workflow_run(saved=name). Over 80,000 characters as JSON: workflow_too_large."""
         checked, workflow, size = await read_saved(relay, name)
         chars = workflow_chars(workflow)
         if chars > WORKFLOW_MAX_CHARS:

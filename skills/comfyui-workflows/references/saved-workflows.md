@@ -60,13 +60,18 @@ converted first, as a UI graph passed inline is.
 
 - **Names** are paths in the workflows folder, as `workflow_list_saved` gives
   them, ending in `.json`: `portrait.json`, or `portraits/old.json`. A leading
-  `workflows/` is dropped. A name with `..`, a leading `/`, a backslash, a
+  `workflows/` is dropped, so a file in a subfolder itself named `workflows`
+  can't be reached; the listing counts it as `unaddressable`. A name with `..`, a leading `/`, a backslash, a
   `%`, a control character, an empty folder or a part starting with a dot is
   refused with `invalid_workflow_name`, and nothing reaches ComfyUI. An
-  unknown name gets `unknown_saved_workflow`, with close names.
+  unknown name gets `unknown_saved_workflow`, with close names. Reading a
+  name in a folder that doesn't exist leaves that folder behind, empty:
+  ComfyUI creates a file's parent folders even on a read. No file changes.
 - **Replacing needs `overwrite: true`.** Without it, saving onto a name that
   exists is refused with `workflow_exists`, and the file is left as it was.
-  ComfyUI makes that check as it writes, so nothing can slip in between.
+  That stops a save from replacing a file that is already there. It doesn't
+  stop two saves racing to create the same new name: ComfyUI checks for the
+  file before it reads the upload, so both can pass, and the later one wins.
 - **API format is refused** with `api_format_not_saved`, because the sidebar
   would open it as an empty canvas. Something that is neither format gets
   `invalid_workflow`. Nothing is written in either case.

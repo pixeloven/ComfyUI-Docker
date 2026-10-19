@@ -624,17 +624,24 @@ filesystem. Reading is the `read` profile's, and saving the `run` profile's (own
 
 - **`workflow_list_saved`** (`read`) lists them from `GET /api/userdata?dir=workflows&recurse=true&full_info=true`:
   each `.json` file's name, size and modification time, newest first, at most **200**
-  (`omitted` counts the rest). A file whose name the tools refuse is counted in
-  `unaddressable`, not listed. No `workflows` folder yet is an empty list.
+  (`omitted` counts the rest). A file whose name the tools refuse, or would read as another
+  file (one under a subfolder named `workflows`, since a leading `workflows/` is dropped), is
+  counted in `unaddressable`, not listed; close-name suggestions skip them too. No `workflows` folder yet is an empty list.
 - **`workflow_get_saved`** (`read`) returns one, from `GET /api/userdata/workflows%2F<name>`,
   with its `format`: `ui`, `api` or `unknown`. An unknown name is `unknown_saved_workflow`, with
   close names (optional detail: a listing that fails or takes over 3 seconds leaves them out).
-  A file that isn't a JSON object is `invalid_saved_workflow`.
+  A file that isn't a JSON object is `invalid_saved_workflow`. It changes no file, but
+  ComfyUI's `GET /userdata/<file>` creates the file's missing parent folders, so reading a
+  missing nested name (here or through `saved=`) leaves empty folders behind. That is
+  ComfyUI's behaviour; the relay doesn't work around it.
 - **`workflow_save`** (`run`) writes one, through `POST /api/userdata/workflows%2F<name>`,
   which ComfyUI writes atomically (a temporary file, then a rename).
   - **Replacing needs `overwrite: true`.** Without it the request says `overwrite=false`, and
     ComfyUI refuses an existing file with HTTP 409, which is `workflow_exists`: its message
-    names the flag, and nothing is written. The check is ComfyUI's, made as it writes.
+    names the flag, and nothing is written. The check is ComfyUI's, and it stops a save from
+    replacing a file that already exists, not two saves racing to create one: v0.38.0 checks
+    that the file exists, then reads the request body, then renames, so two concurrent
+    `overwrite=false` saves of a new name can both succeed, and the later write wins.
   - **UI format only.** The editor's sidebar opens a file through `app.loadGraphData`, which
     reads `nodes` and `links`. On frontend 1.53.6 an API-format file opened from the sidebar
     showed an empty canvas, with only a console warning, and saving that tab would write the
