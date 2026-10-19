@@ -677,8 +677,9 @@ most **80,000** characters of JSON (`workflow_too_large`, as `template_get`), wh
 **Errors from ComfyUI's userdata routes:** 404 is `unknown_saved_workflow` (or an empty list),
 409 `workflow_exists`, 403 `invalid_workflow_name`, 400 `save_failed` (ComfyUI couldn't write
 the file; its reason is included), and anything else `comfyui_http_error`. `--multi-user`
-ComfyUIs aren't handled: the relay sends no `comfy-user` header, so it reads and writes the
-`default` user's files.
+ComfyUIs aren't handled: the relay sends no `comfy-user` header, so ComfyUI has no user to
+resolve and every saved-workflow call fails with HTTP 500 (`comfyui_http_error`), writing
+nothing.
 
 **An open editor tab keeps its own copy.** On frontend 1.53.6, a tab already showing the file
 didn't change when the relay saved it; closing the tab and opening the file from the sidebar
