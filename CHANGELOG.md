@@ -10,6 +10,20 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## Unreleased
+
+### Fixed
+
+- **`check` refuses a direct-URL source with no `sha256:`** (#230). The
+  manifest schema only described the requirement, so `check` passed such a
+  manifest and `resolve` then failed with ``a direct URL needs `sha256` in the
+  manifest``. The schema now requires it, so `check` and `resolve` both exit 1
+  on it, offline and before any network call, saying the source needs
+  `sha256`. No `resolve` has ever locked such an entry. A manifest that carried
+  one outside every profile it resolved did pass, and now fails as a whole.
+  *Migration:* add `sha256: <hash>` to each `https://` entry that has none, or
+  remove the entry.
+
 ## 6.1.0 — 2026-10-18
 
 ### Upgrading from 6.0.0

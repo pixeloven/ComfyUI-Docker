@@ -110,11 +110,13 @@ Note the two that need something extra, because both fail in confusing ways:
   the install path is not knowable offline — and `check` cannot run without
   network. The schema enforces this.
 - **A direct URL requires `sha256:`, and `as:` or `file:`.** Nothing about a
-  bare URL can be resolved from headers. Resolve refuses rather than writing a
-  lock entry that verifies nothing. The name says what the installed file is
+  bare URL can be resolved from headers, so a lock entry without the hash would
+  verify nothing. The schema refuses an entry missing either, so `check` and
+  `resolve` both exit 1 on it, offline. Up to 6.1.0 `check` passed a URL with no
+  `sha256:` that `resolve` then refused. The name says what the installed file is
   called, and `check` derives the path from it offline. Up to 5.x a URL with
   neither locked the `install` directory as the path, and fetch wrote the file
-  over it; the schema now refuses that entry.
+  over it.
 
 Use `as:` too whenever the local filename should differ from upstream's — e.g.
 upstream `4x-UltraSharp.pth` stored as `4xUltrasharp_4xUltrasharpV10.pt`.

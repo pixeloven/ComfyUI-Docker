@@ -46,7 +46,7 @@ def test_every_bad_source_is_reported_and_no_lock_written(fixtures):
     r = runner.invoke(app, ["resolve", str(fixtures / "manifest-broken-sources.yaml")])
     assert r.exit_code == 1
     assert "models:" not in r.stdout, "a partial lock was written"
-    for want in ("civitai:2068000", "does-not-exist-xyz", "needs `sha256`"):
+    for want in ("civitai:2068000", "does-not-exist-xyz"):
         assert want in r.output, f"{want!r} missing from the report"
 
 
