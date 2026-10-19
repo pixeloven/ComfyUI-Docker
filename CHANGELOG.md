@@ -71,9 +71,9 @@ see `VERSIONING.md`.
   `node_describe` batch about 20 MB. `node_search` hits and `node_describe`'s
   suggestions now skip any class whose `class_type` is over 120 characters,
   which can't be cut and still name the class, and `skipped_long_names`
-  counts them. This is a minor change (owner, #241): a cap on data ComfyUI
-  supplies that reports what it left out as a count isn't a narrowing, which
-  `VERSIONING.md` now says.
+  counts them. This is a minor change (owner, #241): a cap that leaves out
+  only ComfyUI-supplied items too large to use whole, and counts them, isn't a
+  narrowing, which `VERSIONING.md` now says.
 - **`check` refuses a direct-URL source with no `sha256:`** (#230). The
   manifest schema only described the requirement, so `check` passed such a
   manifest and `resolve` then failed with ``a direct URL needs `sha256` in the
