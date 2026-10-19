@@ -86,6 +86,9 @@ NOT_MODEL_FOLDERS = frozenset({"custom_nodes", "download_model_base"})
 FETCH_CONCURRENCY = 8
 # A node's or template's display name, as ComfyUI gives it, is cut to this width wherever the relay passes it on.
 DISPLAY_NAME_MAX_CHARS = 120
+# A class_type can't be cut and still name its class, so a longer one is never offered as a node_search hit or a
+# suggestion (#206): it is skipped, and counted. requirements.py's suggestions skip at the same width.
+CLASS_TYPE_MAX_CHARS = 120
 # A node's help page is read up to this many bytes. The longest in comfyui-embedded-docs 0.5.12 is about 11 KB.
 HELP_MAX_BYTES = 64 * 1024
 # Help is optional detail: node_describe's help fetches, all of a call's together, get this long; then help is left
@@ -166,11 +169,14 @@ class NodeHit(_Compact):
     deprecated: bool | None = None
 
 
-class NodeSearchResult(BaseModel):
+class NodeSearchResult(_Compact):
     query: str
     total_matches: int
     node_count: int = Field(description="How many node classes the instance has")
     results: list[NodeHit]
+    skipped_long_names: int | None = Field(
+        default=None, description=f"Matches left out: their class_type is over {CLASS_TYPE_MAX_CHARS} characters"
+    )
 
 
 def _invalid_query(query: str) -> RelayError:
@@ -212,9 +218,12 @@ def _node_search(relay: Relay) -> Callable[..., Any]:
             raise _invalid_query(query)
         info = _checked_object_info(await relay.comfyui.object_info())
         ranked = []
+        skipped = 0
         for class_type, node in info.items():
             tier = _match_tier(query, words, class_type, node)
-            if tier is not None:
+            if tier is not None and len(class_type) > CLASS_TYPE_MAX_CHARS:
+                skipped += 1
+            elif tier is not None:
                 key = (tier, bool(node.get("deprecated")), bool(partner_signals(node)), len(class_type), class_type)
                 ranked.append((key, class_type, node))
         ranked.sort(key=lambda r: r[0])
@@ -222,6 +231,7 @@ def _node_search(relay: Relay) -> Callable[..., Any]:
             query=query,
             total_matches=len(ranked),
             node_count=len(info),
+            skipped_long_names=skipped or None,
             results=[
                 NodeHit(
                     class_type=class_type,
@@ -549,6 +559,9 @@ class UnknownClass(_Compact):
     code: Literal["unknown_node_class"] = "unknown_node_class"
     message: str
     suggestions: list[dict[str, str]]
+    skipped_long_names: int | None = Field(
+        default=None, description=f"Classes never suggested: their class_type is over {CLASS_TYPE_MAX_CHARS} characters"
+    )
 
 
 class FailedClass(_Compact):
@@ -623,11 +636,19 @@ async def _describe_or_failed(
 
 
 def _names(every: dict[str, dict[str, Any]]) -> list[tuple[str, str]]:
-    return [(k, str(v.get("display_name") or k)) for k, v in every.items()]
+    """Each class that can be suggested, with its display name: none whose class_type is too long to use (#206)."""
+    return [(k, str(v.get("display_name") or k)) for k, v in every.items() if len(k) <= CLASS_TYPE_MAX_CHARS]
 
 
-def _unknown(class_type: str, suggestions: list[dict[str, str]], why: str | None = None) -> UnknownClass:
-    """`why` there are no suggestions, when they couldn't be looked for."""
+def _too_long(every: dict[str, dict[str, Any]]) -> int:
+    """How many classes _names leaves out."""
+    return sum(len(k) > CLASS_TYPE_MAX_CHARS for k in every)
+
+
+def _unknown(
+    class_type: str, suggestions: list[dict[str, str]], why: str | None = None, skipped: int = 0
+) -> UnknownClass:
+    """`why` there are no suggestions, when they couldn't be looked for; `skipped`, the classes never suggested."""
     hint = (
         "close matches are in suggestions."
         if suggestions
@@ -639,6 +660,7 @@ def _unknown(class_type: str, suggestions: list[dict[str, str]], why: str | None
         class_type=class_type,
         message=f"ComfyUI has no node class {class_type!r}. Class names are case-sensitive; " + hint,
         suggestions=[{"class_type": s["id"], "display_name": s["display_name"]} for s in suggestions],
+        skipped_long_names=skipped or None,
     )
 
 
@@ -652,8 +674,8 @@ async def _unknowns(comfyui: ComfyUIClient, missing: list[str]) -> list[UnknownC
         return [_unknown(name, [], f"/object_info {every}") for name in missing]
 
     def scan() -> list[UnknownClass]:
-        index = _name_index(_names(every))
-        return [_unknown(name, _closest(name, index)) for name in missing]
+        index, skipped = _name_index(_names(every)), _too_long(every)
+        return [_unknown(name, _closest(name, index), skipped=skipped) for name in missing]
 
     try:
         return await asyncio.wait_for(asyncio.to_thread(scan), SUGGEST_SECONDS)
@@ -735,8 +757,9 @@ def _node_describe(relay: Relay) -> Callable[..., Any]:
             if spec is not None:
                 return NodeDescribed(spec)
             every = _checked_object_info(await relay.comfyui.object_info())
-            unknown = _unknown(class_type, _close_matches(class_type, _names(every)))
-            raise RelayError("unknown_node_class", unknown.message, suggestions=unknown.suggestions)
+            unknown = _unknown(class_type, _close_matches(class_type, _names(every)), skipped=_too_long(every))
+            extra = {"skipped_long_names": unknown.skipped_long_names} if unknown.skipped_long_names else {}
+            raise RelayError("unknown_node_class", unknown.message, suggestions=unknown.suggestions, **extra)
         asked = list(dict.fromkeys(class_types or ()))
         found = await _gather_limited(
             lambda name=name: _describe_or_failed(relay.comfyui, name, max_options, include_help, help_deadline)

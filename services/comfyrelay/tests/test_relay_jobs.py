@@ -424,10 +424,10 @@ async def test_job_tools_unknown_id_is_a_structured_error(tool, args):
     async with Client(server, mode="legacy") as client:
         result = await client.call_tool(tool, {"job_id": "nope", **args})
     assert result.is_error
-    text = result.content[0].text
-    assert text.startswith(f"Error executing tool {tool}: {{")  # the SDK's prefix, then ours
-    error = json.loads(text[text.index("{") :])["error"]
+    (content,) = result.content
+    error = json.loads(content.text)["error"]  # only our JSON: no "Error executing tool" prefix (#217)
     assert error["code"] == "unknown_job" and error["retryable"] is False
+    assert result.structured_content == {"error": error}
 
 
 async def test_job_status_rejects_a_wait_over_the_cap():
@@ -435,6 +435,26 @@ async def test_job_status_rejects_a_wait_over_the_cap():
     async with Client(server, mode="legacy") as client:
         result = await client.call_tool("job_status", {"job_id": "x", "timeout_seconds": 10_000})
     assert result.is_error
+    error = json.loads(result.content[0].text)["error"]  # arguments the schema refuses: the same shape (#217)
+    assert (error["code"], error["retryable"]) == ("invalid_arguments", False)
+    assert "timeout_seconds" in error["message"] and result.structured_content == {"error": error}
+
+
+async def test_an_unknown_tool_and_a_crash_keep_the_sdks_answer():
+    """Only our own errors and refused arguments lose the prefix (#217): a crash's text stays on the server."""
+    server, relay = build_server(settings(), comfyui=comfyui_answering())
+
+    def boom(job_id: str):
+        raise RuntimeError("secret detail")
+
+    relay.jobs.find = lambda job_id: True
+    relay.jobs.get = boom
+    async with Client(server, mode="legacy") as client:
+        crashed = await client.call_tool("job_status", {"job_id": "x"})
+        unknown = await client.call_tool("no_such_tool", {})
+    assert crashed.is_error and crashed.content[0].text == "Error executing tool job_status"
+    assert crashed.structured_content is None
+    assert unknown.is_error and "no_such_tool" in unknown.content[0].text
 
 
 # -- a cancel is delivered once, and says why --------------------------------

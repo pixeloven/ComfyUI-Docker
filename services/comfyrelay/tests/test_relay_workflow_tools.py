@@ -405,6 +405,8 @@ async def test_run_reports_comfyuis_own_rejection():
     async with Client(server, mode="legacy") as client:
         error = error_of(await client.call_tool("workflow_run", {"workflow": t1()}))
     assert error["code"] == "workflow_rejected"
+    # #217: never queued, and it says so where an agent looks first; job_id stays, for consumers that read it.
+    assert error["queued"] is False and "Nothing was queued" in error["message"] and error["job_id"]
     assert error["comfyui_error"]["type"] == "prompt_outputs_failed_validation"
     assert error["node_errors"]["1"]["errors"][0]["type"] == "custom_validation_failed"
     assert error["errors"] == [  # the same shape as workflow_validate's

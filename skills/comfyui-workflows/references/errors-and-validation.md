@@ -59,7 +59,8 @@ with a `type`, a `message`, `details` and `extra_info` (often the input name).
 
 The relay's `workflow_run` passes this on as `workflow_rejected`, and flattens
 it into `type`, `node_id`, `class_type`, `input`, `details`, `expected` and
-`got`. *(needs the comfyrelay sidecar)*
+`got`. Nothing was queued (`queued: false`), so its `job_id` has no run to
+follow. *(needs the comfyrelay sidecar)*
 
 The error types you'll meet most:
 

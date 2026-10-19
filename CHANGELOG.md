@@ -38,8 +38,36 @@ see `VERSIONING.md`.
   derives it from the internal URL, and refuses ambiguous or credential-bearing
   public bases without printing their values.
 
+### Changed
+
+- **comfyrelay's failed calls are only their JSON** (#217). The text no longer
+  starts `Error executing tool <name>: `; it is just
+  `{"error": {"code", "message", "retryable"}}`, and the same object is the
+  result's `structuredContent`. Arguments a tool's input schema refuses now
+  fail the same way, as `invalid_arguments`, instead of as bare text. A client
+  that reads the JSON from its first `{` works with both. An unknown tool and
+  a crash keep the SDK's answer.
+- **`workflow_rejected` says nothing was queued** (#217). The error adds
+  `queued: false`, and its message says there is no run to follow or collect.
+  Its `job_id` stays, for clients that read it, and still only records the
+  refusal.
+- **`docs_search` ranks exact matches first** (#217). A query word typed like
+  a name, with a capital, `_` or `.` (`lastGroupId`, `KSampler`,
+  `workflow_templates`), ranks the sections that have it exactly as typed
+  first, case included, and among those the ones with it in their title,
+  heading or path; `EmptyLatentImage width` now finds `EmptyLatentImage`'s own
+  page before `StableCascade_EmptyLatentImage`'s. Plain lowercase words keep
+  the stemmed order. Each hit's new `exact` says whether it has every word as
+  typed.
+
 ### Fixed
 
+- **comfyrelay never offers a pathologically long `class_type`** (#206). A
+  custom node with class names of about 200,000 characters made one
+  `node_describe` batch about 20 MB. `node_search` hits and `node_describe`'s
+  suggestions now skip any class whose `class_type` is over 120 characters,
+  which can't be cut and still name the class, and `skipped_long_names`
+  counts them.
 - **`check` refuses a direct-URL source with no `sha256:`** (#230). The
   manifest schema only described the requirement, so `check` passed such a
   manifest and `resolve` then failed with ``a direct URL needs `sha256` in the
