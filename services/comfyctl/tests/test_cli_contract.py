@@ -6,7 +6,9 @@ every other test passes, so they are asserted rather than assumed.
 import hashlib
 import json
 
+import httpx
 import pytest
+from comfyctl.fetch import resolve
 from comfyctl.fetch.cli import app
 from typer.testing import CliRunner
 
@@ -156,8 +158,13 @@ def _w(path, text):
 
 
 NOT_YAML = "models: [\n"
+# Valid, and fails inside resolve: `unreachable` makes its HEAD a connection error.
 UNRESOLVABLE = ("models:\n  - name: g\n    files:\n"
-                "      - {source: 'hf:o/r', install: models/loras/}\n")
+                "      - {source: 'hf:o/r', file: a.safetensors, install: models/loras/}\n")
+
+
+def unreachable(url, **k):
+    raise httpx.ConnectError("connection refused")
 
 
 def _build_check_stale(f, t):
@@ -267,10 +274,11 @@ FAILURES = {
 
 
 @pytest.mark.parametrize("name", list(FAILURES))
-def test_every_failure_under_json_writes_a_json_result(name, fixtures, tmp_path):
+def test_every_failure_under_json_writes_a_json_result(name, fixtures, tmp_path, monkeypatch):
     """The contract: under -o json, a non-zero exit still puts one JSON object
     on stdout, with `ok: false` and the reason in `problems`, and the reason on
     stderr too. A machine consumer never gets a bare exit code, or a traceback."""
+    monkeypatch.setattr(resolve.http, "head_headers", unreachable)
     build_args, code = FAILURES[name]
     r = runner.invoke(app, [*build_args(fixtures, tmp_path), "-o", "json"])
     assert r.exception is None or isinstance(r.exception, SystemExit), repr(r.exception)
@@ -279,6 +287,13 @@ def test_every_failure_under_json_writes_a_json_result(name, fixtures, tmp_path)
     assert payload["ok"] is False
     assert payload["problems"] and all(payload["problems"])
     assert r.stderr.strip(), "the reason did not reach stderr"
+
+
+def test_an_unreachable_source_fails_inside_resolve(tmp_path, monkeypatch):
+    monkeypatch.setattr(resolve.http, "head_headers", unreachable)
+    r = runner.invoke(app, ["resolve", _w(tmp_path / "m.yaml", UNRESOLVABLE)])
+    assert r.exit_code == 1, r.output
+    assert "did not resolve" in r.stderr
 
 
 def test_a_null_header_value_is_an_empty_header(fixtures, tmp_path):
