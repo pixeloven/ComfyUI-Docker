@@ -115,6 +115,72 @@ def test_fetch_refuses_a_lock_whose_path_is_a_directory(tmp_path):
     assert not (root / "models").exists()
 
 
+# --- #230: a direct URL states its sha256 ------------------------------------------
+
+NO_SHA = "a direct-URL source needs `sha256`: nothing resolves a hash from a bare URL"
+
+
+def hashless(scheme: str = "https", **extra) -> dict:
+    entry = url_file(**{"as": "a.safetensors", **extra})
+    del entry["sha256"]
+    entry["source"] = entry["source"].replace("https", scheme, 1)
+    return entry
+
+
+@pytest.mark.parametrize("scheme", ["https", "http"])
+def test_a_direct_url_without_sha256_fails_the_schema(scheme):
+    problems = schema.validate(manifest(("g", [hashless(scheme)])), "comfy")
+    assert problems == [f"models/0/files/0: {NO_SHA}"]
+
+
+def test_a_direct_url_without_sha256_or_a_name_reports_both():
+    entry = url_file()
+    del entry["sha256"]
+    problems = schema.validate(manifest(("g", [entry])), "comfy")
+    assert sorted(problems) == sorted([
+        "models/0/files/0: a direct-URL source needs `as` (or `file`) to name the installed file",
+        f"models/0/files/0: {NO_SHA}"])
+
+
+@pytest.mark.parametrize("extra", [{"as": "x.safetensors"}, {"file": "x.safetensors"}])
+def test_a_direct_url_with_sha256_passes_the_schema(extra):
+    assert schema.validate(manifest(("g", [url_file(**extra)])), "comfy") == []
+
+
+@pytest.mark.parametrize("entry", [
+    {"source": "hf:o/r", "file": "a.safetensors", "install": "models/loras/"},
+    {"source": "gh:o/r@v1", "file": "a.safetensors", "install": "models/loras/"},
+    {"source": "civitai:123", "as": "a.safetensors", "install": "models/loras/"},
+])
+def test_other_sources_need_no_sha256(entry):
+    assert schema.validate(manifest(("g", [entry])), "comfy") == []
+
+
+def test_check_refuses_a_direct_url_without_sha256(tmp_path):
+    """The lock is the one `resolve` would write if it could: only the
+    manifest is at fault, so the schema is what refuses it."""
+    m = write(tmp_path / "comfy.yaml", manifest(("g", [hashless()])))
+    lock = write(tmp_path / "lock.yaml", {"models": [{
+        "model": "a.safetensors", "url": "https://example.invalid/dir/a.safetensors",
+        "paths": [{"path": "models/checkpoints/a.safetensors"}],
+        "hashes": [{"hash": SHA_A, "type": "SHA256"}]}]})
+    r = runner.invoke(app, ["check", str(m), str(lock)])
+    assert r.exit_code == 1, r.output
+    assert NO_SHA in r.stdout
+
+
+def test_resolve_refuses_a_direct_url_without_sha256_before_the_network(tmp_path, no_network):
+    """The hf: group would need the network; the hashless URL fails the
+    schema first, so nothing is resolved and no lock is written."""
+    hf = {"source": "hf:o/r", "file": "vae.safetensors", "install": "models/vae/"}
+    m = write(tmp_path / "comfy.yaml", manifest(("hf", [hf]), ("url", [hashless()])))
+    r = runner.invoke(app, ["resolve", str(m)])
+    assert r.exit_code == 1, r.output
+    assert r.stdout == "", "a lock was written"
+    assert "1 schema problem(s)" in r.stderr
+    assert "needs `sha256`" in r.stderr
+
+
 # --- #160: one entry per install path --------------------------------------------
 
 def test_a_file_two_groups_share_is_one_entry(tmp_path):
@@ -358,8 +424,8 @@ def test_out_writes_the_lock_and_header_prepends(tmp_path):
 
 
 @pytest.mark.parametrize("entry, code, why", [
-    ({"source": "https://example.invalid/a.safetensors", "as": "a.safetensors",
-      "install": "models/checkpoints/"}, 1, "needs `sha256`"),   # unresolved
+    ({"source": "hf:o/r", "install": "models/checkpoints/"},
+     1, "needs `file`"),                                        # unresolved
     (url_file(), 1, "1 schema problem(s)"),                       # refused before resolving
 ])
 def test_a_failed_resolve_leaves_the_existing_lock_untouched(tmp_path, entry, code, why):

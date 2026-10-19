@@ -121,6 +121,24 @@
                     ],
                     "$comment": "Without either, the install path is the `install` DIRECTORY, and fetch writes the file over it. Taking the name from the URL isn't derivable the way check derives paths, so the manifest names it."
                   }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "source": {
+                        "pattern": "^https?://"
+                      }
+                    },
+                    "required": [
+                      "source"
+                    ]
+                  },
+                  "then": {
+                    "required": [
+                      "sha256"
+                    ],
+                    "$comment": "Nothing resolves a hash from a bare URL, so resolve refuses an entry without one. Requiring it here makes check refuse it too, offline, instead of passing a manifest that can never resolve (#230)."
+                  }
                 }
               ],
               "patternProperties": {

@@ -1,5 +1,6 @@
-# Three distinct failure modes at once. resolve.sh must report ALL of them in a
-# single pass and write no lock.
+# Two distinct failure modes at once. resolve must report BOTH in a single pass
+# and write no lock. A direct URL without sha256 is no longer one of them: the
+# schema refuses it before anything resolves (#230).
 name: broken-sources
 models:
   - name: dead-civitai
@@ -11,9 +12,4 @@ models:
     files:
       - source: hf:does-not-exist-xyz/nope
         file: nope.safetensors
-        install: models/loras/
-  - name: url-without-hash
-    files:
-      - source: https://example.com/thing.safetensors
-        as: thing.safetensors
         install: models/loras/
