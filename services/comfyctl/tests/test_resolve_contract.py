@@ -156,6 +156,17 @@ def test_other_sources_need_no_sha256(entry):
     assert schema.validate(manifest(("g", [entry])), "comfy") == []
 
 
+def test_a_non_string_source_is_not_asked_for_sha256():
+    entry = {"source": 123, "as": "a.safetensors", "install": "models/loras/"}
+    problems = schema.validate(manifest(("g", [entry])), "comfy")
+    assert problems and not any("sha256" in p for p in problems), problems
+
+
+def test_the_python_api_refuses_a_direct_url_without_sha256():
+    with pytest.raises(resolve.Unresolved, match="needs `sha256`"):
+        resolve._resolve_file(hashless(), resolve.AuthMap.from_document({}))
+
+
 def test_check_refuses_a_direct_url_without_sha256(tmp_path):
     """The lock is the one `resolve` would write if it could: only the
     manifest is at fault, so the schema is what refuses it."""
@@ -424,11 +435,15 @@ def test_out_writes_the_lock_and_header_prepends(tmp_path):
 
 
 @pytest.mark.parametrize("entry, code, why", [
-    ({"source": "hf:o/r", "install": "models/checkpoints/"},
-     1, "needs `file`"),                                        # unresolved
+    ({"source": "hf:o/r", "file": "a.safetensors", "install": "models/checkpoints/"},
+     1, "did not resolve"),                                      # unresolved
     (url_file(), 1, "1 schema problem(s)"),                       # refused before resolving
 ])
-def test_a_failed_resolve_leaves_the_existing_lock_untouched(tmp_path, entry, code, why):
+def test_a_failed_resolve_leaves_the_existing_lock_untouched(tmp_path, monkeypatch,
+                                                             entry, code, why):
+    def unreachable(url, **k):
+        raise httpx.ConnectError("connection refused")
+    monkeypatch.setattr(resolve.http, "head_headers", unreachable)
     m = write(tmp_path / "comfy.yaml", manifest(("a", [entry])))
     lock = tmp_path / "lock.yaml"
     lock.write_text("# the committed, good lock\n")

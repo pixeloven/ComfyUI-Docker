@@ -126,6 +126,7 @@
                   "if": {
                     "properties": {
                       "source": {
+                        "type": "string",
                         "pattern": "^https?://"
                       }
                     },
