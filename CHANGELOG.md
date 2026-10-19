@@ -12,6 +12,18 @@ see `VERSIONING.md`.
 
 ## Unreleased
 
+### Added
+
+- **Optional output links in comfyrelay** (#233). Set `COMFYUI_PUBLIC_URL` to
+  a client-accessible ComfyUI base, including a proxy path prefix, to receive
+  an absolute `view_url` per file from `workflow_outputs`. Unset, it is null;
+  existing `view_path` and the 5,000,000-byte inline limit remain. Both
+  known-size and streamed `output_too_large` errors include the delivery
+  fields. This does not publish files or grant access: operators supply the
+  route and authentication. The relay never fetches the public URL or
+  derives it from the internal URL, and refuses ambiguous or credential-bearing
+  public bases without printing their values.
+
 ### Fixed
 
 - **`check` refuses a direct-URL source with no `sha256:`** (#230). The

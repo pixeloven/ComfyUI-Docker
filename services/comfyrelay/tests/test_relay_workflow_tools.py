@@ -8,6 +8,7 @@ import base64
 import json
 import logging
 import uuid
+from urllib.parse import parse_qs, urlsplit
 
 import comfyrelay.tools_workflow as tw
 import httpx2
@@ -833,6 +834,7 @@ async def test_outputs_lists_files_with_sizes_and_streams_nothing_by_default():
         "size_bytes": len(PNG),
         "mime_type": "image/png",
         "view_path": "/view?filename=t1__00001_.png&subfolder=&type=output",
+        "view_url": None,
     }
     assert got.structured_content["fetched"] is None
     assert [c.type for c in got.content] == ["text"]
@@ -856,15 +858,112 @@ async def test_outputs_fetches_one_file_inline_and_sizes_only_that_one():
     assert base64.b64decode(image.data) == PNG
 
 
-async def test_outputs_refuses_a_file_over_the_inline_cap(monkeypatch):
+@pytest.mark.parametrize("public_url", [None, "https://comfy.example/team/comfy"])
+async def test_outputs_refuses_a_file_over_the_inline_cap(monkeypatch, public_url):
     monkeypatch.setattr(tw, "MAX_INLINE_BYTES", 10)
     fake = FakeComfyUI()
-    server, _ = serve(fake)
+    server, _ = build_server(settings(comfyui_public_url=public_url), comfyui=fake.client())
     async with Client(server, mode="legacy") as client:
         job_id = await finished_job(client)
+        listed = await client.call_tool("workflow_outputs", {"job_id": job_id})
+        assert not listed.is_error
+        [file] = listed.structured_content["files"]
+        assert file["size_bytes"] > listed.structured_content["inline_limit_bytes"]
+        assert file["view_url"] == (public_url + file["view_path"] if public_url else None)
+        assert [c.type for c in listed.content] == ["text"]
+        assert fake.count("GET", "/view") == 0
         error = error_of(await client.call_tool("workflow_outputs", {"job_id": job_id, "fetch": "t1__00001_.png"}))
     assert error["code"] == "output_too_large" and error["size_bytes"] == len(PNG)
     assert "/view?filename=t1__00001_.png" in error["message"]
+    assert error["view_path"] == "/view?filename=t1__00001_.png&subfolder=&type=output"
+    assert error["view_url"] == (public_url + error["view_path"] if public_url else None)
+    assert fake.count("GET", "/view") == 0
+
+
+@pytest.mark.parametrize("public_url", ["https://comfy.example/team/comfy", "https://comfy.example/team/comfy/"])
+async def test_output_links_encode_file_identity_keep_proxy_prefix_and_never_contact_public_url(public_url):
+    fake = FakeComfyUI()
+    ref = {"filename": "肖像 #1&token=other?.png", "subfolder": "my refs/β+%", "type": "temp"}
+    fake.outputs = {"4": {"images": [ref, SAVED["4"]["images"][0]]}}
+    fake.files[ref["filename"]] = PNG
+    private_url = "http://private-user:private-secret@comfyui.test:8188"
+    requests = []
+
+    async def handle(request):
+        requests.append(request)
+        assert request.url.host == "comfyui.test"
+        return await fake.handle(request)
+
+    comfyui = ComfyUIClient(private_url, transport=httpx2.MockTransport(handle))
+    server, _ = build_server(settings(comfyui_url=private_url, comfyui_public_url=public_url), comfyui=comfyui)
+    async with Client(server, mode="legacy") as client:
+        job_id = await finished_job(client)
+        got = await client.call_tool("workflow_outputs", {"job_id": job_id})
+        fetched = await client.call_tool("workflow_outputs", {"job_id": job_id, "fetch": ref["filename"]})
+    assert not got.is_error and not fetched.is_error
+    first, second = got.structured_content["files"]
+    url = urlsplit(first["view_url"])
+    assert url.scheme == "https" and url.netloc == "comfy.example" and url.path == "/team/comfy/view"
+    assert parse_qs(url.query) == {k: [v] for k, v in ref.items()}
+    assert first["view_url"] == public_url.rstrip("/") + first["view_path"]
+    assert second["view_url"] != first["view_url"]
+    assert [c.type for c in got.content] == ["text"]
+    assert fetched.structured_content["files"][0]["view_url"] == first["view_url"]
+    assert base64.b64decode(fetched.content[1].data) == PNG
+    assert requests and fake.count("GET", "/view") == 1
+    for result in (got, fetched):
+        rendered = result.model_dump_json()
+        assert "private-user" not in rendered and "private-secret" not in rendered and "comfyui.test" not in rendered
+
+
+@pytest.mark.parametrize("public_url", [None, "https://comfy.example/team/comfy"])
+@pytest.mark.parametrize("head_length", [None, "0"])
+async def test_output_stream_overflow_keeps_delivery_links_when_head_length_is_missing_or_wrong(
+    monkeypatch, public_url, head_length
+):
+    monkeypatch.setattr(tw, "MAX_INLINE_BYTES", 10)
+    fake = FakeComfyUI()
+
+    async def handle(request):
+        if (request.method, request.url.path) == ("HEAD", "/view"):
+            return httpx2.Response(200, headers={"content-length": head_length} if head_length else {})
+        return await fake.handle(request)
+
+    comfyui = ComfyUIClient("http://private-user:private-secret@comfyui.test:8188", transport=httpx2.MockTransport(handle))
+    server, _ = build_server(settings(comfyui_public_url=public_url), comfyui=comfyui)
+    async with Client(server, mode="legacy") as client:
+        job_id = await finished_job(client)
+        result = await client.call_tool("workflow_outputs", {"job_id": job_id, "fetch": "t1__00001_.png"})
+    error = error_of(result)
+    assert error["code"] == "output_too_large" and error["limit"] == 10 and error["retryable"] is False
+    assert error["view_path"] == "/view?filename=t1__00001_.png&subfolder=&type=output"
+    assert error["view_url"] == (public_url + error["view_path"] if public_url else None)
+    assert fake.count("GET", "/view") == 1
+    assert [c.type for c in result.content] == ["text"]
+    assert "private-secret" not in result.model_dump_json()
+
+
+@pytest.mark.parametrize("failure", ["http", "timeout"])
+async def test_output_fetch_keeps_nonoverflow_errors_unchanged(failure):
+    fake = FakeComfyUI()
+
+    async def handle(request):
+        if (request.method, request.url.path) == ("GET", "/view"):
+            if failure == "timeout":
+                raise httpx2.ReadTimeout("timed out", request=request)
+            return httpx2.Response(404)
+        return await fake.handle(request)
+
+    comfyui = ComfyUIClient("http://private-user:private-secret@comfyui.test:8188", transport=httpx2.MockTransport(handle))
+    server, _ = build_server(settings(comfyui_public_url="https://comfy.example"), comfyui=comfyui)
+    async with Client(server, mode="legacy") as client:
+        job_id = await finished_job(client)
+        result = await client.call_tool("workflow_outputs", {"job_id": job_id, "fetch": "t1__00001_.png"})
+    error = error_of(result)
+    assert error["code"] == ("comfyui_timeout" if failure == "timeout" else "comfyui_http_error")
+    assert error["retryable"] is (failure == "timeout")
+    assert "view_url" not in error and "view_path" not in error
+    assert "private-user" not in result.model_dump_json() and "private-secret" not in result.model_dump_json()
 
 
 async def test_outputs_of_an_unknown_file_names_the_files_there_are():

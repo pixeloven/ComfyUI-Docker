@@ -195,3 +195,53 @@ def test_a_malformed_comfyui_url_is_a_config_error(url):
 def test_a_valid_comfyui_url_is_accepted(url):
     s = Settings.load(comfyui_url=url, host="0.0.0.0", port=9000, profiles="read", env={TOKEN_ENV: TOKEN})
     assert s.comfyui_url == url
+
+
+@pytest.mark.parametrize("public_url", [None, "", "   "])
+def test_public_output_links_are_opt_in_even_with_a_private_comfyui_url(public_url):
+    env = {TOKEN_ENV: TOKEN}
+    if public_url is not None:
+        env["COMFYUI_PUBLIC_URL"] = public_url
+    s = Settings.load(
+        comfyui_url="http://private-user:private-secret@internal:8188", host="h", port=1, profiles="run", env=env
+    )
+    assert s.comfyui_public_url is None
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://comfy.example", "https://comfy.example"),
+        ("https://comfy.example/", "https://comfy.example"),
+        ("https://comfy.example:8443/team/comfy/", "https://comfy.example:8443/team/comfy"),
+        ("http://localhost:8188", "http://localhost:8188"),
+        ("http://127.0.0.1:8188/", "http://127.0.0.1:8188"),
+        ("http://[::1]:8188/comfy/", "http://[::1]:8188/comfy"),
+        ("https://münich.example/réfs/%2F/", "https://xn--mnich-kva.example/r%C3%A9fs/%2F"),
+    ],
+)
+def test_public_output_base_accepts_http_hosts_and_preserves_a_proxy_prefix(url, expected):
+    s = load({TOKEN_ENV: TOKEN, "COMFYUI_PUBLIC_URL": url})
+    assert s.comfyui_public_url == expected
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "ftp://host/path", "//host/path", "host/path", "https:///path", "https://[::1",
+        "https://host:bad", "https://host:65536", "https://host:0", "https://host:",
+        "https://u:private-secret@host", "https://private-secret@host", "https://host?token=private-secret",
+        "http://admin:12/ss@comfyui:8188",
+        "https://host#private-secret", "https://host/comfy?", "https://host/comfy#",
+        " https://host", "https://host ", "https://ho\tst", "https://ho\nst", "https://host/a b",
+        "https://host/\x00", "https://host/\x7f", "https://host\\@elsewhere", "https://host/a\\b",
+        "https://host%40elsewhere", "https://host|other", "https://-host", "https://host..example",
+        "https://host..", "https://256.256.256.256", "https://exämple..",
+    ],
+)
+def test_public_output_base_refuses_ambiguous_urls_without_echoing_values(url):
+    with pytest.raises(ConfigError) as info:
+        load({TOKEN_ENV: TOKEN, "COMFYUI_PUBLIC_URL": url})
+    assert str(info.value).startswith("COMFYUI_PUBLIC_URL must be an http:// or https:// URL")
+    assert url not in str(info.value)
+    assert "private-secret" not in str(info.value)
