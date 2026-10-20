@@ -46,6 +46,12 @@ fails as an unknown tool, so check `server_info` rather than assuming.
 ## Jobs
 
 `workflow_run` returns a `job_id` at once, and the run continues in ComfyUI.
+A graph ComfyUI refuses fails at once with `workflow_rejected` and
+`queued: false`: nothing runs, so there is nothing to follow or collect.
+Its error still carries a `job_id`, which only records the refusal. Fix the
+errors and call `workflow_run` again. If ComfyUI takes over 30 seconds to
+answer, `workflow_run` returns the `job_id` first; a refusal after that shows
+in `job_status` as `failed`, with `comfyui_state: rejected`.
 
 - **Follow it** with `job_status`. Pass `timeout_seconds` to wait up to that
   long for the end (at most 300), and keep each wait under your client's own
@@ -85,5 +91,8 @@ Jobs live in the relay's memory, but ComfyUI keeps the runs. Because a run's
 ## Errors
 
 A failed call's text ends in JSON: `{"error": {"code", "message",
-"retryable"}}`. Branch on `code`. `retryable: true` means the same call can
+"retryable"}}`. The text is only that JSON, and the same object is the
+result's `structuredContent`; an older relay put `Error executing tool
+<name>: ` before it. Arguments the tool's schema refuses fail as
+`invalid_arguments`. Branch on `code`. `retryable: true` means the same call can
 work later unchanged, for example while ComfyUI restarts.

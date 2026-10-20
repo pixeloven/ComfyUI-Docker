@@ -405,6 +405,8 @@ async def test_run_reports_comfyuis_own_rejection():
     async with Client(server, mode="legacy") as client:
         error = error_of(await client.call_tool("workflow_run", {"workflow": t1()}))
     assert error["code"] == "workflow_rejected"
+    # #217: never queued, and it says so where an agent looks first; job_id stays, for consumers that read it.
+    assert error["queued"] is False and "Nothing was queued" in error["message"] and error["job_id"]
     assert error["comfyui_error"]["type"] == "prompt_outputs_failed_validation"
     assert error["node_errors"]["1"]["errors"][0]["type"] == "custom_validation_failed"
     assert error["errors"] == [  # the same shape as workflow_validate's
@@ -425,11 +427,12 @@ async def test_a_rejected_runs_job_says_it_was_never_queued():
     """T4 (#169): the job_id of a run ComfyUI refused only repeats the rejection; job_status must not leave it
     looking as if the submission were still under way."""
     fake = FakeComfyUI()
-    fake.reject = {"error": {"type": "prompt_outputs_failed_validation", "message": "x"}, "node_errors": {}}
+    fake.reject = {"error": {"type": "prompt_outputs_failed_validation", "message": "x."}, "node_errors": {}}
     server, _ = serve(fake)
     async with Client(server, mode="legacy") as client:
         error = error_of(await client.call_tool("workflow_run", {"workflow": t1()}))
         view = (await client.call_tool("job_status", {"job_id": error["job_id"]})).structured_content
+    assert "workflow: x. Nothing was queued" in error["message"]  # ComfyUI's own period, not a second one
     assert (view["state"], view["error"]["code"]) == ("failed", "workflow_rejected")
     assert view["progress"]["comfyui_state"] == "rejected"
     assert (fake.pending, fake.running, fake.history) == ([], [], {})

@@ -25,16 +25,20 @@ from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+from mcp_types import CallToolResult, TextContent
+from pydantic import ValidationError
 
 if TYPE_CHECKING:
-    from mcp_types import Tool
+    from mcp_types import InputRequiredResult, Tool
     from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import __version__
 from .comfyui import ComfyUIClient
 from .convert import CLOSE_SECONDS, Converter
 from .docs_index import DocsIndex, DocsIndexError
+from .errors import RelayError
 from .jobs import SHUTDOWN_WAIT_SECONDS, JobStore
 from .settings import INSTANCE_ID_ENV, MAX_LARGE_REQUESTS_ENV, MCP_PATH, Settings, redact_url
 from .tools import SERVER_NAME, Relay, register
@@ -85,6 +89,40 @@ class RelayMCPServer(MCPServer):
             tool.model_copy(update={"output_schema": None, "input_schema": untitled(tool.input_schema)})
             for tool in await super().list_tools()
         ]
+
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any], context: Context[Any, Any] | None = None
+    ) -> CallToolResult | InputRequiredResult:
+        """The SDK's call, with our errors as they are (#217).
+
+        The SDK reports a failed call as `Error executing tool <name>: ` and then the
+        exception's text. A RelayError, and arguments that fail the input schema
+        (as `invalid_arguments`), come back instead as only the error JSON, with the
+        same object as structuredContent, so a client can read the code without
+        parsing the text. An unknown tool and a crash keep the SDK's own answer.
+        """
+        try:
+            return await super().call_tool(name, arguments, context)
+        except ToolError as exc:
+            if isinstance(exc, UnexpectedToolError):
+                # A crash, even one whose cause is a pydantic ValidationError the tool's own body raised: its text
+                # stays on the server, and the client gets the SDK's generic answer.
+                raise
+            if isinstance(exc.__cause__, RelayError):
+                error = exc.__cause__
+                log.info("tool %r failed: %s", name, error.code)
+            elif isinstance(exc.__cause__, ValidationError):
+                # Field names only in the log, as the SDK logs it: the rejected values are the caller's data.
+                fields = sorted({".".join(str(p) for p in e["loc"]) for e in exc.__cause__.errors()})
+                log.info("tool %r rejected arguments: %r", name, fields)
+                error = RelayError("invalid_arguments", str(exc.__cause__))
+            else:
+                raise
+            return CallToolResult(
+                content=[TextContent(type="text", text=str(error))],
+                structured_content={"error": error.as_dict()},
+                is_error=True,
+            )
 
 
 def untitled(schema: Any) -> Any:

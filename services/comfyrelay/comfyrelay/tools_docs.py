@@ -42,9 +42,13 @@ _STOPWORDS = frozenset(
 
 
 def _query_words(query: str) -> list[str]:
-    words = re.findall(r"[a-z0-9]+(?:[._][a-z0-9]+)*", query.lower())  # keeps sd1.5 and value_not_in_list whole
-    words = list(dict.fromkeys(words))  # each word once: repeating one adds nothing but work
-    return ([w for w in words if w not in _STOPWORDS] or words)[:MAX_QUERY_WORDS]
+    """The words to search for, in the case they were typed, which the ranking uses (#217)."""
+    words = re.findall(r"[A-Za-z0-9]+(?:[._][A-Za-z0-9]+)*", query)  # keeps sd1.5 and value_not_in_list whole
+    once: dict[str, str] = {}
+    for w in words:
+        once.setdefault(w.lower(), w)  # each word once, as first typed: repeating one adds nothing but work
+    words = list(once.values())
+    return ([w for w in words if w.lower() not in _STOPWORDS] or words)[:MAX_QUERY_WORDS]
 
 
 def _docs_index(relay: Relay) -> DocsIndex:
@@ -67,6 +71,11 @@ class DocHit(_Compact):
     section: str = Field(description="The headings above this section, outermost first; empty for a page's opening")
     text: str = Field(description="The section's markdown, or an excerpt around the match when it is long")
     topic: str | None = Field(default=None, description="A guide's topic: docs_guide(topic) returns all of it")
+    exact: bool = Field(
+        description="Every query word is in this section as typed (letter case too, for a capital past its first "
+        "letter); "
+        "false: some only matched in another form or case"
+    )
 
 
 class DocsSearchResult(_Compact):
@@ -101,8 +110,9 @@ def _docs_search(relay: Relay) -> Callable[..., Any]:
 
         Results are page sections, best first, with source, path, license and url, and a guide's docs_guide topic.
         docs.comfy.org describes the latest ComfyUI, not necessarily this one: for a node's inputs and defaults
-        use node_describe. Words match across forms (run, running); every word must match unless none do (match
-        says which).
+        use node_describe. Words match across forms and case (run, running); every word must match unless none do
+        (match says which). Words typed like names (KSampler, VAE, workflow_templates) rank sections with them
+        exactly as typed first (exact).
         """
         words = _query_words(query)
         if not words:
@@ -117,7 +127,7 @@ def _docs_search(relay: Relay) -> Callable[..., Any]:
         )
         return DocsSearchResult(
             query=query,
-            searched=words,
+            searched=[w.lower() for w in words],
             match=mode,
             total_matches=total,
             results=[DocHit(**hit.__dict__) for hit in hits],

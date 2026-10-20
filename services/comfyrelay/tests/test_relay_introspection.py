@@ -807,6 +807,25 @@ async def test_display_names_are_cut_to_a_fixed_width_wherever_they_are_passed_o
     assert [len(s["display_name"]) for s in batch["unknown"][0]["suggestions"]] == [cap]
 
 
+async def test_a_class_type_too_long_to_use_is_never_offered_but_is_counted():
+    """#206: a class_type can't be cut and still name its class, so one over the width is skipped, as a hit and as
+    a suggestion, and counted. 20 such classes once made a 20 MB batch answer."""
+    width = tools_introspection.CLASS_TYPE_MAX_CHARS
+    longest_ok, too_long = "KSamplerLong" + "x" * (width - 12), "KSamplerLong" + "x" * 200_000
+    info = {**OBJECT_INFO, longest_ok: OBJECT_INFO["KSampler"], too_long: OBJECT_INFO["KSampler"]}
+    routes_ = {"/object_info": httpx2.Response(200, json=info)}
+    got = await ok("node_search", {"query": "KSamplerLong"}, **routes_)
+    assert [h["class_type"] for h in got["results"]] == [longest_ok]
+    assert (got["total_matches"], got["skipped_long_names"]) == (1, 1)
+    assert "skipped_long_names" not in await ok("node_search", {"query": "KSampler"})
+    err = await error("node_describe", {"class_type": "KSamplerLon"}, **routes_)
+    suggested = [s["class_type"] for s in err["suggestions"]]
+    assert longest_ok in suggested and too_long not in suggested and err["skipped_long_names"] == 1
+    batch = await ok("node_describe", {"class_types": [f"KSamplerLon{i}" for i in range(20)]}, **routes_)
+    assert len(json.dumps(batch)) < 20_000
+    assert all(u["skipped_long_names"] == 1 and too_long not in str(u["suggestions"]) for u in batch["unknown"])
+
+
 async def test_a_batch_within_its_budget_is_not_cut():
     got = await ok("node_describe", {"class_types": ["KSampler", "OpenAIDalle3"]})
     assert "omitted" not in got and all("help_omitted" not in n for n in got["nodes"])

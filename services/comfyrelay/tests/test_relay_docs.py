@@ -302,6 +302,67 @@ async def test_a_query_counts_each_word_once_and_has_a_length_limit(docs_path):
     assert tool.input_schema["properties"]["query"]["maxLength"] == 500
 
 
+def _ranking_index(root: Path) -> str:
+    """Pairs of pages where bm25 alone ranks the wrong one first: it matches stems and ignores case."""
+    pages = {
+        "specs/lower": ("Groups", "The lastgroupid field. lastgroupid, lastgroupid."),
+        "specs/exact": ("State", "The state has lastGroupId, the last group's id, among other fields of its own."),
+        "ui/templates": ("Templates", "Workflow templates. Open workflow templates; save workflow templates."),
+        "nodes/templates": ("Templates for nodes", "A pack puts its files in its workflow_templates folder for you."),
+        "nodes/samplers": ("Samplers", "KSampler and more: KSampler, KSampler, KSampler."),
+        "nodes/KSampler": ("Sampling", "KSampler denoises a latent image over a number of steps, with a seed."),
+        "tutorials/inpaint": ("Inpaint", "Inpaint the masked area: inpaint, then inpaint again."),
+        "tutorials/masks": ("Masks", "Masks select an area. Among the uses of a mask is inpainting, and others."),
+    }
+    nav = {"navigation": {"languages": [{"language": "en", "tabs": [{"tab": "Docs", "pages": list(pages)}]}]}}
+    files = {"docs.json": json.dumps(nav), "LICENSE": "GPL-3.0\n"}
+    files |= {f"{p}.mdx": f"---\ntitle: {title}\n---\n{body}\n" for p, (title, body) in pages.items()}
+    from comfyrelay.docs_index import build
+
+    skills = write_tree(root / "skills", SKILL_FILES)
+    build(docs=write_tree(root / "docs", files), sha=DOCS_SHA, skills=skills, out=root / "out")
+    return str(root / "out" / "docs.sqlite")
+
+
+@pytest.mark.parametrize(
+    ("query", "first", "exact"),
+    [
+        ("lastGroupId", "specs/exact.mdx", {"specs/exact.mdx": True, "specs/lower.mdx": False}),
+        ("workflow_templates", "nodes/templates.mdx", {"nodes/templates.mdx": True, "ui/templates.mdx": False}),
+        ("KSampler", "nodes/KSampler.mdx", {"nodes/KSampler.mdx": True, "nodes/samplers.mdx": True}),
+    ],
+)
+async def test_an_exact_match_ranks_first_and_says_so(tmp_path, query, first, exact):
+    """#217: a word typed like a name (a capital, `_` or `.`) ranks the sections that have it as typed first, and
+    among those the ones with it in the title, heading or path; `exact` says which hits have every word as typed."""
+    ok, got = await call("docs_search", {"query": query}, _ranking_index(tmp_path))
+    assert ok, got
+    assert got["results"][0]["path"] == first
+    assert {h["path"]: h["exact"] for h in got["results"]} == exact
+
+
+async def test_a_plain_lowercase_query_keeps_the_index_order(tmp_path):
+    """A lowercase word means any form and case, so bm25 decides: the page that repeats it most comes first."""
+    ok, got = await call("docs_search", {"query": "lastgroupid"}, _ranking_index(tmp_path))
+    assert ok and [h["path"] for h in got["results"]] == ["specs/lower.mdx", "specs/exact.mdx"]
+    assert all(h["exact"] for h in got["results"])  # the same word, whatever its case
+
+
+@pytest.mark.parametrize("query", ["inpainting", "Inpainting"])
+async def test_a_plain_or_sentence_case_word_keeps_its_stems(tmp_path, query):
+    """Not typed like a name, so the exact form doesn't rank: the "Inpaint" page, which bm25 ranks first on the stem,
+    stays ahead of the one that has "inpainting" itself. A capital on the first letter only is sentence case."""
+    ok, got = await call("docs_search", {"query": query}, _ranking_index(tmp_path))
+    assert ok and [h["path"] for h in got["results"]] == ["tutorials/inpaint.mdx", "tutorials/masks.mdx"]
+    assert [h["exact"] for h in got["results"]] == [False, True]
+
+
+async def test_the_re_rank_reaches_past_the_limit(tmp_path):
+    """The exact page bm25 ranks below `limit` is still found: the re-rank reads more candidates than it returns."""
+    ok, got = await call("docs_search", {"query": "KSampler", "limit": 1}, _ranking_index(tmp_path))
+    assert ok and [h["path"] for h in got["results"]] == ["nodes/KSampler.mdx"]
+
+
 async def test_docs_search_refuses_a_query_with_nothing_to_search(docs_path):
     ok, err = await call("docs_search", {"query": "?!"}, docs_path)
     assert (ok, err["code"]) == (False, "invalid_query")

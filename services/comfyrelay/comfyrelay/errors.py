@@ -2,11 +2,13 @@
 
 A tool fails by raising `RelayError`. It is the SDK's `ToolError`, so the call
 returns `isError: true` with our message, instead of the bare "Error executing
-tool <name>" that any other exception becomes. The SDK always puts that prefix
-first, so the text a client sees is the prefix and then JSON with stable keys,
-which an agent can branch on (`code`) rather than parse prose:
+tool <name>" that any other exception becomes. The SDK puts that prefix before
+a ToolError's text; `server.RelayMCPServer.call_tool` takes it off again (#217),
+so the text a client sees is only JSON with stable keys, which an agent can
+branch on (`code`) rather than parse prose, and the same object is the result's
+structuredContent:
 
-    Error executing tool job: {"error": {"code": "unknown_job", "message": "...", "retryable": false}}
+    {"error": {"code": "unknown_job", "message": "...", "retryable": false}}
 
 `retryable` says whether the same call can succeed later unchanged (ComfyUI
 restarting, a timeout), as opposed to a request that is wrong as sent.

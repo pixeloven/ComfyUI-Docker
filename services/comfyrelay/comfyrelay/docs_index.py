@@ -53,6 +53,8 @@ from urllib.parse import quote
 from . import __version__
 
 SCHEMA = 1
+# How many of a search's best sections by bm25 are ranked again by exact match (DocsIndex.search).
+CANDIDATES = 200
 DOCS_REPO = "https://github.com/Comfy-Org/docs"
 DOCS_SITE = "https://docs.comfy.org"
 DOCS_SOURCE = "docs.comfy.org"
@@ -609,6 +611,7 @@ class Hit:
     section: str
     text: str
     topic: str | None = None  # a guide's docs_guide topic
+    exact: bool = False  # every query word is in the section as typed (_exact)
 
 
 class DocsIndex:
@@ -632,8 +635,13 @@ class DocsIndex:
     def search(self, words: list[str], limit: int, max_chars: int) -> tuple[list[Hit], int, str]:
         """Sections matching every one of `words`, best first; failing that, any of them. (hits, total, "all"|"any").
 
-        Each word is quoted, so FTS5 syntax in it is text, and one that the tokenizer splits (sd1.5) is a phrase."""
-        words = [w.replace('"', "") for w in words if w.replace('"', "")]
+        Each word is quoted, so FTS5 syntax in it is text, and one that the tokenizer splits (sd1.5) is a phrase.
+        The index matches stems and ignores case, so the best CANDIDATES by bm25 are ranked again (#217) on the
+        words typed like names (_distinctive): first by how many of them the section has as typed (_exact), then
+        by how many of those are in its title, heading or path, then by bm25. `words` keep the case they were
+        typed in. A hit is `exact` when it has every word as typed."""
+        typed = [w.replace('"', "") for w in words if w.replace('"', "")]
+        words = [w.lower() for w in typed]
         if not words:
             return [], 0, "any"
         with self._connect() as db:
@@ -648,9 +656,24 @@ class DocsIndex:
                 "SELECT docs.source, docs.version, docs.path, docs.url, docs.license, docs.title, docs.section, "
                 "docs.body, guides.topic FROM docs LEFT JOIN guides ON guides.path = docs.path WHERE docs MATCH ? "
                 "ORDER BY bm25(docs, 8.0, 4.0, 2.0, 1.0) LIMIT ?",
-                (match, limit),
+                (match, max(limit, CANDIDATES)),
             ).fetchall()
-        return [Hit(*row[:7], excerpt(row[7], words, max_chars), row[8]) for row in rows], total, mode
+        patterns = [_exact(w) for w in typed]
+        named = [_distinctive(w) for w in typed]
+        scored = []
+        for row in rows:  # in bm25 order, which the stable sort keeps among equals
+            head = f"{row[5]}\n{row[6]}\n{row[2]}"  # title, section, path
+            in_head = [p.search(head) is not None for p in patterns]
+            anywhere = [h or p.search(row[7]) is not None for p, h in zip(patterns, in_head, strict=True)]
+            rank = (
+                -sum(a for a, n in zip(anywhere, named, strict=True) if n),
+                -sum(h for h, n in zip(in_head, named, strict=True) if n),
+            )
+            scored.append((rank, all(anywhere), row))
+        scored.sort(key=lambda s: s[0])
+        best = scored[:limit]
+        hits = [Hit(*row[:7], excerpt(row[7], words, max_chars), row[8], exact=exact) for _, exact, row in best]
+        return hits, total, mode
 
     def topics(self) -> list[dict[str, str]]:
         with self._connect() as db:
@@ -675,6 +698,22 @@ class DocsIndex:
             "sources": sources,
             "notice": "/licenses/NOTICE in the image",
         }
+
+
+def _exact(word: str) -> re.Pattern[str]:
+    """`word` as a whole word, as typed: case counts when it has a capital past its first letter (lastGroupId is not
+    lastGroupid; "Lora", capitalised to start a sentence, is lora), and `_` and `.` are part of it
+    (workflow_templates is not "workflow templates"). No stems: lora is not loras."""
+    flags = 0 if any(c.isupper() for c in word[1:]) else re.IGNORECASE
+    return re.compile(rf"(?<![A-Za-z0-9_]){re.escape(word)}(?![A-Za-z0-9_])", flags)
+
+
+def _distinctive(word: str) -> bool:
+    """Typed like a name, so its exact form is what was meant: a capital after the first letter (KSampler,
+    lastGroupId), all capitals (VAE), or a `_` or `.` (workflow_templates, sd1.5). A lowercase or sentence-case
+    word isn't: stems and case are how it should match ("Lora" finds LoRA, inpainting finds an "Inpaint" heading)."""
+    # A capital past the first character covers all capitals of two letters or more (VAE) too.
+    return any(c.isupper() for c in word[1:]) or any(c in "_." for c in word)
 
 
 def excerpt(text: str, words: list[str], limit: int) -> str:
