@@ -10,7 +10,7 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
-## Unreleased
+## 6.2.0 — 2026-10-20
 
 ### Added
 
