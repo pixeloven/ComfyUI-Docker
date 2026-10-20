@@ -1,0 +1,19 @@
+# Develop a custom node pack against this image: an override that mounts the
+# pack's source into the comfyui service, layered over this example.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev-pack.yml up -d
+#
+# Set `source` to your pack's checkout and give the target the pack's
+# directory name. Edits on the host are what ComfyUI loads. Python changes
+# need a restart; JavaScript in a web directory ComfyUI already serves doesn't.
+# The runtime contract has the details:
+# docs/user-guides/runtime-contract.md#developing-a-node-pack
+services:
+  comfyui:
+    volumes:
+      - type: bind
+        source: /path/to/my-pack
+        target: /app/custom_nodes/my-pack
+        bind:
+          # A wrong path fails `up` instead of mounting an empty directory.
+          create_host_path: false

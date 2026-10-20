@@ -246,6 +246,10 @@ seven volume roots bind-mounted from `root:root 0755` sources. It fails unless:
 - ComfyUI runs as 1001:1001;
 - each root ends up owned by 1001:1001 and writable;
 - `comfyui.db` is 1001:1001;
+- a fixture pack (`tests/smoke/fixtures/smoke_dev_pack`) bind-mounted at
+  `/app/custom_nodes/smoke_dev_pack` from a 4321:4321 source loads (its class is
+  in `/object_info`, then left out of the node comparison), and its source is
+  still 4321:4321 (#180);
 - no `comfy_extras` module fails to import;
 - on the same ComfyUI version as the baseline, no node class is missing.
 

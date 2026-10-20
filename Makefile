@@ -69,6 +69,7 @@ validate: ## Validate Bake, example Compose configurations and the Kubernetes ex
 	cd examples/core-gpu && docker compose --profile models config --quiet
 	cd examples/complete-gpu && docker compose --profile models config --quiet
 	cd examples/core-cpu && docker compose --profile models config --quiet
+	cd examples/core-cpu && docker compose -f docker-compose.yml -f docker-compose.dev-pack.yml --profile models config --quiet
 	cd examples/core-amd && docker compose --profile models config --quiet
 	cd examples/core-intel && docker compose --profile models config --quiet
 	$(KUBECONFORM) -strict -summary -kubernetes-version $(KUBERNETES_VERSION) -ignore-filename-pattern '\.patch\.yaml$$' examples/kubernetes
@@ -87,7 +88,7 @@ validate: ## Validate Bake, example Compose configurations and the Kubernetes ex
 SMOKE_NETWORK ?=
 SMOKE_BASELINE ?= ghcr.io/pixeloven/comfyui/core:cpu-latest
 
-smoke: ## Build core-cpu from this tree, boot it as PUID/PGID 1001, check readiness, volume ownership, nodes vs main, and that node deps survive a recreate
+smoke: ## Build core-cpu from this tree, boot it as PUID/PGID 1001, check readiness, volume ownership, a mounted pack loads, nodes vs main, and that node deps survive a recreate
 	IMAGE_LABEL=smoke docker buildx bake core-cpu --load $(if $(filter host,$(SMOKE_NETWORK)),--set "*.network=host" --allow network.host)
 	tests/smoke/run.sh $(if $(SMOKE_NETWORK),--network $(SMOKE_NETWORK)) $(if $(SMOKE_BASELINE),--baseline $(SMOKE_BASELINE)) ghcr.io/pixeloven/comfyui/core:cpu-smoke
 	tests/smoke/node-deps.sh $(if $(SMOKE_NETWORK),--network $(SMOKE_NETWORK)) ghcr.io/pixeloven/comfyui/core:cpu-smoke

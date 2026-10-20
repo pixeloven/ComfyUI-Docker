@@ -75,6 +75,8 @@ jobs:
             - 'services/runtime/**'
             - 'docker-bake.hcl'
             - '.github/workflows/ci.yml'
+            # smoke-cpu runs only when this filter matches.
+            - 'tests/smoke/**'
           comfyctl:
             - 'services/comfyctl/**'
             - 'docker-bake.hcl'
@@ -330,6 +332,9 @@ jobs:
           docker compose --profile models config --quiet
           cd ../..
         done
+        # The override that mounts a node pack's source (#180).
+        cd examples/core-cpu
+        docker compose -f docker-compose.yml -f docker-compose.dev-pack.yml --profile models config --quiet
 
     # The Kubernetes example has no compose file. The same kubeconform image
     # (tag AND digest), flags and schema version as `make validate`, so a local
