@@ -218,8 +218,8 @@ busy one.
 ## Stopping
 
 The image sets no `STOPSIGNAL`, so a stop sends `SIGTERM`, and ComfyUI ignores it.
-ComfyUI runs as PID 1 and installs no `SIGTERM` handler, and the kernel never applies
-a signal's default action to PID 1. A `docker stop`, `docker restart` or pod deletion
+ComfyUI runs as PID 1 and installs no `SIGTERM` handler, and PID 1 ignores a signal it
+has no handler for, except `SIGKILL`. A `docker stop`, `docker restart` or pod deletion
 therefore waits out the whole grace period and then sends `SIGKILL`, and the container
 exits 137 ([#120](https://github.com/pixeloven/ComfyUI-Docker/issues/120)). The grace
 period is 10 s in Docker and Compose, and 30 s in Kubernetes.
@@ -238,7 +238,9 @@ services:
     stop_signal: SIGINT
 ```
 
-- **Idle**, ComfyUI stops in about 2 s and exits 0.
+- **Idle**, ComfyUI stops in about 2 s and exits 0. With Manager on (the default), a
+  stop soon after start can wait for Manager's startup registry fetch, up to the
+  grace period.
 - **A running prompt is abandoned.** A stop during computation can exit 139 with a
   crash trace, and a file being saved can be left truncated.
 - **A stop during startup** exits 130.
