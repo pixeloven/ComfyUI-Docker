@@ -29,6 +29,7 @@ page has a bug.
 | User, started as root | Drops to `PUID:PGID` (default `1000:1000`) through `gosu` |
 | User, started as non-root | Runs as the UID it was given. `PUID`/`PGID` are ignored and the volumes are left as they are |
 | Health check | None. The image defines no `HEALTHCHECK` |
+| Stopping | `SIGTERM` (the default) is ignored, so a stop waits out the grace period and a running prompt can finish. `SIGINT` is an opt-in fast stop (see [Stopping](#stopping)) |
 
 ## Environment Variables
 
@@ -213,6 +214,43 @@ runs the same script (`tests/smoke/run.sh`) locally.
 The image defines no `HEALTHCHECK`, and this repo doesn't prescribe a liveness probe.
 `/system_stats` shows that the server answers. It can't tell a wedged ComfyUI from a
 busy one.
+
+## Stopping
+
+The image sets no `STOPSIGNAL`, so a stop sends `SIGTERM`, and ComfyUI ignores it.
+ComfyUI runs as PID 1 and installs no `SIGTERM` handler, and the kernel never applies
+a signal's default action to PID 1. A `docker stop`, `docker restart` or pod deletion
+therefore waits out the whole grace period and then sends `SIGKILL`, and the container
+exits 137 ([#120](https://github.com/pixeloven/ComfyUI-Docker/issues/120)). The grace
+period is 10 s in Docker and Compose, and 30 s in Kubernetes.
+
+That wait is kept on purpose. While it lasts, a running prompt keeps going and can
+finish and save its outputs. To give long prompts more time, raise the grace period:
+`docker stop -t`, `stop_grace_period` in Compose, or `terminationGracePeriodSeconds` in
+Kubernetes.
+
+**Opt-in: stop with `SIGINT`.** ComfyUI handles `SIGINT` as it handles Ctrl-C.
+Ask for it with `docker run --stop-signal SIGINT`, or in Compose:
+
+```yaml
+services:
+  comfyui:
+    stop_signal: SIGINT
+```
+
+- **Idle**, ComfyUI stops in about 2 s and exits 0.
+- **A running prompt is abandoned.** A stop during computation can exit 139 with a
+  crash trace, and a file being saved can be left truncated.
+- **A stop during startup** exits 130.
+
+It suits development, where a fast restart matters more than the prompt in flight.
+CI's `smoke-cpu` job checks the idle case only: started with `--stop-signal SIGINT`, the
+container must exit 0 within 5 s.
+
+**Kubernetes** applies the image's default, `SIGTERM`. A container can set its own stop
+signal with `lifecycle.stopSignal`, which has been alpha since Kubernetes v1.33. It
+needs the `ContainerStopSignals` feature gate, which is off by default, and the pod's
+`spec.os.name` set.
 
 ## Startup: Root versus Non-Root
 
@@ -587,9 +625,10 @@ Two ways to restart:
   startup. The route answers `403` under `COMFY_MANAGER_SECURITY_LEVEL=strong` (see
   [Manager Security](#manager-security)).
 - **`docker restart <container>`**, which works with Manager off too. It took about
-  22 s on `core:cpu`, about 10 s of it Docker waiting out its stop timeout: the
-  image doesn't stop on `SIGTERM` yet, so Docker kills it
-  ([#120](https://github.com/pixeloven/ComfyUI-Docker/issues/120)).
+  22 s on `core:cpu`, about 10 s of it Docker waiting out its stop timeout: ComfyUI
+  ignores `SIGTERM`, so Docker kills it. For a faster loop, add `stop_signal: SIGINT`
+  to the override; an idle ComfyUI then stops in about 2 s, at the cost described in
+  [Stopping](#stopping).
 
 ### Where Import Errors Appear
 

@@ -31,6 +31,11 @@
 #   4. Save GET /object_info, keys sorted. The mounted pack's class,
 #      SmokeDevPackEcho, must be in it; it is then left out of the saved dump
 #      and the node comparison. No comfy_extras module may fail to import.
+#      Then `docker stop` it, and a second, volume-less container started
+#      directly as non-root 1001:1001. Both start with the opt-in
+#      `--stop-signal SIGINT` and Manager off, and idle ComfyUI must exit 0
+#      within 5 s (#120). The image's default, SIGTERM, is ignored on purpose;
+#      this covers only the idle opt-in path.
 #   5. With --baseline: boot the baseline the same way and diff node classes
 #      into node-diff.md. Same ComfyUI version: any baseline class missing
 #      here fails. Different version (a pin bump): the diff is a report only.
@@ -74,6 +79,7 @@ dev_class=SmokeDevPackEcho
 dev_owner=4321:4321
 name="comfyui-smoke-$$"
 name_base="$name-baseline"
+name_nonroot="$name-nonroot"
 
 fail() { echo "SMOKE FAIL: $*" >&2; exit 1; }
 label() { docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$1"; }
@@ -85,7 +91,7 @@ version="$(label "$image")"
 
 mkdir -p "$out"
 rm -f "$out"/object_info.json "$out"/system_stats.json "$out"/container.log \
-  "$out"/baseline.log "$out"/node-diff.md "$out"/summary.json
+  "$out"/baseline.log "$out"/nonroot.log "$out"/node-diff.md "$out"/summary.json
 work="$(mktemp -d "${TMPDIR:-/tmp}/comfyui-smoke.XXXXXX")"
 mkdir "$work/vol"
 
@@ -112,6 +118,7 @@ cleanup() {
   local status=$?
   retire "$name" "$out/container.log" "$status"
   retire "$name_base" "$out/baseline.log" "$status"
+  retire "$name_nonroot" "$out/nonroot.log" "$status"
   as_root 'rm -rf /vol/*' >/dev/null 2>&1 || true
   rm -rf "$work" 2>/dev/null || echo "note: could not remove $work" >&2
   exit "$status"
@@ -155,6 +162,23 @@ boot() {
   booted_in=$(( $(date +%s) - start ))
 }
 api() { docker exec "$1" curl -fsS --max-time 60 "http://127.0.0.1:$port$2"; }
+# `docker stop` container $1 ($2 says how it started), started with
+# `--stop-signal SIGINT`, the opt-in fast stop (#120), with Docker's default
+# 10 s grace: idle ComfyUI must exit 0 within 5 s. This covers only the idle
+# opt-in path. The image's default, SIGTERM, is ignored on purpose so a running
+# prompt can finish, and SIGINT abandons a running prompt; neither is checked
+# here. Manager stays off: its startup registry fetch runs on a non-daemon
+# thread that can hold the exit open for its 30 s page timeouts.
+stop_cleanly() {
+  local start ms code
+  start="$(date +%s%N)"
+  docker stop "$1" >/dev/null
+  ms=$(( ($(date +%s%N) - start) / 1000000 ))
+  code="$(docker inspect -f '{{.State.ExitCode}}' "$1")"
+  [ "$code" = 0 ] || fail "$2: ComfyUI exited with code $code on docker stop (SIGINT) after ${ms} ms, not 0"
+  [ "$ms" -le 5000 ] || fail "$2: docker stop (SIGINT) took ${ms} ms, over 5000"
+  echo "smoke: docker stop with --stop-signal SIGINT, $2: ComfyUI exited 0 after ${ms} ms"
+}
 
 # 1. The starting state: every volume source root:root 0755, as Docker leaves
 # a missing bind-mount source. Asserted, not assumed.
@@ -173,7 +197,7 @@ mounts+=(-v "$work/vol/$dev_pack:/app/custom_nodes/$dev_pack")
 
 # 2. Readiness.
 echo "smoke: starting $image (ComfyUI $version) as root, PUID=$puid PGID=$pgid"
-boot "$name" "$image" "${mounts[@]}"
+boot "$name" "$image" --stop-signal SIGINT "${mounts[@]}"
 startup="$booted_in"
 cp "$work/$name.system_stats.json" "$out/system_stats.json"
 echo "smoke: /system_stats answered after ${startup}s"
@@ -222,8 +246,13 @@ nodes="$(docker exec -i "$name" jq '.object_info | length' < "$out/object_info.j
 if docker logs "$name" 2>&1 | grep -E 'Cannot import .*comfy_extras'; then
   fail "a built-in comfy_extras node module failed to import"
 fi
+stop_cleanly "$name" "started as root"
 # With the host network, the baseline needs the port back.
 retire "$name" "$out/container.log"
+# The non-root path execs ComfyUI without gosu; stop it the same way.
+boot "$name_nonroot" "$image" --user "$puid:$pgid" --stop-signal SIGINT
+stop_cleanly "$name_nonroot" "started as non-root $puid:$pgid"
+retire "$name_nonroot" "$out/nonroot.log"
 
 # 5. The baseline: the first candidate that exists in its registry.
 baseline=""
