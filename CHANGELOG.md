@@ -29,6 +29,42 @@ see `VERSIONING.md`.
   its class is in `/object_info` and the source keeps its owner. A change under
   `tests/smoke/` now runs `smoke-cpu` on a pull request.
 
+### Changed
+
+- **`COMFY_ENABLE_MANAGER`, `COMFY_ENABLE_ASSETS` and `COMFY_ENABLE_NODE_VENV`
+  accept `true`, `1` or `yes` in any case** (#117). Only the exact string
+  `true` turned them on, so `TRUE`, `1` or `yes` silently turned the feature
+  off. Any other value still turns it off. Additive, so a minor change.
+
+### Fixed
+
+- **A root start no longer exits on a read-only or root-squashed volume, and
+  changes a volume root's owner only when it differs** (#113, #114). The
+  entrypoint's non-recursive `chown` of `/app`, `/app/ComfyUI` and the seven
+  volume roots now runs only when the owner isn't already `PUID:PGID`, so a
+  bind-mounted host directory that already has the right owner is left alone,
+  and a `chown` that fails (`:ro` mounts, root-squashed NFS) prints a warning
+  instead of stopping the container under `set -e`.
+- **A root start keeps the container's supplementary groups** (#122). gosu
+  dropped Docker's `group_add` / `--group-add` GIDs, which `core-amd` and
+  `core-intel` use for `/dev/dri` and `/dev/kfd`. The entrypoint now adds the
+  runtime user to every group it was started with (other than 0 and `PGID`),
+  naming a GID that has none `comfy-<GID>`, and hands gosu the UID alone so it
+  applies them. When `PUID` belongs to an existing user whose own group isn't
+  `PGID`, it warns and runs without them. The non-root path already kept them.
+  Not verified on AMD or Intel GPU hardware.
+- **`performance.md` says the VRAM flags are GPU-only** (#116): `--lowvram`,
+  `--novram`, `--highvram` and `--gpu-only` in `CLI_ARGS` make ComfyUI exit on
+  the CPU image, which always passes `--cpu`.
+- An invalid `PUID` or `PGID` now says it must be a non-negative integer, not a
+  positive one: `0` was always accepted (#117).
+
+`tests/smoke/run.sh` (`make smoke`, CI's `smoke-cpu`) boots the image once more
+as root, with `/app/models` mounted read-only from a source another UID owns,
+`--group-add 44 --group-add 12345` and `COMFY_ENABLE_MANAGER=Yes`, and fails
+unless it answers, the source keeps its owner, ComfyUI has both groups, and
+Manager's `/v2/manager/version` answers.
+
 ## 6.2.0 — 2026-10-20
 
 ### Added

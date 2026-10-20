@@ -55,6 +55,11 @@ For complete documentation, see the [ComfyUI Manual Install Guide](https://docs.
 --fast-disk              # Prefer disk-backed offload on a fast NVMe device
 ```
 
+`--lowvram`, `--novram`, `--highvram` and `--gpu-only` are for GPU images only.
+The CPU image (`core:cpu`) always passes `--cpu`, and ComfyUI makes `--cpu` and
+those four flags mutually exclusive, so putting one of them in `CLI_ARGS` there
+makes ComfyUI exit with an argument error at startup.
+
 ### Precision Settings
 
 ```bash
