@@ -53,6 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       images: ${{ steps.filter.outputs.images }}
+      smoke: ${{ steps.filter.outputs.smoke }}
       comfyctl: ${{ steps.filter.outputs.comfyctl }}
       relay: ${{ steps.filter.outputs.relay }}
       bake: ${{ steps.filter.outputs.bake }}
@@ -75,7 +76,9 @@ jobs:
             - 'services/runtime/**'
             - 'docker-bake.hcl'
             - '.github/workflows/ci.yml'
-            # smoke-cpu runs only when this filter matches.
+          # On a PR, smoke-cpu runs when the images filter or this one matches;
+          # main and tags always run it.
+          smoke:
             - 'tests/smoke/**'
           comfyctl:
             - 'services/comfyctl/**'
@@ -133,6 +136,7 @@ jobs:
       comfyctl_version: ${{ steps.classify.outputs.comfyctl_version }}
       comfyctl_label: ${{ steps.classify.outputs.comfyctl_label }}
       build_images: ${{ steps.classify.outputs.build_images }}
+      run_smoke: ${{ steps.classify.outputs.run_smoke }}
       build_comfyctl: ${{ steps.classify.outputs.build_comfyctl }}
       build_relay: ${{ steps.classify.outputs.build_relay }}
       publish_latest: ${{ steps.classify.outputs.publish_latest }}
@@ -153,6 +157,7 @@ jobs:
     - id: classify
       env:
         IMAGES_CHANGED: ${{ needs.changes.outputs.images }}
+        SMOKE_CHANGED: ${{ needs.changes.outputs.smoke }}
         COMFYCTL_CHANGED: ${{ needs.changes.outputs.comfyctl }}
         RELAY_CHANGED: ${{ needs.changes.outputs.relay }}
       run: |
@@ -265,6 +270,10 @@ jobs:
           if [ "${COMFYCTL_CHANGED}" = true ]; then build_comfyctl=true; fi
           if [ "${RELAY_CHANGED}" = true ]; then build_relay=true; fi
         fi
+        # smoke-cpu builds its own core-cpu, so a change to the smoke test
+        # alone runs it without building every image.
+        run_smoke="${build_images}"
+        if [ "${SMOKE_CHANGED}" = true ]; then run_smoke=true; fi
 
         # What ComfyUI goes INSIDE. Read back out of docker-bake.hcl rather
         # than grepped, so this and the build cannot disagree about the pin.
@@ -294,6 +303,7 @@ jobs:
           echo "comfyctl_version=${comfyctl_version}"
           echo "comfyctl_label=${comfyctl_label}"
           echo "build_images=${build_images}"
+          echo "run_smoke=${run_smoke}"
           echo "build_comfyctl=${build_comfyctl}"
           echo "build_relay=${build_relay}"
           echo "publish_latest=${main}"
@@ -959,7 +969,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [context, test-bake-targets]
-    if: needs.context.outputs.build_images == 'true'
+    if: needs.context.outputs.run_smoke == 'true'
     steps:
     - uses: actions/checkout@v7.0.1
 

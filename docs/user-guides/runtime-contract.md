@@ -541,6 +541,11 @@ With `docker run`, add `-v /path/to/my-pack:/app/custom_nodes/my-pack` beside th
 `custom_nodes` volume's own mount. Mount it at `/app/custom_nodes`, never at
 `/app/ComfyUI/custom_nodes`, for the reasons in [Volumes](#volumes).
 
+Docker creates the mount point as an empty, root-owned directory in the
+`custom_nodes` volume, and it stays there after you stop mounting the pack, so
+ComfyUI then logs `IMPORT FAILED` for it at every start. Remove it once you're
+done: `rmdir data/custom_nodes/<pack>` in the example.
+
 **File ownership.** The source keeps its owner on the host. On a root start, the
 entrypoint's `chown` stops at the volume roots (see
 [Started as Root](#started-as-root)), and the mounted pack is below one, so the
@@ -558,8 +563,13 @@ it into the [node venv](#the-node-venv) from a session as the runtime user, then
 restart:
 
 ```bash
-docker exec -u "$PUID:$PGID" comfyui-core-cpu pip install -r /app/custom_nodes/my-pack/requirements.txt
+docker exec -u "${PUID:?}:${PGID:?}" comfyui-core-cpu pip install -r /app/custom_nodes/my-pack/requirements.txt
 ```
+
+`PUID` and `PGID` are read from your shell here, not from the example's `.env`, so
+set them to the same values first. With them unset, `-u ":"` would run the session
+as root and leave root-owned files in the node venv; `${PUID:?}` stops the command
+instead.
 
 ### Restarting
 
@@ -586,10 +596,16 @@ Two ways to restart:
   `/system_stats` again about 11 s later on `core:cpu`, most of it ComfyUI's own
   startup. The route answers `403` under `COMFY_MANAGER_SECURITY_LEVEL=strong` (see
   [Manager Security](#manager-security)).
-- **`docker restart <container>`**, which works with Manager off too. It took about
-  22 s on `core:cpu`, about 10 s of it Docker waiting out its stop timeout: the
-  image doesn't stop on `SIGTERM` yet, so Docker kills it
-  ([#120](https://github.com/pixeloven/ComfyUI-Docker/issues/120)).
+- **`docker restart <container>`**, which works with Manager off too. The image's
+  stop signal is `SIGTERM`, which ComfyUI ignores so that a running prompt can
+  finish, so a stop waits out Docker's grace period and then kills the container
+  (see *Stopping*). On `core:cpu`:
+  - with the dev-pack override, which sets `stop_signal: SIGINT`, `docker restart`
+    returned after about 2.5 s, and `/system_stats` answered after about 13.5 s.
+    A prompt still running is abandoned;
+  - without it, `docker restart` returned after about 10.4 s, and `/system_stats`
+    answered after about 22 s
+    ([#120](https://github.com/pixeloven/ComfyUI-Docker/issues/120)).
 
 ### Where Import Errors Appear
 
@@ -601,7 +617,8 @@ HTTP route reports it. The log is in three places:
 
 - **`docker logs <container>`**, the container's output.
 - **`GET /internal/logs`**: ComfyUI's last 300 log entries, as one JSON string
-  (`/internal/logs/raw` returns them as a list). ComfyUI documents every
+  (`/internal/logs/raw` returns an object,
+  `{"entries": [{"t", "m"}, …], "size": {"cols", "rows"}}`). ComfyUI documents every
   `/internal/` route as for its frontend's use only and not to be depended on, so
   read it by hand rather than building on it.
 - **Manager's log file, `/app/user/comfyui_<COMFY_PORT>.log`**, on the `user`

@@ -10,6 +10,8 @@
 # docs/user-guides/runtime-contract.md#developing-a-node-pack
 services:
   comfyui:
+    # Fast restarts for development; a running prompt is abandoned on stop.
+    stop_signal: SIGINT
     volumes:
       - type: bind
         source: /path/to/my-pack
