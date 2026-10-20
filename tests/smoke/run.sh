@@ -34,8 +34,9 @@
 #   4b. Start it as root again, with /app/models bind-mounted read-only from a
 #      source owned 4321:4321, --group-add 44 --group-add 12345, and
 #      COMFY_ENABLE_MANAGER=Yes. /system_stats must answer (#113: a chown that
-#      fails only warns), the source keeps its owner, ComfyUI's Groups include
-#      44 and 12345 (#122), and Manager's /v2/manager/version answers (#117).
+#      fails only warns), the source keeps its owner, ComfyUI still runs as
+#      1001:1001 (all four fields) and its Groups include 44 and 12345 (#122),
+#      and Manager's /v2/manager/version answers (#117).
 #   5. With --baseline: boot the baseline the same way and diff node classes
 #      into node-diff.md. Same ComfyUI version: any baseline class missing
 #      here fails. Different version (a pin bump): the diff is a report only.
@@ -240,6 +241,10 @@ boot "$name_edge" "$image" -v "$work/vol/ro_models:/app/models:ro" \
   --group-add 44 --group-add 12345 -e COMFY_ENABLE_MANAGER=Yes
 got="$(stat -c '%u:%g' "$work/vol/ro_models")"
 [ "$got" = "$dev_owner" ] || fail "the read-only /app/models source is $got after startup, not $dev_owner"
+# gosu gets the UID alone here, and the GID from the passwd entry: check all
+# four fields as in step 3.
+ids="$(docker exec "$name_edge" awk '/^(Uid|Gid):/ {print $1, $2, $3, $4, $5}' /proc/1/status)"
+[ "$ids" = "$want" ] || fail "with --group-add, ComfyUI runs with $(echo "$ids" | tr '\n' ' ')instead of $puid:$pgid"
 groups="$(docker exec "$name_edge" awk '/^Groups:/ {$1 = ""; print}' /proc/1/status)"
 for gid in 44 12345; do
   [[ " $groups " == *" $gid "* ]] || fail "ComfyUI's supplementary groups are '$groups', without the --group-add GID $gid"

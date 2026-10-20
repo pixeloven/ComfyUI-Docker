@@ -63,6 +63,10 @@ validate_id() {
 
 validate_id "PUID" "$PUID"
 validate_id "PGID" "$PGID"
+# Plain decimal from here on, so 01001 compares equal to the 1001 that stat,
+# getent and id print.
+PUID=$((10#$PUID))
+PGID=$((10#$PGID))
 
 # Warn if running as root
 if [ "$PUID" -eq 0 ]; then
@@ -114,9 +118,11 @@ for gid in $(id -G); do
 done
 if [ "${#extra_gids[@]}" -gt 0 ]; then
     if keep_groups; then
+        # The UID-alone form grants every group /etc/group lists for this user
+        # name, not only the ones started with (the image lists none today).
         gosu_user="$PUID"
     else
-        echo "WARNING: could not keep the supplementary groups ${extra_gids[*]} for $PUID:$PGID, so ComfyUI runs without them. Starting the container as $PUID:$PGID (Compose user:) keeps them." >&2
+        echo "WARNING: could not keep the supplementary groups ${extra_gids[*]} for $PUID:$PGID, so ComfyUI runs without them. Starting the container as $PUID:$PGID (Compose user:) keeps them, but a non-root start changes no owner, so the volumes must already be writable by $PUID:$PGID." >&2
     fi
 fi
 

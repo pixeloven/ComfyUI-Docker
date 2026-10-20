@@ -43,8 +43,10 @@ see `VERSIONING.md`.
   entrypoint's non-recursive `chown` of `/app`, `/app/ComfyUI` and the seven
   volume roots now runs only when the owner isn't already `PUID:PGID`, so a
   bind-mounted host directory that already has the right owner is left alone,
-  and a `chown` that fails (`:ro` mounts, root-squashed NFS) prints a warning
-  instead of stopping the container under `set -e`.
+  and a `chown` that fails (`:ro` mounts, root-squashed NFS, or `/app` under a
+  `--read-only` root filesystem) prints a warning instead of stopping the
+  container under `set -e`. `PUID` and `PGID` with leading zeros (`01001`) are
+  read as plain decimal.
 - **A root start keeps the container's supplementary groups** (#122). gosu
   dropped Docker's `group_add` / `--group-add` GIDs, which `core-amd` and
   `core-intel` use for `/dev/dri` and `/dev/kfd`. The entrypoint now adds the

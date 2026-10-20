@@ -233,7 +233,8 @@ These outcomes are the contract:
   example, `PUID=33` gets `/var/www` and `PUID=65534` gets `/nonexistent`. That
   behaviour is long-standing and intended, not a defect.
 - **Started as root, the volume roots are writable by the runtime UID** when
-  ComfyUI starts, except one mounted read-only. Started as non-root, making them writable is up to the deployer
+  ComfyUI starts, except one whose `chown` fails (a read-only mount, or
+  root-squashed NFS). Started as non-root, making them writable is up to the deployer
   (see below).
 - **Started as root, no root process remains** once ComfyUI is running, unless you
   ask for one with `PUID=0`.
@@ -264,10 +265,12 @@ has no `USER`, so it starts as root.
 4. It keeps the supplementary groups the container was started with, such as
    Compose `group_add` or `docker run --group-add` (the `core-amd` and `core-intel`
    examples use them for `/dev/dri` and `/dev/kfd`). The runtime user joins each of
-   those groups, and a GID with no name gets the group `comfy-<GID>`. If `PUID`
+   those groups, and a GID with no name gets the group `comfy-<GID>`. GID 0 and
+   `PGID` are never added as supplementary groups. If `PUID`
    belongs to an existing user whose own group isn't `PGID`, for example `PUID=1000`
    with `PGID=100`, the groups can't be kept on this path: the entrypoint prints a
-   warning and ComfyUI runs without them. Start the container as non-root instead.
+   warning and ComfyUI runs without them. Start the container as non-root instead,
+   with volumes already writable by that UID, since a non-root start changes no owner.
 5. It logs `Starting with UID:GID = <PUID>:<PGID>`.
 6. It runs `exec gosu`, activates the venv, and execs `startup.sh`. No root
    process remains.
