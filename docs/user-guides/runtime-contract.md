@@ -515,6 +515,114 @@ listener or `personal_cloud`. Installing over the network is tracked in
 [#125](https://github.com/pixeloven/ComfyUI-Docker/issues/125). `cm-cli` in a
 `docker exec` session is gated by none of this.
 
+## Developing a Node Pack
+
+You can use the image as the runtime for a custom node pack you're writing: mount
+the pack's source into the container, edit it on the host, and restart ComfyUI to
+load your changes. This section covers what the image does with a mounted pack.
+How to write a node is upstream's subject, in
+[ComfyUI's custom node docs](https://docs.comfy.org/custom-nodes/overview).
+
+Checked on ComfyUI v0.38.0 with Manager 4.2.2, on `core:cpu`.
+
+### Mounting the Source
+
+Bind-mount the pack's directory at **`/app/custom_nodes/<pack>`**, inside the
+`custom_nodes` volume. ComfyUI loads it like any installed pack.
+[`examples/core-cpu/docker-compose.dev-pack.yml`](../../examples/core-cpu/docker-compose.dev-pack.yml)
+is a Compose override that does this for the CPU example:
+
+```bash
+cd examples/core-cpu   # set `source` and `target` in docker-compose.dev-pack.yml first
+docker compose -f docker-compose.yml -f docker-compose.dev-pack.yml up -d
+```
+
+With `docker run`, add `-v /path/to/my-pack:/app/custom_nodes/my-pack` beside the
+`custom_nodes` volume's own mount. Mount it at `/app/custom_nodes`, never at
+`/app/ComfyUI/custom_nodes`, for the reasons in [Volumes](#volumes).
+
+**File ownership.** The source keeps its owner on the host. On a root start, the
+entrypoint's `chown` stops at the volume roots (see
+[Started as Root](#started-as-root)), and the mounted pack is below one, so the
+files stay yours whatever `PUID` is. On a non-root start nothing is `chown`ed at
+all. Either way, ComfyUI only needs to read the source, so it loads under any
+runtime UID as long as its directories are world-readable and searchable and its
+files world-readable (`0755` and `0644`, as git checks them out). The image sets
+`PYTHONDONTWRITEBYTECODE=1`, so no `__pycache__` appears in your checkout. If your
+pack writes into its own directory at runtime, run the container as your own UID:
+`PUID`/`PGID` set to your `id -u`/`id -g` on a root start, or that UID on a
+non-root start.
+
+**Dependencies.** Nothing installs a mounted pack's `requirements.txt`. Install
+it into the [node venv](#the-node-venv) from a session as the runtime user, then
+restart:
+
+```bash
+docker exec -u "$PUID:$PGID" comfyui-core-cpu pip install -r /app/custom_nodes/my-pack/requirements.txt
+```
+
+### Restarting
+
+ComfyUI has no hot reload for Python. What a change needs:
+
+| You changed | To load it |
+|-------------|------------|
+| Any Python in the pack: a node's class, `INPUT_TYPES`, `NODE_CLASS_MAPPINGS` | Restart ComfyUI |
+| A file in a web directory ComfyUI already serves, or a new file there | Reload the page. ComfyUI serves `/extensions/<pack>/…` from disk with `Cache-Control: no-store`, and lists new `.js` files on the next page load |
+| A new pack, a `WEB_DIRECTORY` that is new or moved, or a pack that failed to import at the last start | Restart ComfyUI. Web directories are registered only at startup; until then their files answer `404` |
+
+Two ways to restart:
+
+- **Manager's reboot route**, with Manager on (`COMFY_ENABLE_MANAGER`, the
+  default):
+
+  ```bash
+  curl -X POST http://localhost:8188/v2/manager/reboot
+  ```
+
+  Manager re-executes ComfyUI in place, in the same container and as the same
+  UID, so the container doesn't restart. The request gets no response, because the
+  process answering it is replaced: `curl` reports an empty reply. ComfyUI answered
+  `/system_stats` again about 11 s later on `core:cpu`, most of it ComfyUI's own
+  startup. The route answers `403` under `COMFY_MANAGER_SECURITY_LEVEL=strong` (see
+  [Manager Security](#manager-security)).
+- **`docker restart <container>`**, which works with Manager off too. It took about
+  22 s on `core:cpu`, about 10 s of it Docker waiting out its stop timeout: the
+  image doesn't stop on `SIGTERM` yet, so Docker kills it
+  ([#120](https://github.com/pixeloven/ComfyUI-Docker/issues/120)).
+
+### Where Import Errors Appear
+
+A pack that fails to import doesn't stop ComfyUI. Its classes are missing from
+`/object_info`, and the error is only logged: a traceback, then
+`Cannot import /app/custom_nodes/<pack> module for custom nodes: <error>`, and the
+pack marked `(IMPORT FAILED)` in the `Import times for custom nodes` list. No stable
+HTTP route reports it. The log is in three places:
+
+- **`docker logs <container>`**, the container's output.
+- **`GET /internal/logs`**: ComfyUI's last 300 log entries, as one JSON string
+  (`/internal/logs/raw` returns them as a list). ComfyUI documents every
+  `/internal/` route as for its frontend's use only and not to be depended on, so
+  read it by hand rather than building on it.
+- **Manager's log file, `/app/user/comfyui_<COMFY_PORT>.log`**, on the `user`
+  volume, with Manager on. Each start, a Manager reboot included, moves the previous
+  file to `comfyui_<COMFY_PORT>.prev.log`, and that one to `.prev2.log`. Manager
+  prints `** Log path: /app/user/comfyui.log` at start, without the port; the file
+  it writes has the port in its name.
+
+Manager's `POST /v2/customnode/import_fail_info` doesn't know a hand-mounted pack:
+it looks packs up by registry ID or repository URL, and answers `400` with an empty
+body for a pack it didn't install.
+
+To check that a node loaded, ask for its class:
+`GET /object_info/<class>` returns `{}` when the class isn't loaded.
+
+CI checks the mount itself. `tests/smoke/run.sh`, which the `smoke-cpu` job and
+`make smoke` run, mounts a one-node V1 pack at `/app/custom_nodes/smoke_dev_pack`
+from a source owned by another UID, starts the image as root with `PUID`/`PGID`
+`1001`, and fails unless the pack's class is in `/object_info` and the source still
+has its owner.
+
 ## The `mcp` Image
 
 `ghcr.io/pixeloven/comfyui/mcp` is an MCP server for agents, separate from the

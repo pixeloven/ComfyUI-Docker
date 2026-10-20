@@ -10,6 +10,25 @@ This is **our packaging version**, not what is inside the image. `COMFYUI_VERSIO
 is pinned in `docker-bake.hcl`, published alongside, and moves independently —
 see `VERSIONING.md`.
 
+## Unreleased
+
+### Added
+
+- **The image as a runtime for developing a node pack (#180).** The runtime
+  contract has a new section, *Developing a Node Pack*: mounting a pack's
+  source at `/app/custom_nodes/<pack>` (the entrypoint's `chown` stops at the
+  volume roots, so the source keeps its owner under any `PUID` or UID),
+  installing its requirements into the node venv, what each kind of change
+  needs to load (Python always needs a restart; JavaScript in a web directory
+  ComfyUI already serves is reloaded from disk), restarting through Manager's
+  reboot route or `docker restart`, and where import errors appear.
+  `examples/core-cpu/docker-compose.dev-pack.yml` is a Compose override that
+  mounts a pack into the CPU example, and `make validate` resolves it.
+  `tests/smoke/run.sh` (`make smoke`, CI's `smoke-cpu`) now mounts a one-node
+  fixture pack that way, from a source owned by another UID, and fails unless
+  its class is in `/object_info` and the source keeps its owner. A change under
+  `tests/smoke/` now runs `smoke-cpu` on a pull request.
+
 ## 6.2.0 — 2026-10-20
 
 ### Added

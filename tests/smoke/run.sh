@@ -19,13 +19,18 @@
 #      0755 (checked), as Docker creates a missing Compose bind-mount source,
 #      then start the image as root with PUID=1001 PGID=1001 and Manager off.
 #      Only that path runs the entrypoint's volume chown; `docker run -u`
-#      takes the non-root path and never does.
+#      takes the non-root path and never does. A copy of the fixture pack
+#      fixtures/smoke_dev_pack, owned 4321:4321 as a developer's checkout is
+#      owned by their own UID, is bind-mounted at
+#      /app/custom_nodes/smoke_dev_pack, as a pack's source is mounted (#180).
 #   2. Poll /system_stats until it answers, and record the startup time.
 #   3. ComfyUI (PID 1) runs as 1001:1001 (all four UID and GID fields), each
 #      volume root is 1001:1001 on the host, 1001 can write to each, and the
-#      comfyui.db ComfyUI created is 1001:1001.
-#   4. Save GET /object_info, keys sorted. No comfy_extras module may fail to
-#      import.
+#      comfyui.db ComfyUI created is 1001:1001. The mounted pack's source is
+#      still 4321:4321: the entrypoint's chown stops at the volume roots.
+#   4. Save GET /object_info, keys sorted. The mounted pack's class,
+#      SmokeDevPackEcho, must be in it; it is then left out of the saved dump
+#      and the node comparison. No comfy_extras module may fail to import.
 #   5. With --baseline: boot the baseline the same way and diff node classes
 #      into node-diff.md. Same ComfyUI version: any baseline class missing
 #      here fails. Different version (a pin bump): the diff is a report only.
@@ -63,6 +68,10 @@ timeout="${SMOKE_TIMEOUT:-300}"
 puid=1001
 pgid=1001
 volumes="models custom_nodes datasets input output temp user"
+# The mounted fixture pack (#180), and the UID:GID its source belongs to.
+dev_pack=smoke_dev_pack
+dev_class=SmokeDevPackEcho
+dev_owner=4321:4321
 name="comfyui-smoke-$$"
 name_base="$name-baseline"
 
@@ -156,6 +165,11 @@ for d in $volumes; do
   [ "$got" = "0:0 755" ] || fail "volume source $d starts as '$got', not '0:0 755'"
   mounts+=(-v "$work/vol/$d:/app/$d")
 done
+# A pack's source, mounted inside the custom_nodes volume as a developer
+# mounts it. Not one of the volume roots above, so nothing may chown it.
+cp -R "$here/fixtures/$dev_pack" "$work/vol/$dev_pack"
+as_root "chown -R $dev_owner /vol/$dev_pack && chmod -R u=rwX,go=rX /vol/$dev_pack"
+mounts+=(-v "$work/vol/$dev_pack:/app/custom_nodes/$dev_pack")
 
 # 2. Readiness.
 echo "smoke: starting $image (ComfyUI $version) as root, PUID=$puid PGID=$pgid"
@@ -183,11 +197,22 @@ docker exec -u "$puid:$pgid" "$name" sh -c '
 db="$(stat -c '%u:%g' "$work/vol/user/comfyui.db" 2>/dev/null)" \
   || fail "ComfyUI did not create /app/user/comfyui.db"
 [ "$db" = "$puid:$pgid" ] || fail "ComfyUI created comfyui.db as $db, not $puid:$pgid"
-echo "smoke: ComfyUI runs as $puid:$pgid, owns and writes all seven volume roots, and wrote comfyui.db as $db"
+for f in "$work/vol/$dev_pack" "$work/vol/$dev_pack/__init__.py"; do
+  got="$(stat -c '%u:%g' "$f")"
+  [ "$got" = "$dev_owner" ] || fail "the mounted pack's ${f#"$work/vol/"} is $got after startup, not $dev_owner; the entrypoint changed a pack source's owner"
+done
+echo "smoke: ComfyUI runs as $puid:$pgid, owns and writes all seven volume roots, and wrote comfyui.db as $db; the mounted pack is still $dev_owner"
 
 # 4. The node schema, keys sorted so two dumps diff cleanly.
 api "$name" /object_info > "$work/object_info.raw.json" || fail "GET /object_info failed"
-docker exec -i "$name" jq -S --arg v "$version" '{comfyui_version: $v, object_info: .}' \
+# The mounted pack loaded. A pack that fails to import only logs it, and its
+# classes are missing here; the logs printed on failure say why.
+docker exec -i "$name" jq -e --arg c "$dev_class" 'has($c)' < "$work/object_info.raw.json" >/dev/null \
+  || fail "$dev_class, from the pack mounted at /app/custom_nodes/$dev_pack, is not in /object_info"
+echo "smoke: the pack mounted at /app/custom_nodes/$dev_pack loaded ($dev_class is in /object_info)"
+# Left out of the saved dump, so the node comparison sees the image alone.
+docker exec -i "$name" jq -S --arg v "$version" --arg c "$dev_class" \
+  '{comfyui_version: $v, object_info: del(.[$c])}' \
   < "$work/object_info.raw.json" > "$out/object_info.json" \
   || fail "/object_info is not JSON"
 nodes="$(docker exec -i "$name" jq '.object_info | length' < "$out/object_info.json")"
