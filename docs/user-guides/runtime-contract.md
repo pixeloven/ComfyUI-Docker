@@ -537,6 +537,10 @@ cd examples/core-cpu   # set `source` and `target` in docker-compose.dev-pack.ym
 docker compose -f docker-compose.yml -f docker-compose.dev-pack.yml up -d
 ```
 
+The override also sets `stop_signal: SIGINT`, so a `docker restart` doesn't wait
+out the stop timeout, and a running prompt is abandoned; see
+[Stopping](#stopping).
+
 With `docker run`, add `-v /path/to/my-pack:/app/custom_nodes/my-pack` beside the
 `custom_nodes` volume's own mount. Mount it at `/app/custom_nodes`, never at
 `/app/ComfyUI/custom_nodes`, for the reasons in [Volumes](#volumes).
@@ -596,16 +600,10 @@ Two ways to restart:
   `/system_stats` again about 11 s later on `core:cpu`, most of it ComfyUI's own
   startup. The route answers `403` under `COMFY_MANAGER_SECURITY_LEVEL=strong` (see
   [Manager Security](#manager-security)).
-- **`docker restart <container>`**, which works with Manager off too. The image's
-  stop signal is `SIGTERM`, which ComfyUI ignores so that a running prompt can
-  finish, so a stop waits out Docker's grace period and then kills the container
-  (see *Stopping*). On `core:cpu`:
-  - with the dev-pack override, which sets `stop_signal: SIGINT`, `docker restart`
-    returned after about 2.5 s, and `/system_stats` answered after about 13.5 s.
-    A prompt still running is abandoned;
-  - without it, `docker restart` returned after about 10.4 s, and `/system_stats`
-    answered after about 22 s
-    ([#120](https://github.com/pixeloven/ComfyUI-Docker/issues/120)).
+- **`docker restart <container>`**, which works with Manager off too. It took about
+  22 s on `core:cpu`, about 10 s of it Docker waiting out its stop timeout: the
+  image doesn't stop on `SIGTERM` yet, so Docker kills it
+  ([#120](https://github.com/pixeloven/ComfyUI-Docker/issues/120)).
 
 ### Where Import Errors Appear
 
