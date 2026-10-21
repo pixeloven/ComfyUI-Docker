@@ -42,9 +42,9 @@ The variables fall into three groups. Only the first is read by the image's scri
 | `PUID` | `1000` | UID that ComfyUI runs as. **Only when the container starts as root.** It must be an integer from 0 to 65534, or the container exits 1. `0` is allowed, with a warning | `entrypoint.sh` |
 | `PGID` | `1000` | GID that ComfyUI runs as. Same rules and the same root-only caveat as `PUID` | `entrypoint.sh` |
 | `COMFY_PORT` | `8188` | Passed as `--port` | `startup.sh` |
-| `COMFY_ENABLE_MANAGER` | `true` | Only the exact string `true` adds `--enable-manager`. Any other value, including `True` or `1`, disables the Manager | `startup.sh` |
-| `COMFY_ENABLE_ASSETS` | `true` | Only the exact string `true` adds `--enable-assets` (the Assets API, sidebar and index) | `startup.sh` |
-| `COMFY_ENABLE_NODE_VENV` | `true` | Only the exact string `true` runs ComfyUI from the [node venv](#the-node-venv), so the Python packages custom nodes install survive a recreate, and sets Manager's `use_uv` and `use_unified_resolver` to `False`. If the node venv can't be used, startup warns and falls back to the image's venv; it never exits over it. Any other value runs ComfyUI from the image's venv, as earlier releases did | `startup.sh` |
+| `COMFY_ENABLE_MANAGER` | `true` | `true`, `1` or `yes`, in any case, adds `--enable-manager`. Any other value disables the Manager | `startup.sh` |
+| `COMFY_ENABLE_ASSETS` | `true` | `true`, `1` or `yes`, in any case, adds `--enable-assets` (the Assets API, sidebar and index). Any other value leaves it off | `startup.sh` |
+| `COMFY_ENABLE_NODE_VENV` | `true` | `true`, `1` or `yes`, in any case, runs ComfyUI from the [node venv](#the-node-venv), so the Python packages custom nodes install survive a recreate, and sets Manager's `use_uv` and `use_unified_resolver` to `False`. If the node venv can't be used, startup warns and falls back to the image's venv; it never exits over it. Any other value runs ComfyUI from the image's venv, as earlier releases did | `startup.sh` |
 | `COMFY_MANAGER_SECURITY_LEVEL` | *(empty)* | Opt-in. `strong`, `normal`, `normal-` or `weak` is written to `security_level` in Manager's `config.ini` at every start. Empty leaves the file's own value, which is `normal` unless someone changed it. Any other value makes the container exit 1. See [Manager Security](#manager-security) | `startup.sh` |
 | `CLI_ARGS` | *(empty)* | Extra ComfyUI arguments, split on whitespace and appended **last**. Quoting inside the value is not honoured, so an argument can't contain a space | `startup.sh` |
 | `COMFY_RUNTIME` | set by the image: `cuda`, `cpu`, `rocm` or `xpu` | `cpu` adds `--cpu`. Every other value adds nothing. You don't normally set this, because each image already carries the right value | `startup.sh` |
@@ -273,7 +273,8 @@ These outcomes are the contract:
   example, `PUID=33` gets `/var/www` and `PUID=65534` gets `/nonexistent`. That
   behaviour is long-standing and intended, not a defect.
 - **Started as root, the volume roots are writable by the runtime UID** when
-  ComfyUI starts. Started as non-root, making them writable is up to the deployer
+  ComfyUI starts, except one whose `chown` fails (a read-only mount, or
+  root-squashed NFS). Started as non-root, making them writable is up to the deployer
   (see below).
 - **Started as root, no root process remains** once ComfyUI is running, unless you
   ask for one with `PUID=0`.
@@ -297,12 +298,25 @@ has no `USER`, so it starts as root.
 3. It runs `chown PUID:PGID` on `/app`, on `/app/ComfyUI`, and on each of the seven
    volume roots that exists, skipping any volume root that is a symlink. This is **not recursive**: only the directory itself
    changes owner, never what's inside it, because a model store can be terabytes.
-4. It logs `Starting with UID:GID = <PUID>:<PGID>`.
-5. It runs `exec gosu PUID:PGID`, activates the venv, and execs `startup.sh`. No root
+   It changes an owner **only when it differs** from `PUID:PGID`, and if the `chown`
+   fails, on a read-only mount (`:ro`) or a root-squashed NFS export, it prints a
+   warning and carries on: that volume root keeps its owner, and ComfyUI can write
+   to it only if that owner or its mode already allows it.
+4. It keeps the supplementary groups the container was started with, such as
+   Compose `group_add` or `docker run --group-add` (the `core-amd` and `core-intel`
+   examples use them for `/dev/dri` and `/dev/kfd`). The runtime user joins each of
+   those groups, and a GID with no name gets the group `comfy-<GID>`. GID 0 and
+   `PGID` are never added as supplementary groups. If `PUID`
+   belongs to an existing user whose own group isn't `PGID`, for example `PUID=1000`
+   with `PGID=100`, the groups can't be kept on this path: the entrypoint prints a
+   warning and ComfyUI runs without them. Start the container as non-root instead,
+   with volumes already writable by that UID, since a non-root start changes no owner.
+5. It logs `Starting with UID:GID = <PUID>:<PGID>`.
+6. It runs `exec gosu`, activates the venv, and execs `startup.sh`. No root
    process remains.
 
-So on this path, each volume root ends up owned by `PUID:PGID`, **including the
-host directory behind a bind mount**. Files and directories below the root keep
+So on this path, each writable volume root ends up owned by `PUID:PGID`, **including
+the host directory behind a bind mount** when its owner was different. Files and directories below the root keep
 whatever owner they had. If older files belong to another UID, fix them once on the
 host (`sudo chown -R`, see [Data Management](data.md#file-permissions)).
 
@@ -314,6 +328,9 @@ Compose `user:`.
 1. It logs `Starting as non-root UID:GID = <uid>:<gid>`.
 2. If the UID or GID has no passwd or group entry, it gets one, with home `/app`.
 3. It activates the venv and execs `startup.sh` directly.
+
+Supplementary groups, such as `group_add` or Kubernetes `supplementalGroups`, are
+kept as the container runtime set them.
 
 On this path, **`PUID` and `PGID` are ignored, and nothing is `chown`ed**. The volumes
 must already be writable by the UID or GID the container runs as:
@@ -577,9 +594,18 @@ cd examples/core-cpu   # set `source` and `target` in docker-compose.dev-pack.ym
 docker compose -f docker-compose.yml -f docker-compose.dev-pack.yml up -d
 ```
 
+The override also sets `stop_signal: SIGINT`, so a `docker restart` doesn't wait
+out the stop timeout, and a running prompt is abandoned; see
+[Stopping](#stopping).
+
 With `docker run`, add `-v /path/to/my-pack:/app/custom_nodes/my-pack` beside the
 `custom_nodes` volume's own mount. Mount it at `/app/custom_nodes`, never at
 `/app/ComfyUI/custom_nodes`, for the reasons in [Volumes](#volumes).
+
+Docker creates the mount point as an empty, root-owned directory in the
+`custom_nodes` volume, and it stays there after you stop mounting the pack, so
+ComfyUI then logs `IMPORT FAILED` for it at every start. Remove it once you're
+done: `rmdir data/custom_nodes/<pack>` in the example.
 
 **File ownership.** The source keeps its owner on the host. On a root start, the
 entrypoint's `chown` stops at the volume roots (see
@@ -598,8 +624,13 @@ it into the [node venv](#the-node-venv) from a session as the runtime user, then
 restart:
 
 ```bash
-docker exec -u "$PUID:$PGID" comfyui-core-cpu pip install -r /app/custom_nodes/my-pack/requirements.txt
+docker exec -u "${PUID:?}:${PGID:?}" comfyui-core-cpu pip install -r /app/custom_nodes/my-pack/requirements.txt
 ```
+
+`PUID` and `PGID` are read from your shell here, not from the example's `.env`, so
+set them to the same values first. With them unset, `-u ":"` would run the session
+as root and leave root-owned files in the node venv; `${PUID:?}` stops the command
+instead.
 
 ### Restarting
 
@@ -628,8 +659,8 @@ Two ways to restart:
   [Manager Security](#manager-security)).
 - **`docker restart <container>`**, which works with Manager off too. It took about
   22 s on `core:cpu`, about 10 s of it Docker waiting out its stop timeout: ComfyUI
-  ignores `SIGTERM`, so Docker kills it. For a faster loop, add `stop_signal: SIGINT`
-  to the override; an idle ComfyUI then stops in about 2 s, at the cost described in
+  ignores `SIGTERM`, so Docker kills it. The override sets `stop_signal: SIGINT`,
+  so an idle ComfyUI stops in about 2 s instead, at the cost described in
   [Stopping](#stopping).
 
 ### Where Import Errors Appear
@@ -642,7 +673,8 @@ HTTP route reports it. The log is in three places:
 
 - **`docker logs <container>`**, the container's output.
 - **`GET /internal/logs`**: ComfyUI's last 300 log entries, as one JSON string
-  (`/internal/logs/raw` returns them as a list). ComfyUI documents every
+  (`/internal/logs/raw` returns an object,
+  `{"entries": [{"t", "m"}, …], "size": {"cols", "rows"}}`). ComfyUI documents every
   `/internal/` route as for its frontend's use only and not to be depended on, so
   read it by hand rather than building on it.
 - **Manager's log file, `/app/user/comfyui_<COMFY_PORT>.log`**, on the `user`
@@ -807,11 +839,7 @@ repository owner confirms how each change is classified.
 This is current behaviour that nobody should rely on. Fixing any of these is **not**
 a major change.
 
-- [#113](https://github.com/pixeloven/ComfyUI-Docker/issues/113): a root start exits if a volume root is read-only or on a root-squashed NFS export.
-- [#114](https://github.com/pixeloven/ComfyUI-Docker/issues/114): a root start changes the owner of the host directory behind a bind-mounted volume root.
 - [#115](https://github.com/pixeloven/ComfyUI-Docker/issues/115): the caches under `/app/.cache` are lost when the container is recreated. Custom-node dependencies are not, with the [node venv](#the-node-venv) on.
-- [#116](https://github.com/pixeloven/ComfyUI-Docker/issues/116): VRAM flags in `CLI_ARGS` make ComfyUI exit on the CPU image.
-- [#117](https://github.com/pixeloven/ComfyUI-Docker/issues/117): `COMFY_ENABLE_*` accept only the exact string `true`.
 
 ---
 

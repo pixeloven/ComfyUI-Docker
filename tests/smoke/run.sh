@@ -36,6 +36,12 @@
 #      `--stop-signal SIGINT` and Manager off, and idle ComfyUI must exit 0
 #      within 5 s (#120). The image's default, SIGTERM, is ignored on purpose;
 #      this covers only the idle opt-in path.
+#   4b. Start it as root again, with /app/models bind-mounted read-only from a
+#      source owned 4321:4321, --group-add 44 --group-add 12345, and
+#      COMFY_ENABLE_MANAGER=Yes. /system_stats must answer (#113: a chown that
+#      fails only warns), the source keeps its owner, ComfyUI still runs as
+#      1001:1001 (all four fields) and its Groups include 44 and 12345 (#122),
+#      and Manager's /v2/manager/version answers (#117).
 #   5. With --baseline: boot the baseline the same way and diff node classes
 #      into node-diff.md. Same ComfyUI version: any baseline class missing
 #      here fails. Different version (a pin bump): the diff is a report only.
@@ -80,6 +86,7 @@ dev_owner=4321:4321
 name="comfyui-smoke-$$"
 name_base="$name-baseline"
 name_nonroot="$name-nonroot"
+name_edge="$name-edge"
 
 fail() { echo "SMOKE FAIL: $*" >&2; exit 1; }
 label() { docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$1"; }
@@ -91,7 +98,8 @@ version="$(label "$image")"
 
 mkdir -p "$out"
 rm -f "$out"/object_info.json "$out"/system_stats.json "$out"/container.log \
-  "$out"/baseline.log "$out"/nonroot.log "$out"/node-diff.md "$out"/summary.json
+  "$out"/baseline.log "$out"/nonroot.log "$out"/edge.log "$out"/node-diff.md \
+  "$out"/summary.json
 work="$(mktemp -d "${TMPDIR:-/tmp}/comfyui-smoke.XXXXXX")"
 mkdir "$work/vol"
 
@@ -119,6 +127,7 @@ cleanup() {
   retire "$name" "$out/container.log" "$status"
   retire "$name_base" "$out/baseline.log" "$status"
   retire "$name_nonroot" "$out/nonroot.log" "$status"
+  retire "$name_edge" "$out/edge.log" "$status"
   as_root 'rm -rf /vol/*' >/dev/null 2>&1 || true
   rm -rf "$work" 2>/dev/null || echo "note: could not remove $work" >&2
   exit "$status"
@@ -253,6 +262,26 @@ retire "$name" "$out/container.log"
 boot "$name_nonroot" "$image" --user "$puid:$pgid" --stop-signal SIGINT
 stop_cleanly "$name_nonroot" "started as non-root $puid:$pgid"
 retire "$name_nonroot" "$out/nonroot.log"
+
+# 4b. A read-only volume root owned by another UID, group_add GIDs, and a
+# COMFY_ENABLE_* value other than the exact string `true`.
+as_root "mkdir /vol/ro_models && chown $dev_owner /vol/ro_models && chmod 0755 /vol/ro_models"
+echo "smoke: starting as root with /app/models read-only, --group-add 44 --group-add 12345, COMFY_ENABLE_MANAGER=Yes"
+boot "$name_edge" "$image" -v "$work/vol/ro_models:/app/models:ro" \
+  --group-add 44 --group-add 12345 -e COMFY_ENABLE_MANAGER=Yes
+got="$(stat -c '%u:%g' "$work/vol/ro_models")"
+[ "$got" = "$dev_owner" ] || fail "the read-only /app/models source is $got after startup, not $dev_owner"
+# gosu gets the UID alone here, and the GID from the passwd entry: check all
+# four fields as in step 3.
+ids="$(docker exec "$name_edge" awk '/^(Uid|Gid):/ {print $1, $2, $3, $4, $5}' /proc/1/status)"
+[ "$ids" = "$want" ] || fail "with --group-add, ComfyUI runs with $(echo "$ids" | tr '\n' ' ')instead of $puid:$pgid"
+groups="$(docker exec "$name_edge" awk '/^Groups:/ {$1 = ""; print}' /proc/1/status)"
+for gid in 44 12345; do
+  [[ " $groups " == *" $gid "* ]] || fail "ComfyUI's supplementary groups are '$groups', without the --group-add GID $gid"
+done
+api "$name_edge" /v2/manager/version >/dev/null || fail "COMFY_ENABLE_MANAGER=Yes did not enable Manager: /v2/manager/version did not answer"
+retire "$name_edge" "$out/edge.log"
+echo "smoke: with /app/models read-only it booted and left the source $dev_owner; ComfyUI keeps groups$groups; COMFY_ENABLE_MANAGER=Yes enabled Manager"
 
 # 5. The baseline: the first candidate that exists in its registry.
 baseline=""

@@ -113,8 +113,13 @@ There is no date tag.
   Creating an entry needs writable `/etc/passwd` and `/etc/group`. It then tightens
   their permissions (non-fatal) and warns if it cannot. `chown -h` is **non-recursive** and
   covers only `/app`, plus `/app/ComfyUI` and each volume root that exists and is not
-  a symlink, because model stores run to terabytes. It logs `Starting with UID:GID = x:y`, then
-  `exec gosu "$PUID:$PGID"`.
+  a symlink, because model stores run to terabytes. It runs only when the owner differs (#114),
+  and a failed `chown` (`:ro`, root-squashed NFS) warns instead of exiting (#113). The
+  supplementary groups root started with (`group_add`) are kept (#122): the user joins each
+  (a nameless GID gets `comfy-<GID>`) and gosu gets `"$PUID"` alone, since gosu applies
+  `/etc/group` membership only without a group in its spec; with a reused user whose passwd
+  group isn't PGID it warns and uses `"$PUID:$PGID"` (never `usermod -g`, which regroups
+  `/app` recursively). It logs `Starting with UID:GID = x:y`, then `exec gosu`.
 - **Started non-root** (Kubernetes `runAsUser`): no gosu. It appends `/etc/passwd` and
   `/etc/group` entries when the UID or GID has none, logs `Starting as non-root
   UID:GID = x:y`, and execs directly.
@@ -261,6 +266,10 @@ seven volume roots bind-mounted from `root:root 0755` sources. It fails unless:
   ComfyUI exit 0 within 5 s, started as root and, in a second volume-less container, as
   non-root 1001:1001 (#120). Only the idle opt-in path is checked, not the default `SIGTERM`;
 - on the same ComfyUI version as the baseline, no node class is missing.
+
+It also boots once more as root with `/app/models` mounted `:ro` from a 4321-owned source,
+`--group-add 44 --group-add 12345` and `COMFY_ENABLE_MANAGER=Yes`, and fails unless it answers,
+the source keeps its owner, PID 1's `Groups` include both GIDs, and `/v2/manager/version` answers.
 
 The baseline is an image main already published, pulled from GHCR, never a repo
 file. `make smoke` uses `core:cpu-latest` (`SMOKE_BASELINE` overrides it). CI uses

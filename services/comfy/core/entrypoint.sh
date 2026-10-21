@@ -50,7 +50,7 @@ validate_id() {
 
     # Check if numeric
     if ! [[ "$value" =~ ^[0-9]+$ ]]; then
-        echo "ERROR: Invalid $name value '$value'. Must be a positive integer." >&2
+        echo "ERROR: Invalid $name value '$value'. Must be a non-negative integer." >&2
         exit 1
     fi
 
@@ -63,6 +63,10 @@ validate_id() {
 
 validate_id "PUID" "$PUID"
 validate_id "PGID" "$PGID"
+# Plain decimal from here on, so 01001 compares equal to the 1001 that stat,
+# getent and id print.
+PUID=$((10#$PUID))
+PGID=$((10#$PGID))
 
 # Warn if running as root
 if [ "$PUID" -eq 0 ]; then
@@ -85,6 +89,43 @@ if ! getent passwd "$PUID" > /dev/null 2>&1; then
     useradd -u "$PUID" -g "$PGID" -d /app -s /bin/bash -M "$USERNAME-$PUID"
 fi
 
+# Keep the supplementary groups this process was started with (#122), such as
+# Docker's group_add for /dev/dri and /dev/kfd. gosu sets only the groups
+# /etc/group lists for the user, and only when given the UID alone, which takes
+# the primary group from the passwd entry. So the user joins each one (a GID
+# with no name gets one), and gosu gets the UID alone if that entry's group is
+# PGID. Otherwise, as for an existing user with another group, the entry is
+# left alone (usermod -g also regroups files under its home, /app) and ComfyUI
+# runs without them, with a warning.
+gosu_user="$PUID:$PGID"
+keep_groups() {
+    local user gid group
+    user="$(getent passwd "$PUID" | cut -d: -f1)" || return 1
+    [ "$(getent passwd "$PUID" | cut -d: -f4)" = "$PGID" ] || return 1
+    for gid in "${extra_gids[@]}"; do
+        if ! getent group "$gid" > /dev/null 2>&1; then
+            groupadd -g "$gid" "$USERNAME-$gid" || return 1
+        fi
+        group="$(getent group "$gid" | cut -d: -f1)" || return 1
+        usermod -aG "$group" "$user" || return 1
+    done
+}
+extra_gids=()
+for gid in $(id -G); do
+    if [ "$gid" -ne 0 ] && [ "$gid" -ne "$PGID" ]; then
+        extra_gids+=("$gid")
+    fi
+done
+if [ "${#extra_gids[@]}" -gt 0 ]; then
+    if keep_groups; then
+        # The UID-alone form grants every group /etc/group lists for this user
+        # name, not only the ones started with (the image lists none today).
+        gosu_user="$PUID"
+    else
+        echo "WARNING: could not keep the supplementary groups ${extra_gids[*]} for $PUID:$PGID, so ComfyUI runs without them. Starting the container as $PUID:$PGID (Compose user:) keeps them, but a non-root start changes no owner, so the volumes must already be writable by $PUID:$PGID." >&2
+    fi
+fi
+
 # User setup is done; give the account files their normal mode. Non-fatal:
 # if they are mounted read-only, they cannot be written anyway.
 chmod 644 /etc/passwd /etc/group 2>/dev/null || true
@@ -99,9 +140,17 @@ fi
 # Set ownership of application and persistent volume roots. Keep this
 # non-recursive: model stores can contain terabytes of data. -h changes a
 # symlink itself, never its target, and a symlinked volume root is skipped.
-chown -h "$PUID:$PGID" /app
+# Only an owner that differs is changed (#114), and a chown that fails, on a
+# read-only mount or a root-squashed NFS export, warns instead of exiting (#113).
+own() {
+    if [ "$(stat -c %u:%g "$1")" != "$PUID:$PGID" ]; then
+        chown -h "$PUID:$PGID" "$1" \
+            || echo "WARNING: could not change the owner of $1 to $PUID:$PGID (read-only, or root-squashed NFS?); it stays $(stat -c %u:%g "$1")." >&2
+    fi
+}
+own /app
 if [ -d /app/ComfyUI ] && [ ! -L /app/ComfyUI ]; then
-    chown -h "$PUID:$PGID" /app/ComfyUI
+    own /app/ComfyUI
 fi
 for directory in \
     /app/models \
@@ -112,7 +161,7 @@ for directory in \
     /app/temp \
     /app/user; do
     if [ -d "$directory" ] && [ ! -L "$directory" ]; then
-        chown -h "$PUID:$PGID" "$directory"
+        own "$directory"
     fi
 done
 
@@ -128,7 +177,7 @@ echo "Starting with UID:GID = $PUID:$PGID"
 
 # Activate venv and exec as target user
 # Using exec ensures no root shell remains in process tree
-exec gosu "$PUID:$PGID" bash -c '
+exec gosu "$gosu_user" bash -c '
     source /app/.venv/bin/activate
     exec "$@"
 ' -- "$@"
