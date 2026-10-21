@@ -537,9 +537,18 @@ cd examples/core-cpu   # set `source` and `target` in docker-compose.dev-pack.ym
 docker compose -f docker-compose.yml -f docker-compose.dev-pack.yml up -d
 ```
 
+The override also sets `stop_signal: SIGINT`, so a `docker restart` doesn't wait
+out the stop timeout, and a running prompt is abandoned; see
+[Stopping](#stopping).
+
 With `docker run`, add `-v /path/to/my-pack:/app/custom_nodes/my-pack` beside the
 `custom_nodes` volume's own mount. Mount it at `/app/custom_nodes`, never at
 `/app/ComfyUI/custom_nodes`, for the reasons in [Volumes](#volumes).
+
+Docker creates the mount point as an empty, root-owned directory in the
+`custom_nodes` volume, and it stays there after you stop mounting the pack, so
+ComfyUI then logs `IMPORT FAILED` for it at every start. Remove it once you're
+done: `rmdir data/custom_nodes/<pack>` in the example.
 
 **File ownership.** The source keeps its owner on the host. On a root start, the
 entrypoint's `chown` stops at the volume roots (see
@@ -558,8 +567,13 @@ it into the [node venv](#the-node-venv) from a session as the runtime user, then
 restart:
 
 ```bash
-docker exec -u "$PUID:$PGID" comfyui-core-cpu pip install -r /app/custom_nodes/my-pack/requirements.txt
+docker exec -u "${PUID:?}:${PGID:?}" comfyui-core-cpu pip install -r /app/custom_nodes/my-pack/requirements.txt
 ```
+
+`PUID` and `PGID` are read from your shell here, not from the example's `.env`, so
+set them to the same values first. With them unset, `-u ":"` would run the session
+as root and leave root-owned files in the node venv; `${PUID:?}` stops the command
+instead.
 
 ### Restarting
 
@@ -601,7 +615,8 @@ HTTP route reports it. The log is in three places:
 
 - **`docker logs <container>`**, the container's output.
 - **`GET /internal/logs`**: ComfyUI's last 300 log entries, as one JSON string
-  (`/internal/logs/raw` returns them as a list). ComfyUI documents every
+  (`/internal/logs/raw` returns an object,
+  `{"entries": [{"t", "m"}, …], "size": {"cols", "rows"}}`). ComfyUI documents every
   `/internal/` route as for its frontend's use only and not to be depended on, so
   read it by hand rather than building on it.
 - **Manager's log file, `/app/user/comfyui_<COMFY_PORT>.log`**, on the `user`
