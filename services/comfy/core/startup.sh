@@ -9,18 +9,27 @@ args=(
     --database-url sqlite:////app/user/comfyui.db
 )
 
+# A COMFY_ENABLE_* switch is on for true, 1 or yes in any case (#117), and off
+# for anything else.
+enabled() {
+    case "${1,,}" in
+        true|1|yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 if [ "${COMFY_RUNTIME:-cuda}" = "cpu" ]; then
     args+=(--cpu)
 fi
 
 # Manager is an upstream package and is enabled by default in these images.
-if [ "${COMFY_ENABLE_MANAGER:-true}" = "true" ]; then
+if enabled "${COMFY_ENABLE_MANAGER:-true}"; then
     args+=(--enable-manager)
 fi
 
 # The assets API and index back the current Assets sidebar. Hashing remains an
 # explicit opt-in because it can make startup expensive on large model stores.
-if [ "${COMFY_ENABLE_ASSETS:-true}" = "true" ]; then
+if enabled "${COMFY_ENABLE_ASSETS:-true}"; then
     args+=(--enable-assets)
 fi
 
@@ -73,7 +82,7 @@ put() {
 # venv, as in 6.0.0, with a WARNING.
 node_venv=/app/user/__node_venv
 node_venv_used=false
-if [ "${COMFY_ENABLE_NODE_VENV:-true}" = "true" ]; then
+if enabled "${COMFY_ENABLE_NODE_VENV:-true}"; then
     py="$(python -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
     image_site="/app/.venv/lib/python$py/site-packages"
     site="$node_venv/lib/python$py/site-packages"
