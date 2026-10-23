@@ -485,7 +485,7 @@ jobs:
         driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     - name: Build the comfyctl image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: comfyctl
@@ -527,7 +527,7 @@ jobs:
         driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     - name: Build the comfyctl image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: comfyctl
@@ -653,7 +653,7 @@ jobs:
 
     - name: Build and push
       id: build
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: comfyctl
@@ -739,7 +739,7 @@ jobs:
         GH_TOKEN: ${{ github.token }}
 
     - name: Build CUDA images
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: cuda
@@ -806,7 +806,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build architecture-specific CUDA images
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: cuda-arch
@@ -868,7 +868,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build the mcp image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: mcp
@@ -928,7 +928,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build CPU images
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: cpu
@@ -980,7 +980,7 @@ jobs:
 
     # Never pushed: `push: false`, and the label is not one CI publishes.
     - name: Build core-cpu
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: core-cpu
@@ -1087,7 +1087,7 @@ jobs:
 
     # Never pushed: `push: false`, and `ci` is not a label CI publishes.
     - name: Build the mcp image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: mcp
@@ -1131,7 +1131,7 @@ jobs:
     # CI publishes.
     - name: Build core-cpu at this commit's pin
       if: steps.comfyui.outputs.build == 'true'
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: core-cpu
@@ -1268,7 +1268,7 @@ jobs:
 
     # Never pushed: `push: false`, and `ci` is not a label CI publishes.
     - name: Build the mcp-convert image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: mcp-convert
@@ -1303,7 +1303,7 @@ jobs:
 
     - name: Build core-cpu at this commit's pin
       if: steps.comfyui.outputs.build == 'true'
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: core-cpu
@@ -1439,7 +1439,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build the mcp-convert image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: mcp-convert
@@ -1502,7 +1502,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build ${{ matrix.target }} images
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: ${{ matrix.target }}
