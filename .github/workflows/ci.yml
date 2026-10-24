@@ -165,7 +165,7 @@ jobs:
     # than only in validate-models because every publishing job needs this one:
     # the release job tolerates a SKIPPED publish-comfyctl, which is what a failed
     # validate-models produces.
-    - uses: astral-sh/setup-uv@v10.3.0
+    - uses: astral-sh/setup-uv@v10.3.1
     - name: services/uv.lock is current
       run: uv lock --check --directory services
 
@@ -480,7 +480,7 @@ jobs:
         persist-credentials: false
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v10.3.0
+      uses: astral-sh/setup-uv@v10.3.1
       with:
         enable-cache: true
 
@@ -525,7 +525,7 @@ jobs:
         driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     - name: Build the comfyctl image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: comfyctl
@@ -569,7 +569,7 @@ jobs:
         driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
 
     - name: Build the comfyctl image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: comfyctl
@@ -655,7 +655,7 @@ jobs:
       with:
         persist-credentials: false
 
-    - uses: astral-sh/setup-uv@v10.3.0
+    - uses: astral-sh/setup-uv@v10.3.1
       with:
         version: ${{ env.RELEASE_UV_VERSION }}
 
@@ -709,7 +709,7 @@ jobs:
 
     - name: Build and push
       id: build
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: comfyctl
@@ -811,7 +811,7 @@ jobs:
         GH_TOKEN: ${{ github.token }}
 
     - name: Build CUDA images
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: cuda
@@ -890,7 +890,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build architecture-specific CUDA images
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: cuda-arch
@@ -967,7 +967,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build the mcp image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: mcp
@@ -1040,7 +1040,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build CPU images
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: cpu
@@ -1155,7 +1155,7 @@ jobs:
 
     # Never pushed: `push: false`, and `ci` is not a label CI publishes.
     - name: Build the mcp image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: mcp
@@ -1199,7 +1199,7 @@ jobs:
     # CI publishes.
     - name: Build core-cpu at this commit's pin
       if: steps.comfyui.outputs.build == 'true'
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: core-cpu
@@ -1221,7 +1221,7 @@ jobs:
         tests/relay/run.sh --comfyui "${COMFYUI_IMAGE}" "${RELAY_IMAGE}"
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v10.3.0
+      uses: astral-sh/setup-uv@v10.3.1
 
     # On the runner, from the uv environment, as a contributor runs them: the
     # SIGTERM test starts `comfyctl relay serve` from it on a free loopback
@@ -1336,7 +1336,7 @@ jobs:
 
     # Never pushed: `push: false`, and `ci` is not a label CI publishes.
     - name: Build the mcp-convert image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: mcp-convert
@@ -1371,7 +1371,7 @@ jobs:
 
     - name: Build core-cpu at this commit's pin
       if: steps.comfyui.outputs.build == 'true'
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: core-cpu
@@ -1393,7 +1393,7 @@ jobs:
         tests/relay/run.sh --comfyui "${COMFYUI_IMAGE}" "${RELAY_IMAGE}"
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v10.3.0
+      uses: astral-sh/setup-uv@v10.3.1
 
     # The Chromium build the pinned Playwright names, as the image has it, and
     # checked the same way: its revision and the hash over its files, both read
@@ -1519,7 +1519,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build the mcp-convert image
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: mcp-convert
@@ -1595,7 +1595,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build ${{ matrix.target }} images
-      uses: docker/bake-action@v7.4.0
+      uses: docker/bake-action@v7.5.0
       with:
         files: docker-bake.hcl
         targets: ${{ matrix.target }}
@@ -1712,7 +1712,7 @@ jobs:
 
     # The uv the release-requirements job tests on every PR that touches the
     # file, so the tag writes it with the same uv.
-    - uses: astral-sh/setup-uv@v10.3.0
+    - uses: astral-sh/setup-uv@v10.3.1
       with:
         version: ${{ env.RELEASE_UV_VERSION }}
 
