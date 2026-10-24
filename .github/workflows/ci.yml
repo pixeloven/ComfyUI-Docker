@@ -92,6 +92,7 @@ jobs:
           # main always runs it, and a v* tag runs smoke-gate instead.
           smoke:
             - 'tests/smoke/**'
+            - '.github/actions/smoke-cpu/**'
           comfyctl:
             - 'services/comfyctl/**'
             - 'docker-bake.hcl'
@@ -342,6 +343,21 @@ jobs:
     # By digest, the tag beside it for reading (#121); Dependabot cannot see an
     # image inside a `run:` line, so bump both by hand. Read-only: it only reads.
     - run: docker run --rm -v "$PWD":/repo:ro -w /repo mirror.gcr.io/rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 -color
+    # actionlint doesn't shellcheck a composite action's `run:` blocks, so this
+    # does, as bash, with the shellcheck inside that same pinned image. yq is
+    # preinstalled on ubuntu runners.
+    - name: shellcheck the composite actions' run blocks
+      run: |
+        set -euo pipefail
+        out="$(mktemp -d)"
+        for f in .github/actions/*/action.yml; do
+          for i in $(seq 0 $(( $(yq '.runs.steps | length' "$f") - 1 ))); do
+            [ "$(yq ".runs.steps[$i] | has(\"run\")" "$f")" = true ] || continue
+            yq -r ".runs.steps[$i].run" "$f" > "${out}/$(basename "$(dirname "$f")")-step${i}.sh"
+          done
+        done
+        cd "${out}" && docker run --rm -u "$(id -u)" -v "$PWD":/s:ro -w /s --entrypoint shellcheck \
+          mirror.gcr.io/rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 -s bash ./*.sh
 
   validate-examples:
     runs-on: ubuntu-latest

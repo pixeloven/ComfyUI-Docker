@@ -157,6 +157,12 @@ Anything that breaks a consumer who changes nothing but the version they pull:
   contract, which makes it the one exception to the definition above: an agent
   reads the output, and a reshape that keeps the information is minor. A script that
   parses a tool's output should pin an image version.
+- **The release assets' formats.** `IMAGE-DIGESTS.txt`'s line grammar (a
+  `#` comment, or two space-separated fields: `<image>:<tag>` then
+  `<image>@sha256:<digest>`) and `SHA256SUMS` are a contract: a script reads
+  them. A change to either is major. (The two-field grammar replaced an
+  undocumented one-field form in the first release after 6.2.0, as a minor
+  change; the contract starts there.)
 
 Adding something optional is never major: a new env var, volume, profile,
 image, tool, or optional tool argument is a minor.

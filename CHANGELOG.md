@@ -53,7 +53,9 @@ see `VERSIONING.md`.
   `complete:cuda-X.Y.Z` has no architecture-specific kernels. Up to 6.2.0 a
   line held the digest alone, so the six `complete` digests could not be told
   apart. A script that read each line as one image reference now reads the
-  second field.
+  second field. A minor change: the old form was never documented. The
+  two-field grammar, and `SHA256SUMS`, are a contract from this release on,
+  and changing either is now major (`VERSIONING.md` → *What counts as major*).
 - **CI runs with a read-only token by default (#121).** `ci.yml` and
   `nightly.yml` set `permissions: contents: read`; only the jobs that push to
   GHCR get `packages: write` (and `build-cuda` `actions: write`, to clear the

@@ -244,7 +244,10 @@ tests/relay/corpus.sh --comfyui <core-cpu image> <mcp-convert image>
                                                  # own export and ComfyUI's /prompt validation, never queued. Needs the convert
                                                  # extra's Chromium on the host; CI's `mcp-convert template corpus` workflow runs it when
                                                  # the relay, its lock, its Dockerfile, the mcp-convert target or COMFYUI_VERSION changes
-docker run --rm -v "$PWD":/repo -w /repo mirror.gcr.io/rhysd/actionlint:1.7.7 -color
+docker run --rm -v "$PWD":/repo:ro -w /repo mirror.gcr.io/rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 -color
+                                                 # by digest (#121); bump tag and digest together, by hand
+                                                 # CI's lint-workflows also shellchecks each .github/actions/*/action.yml
+                                                 # run: block, as bash, with the same image's shellcheck
 ```
 
 `make smoke` builds `core:cpu-smoke` from the tree and runs `tests/smoke/run.sh`,
@@ -294,5 +297,6 @@ Nothing else boots the non-root start, and nothing boots the other profiles or a
 
 `uv run` creates `services/.venv`, which `.gitignore` covers (`.venv/`), but
 stage files by name anyway. No Python or shell linter or formatter is configured. The one
-exception is actionlint, which runs shellcheck over the workflow `run:` blocks;
-`entrypoint.sh` and `startup.sh` are not linted.
+exception is actionlint, which runs shellcheck over the workflow `run:` blocks, and
+the `lint-workflows` step that runs the same shellcheck over the composite actions'
+`run:` blocks, which actionlint skips; `entrypoint.sh` and `startup.sh` are not linted.
