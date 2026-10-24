@@ -45,6 +45,11 @@ concurrency:
   group: nightly
   cancel-in-progress: false
 
+# Read-only by default (#121). Each job that pushes to GHCR widens this to
+# packages: write; nothing here writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   context:
     name: Resolve the upstream commit
@@ -55,6 +60,8 @@ jobs:
       weekly: ${{ steps.meta.outputs.weekly }}
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Resolve the upstream commit
       id: meta
@@ -106,10 +113,15 @@ jobs:
     name: CUDA images
     needs: [context]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     env:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@v2.0.0
@@ -154,15 +166,28 @@ jobs:
         # NEVER true here. `*-latest` is our main; a nightly that moved it would
         # hand every consumer an unreviewed upstream commit without them asking.
         PUBLISH_LATEST: false
+        # No `*-cache` tags (#176). cache-to above is the Actions cache, so a
+        # `*-cache` pushed from here would carry no inline cache and a different
+        # ComfyUI. CI on main and on tags is the only writer of those tags.
+        PUBLISH_CACHE: false
+        # The image labels (#89): what the tag model calls this build, and the
+        # commit of this repo it was built from.
+        PACKAGE_VERSION: nightly
+        GIT_SHA: ${{ github.sha }}
 
   cuda-arch:
     name: architecture-specific CUDA images
     needs: [context, cuda]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     env:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@v2.0.0
@@ -208,15 +233,28 @@ jobs:
         # NEVER true here. `*-latest` is our main; a nightly that moved it would
         # hand every consumer an unreviewed upstream commit without them asking.
         PUBLISH_LATEST: false
+        # No `*-cache` tags (#176). cache-to above is the Actions cache, so a
+        # `*-cache` pushed from here would carry no inline cache and a different
+        # ComfyUI. CI on main and on tags is the only writer of those tags.
+        PUBLISH_CACHE: false
+        # The image labels (#89): what the tag model calls this build, and the
+        # commit of this repo it was built from.
+        PACKAGE_VERSION: nightly
+        GIT_SHA: ${{ github.sha }}
 
   cpu:
     name: CPU images
     needs: [context]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     env:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@v2.0.0
@@ -261,6 +299,14 @@ jobs:
         # NEVER true here. `*-latest` is our main; a nightly that moved it would
         # hand every consumer an unreviewed upstream commit without them asking.
         PUBLISH_LATEST: false
+        # No `*-cache` tags (#176). cache-to above is the Actions cache, so a
+        # `*-cache` pushed from here would carry no inline cache and a different
+        # ComfyUI. CI on main and on tags is the only writer of those tags.
+        PUBLISH_CACHE: false
+        # The image labels (#89): what the tag model calls this build, and the
+        # commit of this repo it was built from.
+        PACKAGE_VERSION: nightly
+        GIT_SHA: ${{ github.sha }}
 
   accelerators:
     name: ${{ matrix.target }} images
@@ -270,10 +316,15 @@ jobs:
       fail-fast: false
       matrix:
         target: [rocm, xpu]
+    permissions:
+      contents: read
+      packages: write
     env:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@v2.0.0
@@ -318,3 +369,11 @@ jobs:
         # NEVER true here. `*-latest` is our main; a nightly that moved it would
         # hand every consumer an unreviewed upstream commit without them asking.
         PUBLISH_LATEST: false
+        # No `*-cache` tags (#176). cache-to above is the Actions cache, so a
+        # `*-cache` pushed from here would carry no inline cache and a different
+        # ComfyUI. CI on main and on tags is the only writer of those tags.
+        PUBLISH_CACHE: false
+        # The image labels (#89): what the tag model calls this build, and the
+        # commit of this repo it was built from.
+        PACKAGE_VERSION: nightly
+        GIT_SHA: ${{ github.sha }}

@@ -69,7 +69,12 @@ These come from `VERSIONING.md` and the `context` job in `ci.yml`. A tag answers
 also gets `X.Y`. A PR build never pushes. **What ComfyUI is inside** is stated
 only by the `org.opencontainers.image.version` label, which is set from
 `COMFYUI_VERSION` (tag, branch or commit SHA; a release requires `vX.Y.Z`).
-There is no date tag.
+There is no date tag. Which build of *this repo* an image is, is stated on every
+image by `io.github.pixeloven.comfyui-docker.version` (`X.Y.Z`, `<sha8>`,
+`nightly`, or `dev` locally) and `org.opencontainers.image.revision` (the
+commit), from bake's `_labels` target, which every target inherits (#89).
+The nightly sets `PUBLISH_CACHE=false`, so only CI on `main` and tags writes the
+`*-cache` tags (#176).
 
 ## Data contract
 
@@ -239,11 +244,15 @@ tests/relay/corpus.sh --comfyui <core-cpu image> <mcp-convert image>
                                                  # own export and ComfyUI's /prompt validation, never queued. Needs the convert
                                                  # extra's Chromium on the host; CI's `mcp-convert template corpus` workflow runs it when
                                                  # the relay, its lock, its Dockerfile, the mcp-convert target or COMFYUI_VERSION changes
-docker run --rm -v "$PWD":/repo -w /repo mirror.gcr.io/rhysd/actionlint:1.7.7 -color
+docker run --rm -v "$PWD":/repo:ro -w /repo mirror.gcr.io/rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 -color
+                                                 # by digest (#121); bump tag and digest together, by hand
+                                                 # CI's lint-workflows also shellchecks each .github/actions/*/action.yml
+                                                 # run: block, as bash, with the same image's shellcheck
 ```
 
 `make smoke` builds `core:cpu-smoke` from the tree and runs `tests/smoke/run.sh`,
-which is also what CI's `smoke-cpu` job runs on image-touching PRs, `main` and tags.
+which is also what CI runs through the `.github/actions/smoke-cpu` composite action:
+the `smoke-cpu` job on image-touching PRs and `main`, and `smoke-gate` on a `v*` tag.
 The script starts the image as root with `PUID`/`PGID` 1001, Manager off, and all
 seven volume roots bind-mounted from `root:root 0755` sources. It fails unless:
 
@@ -282,10 +291,12 @@ with a valid file it must repair a half-made venv, and its `uv` wrapper must ref
 `uv -q pip install`, `uv --preview-features X pip install` and
 `uv --python-fetch automatic pip install` but allow `python -m uv pip freeze`. It needs the Comfy Registry and PyPI.
 
-A failed smoke test on a tag withholds the GitHub Release, but not the image pushes.
+On a tag, `smoke-gate` runs before anything pushes, and every pushing job needs it,
+so a failed smoke test holds back the image pushes and the GitHub Release (#138).
 Nothing else boots the non-root start, and nothing boots the other profiles or any GPU image.
 
 `uv run` creates `services/.venv`, which `.gitignore` covers (`.venv/`), but
 stage files by name anyway. No Python or shell linter or formatter is configured. The one
-exception is actionlint, which runs shellcheck over the workflow `run:` blocks;
-`entrypoint.sh` and `startup.sh` are not linted.
+exception is actionlint, which runs shellcheck over the workflow `run:` blocks, and
+the `lint-workflows` step that runs the same shellcheck over the composite actions'
+`run:` blocks, which actionlint skips; `entrypoint.sh` and `startup.sh` are not linted.

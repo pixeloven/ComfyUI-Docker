@@ -93,7 +93,29 @@ overwrite the stable tags.
 A tag can move; a digest cannot. Semver tags exist to say whether a digest
 change was a **patch or a break** — which a commit-sha cannot express. Pin
 `@sha256:…` and read the semver tag to decide whether to move. Every release
-publishes `IMAGE-DIGESTS.txt` so the digests are readable without the registry.
+publishes `IMAGE-DIGESTS.txt` so the digests are readable without the registry:
+one line per tag, the tag and then the digest to pin it by
+(`<image>:<tag>  <image>@sha256:…`), with `#` comments above that say how to
+pick a `complete:cuda-sm<NN>` variant for a GPU.
+
+A digest you already hold says which build of this repo it is, too. Every image
+(`complete`, `core`, `runtime`, `mcp`, `mcp-convert`, `comfyctl`) carries two
+labels, readable from the registry without a pull:
+
+| label | value |
+|---|---|
+| `io.github.pixeloven.comfyui-docker.version` | `X.Y.Z` from a `vX.Y.Z` tag, the commit's `<sha8>` from `main`, `nightly` from the nightly: the tag that build answers to. `dev` on a local build |
+| `org.opencontainers.image.revision` | the full commit of this repo it was built from (absent on a local build) |
+
+```sh
+docker buildx imagetools inspect ghcr.io/pixeloven/comfyui/comfyctl@sha256:… \
+  --format '{{index .Image.Config.Labels "io.github.pixeloven.comfyui-docker.version"}}'
+```
+
+So a gate can check that the digest it pins and the version it pins elsewhere
+(the `comfyctl` wheel, say) are the same release. The packaging version has a
+key of its own because `org.opencontainers.image.version` already means
+something else here: the ComfyUI inside (above).
 
 Releases here are **not** immutable: that is a deliberate choice, so a release
 can be corrected when there is a good reason. CI still refuses to publish over
@@ -135,6 +157,12 @@ Anything that breaks a consumer who changes nothing but the version they pull:
   contract, which makes it the one exception to the definition above: an agent
   reads the output, and a reshape that keeps the information is minor. A script that
   parses a tool's output should pin an image version.
+- **The release assets' formats.** `IMAGE-DIGESTS.txt`'s line grammar (a
+  `#` comment, or two space-separated fields: `<image>:<tag>` then
+  `<image>@sha256:<digest>`) and `SHA256SUMS` are a contract: a script reads
+  them. A change to either is major. (The two-field grammar replaced an
+  undocumented one-field form in the first release after 6.2.0, as a minor
+  change; the contract starts there.)
 
 Adding something optional is never major: a new env var, volume, profile,
 image, tool, or optional tool argument is a minor.

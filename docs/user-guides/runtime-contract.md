@@ -203,12 +203,13 @@ readinessProbe:
 ```
 
 CI verifies this probe. The `smoke-cpu` job starts `core-cpu` on every pull request
-that changes the images, on every push to `main`, and on every release tag. It fails
+that changes the images and on every push to `main`; on a release tag the
+`smoke-gate` job runs the same check before anything is pushed. It fails
 unless `/system_stats` answers with a success status (anything below `400`, as
 `curl -f` reads it), so a `COMFYUI_VERSION` bump that dropped the route would fail it.
-The check boots the CPU image only. On a release tag, a failure withholds the GitHub
-Release, but the images are pushed in parallel and are not held back. `make smoke`
-runs the same script (`tests/smoke/run.sh`) locally.
+The check boots the CPU image only. On a release tag, a failure holds back every
+image push and the GitHub Release. `make smoke` runs the same script
+(`tests/smoke/run.sh`) locally.
 
 The image defines no `HEALTHCHECK`, and this repo doesn't prescribe a liveness probe.
 `/system_stats` shows that the server answers. It can't tell a wedged ComfyUI from a
@@ -763,7 +764,7 @@ examples' opt-in `fetch` service. It talks to no ComfyUI. It replaced the
 | User | `USER 1000`, with no group, so it runs as `1000:0`. Any UID works: the image itself needs nothing writable. `fetch fetch --apply` needs write access to the destination volume, where it writes each file beside its target (`<name>.fetch-tmp`) and renames it into place |
 | Read-only root | Works for every verb. `check`, `build`, `facts`, `fetch` and `resolve` write only to the paths you mount: `fetch` and `resolve -O` write a temporary file beside their target, then rename it. `resolve` hashes a download as it streams, so it needs no temp directory (since 6.0.0) |
 | Tags | `<sha8>` and `latest` from a push to `main`, `X.Y.Z` and `X.Y` from a release. No runtime prefix and no `nightly`. Pin a digest; the release's `IMAGE-DIGESTS.txt` lists it. `comfyctl:cache` is the build cache, rewritten by every publishing build: never pull or pin it |
-| Labels | `org.opencontainers.image.source` (this repository), `org.opencontainers.image.description` and `org.opencontainers.image.licenses` (`MIT`). There is no `org.opencontainers.image.version`: on the other images it states the ComfyUI inside, and this one has none |
+| Labels | `org.opencontainers.image.source` (this repository), `org.opencontainers.image.description` and `org.opencontainers.image.licenses` (`MIT`), and, as on every image, `io.github.pixeloven.comfyui-docker.version` (`X.Y.Z` from a release, `<sha8>` from `main`) and `org.opencontainers.image.revision` (the commit); see [`VERSIONING.md` → *Pin by digest anyway*](../../VERSIONING.md#pin-by-digest-anyway). There is no `org.opencontainers.image.version`: on the other images it states the ComfyUI inside, and this one has none |
 
 These are promises by the same rule as the rest of this page: breaking one is
 a major version.

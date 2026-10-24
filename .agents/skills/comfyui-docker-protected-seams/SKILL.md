@@ -18,9 +18,11 @@ registry is what they check against.
   `package.json`, and the `comfyctl` and `comfyrelay` entries in
   `services/uv.lock`; the `context` and `release` jobs in `ci.yml` (including
   which workspace packages the release builds wheels for); `IMAGE_LABEL`,
-  `PUBLISH_LATEST`, `IMAGE_VERSION`, `COMFYCTL_VERSION` and every `tags = [...]` in
+  `PUBLISH_LATEST`, `PUBLISH_CACHE`, `IMAGE_VERSION`, `COMFYCTL_VERSION`,
+  `PACKAGE_VERSION` and every `tags = [...]` in
   `docker-bake.hcl`, and which targets `group "all"` holds; comfyctl's
-  dependencies; anything in `nightly.yml` that sets tags.
+  dependencies; anything in `nightly.yml` that sets tags; `smoke-gate` and
+  the `needs`/`if` that hold every pushing job in `ci.yml` behind it on a tag.
 - **Risk:** a tag starts meaning two things. The nightly moving `*-latest` hands every
   consumer an unreviewed upstream commit. A hand-made Release makes the release job
   fail after images publish. The `context` job fails any push where the
@@ -64,7 +66,10 @@ registry is what they check against.
   and Compose append `fetch fetch /lock.yaml /app --apply` to it; it replaced the
   `fetch` image, whose entrypoint was `comfyctl fetch fetch`, in 6.0.0), its labels
   (`org.opencontainers.image.source`, `.description` and `.licenses`, and no
-  `.version`, because no ComfyUI is inside; *The `comfyctl` Image*), the permission steps in `dockerfile.comfy.core`, the volume mounts in
+  `.version`, because no ComfyUI is inside; *The `comfyctl` Image*), the
+  `io.github.pixeloven.comfyui-docker.version` and
+  `org.opencontainers.image.revision` labels every image carries (bake's
+  `_labels`; consumers gate digest pins on them), the permission steps in `dockerfile.comfy.core`, the volume mounts in
   `examples/*/docker-compose.yml`, and removing a bake target, image, or example.
 - **Risk:** a deployment that worked breaks on `docker compose pull`, or only under
   a UID nobody tested. That includes Kubernetes `runAsUser` deployments, which
