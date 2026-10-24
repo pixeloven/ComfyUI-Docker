@@ -54,6 +54,9 @@ registry is what they check against.
 - **Pattern:** env var names and defaults (`PUID`, `PGID`, `COMFY_*`, `CLI_ARGS`,
   and the examples' `COMFYCTL_IMAGE`, which the `COMFY_*` glob doesn't match),
   volume paths under `/app`, the port, `entrypoint.sh` user, chown and gosu logic,
+  the core image's stop behaviour (no `STOPSIGNAL`, so `SIGTERM` is ignored and a
+  stop waits out the grace period while a running prompt can finish; `SIGINT` is
+  the documented opt-in; `docs/user-guides/runtime-contract.md` → *Stopping*, #120),
   the `mcp` image's promises (`COMFYUI_MCP_HTTP_TOKEN` required and at least 32
   characters, `MCP_PORT` 9000, the `/mcp` path, `COMFYUI_URL`, the tool names and
   which profile holds each, `COMFYUI_MCP_PROFILES` and its default,

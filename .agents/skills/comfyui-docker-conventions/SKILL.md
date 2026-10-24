@@ -160,6 +160,12 @@ The nightly sets `PUBLISH_CACHE=false`, so only CI on `main` and tags writes the
   `setup-buildx-action` names in `driver-opts`. The mirror holds only images Docker Hub
   serves often and can lag a moved tag, so check a new or bumped ref with
   `docker buildx imagetools inspect` on both. Dependabot has no `docker` ecosystem here.
+- **Stop signal: the ComfyUI images keep the default (`SIGTERM`) on purpose** and set no
+  `STOPSIGNAL` (#120). ComfyUI as PID 1 has no `SIGTERM` handler, so a stop waits out the
+  grace period and a running prompt can finish (the drain). `STOPSIGNAL SIGINT` was tried
+  and rejected: it kills the prompt worker (a daemon thread) at once, which can segfault
+  torch mid-compute (exit 139) or truncate an output being saved. `SIGINT` stays a
+  documented opt-in (`runtime-contract.md` → *Stopping*).
 - **Multi-stage:** the venv, ComfyUI and torch are built in `builder` and copied into
   `core`. The runtime base keeps `build-essential` and `python3-dev`.
 - **Layer order:** base, then apt, then torch, then the ComfyUI clone. Nightly busts only the
@@ -265,6 +271,9 @@ seven volume roots bind-mounted from `root:root 0755` sources. It fails unless:
   in `/object_info`, then left out of the node comparison), and its source is
   still 4321:4321 (#180);
 - no `comfy_extras` module fails to import;
+- with the opt-in `--stop-signal SIGINT` and Manager off, `docker stop` makes an idle
+  ComfyUI exit 0 within 5 s, started as root and, in a second volume-less container, as
+  non-root 1001:1001 (#120). Only the idle opt-in path is checked, not the default `SIGTERM`;
 - on the same ComfyUI version as the baseline, no node class is missing.
 
 It also boots once more as root with `/app/models` mounted `:ro` from a 4321-owned source,

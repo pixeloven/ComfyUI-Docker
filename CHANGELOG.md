@@ -103,6 +103,23 @@ as root, with `/app/models` mounted read-only from a source another UID owns,
 unless it answers, the source keeps its owner, ComfyUI has both groups, and
 Manager's `/v2/manager/version` answers.
 
+### Documentation
+
+- **Why a stop takes the full grace period, and a `SIGINT` opt-in (#120).** The
+  images behave as before. ComfyUI runs as PID 1 and installs no `SIGTERM`
+  handler, so it ignores `SIGTERM`, the default stop signal. Every `docker stop`,
+  `docker restart` or pod deletion waits out the grace period (10 s in Docker and
+  Compose, 30 s in Kubernetes) and ends in `SIGKILL`, exit 137. That is kept on
+  purpose: during the wait, a running prompt can finish and save its outputs. The
+  runtime contract has a new *Stopping* section documenting the opt-in,
+  `stop_signal: SIGINT` in Compose or `docker run --stop-signal SIGINT`. It stops
+  an idle ComfyUI in about 2 s with exit 0, but abandons a running prompt, which
+  can exit 139 with a crash trace, and a stop during startup exits 130. The
+  smoke test checks the idle opt-in in both UID modes: exit 0 within 5 s. The
+  node-pack override, `examples/core-cpu/docker-compose.dev-pack.yml`, sets
+  `stop_signal: SIGINT`, so a `docker restart` while developing a pack takes
+  about 2 s rather than the grace period.
+
 ## 6.2.0 — 2026-10-20
 
 ### Added
