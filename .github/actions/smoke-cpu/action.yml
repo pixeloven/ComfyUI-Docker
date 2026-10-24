@@ -1,0 +1,114 @@
+# The core-cpu boot smoke, shared by ci.yml's two jobs that run it (#138):
+# smoke-cpu on PRs and main, and smoke-gate on a v* tag, before anything
+# pushes. One copy of the steps, so the gate a release passes is the test every
+# PR ran. The job checks the repo out first; this needs nothing else from it.
+#
+# Boot the image, not just build it. build-cpu pushes without loading and a PR
+# has no pushed tag to pull, so this builds core-cpu again with `load` and runs
+# tests/smoke/run.sh on it: root start with PUID/PGID 1001 (the Compose path,
+# the only one that runs the volume chown), /system_stats readiness, UID/GID
+# and ownership of all seven volume roots, and a GET /object_info dump whose
+# node classes are compared with the image main already published. It tests our
+# packaging, not ComfyUI, so no workflow runs. `make smoke` is the same script
+# locally.
+name: core-cpu boot smoke
+description: Build core-cpu from the tree (never pushed), boot it, and compare its node classes with main's published image.
+
+inputs:
+  registry-url:
+    description: The registry prefix images are named under, from the context job.
+    required: true
+  comfyui-version:
+    description: The ComfyUI pin, from the context job.
+    required: true
+  artifact-name:
+    description: What to call the uploaded results.
+    required: true
+
+runs:
+  using: composite
+  steps:
+  - name: Set up Docker Buildx
+    uses: docker/setup-buildx-action@v4.4.1
+    with:
+      driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+
+  # Never pushed: `push: false`, and the label is not one CI publishes.
+  - name: Build core-cpu
+    uses: docker/bake-action@v7.4.0
+    with:
+      files: docker-bake.hcl
+      targets: core-cpu
+      load: true
+      push: false
+      provenance: false
+      sbom: false
+    env:
+      REGISTRY_URL: ${{ inputs.registry-url }}
+      IMAGE_LABEL: smoke
+      COMFYUI_VERSION: ${{ inputs.comfyui-version }}
+
+  # The node baseline is what main already published, never a file in the
+  # repo: `core:cpu-<sha8>` of the commit this build is measured against,
+  # falling back to `cpu-latest`. For a PR that is its merge-base with main;
+  # for a push to main, the previous tip; for a tag, main's build of the
+  # same commit. Same ComfyUI version: a missing node class fails. A pin
+  # bump: the diff is reported (node-diff.md), not enforced. A baseline that
+  # cannot be looked up or pulled fails; one that does not exist yet only
+  # prints a notice.
+  - name: Boot it, and compare node classes with main's image
+    shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IMAGE: ${{ inputs.registry-url }}core:cpu-smoke
+      REGISTRY_URL: ${{ inputs.registry-url }}
+      PR_BASE: ${{ github.event.pull_request.base.sha }}
+      PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      BEFORE: ${{ github.event.before }}
+    run: |
+      set -euo pipefail
+      case "${GITHUB_EVENT_NAME}:${GITHUB_REF}" in
+        pull_request:*)
+          commit="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PR_BASE}...${PR_HEAD}" --jq .merge_base_commit.sha)"
+          why="merge-base with main" ;;
+        push:refs/heads/main)
+          commit="${BEFORE}"; why="main before this push" ;;
+        *)
+          commit="${GITHUB_SHA}"; why="main's build of this commit" ;;
+      esac
+      echo "baseline commit ${commit:0:8} (${why})"
+      tests/smoke/run.sh \
+        --baseline "${REGISTRY_URL}core:cpu-${commit:0:8}" \
+        --baseline "${REGISTRY_URL}core:cpu-latest" \
+        "$IMAGE"
+
+  # #115: a node pack installed with cm-cli, as a user would, keeps its
+  # Python dependency across a container recreate, because it lands in the
+  # node venv on the user volume; the image venv is untouched. Also checks
+  # the Manager settings startup.sh writes (#125). Needs the Comfy Registry
+  # and PyPI. `make smoke` runs it too.
+  - name: Install a node pack, recreate, and check it still imports
+    shell: bash
+    env:
+      IMAGE: ${{ inputs.registry-url }}core:cpu-smoke
+    run: tests/smoke/node-deps.sh "$IMAGE"
+
+  - name: Record the startup time and node diff
+    if: always()
+    shell: bash
+    run: |
+      if [ -f tests/smoke/results/summary.json ]; then
+        { echo '### core-cpu boot smoke'; echo '```json'; cat tests/smoke/results/summary.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      fi
+      if [ -f tests/smoke/results/node-diff.md ]; then
+        cat tests/smoke/results/node-diff.md >> "$GITHUB_STEP_SUMMARY"
+      fi
+
+  - name: Upload the node schema and logs
+    if: always()
+    uses: actions/upload-artifact@v7.0.2
+    with:
+      name: ${{ inputs.artifact-name }}
+      path: tests/smoke/results/
+      if-no-files-found: warn
+      retention-days: 14

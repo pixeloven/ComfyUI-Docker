@@ -29,12 +29,36 @@ see `VERSIONING.md`.
   its class is in `/object_info` and the source keeps its owner. A change under
   `tests/smoke/` now runs `smoke-cpu` on a pull request.
 
+- **Every image says which build of this repo it is (#89).** `complete`,
+  `core`, `runtime`, `mcp`, `mcp-convert` and `comfyctl` carry
+  `io.github.pixeloven.comfyui-docker.version` (`X.Y.Z` from a release tag,
+  the commit's `<sha8>` from `main`, `nightly` from the nightly) and
+  `org.opencontainers.image.revision` (the full commit), so a digest pinned
+  downstream can be checked against the release it came from with
+  `docker buildx imagetools inspect`, without a pull. `VERSIONING.md` →
+  *Pin by digest anyway* has the one-liner. `org.opencontainers.image.version`
+  still states the ComfyUI inside. Additive, so a minor change.
+
 ### Changed
 
 - **`COMFY_ENABLE_MANAGER`, `COMFY_ENABLE_ASSETS` and `COMFY_ENABLE_NODE_VENV`
   accept `true`, `1` or `yes` in any case** (#117). Only the exact string
   `true` turned them on, so `TRUE`, `1` or `yes` silently turned the feature
   off. Any other value still turns it off. Additive, so a minor change.
+
+- **`IMAGE-DIGESTS.txt` names each digest (#78).** Each line is now the tag
+  and then the digest to pin it by (`<image>:<tag>  <image>@sha256:…`), under
+  a header that says how to pick a `complete:cuda-sm<NN>` variant with
+  `nvidia-smi --query-gpu=name,compute_cap --format=csv` and that the portable
+  `complete:cuda-X.Y.Z` has no architecture-specific kernels. Up to 6.2.0 a
+  line held the digest alone, so the six `complete` digests could not be told
+  apart. A script that read each line as one image reference now reads the
+  second field.
+- **CI runs with a read-only token by default (#121).** `ci.yml` and
+  `nightly.yml` set `permissions: contents: read`; only the jobs that push to
+  GHCR get `packages: write` (and `build-cuda` `actions: write`, to clear the
+  Actions cache), and no checkout keeps the token in `.git/config`. The
+  actionlint image is pinned by digest and mounts the repo read-only.
 
 ### Fixed
 
@@ -60,6 +84,16 @@ see `VERSIONING.md`.
   the CPU image, which always passes `--cpu`.
 - An invalid `PUID` or `PGID` now says it must be a non-negative integer, not a
   positive one: `0` was always accepted (#117).
+- **A release no longer pushes images that fail to boot (#138).** On a `v*`
+  tag a `smoke-gate` job runs the core-cpu boot smoke before anything pushes,
+  and every job that pushes needs it, so a failure holds back every image as
+  well as the GitHub Release. Before, `smoke-cpu` gated only the Release while
+  the builds pushed in parallel. PRs and `main` still run `smoke-cpu`; both
+  jobs run the same steps, from `.github/actions/smoke-cpu`.
+- **The nightly no longer overwrites the `*-cache` tags (#176).** It pushed
+  them with cache-less images built from upstream master, so the next build
+  that imported them (every `cuda-arch` build, and the weekly rebuild) rebuilt
+  the shared layers. Only CI on `main` and on tags writes them now.
 
 `tests/smoke/run.sh` (`make smoke`, CI's `smoke-cpu`) boots the image once more
 as root, with `/app/models` mounted read-only from a source another UID owns,

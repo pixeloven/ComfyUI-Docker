@@ -44,6 +44,12 @@ concurrency:
 env:
   RELEASE_UV_VERSION: "0.13.0"
 
+# Read-only by default (#121). A job widens this only for what it does: the
+# jobs that push to GHCR get packages: write, build-cuda also actions: write
+# (it can clear the Actions cache), and release writes the GitHub Release.
+permissions:
+  contents: read
+
 jobs:
   # Which parts of the repo a change touches. The expensive image builds are
   # ~60 of the ~62 minutes a full run costs, and most changes cannot affect
@@ -51,6 +57,10 @@ jobs:
   # nothing.
   changes:
     runs-on: ubuntu-latest
+    # paths-filter reads a pull request's changed files through the API.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       images: ${{ steps.filter.outputs.images }}
       smoke: ${{ steps.filter.outputs.smoke }}
@@ -61,6 +71,8 @@ jobs:
       release_requirements: ${{ steps.filter.outputs.release_requirements }}
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
     # Pinned to an exact semver tag, like every other action here -- a version
     # is something a human can read, compare and reason about upgrading; a
     # commit sha is not. Dependabot proposes the bumps. It is used rather
@@ -77,7 +89,7 @@ jobs:
             - 'docker-bake.hcl'
             - '.github/workflows/ci.yml'
           # On a PR, smoke-cpu runs when the images filter or this one matches;
-          # main and tags always run it.
+          # main always runs it, and a v* tag runs smoke-gate instead.
           smoke:
             - 'tests/smoke/**'
           comfyctl:
@@ -145,6 +157,8 @@ jobs:
       commit_sha: ${{ steps.classify.outputs.commit_sha }}
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     # The lock agrees with every pyproject.toml, or nothing publishes. Here rather
     # than only in validate-models because every publishing job needs this one:
@@ -323,12 +337,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7.0.1
-    - run: docker run --rm -v "$PWD":/repo -w /repo mirror.gcr.io/rhysd/actionlint:1.7.7 -color
+      with:
+        persist-credentials: false
+    # By digest, the tag beside it for reading (#121); Dependabot cannot see an
+    # image inside a `run:` line, so bump both by hand. Read-only: it only reads.
+    - run: docker run --rm -v "$PWD":/repo:ro -w /repo mirror.gcr.io/rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 -color
 
   validate-examples:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
     
     - name: Validate Example Configurations
       run: |
@@ -348,7 +368,7 @@ jobs:
 
     # The Kubernetes example has no compose file. The same kubeconform image
     # (tag AND digest), flags and schema version as `make validate`, so a local
-    # run and CI agree. Job permissions are tracked separately in #121.
+    # run and CI agree.
     - name: Validate the Kubernetes example
       run: docker run --rm -v "$PWD":/repo:ro -w /repo ghcr.io/yannh/kubeconform:v0.8.0@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e -strict -summary -kubernetes-version 1.36.4 -ignore-filename-pattern '\.patch\.yaml$' examples/kubernetes
 
@@ -366,6 +386,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Test Docker Bake targets
       run: |
@@ -438,6 +460,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Install uv
       uses: astral-sh/setup-uv@v10.3.0
@@ -520,6 +544,8 @@ jobs:
     needs: validate-models
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.4.1
@@ -630,12 +656,26 @@ jobs:
     name: publish the comfyctl image
     runs-on: ubuntu-latest
     # Keeps the full gate: it publishes an artifact consumers pin by digest.
-    needs: [context, validate-examples, test-bake-targets, validate-models, end-to-end]
-    if: needs.context.outputs.build_comfyctl == 'true'
+    needs: [context, validate-examples, test-bake-targets, validate-models, end-to-end, smoke-gate]
+    # Gated by smoke-gate on a v* tag: see that job.
+    if: >-
+      !cancelled()
+      && needs.context.result == 'success'
+      && needs.validate-examples.result == 'success'
+      && needs.test-bake-targets.result == 'success'
+      && needs.validate-models.result == 'success'
+      && needs.end-to-end.result == 'success'
+      && (needs.smoke-gate.result == 'success' || needs.smoke-gate.result == 'skipped')
+      && needs.context.outputs.build_comfyctl == 'true'
+    permissions:
+      contents: read
+      packages: write
     env:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     # No free-disk-space or prune step: this image is ~48 MB, not a CUDA stack.
 
@@ -669,6 +709,9 @@ jobs:
         IMAGE_LABEL: ${{ needs.context.outputs.comfyctl_label }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
         COMFYCTL_VERSION: ${{ needs.context.outputs.comfyctl_version }}
+        # The image labels (#89): X.Y.Z on a tag, <sha8> otherwise, and the commit.
+        PACKAGE_VERSION: ${{ needs.context.outputs.comfyctl_label }}
+        GIT_SHA: ${{ github.sha }}
 
     # Consumers pin by digest, so the digest has to be findable without digging
     # through logs. Harmony pins this one in a Job manifest.
@@ -692,12 +735,25 @@ jobs:
 
   build-cuda:
     runs-on: ubuntu-latest
-    needs: [context, test-bake-targets]
-    if: needs.context.outputs.build_images == 'true'
+    needs: [context, test-bake-targets, smoke-gate]
+    # Gated by smoke-gate on a v* tag: see that job.
+    if: >-
+      !cancelled()
+      && needs.context.result == 'success'
+      && needs.test-bake-targets.result == 'success'
+      && (needs.smoke-gate.result == 'success' || needs.smoke-gate.result == 'skipped')
+      && needs.context.outputs.build_images == 'true'
+    # actions: write for `gh cache delete` on a force_rebuild run.
+    permissions:
+      contents: read
+      packages: write
+      actions: write
     env:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
     
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@v2.0.0
@@ -766,14 +822,26 @@ jobs:
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
         IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
+        # The image labels (#89): X.Y.Z on a tag, <sha8> otherwise, and the commit.
+        PACKAGE_VERSION: ${{ needs.context.outputs.image_label }}
+        GIT_SHA: ${{ github.sha }}
 
   build-cuda-arch:
     runs-on: ubuntu-latest
     needs: [context, build-cuda]
+    # Spelled out rather than the implicit success(): that also counts a skipped
+    # job further up (smoke-gate, everywhere but a tag) and would skip this.
+    if: >-
+      !cancelled() && needs.build-cuda.result == 'success'
+    permissions:
+      contents: read
+      packages: write
     env:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@v2.0.0
@@ -833,6 +901,9 @@ jobs:
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
         IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
+        # The image labels (#89): X.Y.Z on a tag, <sha8> otherwise, and the commit.
+        PACKAGE_VERSION: ${{ needs.context.outputs.image_label }}
+        GIT_SHA: ${{ github.sha }}
 
   # The mcp image: comfyrelay since 5.0.0 (#136). bake has declared the target
   # since #43, and VERSIONING.md counts it in the image family.
@@ -848,12 +919,24 @@ jobs:
   # stack.
   build-mcp:
     runs-on: ubuntu-latest
-    needs: [context, test-bake-targets, relay]
-    if: needs.context.outputs.build_relay == 'true'
+    needs: [context, test-bake-targets, relay, smoke-gate]
+    # Gated by smoke-gate on a v* tag: see that job.
+    if: >-
+      !cancelled()
+      && needs.context.result == 'success'
+      && needs.test-bake-targets.result == 'success'
+      && needs.relay.result == 'success'
+      && (needs.smoke-gate.result == 'success' || needs.smoke-gate.result == 'skipped')
+      && needs.context.outputs.build_relay == 'true'
+    permissions:
+      contents: read
+      packages: write
     env:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.4.1
@@ -886,16 +969,29 @@ jobs:
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
         IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
+        # The image labels (#89): X.Y.Z on a tag, <sha8> otherwise, and the commit.
+        PACKAGE_VERSION: ${{ needs.context.outputs.image_label }}
         GIT_SHA: ${{ github.sha }}
 
   build-cpu:
     runs-on: ubuntu-latest
-    needs: [context, test-bake-targets]
-    if: needs.context.outputs.build_images == 'true'
+    needs: [context, test-bake-targets, smoke-gate]
+    # Gated by smoke-gate on a v* tag: see that job.
+    if: >-
+      !cancelled()
+      && needs.context.result == 'success'
+      && needs.test-bake-targets.result == 'success'
+      && (needs.smoke-gate.result == 'success' || needs.smoke-gate.result == 'skipped')
+      && needs.context.outputs.build_images == 'true'
+    permissions:
+      contents: read
+      packages: write
     env:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
     
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@v2.0.0
@@ -955,105 +1051,61 @@ jobs:
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
         IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
+        # The image labels (#89): X.Y.Z on a tag, <sha8> otherwise, and the commit.
+        PACKAGE_VERSION: ${{ needs.context.outputs.image_label }}
+        GIT_SHA: ${{ github.sha }}
 
-  # Boot the image, not just build it. build-cpu pushes without loading and a
-  # PR has no pushed tag to pull, so this builds core-cpu again with `load` and
-  # runs tests/smoke/run.sh on it: root start with PUID/PGID 1001 (the Compose
-  # path, the only one that runs the volume chown), /system_stats readiness,
-  # UID/GID and ownership of all seven volume roots, and a GET /object_info
-  # dump whose node classes are compared with the image main already
-  # published. It tests our packaging, not ComfyUI, so no workflow runs.
-  # `make smoke` is the same script locally.
+  # Boot the image, not just build it: the steps are the smoke-cpu composite
+  # action (.github/actions/smoke-cpu), which says what they check. This job
+  # runs them on PRs and main; on a v* tag smoke-gate runs them instead.
   smoke-cpu:
     name: core-cpu boots
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [context, test-bake-targets]
-    if: needs.context.outputs.run_smoke == 'true'
+    if: needs.context.outputs.run_smoke == 'true' && !startsWith(github.ref, 'refs/tags/v')
     steps:
     - uses: actions/checkout@v7.0.1
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4.4.1
       with:
-        driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+        persist-credentials: false
 
-    # Never pushed: `push: false`, and the label is not one CI publishes.
-    - name: Build core-cpu
-      uses: docker/bake-action@v7.4.0
+    - uses: ./.github/actions/smoke-cpu
       with:
-        files: docker-bake.hcl
-        targets: core-cpu
-        load: true
-        push: false
-        provenance: false
-        sbom: false
-      env:
-        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
-        IMAGE_LABEL: smoke
-        COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
+        registry-url: ${{ needs.context.outputs.registry_url }}
+        comfyui-version: ${{ needs.context.outputs.comfyui_version }}
+        artifact-name: smoke-cpu
 
-    # The node baseline is what main already published, never a file in the
-    # repo: `core:cpu-<sha8>` of the commit this build is measured against,
-    # falling back to `cpu-latest`. For a PR that is its merge-base with main;
-    # for a push to main, the previous tip; for a tag, main's build of the
-    # same commit. Same ComfyUI version: a missing node class fails. A pin
-    # bump: the diff is reported (node-diff.md), not enforced. A baseline that
-    # cannot be looked up or pulled fails; one that does not exist yet only
-    # prints a notice.
-    - name: Boot it, and compare node classes with main's image
-      env:
-        GH_TOKEN: ${{ github.token }}
-        IMAGE: ${{ needs.context.outputs.registry_url }}core:cpu-smoke
-        REGISTRY_URL: ${{ needs.context.outputs.registry_url }}
-        PR_BASE: ${{ github.event.pull_request.base.sha }}
-        PR_HEAD: ${{ github.event.pull_request.head.sha }}
-        BEFORE: ${{ github.event.before }}
-      run: |
-        set -euo pipefail
-        case "${GITHUB_EVENT_NAME}:${GITHUB_REF}" in
-          pull_request:*)
-            commit="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PR_BASE}...${PR_HEAD}" --jq .merge_base_commit.sha)"
-            why="merge-base with main" ;;
-          push:refs/heads/main)
-            commit="${BEFORE}"; why="main before this push" ;;
-          *)
-            commit="${GITHUB_SHA}"; why="main's build of this commit" ;;
-        esac
-        echo "baseline commit ${commit:0:8} (${why})"
-        tests/smoke/run.sh \
-          --baseline "${REGISTRY_URL}core:cpu-${commit:0:8}" \
-          --baseline "${REGISTRY_URL}core:cpu-latest" \
-          "$IMAGE"
-
-    # #115: a node pack installed with cm-cli, as a user would, keeps its
-    # Python dependency across a container recreate, because it lands in the
-    # node venv on the user volume; the image venv is untouched. Also checks
-    # the Manager settings startup.sh writes (#125). Needs the Comfy Registry
-    # and PyPI. `make smoke` runs it too.
-    - name: Install a node pack, recreate, and check it still imports
-      env:
-        IMAGE: ${{ needs.context.outputs.registry_url }}core:cpu-smoke
-      run: tests/smoke/node-deps.sh "$IMAGE"
-
-    - name: Record the startup time and node diff
-      if: always()
-      run: |
-        if [ -f tests/smoke/results/summary.json ]; then
-          { echo '### core-cpu boot smoke'; echo '```json'; cat tests/smoke/results/summary.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-        fi
-        if [ -f tests/smoke/results/node-diff.md ]; then
-          cat tests/smoke/results/node-diff.md >> "$GITHUB_STEP_SUMMARY"
-        fi
-
-    - name: Upload the node schema and logs
-      if: always()
-      uses: actions/upload-artifact@v7.0.2
+  # The same smoke, on a v* tag ref only, BEFORE anything pushes (#138). Every
+  # job that pushes needs it, so an image that fails to boot never reaches GHCR
+  # as `*-X.Y.Z`. smoke-cpu used to gate only the GitHub Release, while the
+  # builds pushed in parallel; a tag can resolve a newer torch than the PR that
+  # passed, since torch is unpinned.
+  #
+  # Everywhere else this is skipped, and a skipped need skips its dependents
+  # unless their `if` says otherwise. So each one spells it out: `!cancelled()`,
+  # every other need succeeded, and this one either succeeded or was skipped.
+  # Not `!= 'failure'` alone, so a timed-out or cancelled gate holds the push
+  # back too. On a tag, a skipped gate can only mean `context` failed, and each
+  # dependent requires `context` to have succeeded.
+  #
+  # Like docs-pin, it keys on the ref, not the event, so a workflow_dispatch
+  # run at a tag runs it too.
+  smoke-gate:
+    name: core-cpu boots, before a release pushes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [context, test-bake-targets]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+    - uses: actions/checkout@v7.0.1
       with:
-        name: smoke-cpu
-        path: tests/smoke/results/
-        if-no-files-found: warn
-        retention-days: 14
+        persist-credentials: false
+
+    - uses: ./.github/actions/smoke-cpu
+      with:
+        registry-url: ${{ needs.context.outputs.registry_url }}
+        comfyui-version: ${{ needs.context.outputs.comfyui_version }}
+        artifact-name: smoke-gate
 
   # The mcp image, comfyrelay (#131, #136). This job builds it and tests it;
   # build-mcp publishes it, and only after this has passed. The image's own
@@ -1419,12 +1471,24 @@ jobs:
   # build-mcp and build-mcp nothing of it, so neither can hold back the other.
   build-mcp-convert:
     runs-on: ubuntu-latest
-    needs: [context, test-bake-targets, relay-convert]
-    if: needs.context.outputs.build_relay == 'true'
+    needs: [context, test-bake-targets, relay-convert, smoke-gate]
+    # Gated by smoke-gate on a v* tag: see that job.
+    if: >-
+      !cancelled()
+      && needs.context.result == 'success'
+      && needs.test-bake-targets.result == 'success'
+      && needs.relay-convert.result == 'success'
+      && (needs.smoke-gate.result == 'success' || needs.smoke-gate.result == 'skipped')
+      && needs.context.outputs.build_relay == 'true'
+    permissions:
+      contents: read
+      packages: write
     env:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4.4.1
@@ -1457,12 +1521,23 @@ jobs:
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
         IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
+        # The image labels (#89): X.Y.Z on a tag, <sha8> otherwise, and the commit.
+        PACKAGE_VERSION: ${{ needs.context.outputs.image_label }}
         GIT_SHA: ${{ github.sha }}
 
   build-linux-accelerators:
     runs-on: ubuntu-latest
-    needs: [context, test-bake-targets]
-    if: needs.context.outputs.build_images == 'true'
+    needs: [context, test-bake-targets, smoke-gate]
+    # Gated by smoke-gate on a v* tag: see that job.
+    if: >-
+      !cancelled()
+      && needs.context.result == 'success'
+      && needs.test-bake-targets.result == 'success'
+      && (needs.smoke-gate.result == 'success' || needs.smoke-gate.result == 'skipped')
+      && needs.context.outputs.build_images == 'true'
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -1471,6 +1546,8 @@ jobs:
       REGISTRY: ghcr.io
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@v2.0.0
@@ -1519,6 +1596,9 @@ jobs:
         COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
         IMAGE_VERSION: ${{ needs.context.outputs.image_version }}
         PUBLISH_LATEST: ${{ needs.context.outputs.publish_latest }}
+        # The image labels (#89): X.Y.Z on a tag, <sha8> otherwise, and the commit.
+        PACKAGE_VERSION: ${{ needs.context.outputs.image_label }}
+        GIT_SHA: ${{ github.sha }}
 
   # The GitHub Release. Until this job existed the repo had semver, publish
   # paths and an agreement gate but zero tags and zero releases -- so a version
@@ -1530,7 +1610,7 @@ jobs:
   release:
     name: cut the release
     runs-on: ubuntu-latest
-    needs: [context, validate-models, end-to-end, publish-comfyctl, build-cuda, build-cuda-arch, build-cpu, build-mcp, relay, build-mcp-convert, relay-convert, docs-pin, build-linux-accelerators, smoke-cpu]
+    needs: [context, validate-models, end-to-end, publish-comfyctl, build-cuda, build-cuda-arch, build-cpu, build-mcp, relay, build-mcp-convert, relay-convert, docs-pin, build-linux-accelerators, smoke-gate]
     # `!contains(failure)` rather than the default all-succeeded: on a non-release
     # push some build jobs are legitimately `skipped` by the path filter, and
     # `skipped` is not `success`.
@@ -1539,15 +1619,15 @@ jobs:
     # or a workflow_dispatch run at the tag), and there nothing it needs is
     # skipped legitimately: `context` forces build_images, build_comfyctl and
     # build_relay true (which relay-convert and build-mcp-convert run on, as
-    # relay and build-mcp do), docs-pin's `if` holds on any v* tag ref whatever the
-    # event, and validate-models, end-to-end and build-cuda-arch have no `if`.
-    # So a `skipped` need here means an upstream failure hid it -- a failed
-    # validate-models leaves publish-comfyctl skipped, not failed -- and every
-    # need must have succeeded.
+    # relay and build-mcp do), docs-pin's and smoke-gate's `if` hold on any v* tag
+    # ref whatever the event, validate-models and end-to-end have no `if`, and
+    # build-cuda-arch runs whenever build-cuda succeeded. So a `skipped` need
+    # here means an upstream failure hid it -- a failed validate-models leaves
+    # publish-comfyctl skipped, not failed -- and every need must have succeeded.
     #
-    # This gates the GitHub Release only. On a tag the build jobs push their
-    # images in parallel with smoke-cpu, so an image that fails it still
-    # reaches the registry.
+    # smoke-gate ran before any of the build jobs pushed (#138), so an image
+    # that fails to boot never reached the registry. smoke-cpu does not run on
+    # a tag.
     if: >-
       !cancelled()
       && !contains(needs.*.result, 'failure')
@@ -1565,6 +1645,8 @@ jobs:
       COMFYUI_VERSION: ${{ needs.context.outputs.comfyui_version }}
     steps:
     - uses: actions/checkout@v7.0.1
+      with:
+        persist-credentials: false
 
     - name: Releases are immutable
       run: |
@@ -1701,15 +1783,31 @@ jobs:
 
         # What is inside, stated on the artifact itself. Reading a digest list
         # and not being able to tell which ComfyUI it carries is how "0.1.0"
-        # becomes a number nobody can interpret.
+        # becomes a number nobody can interpret. And which image each digest
+        # is (#78): up to 6.x a line held the digest alone, so the six
+        # `complete` digests were indistinguishable.
         {
           echo "# ComfyUI ${COMFYUI_VERSION}, packaged as ${IMAGE_VERSION}"
           echo "#"
+          echo "# One line per published tag: the tag, then the digest to pin it by."
+          echo "#   <image>:<tag>  <image>@<digest>"
+          echo "# Two fields separated by spaces. Lines starting with # are comments."
+          echo "#"
+          echo "# Picking a complete CUDA image: complete:cuda-${IMAGE_VERSION} is portable"
+          echo "# and has NO architecture-specific kernels (no SageAttention). Each"
+          echo "# complete:cuda-sm<NN>-${IMAGE_VERSION} adds SageAttention kernels for one"
+          echo "# NVIDIA compute capability, used with CLI_ARGS=--use-sage-attention."
+          echo "# Read the GPU's compute capability with"
+          echo "#     nvidia-smi --query-gpu=name,compute_cap --format=csv"
+          echo "# and drop the dot: 8.0 is sm80, 8.6 sm86, 8.9 sm89, 9.0 sm90, 12.0 sm120."
+          echo "# A capability with no variant of its own takes the portable image."
+          echo "#"
         } > IMAGE-DIGESTS.txt
 
+        w="$(awk '{ if (length($0) > m) m = length($0) } END { print m }' tags.txt)"
         while read -r tag; do
           digest="$(docker buildx imagetools inspect "${tag}" --format '{{.Manifest.Digest}}')"
-          printf '%s@%s\n' "${tag%%:*}" "${digest}"
+          printf '%-*s  %s@%s\n' "${w}" "${tag}" "${tag%%:*}" "${digest}"
         done < tags.txt | tee -a IMAGE-DIGESTS.txt
 
         n=$(grep -c '@sha256:' IMAGE-DIGESTS.txt); declared=$(wc -l < tags.txt)

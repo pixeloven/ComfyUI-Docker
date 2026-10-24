@@ -91,6 +91,23 @@ variable "PUBLISH_LATEST" {
     default = false
 }
 
+variable "PUBLISH_CACHE" {
+    // Whether each target also tags `*-cache`, the inline build cache the
+    // targets' cache-from reads. CI's builds on main and on tags write it. The
+    // nightly sets this false (#176): it overrides cache-to with the Actions
+    // cache, so a `*-cache` tag it pushed would point at an image with no
+    // inline cache, built from a different ComfyUI.
+    default = true
+}
+
+variable "PACKAGE_VERSION" {
+    // What `io.github.pixeloven.comfyui-docker.version` says on every image
+    // (#89): which build of this repo it is, as the tag model names it. CI
+    // passes `X.Y.Z` on a v* tag and the commit's <sha8> on main; the nightly
+    // passes `nightly`. A local build without it says `dev`.
+    default = ""
+}
+
 variable "SAGEATTENTION_RELEASE_URL" {
     // Release produced from thu-ml/SageAttention v2.2.0 for the Python,
     // PyTorch, and CUDA ABI used by the current CUDA image. NOT immutable --
@@ -99,13 +116,28 @@ variable "SAGEATTENTION_RELEASE_URL" {
     default = "https://github.com/pixeloven/SageAttention-Wheels/releases/download/sageattention-v2.2.0-cu130-torch2.13.0"
 }
 
+// The labels every image carries (#89), inherited by each target below. A
+// digest pinned downstream reads them without a pull:
+//   docker buildx imagetools inspect <image>@sha256:... \
+//     --format '{{index .Image.Config.Labels "io.github.pixeloven.comfyui-docker.version"}}'
+// org.opencontainers.image.version is NOT one of them: on the ComfyUI and mcp
+// images it states the ComfyUI inside, set by the Dockerfile. The revision is
+// this repo's commit (GIT_SHA), left off a local build that does not pass one.
+target "_labels" {
+    labels = {
+        "io.github.pixeloven.comfyui-docker.version" = PACKAGE_VERSION != "" ? PACKAGE_VERSION : "dev"
+        "org.opencontainers.image.revision" = GIT_SHA != "" ? GIT_SHA : null
+    }
+}
+
 target "runtime-cuda" {
+    inherits = ["_labels"]
     context = "services/runtime"
     dockerfile = "dockerfile.cuda.runtime"
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}runtime:cuda-${IMAGE_LABEL}",
-        "${REGISTRY_URL}runtime:cuda-cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}runtime:cuda-cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}runtime:cuda-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}runtime:cuda-${IMAGE_VERSION}" : ""
     ]
@@ -114,12 +146,13 @@ target "runtime-cuda" {
 }
 
 target "runtime-cpu" {
+    inherits = ["_labels"]
     context = "services/runtime"
     dockerfile = "dockerfile.cpu.runtime"
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}runtime:cpu-${IMAGE_LABEL}",
-        "${REGISTRY_URL}runtime:cpu-cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}runtime:cpu-cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}runtime:cpu-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}runtime:cpu-${IMAGE_VERSION}" : ""
     ]
@@ -128,12 +161,13 @@ target "runtime-cpu" {
 }
 
 target "runtime-rocm" {
+    inherits = ["_labels"]
     context = "services/runtime"
     dockerfile = "dockerfile.cpu.runtime"
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}runtime:rocm-${IMAGE_LABEL}",
-        "${REGISTRY_URL}runtime:rocm-cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}runtime:rocm-cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}runtime:rocm-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}runtime:rocm-${IMAGE_VERSION}" : ""
     ]
@@ -142,12 +176,13 @@ target "runtime-rocm" {
 }
 
 target "runtime-xpu" {
+    inherits = ["_labels"]
     context = "services/runtime"
     dockerfile = "dockerfile.cpu.runtime"
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}runtime:xpu-${IMAGE_LABEL}",
-        "${REGISTRY_URL}runtime:xpu-cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}runtime:xpu-cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}runtime:xpu-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}runtime:xpu-${IMAGE_VERSION}" : ""
     ]
@@ -156,6 +191,7 @@ target "runtime-xpu" {
 }
 
 target "core-cuda" {
+    inherits = ["_labels"]
     context = "services/comfy/core"
     contexts = {
         runtime = "target:runtime-cuda"
@@ -164,7 +200,7 @@ target "core-cuda" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:cuda-${IMAGE_LABEL}",
-        "${REGISTRY_URL}core:cuda-cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}core:cuda-cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}core:cuda-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}core:cuda-${IMAGE_VERSION}" : ""
     ]
@@ -182,6 +218,7 @@ target "core-cuda" {
 }
 
 target "core-cpu" {
+    inherits = ["_labels"]
     context = "services/comfy/core"
     contexts = {
         runtime = "target:runtime-cpu"
@@ -190,7 +227,7 @@ target "core-cpu" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:cpu-${IMAGE_LABEL}",
-        "${REGISTRY_URL}core:cpu-cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}core:cpu-cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}core:cpu-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}core:cpu-${IMAGE_VERSION}" : ""
     ]
@@ -208,6 +245,7 @@ target "core-cpu" {
 }
 
 target "core-rocm" {
+    inherits = ["_labels"]
     context = "services/comfy/core"
     contexts = {
         runtime = "target:runtime-rocm"
@@ -216,7 +254,7 @@ target "core-rocm" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:rocm-${IMAGE_LABEL}",
-        "${REGISTRY_URL}core:rocm-cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}core:rocm-cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}core:rocm-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}core:rocm-${IMAGE_VERSION}" : ""
     ]
@@ -234,6 +272,7 @@ target "core-rocm" {
 }
 
 target "core-xpu" {
+    inherits = ["_labels"]
     context = "services/comfy/core"
     contexts = {
         runtime = "target:runtime-xpu"
@@ -242,7 +281,7 @@ target "core-xpu" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}core:xpu-${IMAGE_LABEL}",
-        "${REGISTRY_URL}core:xpu-cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}core:xpu-cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}core:xpu-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}core:xpu-${IMAGE_VERSION}" : ""
     ]
@@ -260,6 +299,7 @@ target "core-xpu" {
 }
 
 target "complete-cuda" {
+    inherits = ["_labels"]
     context = "services/comfy/complete"
     contexts = {
         core = "target:core-cuda"
@@ -268,7 +308,7 @@ target "complete-cuda" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}complete:cuda-${IMAGE_LABEL}",
-        "${REGISTRY_URL}complete:cuda-cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}complete:cuda-cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}complete:cuda-latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}complete:cuda-${IMAGE_VERSION}" : ""
     ]
@@ -360,6 +400,7 @@ target "complete-cuda-sm120" {
 // The guides the docs index covers (skills/comfyui-workflows/, #134) come in
 // as the `skills` named context, since skills/ is outside that root.
 target "mcp" {
+    inherits = ["_labels"]
     context = "services"
     dockerfile = "comfyrelay/dockerfile.comfy.relay"
     contexts = {
@@ -368,7 +409,7 @@ target "mcp" {
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}mcp:${IMAGE_LABEL}",
-        "${REGISTRY_URL}mcp:cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}mcp:cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}mcp:latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}mcp:${IMAGE_VERSION}" : ""
     ]
@@ -401,7 +442,7 @@ target "mcp-convert" {
     inherits = ["mcp"]
     tags = [
         "${REGISTRY_URL}mcp-convert:${IMAGE_LABEL}",
-        "${REGISTRY_URL}mcp-convert:cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}mcp-convert:cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}mcp-convert:latest" : "",
         IMAGE_VERSION != "" ? "${REGISTRY_URL}mcp-convert:${IMAGE_VERSION}" : ""
     ]
@@ -417,12 +458,13 @@ target "mcp-convert" {
 // bytes and checks hashes, so there is no CUDA/CPU/ROCm variant to build. The
 // context is the uv workspace root, so the image installs services/uv.lock (#177).
 target "comfyctl" {
+    inherits = ["_labels"]
     context = "services"
     dockerfile = "comfyctl/dockerfile.comfy.ctl"
     platforms = PLATFORMS
     tags = [
         "${REGISTRY_URL}comfyctl:${IMAGE_LABEL}",
-        "${REGISTRY_URL}comfyctl:cache",
+        PUBLISH_CACHE ? "${REGISTRY_URL}comfyctl:cache" : "",
         PUBLISH_LATEST ? "${REGISTRY_URL}comfyctl:latest" : "",
         // Consumers pin by DIGEST; these say whether a digest change was a
         // patch or a break, which a sha tag cannot.

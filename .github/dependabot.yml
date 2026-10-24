@@ -2,8 +2,12 @@
 # pin. This is what makes pinning sustainable rather than a one-time gesture.
 version: 2
 updates:
+  # `/` covers .github/workflows; a composite action under .github/actions/
+  # pins actions too, and is scanned only when its directory is named.
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
     groups:
