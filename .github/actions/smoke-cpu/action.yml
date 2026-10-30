@@ -35,7 +35,7 @@ runs:
 
   # Never pushed: `push: false`, and the label is not one CI publishes.
   - name: Build core-cpu
-    uses: docker/bake-action@v7.4.0
+    uses: docker/bake-action@v7.5.0
     with:
       files: docker-bake.hcl
       targets: core-cpu
