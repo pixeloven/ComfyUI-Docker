@@ -24,7 +24,7 @@ members = ["comfyctl", "comfyrelay"]
 # `uv run pytest -q` from here runs every member's tests in one pass. Each
 # member keeps its own pytest config, so `cd comfyctl && uv run pytest` still works.
 [dependency-groups]
-dev = ["pytest>=8.0", "respx>=0.21"]
+dev = ["pytest>=9.2.0", "respx>=0.21"]
 
 [tool.pytest.ini_options]
 testpaths = ["comfyctl/tests", "comfyrelay/tests"]
